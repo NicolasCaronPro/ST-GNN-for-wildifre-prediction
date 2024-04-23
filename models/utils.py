@@ -34,7 +34,7 @@ class OutputLayer(torch.nn.Module):
             self.activation = ReLU()
         if act_func == 'gelu':
             self.activation = GELU()
-        self.fc2 = nn.Linear(in_channels=end_channels, out_channels=n_steps, weight_initializer='glorot', bias=True).to(device)
+        self.fc2 = nn.Linear(in_channels=end_channels, out_channels=1, weight_initializer='glorot', bias=True).to(device)
         self.n_steps = n_steps
         self.output = ReLU()
 
@@ -45,5 +45,5 @@ class OutputLayer(torch.nn.Module):
         x = self.activation(x)
         x = self.fc2(x)
         x = self.output(x)
-        x = x.view(x.shape[0], self.n_steps)
+        x = x.view(x.shape[0], 1)
         return x

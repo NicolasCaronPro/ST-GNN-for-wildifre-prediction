@@ -24,7 +24,7 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from ngboost import NGBClassifier, NGBRegressor
 from sklearn.svm import SVR
 import sys
-from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score
+from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score
 from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
 from scipy.interpolate import griddata
 from geocube.api.core import make_geocube
@@ -33,9 +33,65 @@ from skimage import img_as_float
 from category_encoders import TargetEncoder, CatBoostEncoder
 import convertdate
 from skimage import transform
-from config import *
-from weigh_predictor import *
+#from weigh_predictor import *
 random.seed(42)
+
+# Dictionnaire de gestion des départements
+int2str = {
+    1 : 'ain',
+    25 : 'doubs',
+    69 : 'rhone',
+    78 : 'yvelines'
+}
+
+int2strMaj = {
+    1 : 'Ain',
+    25 : 'Doubs',
+    69 : 'Rhone',
+    78 : 'Yvelines'
+}
+
+int2name = {
+    1 : 'departement-01-ain',
+    25 : 'departement-25-doubs',
+    69 : 'departement-69-rhone',
+    78 : 'departement-78-yvelines'
+}
+
+str2int = {
+    'ain': 1,
+    'doubs' : 25,
+    'rhone' : 69,
+    'yvelines' : 78
+}
+
+str2intMaj = {
+    'Ain': 1,
+    'Doubs' : 25,
+    'Rhone' : 69,
+    'Yvelines' : 78
+}
+
+str2name = {
+    'Ain': 'departement-01-ain',
+    'Doubs' : 'departement-25-doubs',
+    'Rhone' : 'departement-69-rhone',
+    'Yvelines' : 'departement-78-yvelines'
+}
+
+name2str = {
+    'departement-01-ain': 'Ain',
+    'departement-25-doubs' : 'Doubs',
+    'departement-69-rhone' : 'Rhone',
+    'departement-78-yvelines' : 'Yvelines'
+}
+
+name2int = {
+    'departement-01-ain': 1,
+    'departement-25-doubs' : 25,
+    'departement-69-rhone' : 69,
+    'departement-78-yvelines' : 78
+}
 
 def create_larger_scale_image(input, proba, bin):
     probaImageScale = np.full(proba.shape, np.nan)
@@ -52,16 +108,18 @@ def create_larger_scale_image(input, proba, bin):
 
     return None, binImageScale
 
-def create_larger_scale_bin(input, bin):
+def create_larger_scale_bin(input, bin, influence):
     binImageScale = np.full(bin.shape, np.nan)
+    influenceImageScale = np.full(influence.shape, np.nan)
     
     clusterID = np.unique(input)
     for di in range(bin.shape[-1]):
         for id in clusterID:
             mask = np.argwhere(input == id)
             binImageScale[mask[:,0], mask[:,1], di] = np.sum(bin[mask[:,0], mask[:,1], di])
+            influenceImageScale[mask[:,0], mask[:,1], di] = np.sum(influence[mask[:,0], mask[:,1], di])
 
-    return binImageScale
+    return binImageScale, influenceImageScale
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -642,12 +700,23 @@ def load_x_from_pickle(x : np.array, shape : tuple,
             index2D = pos_feature_2D[feature]
             index1D = pos_feature[feature] + 2
             newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D,:], Xtrain[:, index1D], concat=False)
-
     return newx
+
+def order_class(predictor, pred):
+    res = np.empty((pred.shape[0], 1), dtype=int)
+    cc = predictor.kmeans.cluster_centers_.reshape(-1)
+    classes = np.arange(cc.shape[0])
+    ind = np.lexsort([cc])
+    cc = cc[ind]
+    classes = classes[ind]
+    for c in range(cc.shape[0]):
+        mask = np.argwhere(pred == classes[c])
+        res[mask] = c
+
+    return res
 
 def realVspredict(ypred, y, dir_output, name):
     check_and_create_path(dir_output)
-    ypred = ypred
     ytrue = y[:,-1]
     _, ax = plt.subplots(1, figsize=(20,10))
     ax.plot(ypred, color='red', label='predict')
@@ -659,39 +728,93 @@ def realVspredict(ypred, y, dir_output, name):
 
 def realVspredict2d(ypred : np.array,
                     ytrue : np.array,
+                    isBin : np.array,
+                    modelName : str,
+                    scale : int,
                     dir_output : Path,
-                    geo : gpd.GeoDataFrame):
-    
-    ytrue = ytrue[ytrue[:,4] >= allDates.index('2023-01-01')]
-    if ytrue.shape[0] == 0:
-        return
+                    Geo : gpd.GeoDataFrame,
+                    testDepartement : list,
+                    graph):
+
+    dir_predictor = root / 'Model' / 'HexagonalScale' / 'GNN' / 'influenceClustering'
+    yclass = np.empty(ypred.shape)
+    for nameDep in testDepartement:
+        mask = np.argwhere(ytrue[:,3] == name2int[nameDep])
+        if mask.shape[0] == 0:
+            continue
+        if not isBin:
+            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
+        else:
+            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+        
+        classpred = predictor.predict(ypred[mask].astype(float))
+
+        yclass[mask] = order_class(predictor, classpred)
+
+    geo = Geo[Geo['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
+
+    x = list(zip(geo.longitude, geo.latitude))
+
+    geo['id'] = graph._predict_node(x)
     
     check_and_create_path(dir_output)
     uniqueDates = np.sort(np.unique(ytrue[:,4])).astype(int)
     mean = []
     for date in uniqueDates:
-        #print(allDates[date])
-        mask = np.argwhere(ytrue[:,4] == date)
-        ypredDate = ypred[mask]
-        ybinDate = ytrue[mask,-2]
-        ytrueDate = ytrue[mask,-1]
-        dfff = geo.copy(deep=True)
-        dfff['id'] = ytrue[mask,0]
-        dfff['longitude'] = ytrue[mask,1]
-        dfff['latitude'] = ytrue[mask,2]
-        dfff['departement'] = ytrue[mask,3]
-        dfff['date'] = ytrue[mask,4]
-        dfff['gt'] = ytrueDate
-        dfff['nbFire'] = ybinDate
-        dfff['prediction'] = ypredDate
-        dfff = gpd.GeoDataFrame(dfff, geometry=gpd.points_from_xy(dfff.longitude, dfff.latitude))
-        name = allDates[date]+'.geojson'
-        mean.append(dfff)
-        dfff.to_file(dir_output / name, driver='GeoJSON')
-    
+        try:
+            dfff = geo.copy(deep=True)
+            dfff['date'] = date
+            dfff['gt'] = dfff['id'].apply(lambda x : ytrue[(ytrue[:,4] == date) & (ytrue[:,0] == x)][:,-1][0])
+            dfff['nbFire'] = dfff['id'].apply(lambda x : ytrue[(ytrue[:,4] == date) & (ytrue[:,0] == x)][:,-2][0])
+            dfff['prediction'] = dfff['id'].apply(lambda x : ypred[(ytrue[:,4] == date) & (ytrue[:,0] == x)][0])
+            dfff['class'] = dfff['id'].apply(lambda x : yclass[(ytrue[:,4] == date) & (ytrue[:,0] == x)][0])
+            mean.append(dfff)
+
+            _, ax = plt.subplots(2,2, figsize=(20,10))
+            plt.title(allDates[date] + ' prediction')
+
+            dfff.plot(ax=ax[0][0], column='nbFire', vmin=np.nanmin(ytrue[:,-2]), vmax=np.nanmax(ytrue[:,-2]), cmap='jet', categorical=True)
+            ax[0][0].set_title('Number of fire the next day')
+
+            dfff.plot(ax=ax[0][1], column='gt', vmin=np.nanmin(ytrue[:,-1]), vmax=np.nanmax(ytrue[:,-1]), cmap='jet')
+            ax[0][1].set_title('Ground truth value')
+
+            dfff.plot(ax=ax[1][0], column='prediction', vmin=np.nanmin(ytrue[:,-1]), vmax=np.nanmax(ytrue[:,-1]), cmap='jet')
+            ax[1][0].set_title('Predicted value')
+
+            dfff.plot(ax=ax[1][1], column='class', vmin=0, vmax=4, cmap='jet', categorical=True)
+            ax[1][1].set_title('Predicted class')
+            
+            plt.tight_layout()
+            name = allDates[date]+'.png'
+            plt.savefig(dir_output / name)
+            plt.close('all')
+        except:
+            pass
+    if len(mean) == 0:
+        return
     mean = pd.concat(mean).reset_index(drop=True)
-    name = 'mean.geojson'
-    mean.to_file(dir_output / name, driver='GeoJSON')
+    plt.title('Mean prediction')
+    _, ax = plt.subplots(2,2, figsize=(20,10))
+
+    plt.title('Mean prediction')
+
+    mean.plot(ax=ax[0][0], column='nbFire', cmap='jet', categorical=True)
+    ax[0][0].set_title('Number of fire the next day')
+
+    mean.plot(ax=ax[0][1], column='gt', cmap='jet')
+    ax[0][1].set_title('Ground truth value')
+
+    mean.plot(ax=ax[1][0], column='prediction', cmap='jet')
+    ax[1][0].set_title('Predicted value')
+
+    mean.plot(ax=ax[1][1], column='prediction', cmap='jet')
+    ax[1][1].set_title('Predicted class')
+    
+    plt.tight_layout()
+    name = allDates[date]+'.png'
+    plt.savefig(dir_output / name)
+    plt.close('all')
 
 def train(trainLoader, valLoader, PATIENCE_CNT : int,
           CHECKPOINT: int,
@@ -728,9 +851,10 @@ def train(trainLoader, valLoader, PATIENCE_CNT : int,
                 
                 output = model(inputs, edges)
                 target = torch.masked_select(target, weights.gt(0))
-                output = torch.masked_select(output, weights.gt(0))
                 weights = torch.masked_select(weights, weights.gt(0))
 
+                target = target.view(output.shape)
+                weights = weights.view(output.shape)
                 loss = criterion(output, target, weights)
 
                 optimizer.zero_grad()
@@ -752,9 +876,11 @@ def train(trainLoader, valLoader, PATIENCE_CNT : int,
                     weights = labels[:,-3]
 
                     target = torch.masked_select(target, weights.gt(0))
-                    output = torch.masked_select(output, weights.gt(0))
                     weights = torch.masked_select(weights, weights.gt(0))
 
+                    target = target.view(output.shape)
+                    weights = weights.view(output.shape)
+                    
                     loss = criterion(output, target, weights)
 
                     if loss.item() < BEST_VAL_LOSS:
@@ -833,7 +959,6 @@ def config_lightGBM(device, binary):
         params['objective'] = 'binary',
         return LGBMClassifier(**params)
 
-
 def config_ngboost(binary):
     params  = {
         'natural_gradient':True,
@@ -863,7 +988,8 @@ def train_sklearn_api_model(trainSet, valSet,
           binary : bool,
           pos_feature : dict,
           encoding : str,
-          scaling: str):
+          scaling: str,
+          weight : bool):
     
     models = []
     
@@ -954,33 +1080,34 @@ def train_sklearn_api_model(trainSet, valSet,
     print(f'Check {scaling} standardisation Train : {np.nanmax(Xtrain[:,6:])}, {np.nanmin(Xtrain[:,6:])}')
     print(f'Check {scaling} standardisation Val : {np.nanmax(Xval[:,6:])}, {np.nanmin(Xval[:,6:])}')
 
-    print([np.argwhere(Xval[:,6:] == np.nanmax(Xval[:,6:]))])
-
-    Xval = Xval[:, [  6,   7,   8,  10,  11,  12,  13,  14,  15,  16,  17,  22,  23,
-        24,  25,  27,  28,  30,  31,  32,  34,  35,  36,  37,  38,  39,
-        40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,
-        53,  54,  55,  56,  57,  58,  59,  60,  62,  63,  64,  66,  67,
-        68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,  80,  82,
-        85,  86,  87,  88,  94,  95,  96, 100, 102, 104, 105, 108, 113,
-       114, 116, 117, 119, 121, 132, 133, 136, 137, 138, 139, 140, 146,
-       147, 157, 158, 159, 160, 162, 163, 164, 165]]
+    Xval = Xval[:, [  7,  10,  13,  14,  16,  22,  23,  24,  25,  28,  32,  34,  35,
+        36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  52,  53,  54,  55,  56,  57,  58,  62,  63,  64,  65,
+        66,  67,  68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,
+        80,  82,  86,  87,  88,  94,  96,  97,  99, 106, 107, 108, 109,
+       110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 124, 130,
+       131, 132, 133, 134, 135, 136, 137, 138, 140, 141, 142, 145, 146,
+       147, 148, 157, 158, 159, 160, 162, 163, 165]]
     
-    Xtrain = Xtrain[:, [  6,   7,   8,  10,  11,  12,  13,  14,  15,  16,  17,  22,  23,
-        24,  25,  27,  28,  30,  31,  32,  34,  35,  36,  37,  38,  39,
-        40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,
-        53,  54,  55,  56,  57,  58,  59,  60,  62,  63,  64,  66,  67,
-        68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,  80,  82,
-        85,  86,  87,  88,  94,  95,  96, 100, 102, 104, 105, 108, 113,
-       114, 116, 117, 119, 121, 132, 133, 136, 137, 138, 139, 140, 146,
-       147, 157, 158, 159, 160, 162, 163, 164, 165]]
+    Xtrain = Xtrain[:, [  7,  10,  13,  14,  16,  22,  23,  24,  25,  28,  32,  34,  35,
+        36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  52,  53,  54,  55,  56,  57,  58,  62,  63,  64,  65,
+        66,  67,  68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,
+        80,  82,  86,  87,  88,  94,  96,  97,  99, 106, 107, 108, 109,
+       110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 124, 130,
+       131, 132, 133, 134, 135, 136, 137, 138, 140, 141, 142, 145, 146,
+       147, 148, 157, 158, 159, 160, 162, 163, 165]]
     
     Xtrain = Xtrain[Ytrain[:,-3] > 0]
     Ytrain = Ytrain[Ytrain[:,-3] > 0]
 
+    print(Xtrain.shape, Ytrain.shape, Ytrain[Ytrain[:,-2] > 0].shape)
+
     if not binary:
         Yw = Ytrain[:,-3]
     else:
-        Yw = np.ones(Ytrain.shape[0])
+        Yw = Ytrain[:,-3]
+        Yw[Ytrain[:,-2] == 0] = 1
 
     Xval = Xval[Yval[:,-3] > 0]
     Yval = Yval[Yval[:,-3] > 0]
@@ -991,6 +1118,9 @@ def train_sklearn_api_model(trainSet, valSet,
     else:
         Ytrain = Ytrain[:,-2] > 0
         Yval = Yval[:,-2] > 0
+
+    if not weight:
+        Yw = np.ones(Ytrain.shape[0])
 
     for name, model in models:
 
@@ -1008,6 +1138,8 @@ def train_sklearn_api_model(trainSet, valSet,
             }
 
         if name == 'ngboost':
+            if binary:
+                return
             fitparams={
             'early_stopping_rounds':15,
             'sample_weight' : Yw,
@@ -1017,6 +1149,8 @@ def train_sklearn_api_model(trainSet, valSet,
 
         if binary:
             name = name+'_bin'
+        if not weight:
+             name = name+'_unweighted'
 
         print(f'Fitting model {name}')
         model.fit(Xtrain, Ytrain, **fitparams)
@@ -1085,16 +1219,12 @@ def quantile_prediction_error(ytrue : torch.tensor, ypred : torch.tensor, weight
     ypred = ypred.detach().cpu().numpy()
     if maxi < 1.0:
         maxi = 1.0
-    quantiles = [(0.0,0.1),
-                 (0.1, 0.2),
-                 (0.2, 0.3),
-                 (0.3, 0.4),
-                 (0.4, 0.5),
-                 (0.5, 0.6),
-                 (0.6, 0.7),
-                 (0.7, 0.8),
-                 (0.8, 0.9),
-                 (0.9, 1.0)]
+    quantiles = [(0.0,0.2),
+                 (0.2,0.4),
+                 (0.4,0.6),
+                 (0.6,0.8),
+                 (0.8,1.1)
+                 ]
     
     error = []
     for (minB, maxB) in quantiles:
@@ -1137,7 +1267,8 @@ def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tens
 
     return (bestScore, prec, rec, bestBound)
 
-def class_risk(ypred, ytrue, departements : list, isBin : bool, scale : int, modelName: str, weights = None) -> dict:
+def class_risk(ypred, ytrue, departements : list, isBin : bool,
+               scale : int, modelName: str, weights = None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1152,11 +1283,16 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool, scale : int, mod
         if mask.shape[0] == 0:
             continue
         if not isBin:
-            predictor = read_object(nameDep+'Predictor.pkl', dir_predictor)
+            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
         else:
-            predictor = Predictor(5)
-            predictor.fit(ypred[mask])
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            try:
+                predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            except:
+                predictor = Predictor(5)
+                if np.unique(ypred).shape[0] <= 5:
+                    return res
+                predictor.fit(np.unique(ypred[mask]))
+                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
         
         yclass = predictor.predict(ypred[mask])
         uniqueClass = np.unique(yclass)
@@ -1193,17 +1329,60 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool, scale : int,
         if mask.shape[0] == 0:
             continue
         if not isBin:
-            predictor = read_object(nameDep+'Predictor.pkl', dir_predictor)
+            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
         else:
-            predictor = Predictor(5)
-            predictor.fit(ypred[mask])
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            try:
+                predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            except:
+                predictor = Predictor(5)
+                if np.unique(ypred).shape[0] <= 5:
+                    return res
+                predictor.fit(np.unique(ypred[mask]))
+                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
         
         ypredclass = predictor.predict(ypred[mask])
         ytrueclass = predictor.predict(ytrue[mask, -1])
         yweights = weightsNumpy[mask].reshape(-1)
 
         res[nameDep] = accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
+            
+    return res
+
+def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool, scale : int, modelName: str, weights = None) -> dict:
+    if torch.is_tensor(ypred):
+        ypred = ypred.detach().cpu().numpy().astype(float)
+    if torch.is_tensor(ytrue):
+        ytrue = ytrue.detach().cpu().numpy().astype(float)
+
+    if weights is not None:
+        weightsNumpy = weights.detach().cpu().numpy()
+    else:
+        weightsNumpy = np.ones(ytrue.shape[0])
+    
+    dir_predictor = root / 'Model' / 'HexagonalScale' / 'GNN' / 'influenceClustering'
+    ydep = ytrue[:,3]
+    res = {}
+    for nameDep in departements:
+        mask = np.argwhere(ydep == name2int[nameDep])
+        if mask.shape[0] == 0:
+            continue
+        if not isBin:
+            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
+        else:
+            try:
+                predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            except:
+                predictor = Predictor(5)
+                if np.unique(ypred).shape[0] <= 5:
+                    return res
+                predictor.fit(np.unique(ypred[mask]))
+                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+        
+        ypredclass = predictor.predict(ypred[mask])
+        ytrueclass = predictor.predict(ytrue[mask, -1])
+        yweights = weightsNumpy[mask].reshape(-1)
+
+        res[nameDep] = balanced_accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
             
     return res
 

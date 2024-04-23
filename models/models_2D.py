@@ -28,9 +28,7 @@ class Zhang(torch.nn.Module):
         self.FC4 = torch.nn.Linear(in_features=32, out_features=2 if binary else n_sequences).to(device)
 
         self.output = torch.nn.Softmax(dim=1) if binary else Identity().to(device)
-        self.drop = torch.nn.Dropout(0.03) if dropout > 0.0 else Identity().to(device)
-
-        pass
+        self.drop = torch.nn.Dropout(dropout) if dropout > 0.0 else Identity().to(device)
     
     def forward(self, X, edge_index):
         # egde index not used, API configuration
@@ -59,16 +57,18 @@ class Zhang(torch.nn.Module):
 
         # Output
         x = self.FC1(x)
+        x = self.drop(x)
         x = self.activation(x)
 
         x = self.FC2(x)
+        x = self.drop(x)
         x = self.activation(x)
         
         x = self.FC3(x)
+        x = self.drop(x)
         x = self.activation(x)
 
         x = self.FC4(x)
-        x = self.drop(x)
 
         output = self.output(x)
 
@@ -77,11 +77,12 @@ class Zhang(torch.nn.Module):
 ########################### ConvLTSM ####################################    
 
 class CONVLSTM(torch.nn.Module):
-    def __init__(self, in_channels, hidden_dim, end_channels, n_sequences, device, act_func):
+    def __init__(self, in_channels, hidden_dim, end_channels, n_sequences, device, act_func, dropout):
         super(CONVLSTM, self).__init__()
 
         num_layer = len(hidden_dim)
         self.device = device
+        self.dropout = torch.nn.Dropout(dropout) if dropout > 0 else torch.nn.Identity()
         self.convlstm = ConvLSTM(input_dim=in_channels,
                                 hidden_dim=hidden_dim,
                                 kernel_size=[3 for i in range(num_layer)] ,
@@ -97,11 +98,13 @@ class CONVLSTM(torch.nn.Module):
 
     def forward(self, X, edge_index):
         # edge Index is used for api facility but it is ignore
-        #x = self.input(X)
+
         X = X.permute(0, 4, 3, 1, 2)
-        x, h = self.convlstm(X)
+        x, _ = self.convlstm(X)
         x = x[0][:, -1, :, :]
+        x = self.dropout(x)
         x = self.output(x)
+
         return x
 
 ########################### ST-GATCONVLSTM ####################################    
@@ -119,9 +122,8 @@ class ST_GATCONVLSTM(torch.nn.Module):
 
     def forward(self, X, edge_index):
         x = self.input(X)
-        
+        # TO DO
         x = self.output(x)
-        pass
     
 ########################### ST-GATCONV2D ####################################
 
@@ -137,8 +139,7 @@ class ST_GATCONV2D(torch.nn.Module):
         self.output = OutputLayer(in_channels=hidden_channels, end_channels=end_channels, n_steps=n_sequences, device=device, act_func=act_func)
 
     def forward(self, X, edge_index):
-        # edge Index is used for api facility but it is ignore
         x = self.input(X)
-        
+        # TO DO
         x = self.output(x)
         return x

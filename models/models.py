@@ -15,8 +15,9 @@ class GAT(torch.nn.Module):
 
             heads = [1] + heads
             num_of_layers = len(in_dim) - 1
-            #in_dim = in_dim + [heads[-1] * in_dim[-1]]
-            gat_layers = []  # collect GAT layers
+            gat_layers = []
+
+            self.dropout = torch.nn.Dropout(dropout) if dropout > 0.0 else torch.nn.Identity()
 
             for i in range(num_of_layers):
                 layer = GATConv(
@@ -36,20 +37,18 @@ class GAT(torch.nn.Module):
 
             self.net = Sequential("x, edge_index", gat_layers)
 
-            #self.output = OutputLayer(in_channels=in_dim[-1],
-            #                      end_channels=in_dim[-1],
-            #                      n_steps=n_sequences,
-            #                      device=device,
-            #                      act_func=act_func)
-
-            self.fc = nn.Linear(in_channels=in_dim[-1], out_channels=n_sequences, weight_initializer='glorot', bias=True).to(device=device)
+            self.output = OutputLayer(in_channels=in_dim[-1],
+                                  end_channels=in_dim[-1],
+                                  n_steps=n_sequences,
+                                  device=device,
+                                  act_func=act_func)
 
     def forward(self, X, edge_index):
         edge_index = edge_index[:2]
-        #x = X.reshape(X.shape[0], -1)
         x = X[:,:,-1]
         x = self.net(x, edge_index)
-        x = self.fc(x)
+        x = self.dropout(x)
+        x = self.output(x)
         return x
 
 ################################### ST_GATCN ######################################
@@ -154,8 +153,8 @@ class STGATCN(torch.nn.Module):
         in_channels = residual_channels
 
         for i in range(num_of_layers):
-            #concat = True if i < num_of_layers -1 else False
-            concat = False
+            concat = True if i < num_of_layers -1 else False
+        
             self.layers.append(SpatioTemporalLayer(n_sequences=n_sequences,
                                             residual_channels=in_channels,
                                             skip_channels=skip_channels,
@@ -287,8 +286,8 @@ class STGATCONV(torch.nn.Module):
         in_channels = residual_channels
 
         for i in range(num_of_layers):
-            #concat = True if i < num_of_layers -1 else False
-            concat = False
+            concat = True if i < num_of_layers -1 else False
+
             self.layers.append(SandiwchLayer(n_sequences=n_sequences,
                                             in_channels=in_channels,
                                             hidden_channels=hidden_channels,
@@ -404,12 +403,12 @@ class STGCNCONV(torch.nn.Module):
     
 ################################## TEMPORAL GNN ################################
 class TemporalGNN(torch.nn.Module):
-    def __init__(self, in_channels, hidden_channels, out_channels, n_sequences, device, act_func):
+    def __init__(self, in_channels, hidden_channels, out_channels, n_sequences, device, act_func, dropout):
         super(TemporalGNN, self).__init__()
         # Attention Temporal Graph Convolutional Cell
         self.n_sequences = n_sequences
         self.input = torch.nn.Conv1d(in_channels=in_channels, out_channels=hidden_channels, kernel_size=1).to(device)
-
+        self.dropout = torch.nn.Dropout(dropout) if dropout > 0.0 else torch.nn.Identity()
         self.tgnn = A3TGCN(in_channels=hidden_channels,
                            out_channels=hidden_channels,
                            periods=n_sequences).to(device)
@@ -428,6 +427,7 @@ class TemporalGNN(torch.nn.Module):
         """
         x = self.input(X)
         x = self.tgnn(x, edge_index)
+        x = self.dropout(x)
         x = self.output(x)
         return x
 
@@ -441,32 +441,30 @@ class ST_GATLSTM(torch.nn.Module):
                  heads, dropout):
         super(ST_GATLSTM, self).__init__()
         self.n_sequences = n_sequences
-        lstm1_hidden_size = 32
-        lstm2_hidden_size = 128
 
-        self.input = torch.nn.Conv1d(in_channels=in_channels, out_channels=hidden_channels, kernel_size=1).to(device)
+        self.input = torch.nn.Conv1d(in_channels=in_channels, out_channels=hidden_channels[0], kernel_size=1).to(device)
 
-        #self.bn = torch.nn.BatchNorm1d(hidden_channels)
+        self.bn = torch.nn.BatchNorm1d(hidden_channels[-1])
         self.dropout = torch.nn.Dropout(dropout) if dropout > 0 else torch.nn.Identity()
 
-        self.gat = GATConv(in_channels=hidden_channels * n_sequences, out_channels=hidden_channels * n_sequences,
+        self.gat = GATConv(in_channels=hidden_channels[0] * n_sequences, out_channels=hidden_channels[0] * n_sequences,
             heads=heads, dropout=0.03, concat=False).to(device)
 
-        self.lstm1 = torch.nn.LSTM(input_size=hidden_channels, hidden_size=lstm1_hidden_size, num_layers=1).to(device)
+        self.lstm1 = torch.nn.LSTM(input_size=hidden_channels[0], hidden_size=hidden_channels[1], num_layers=1).to(device)
         for name, param in self.lstm1.named_parameters():
             if 'bias' in name:
                 torch.nn.init.constant_(param, 0.0)
             elif 'weight' in name:
                 torch.nn.init.xavier_uniform_(param)
 
-        self.lstm2 = torch.nn.LSTM(input_size=lstm1_hidden_size, hidden_size=lstm2_hidden_size, num_layers=1).to(device)
+        self.lstm2 = torch.nn.LSTM(input_size=hidden_channels[1], hidden_size=hidden_channels[-1], num_layers=1).to(device)
         for name, param in self.lstm1.named_parameters():
             if 'bias' in name:
                 torch.nn.init.constant_(param, 0.0)
             elif 'weight' in name:
                 torch.nn.init.xavier_uniform_(param)
 
-        self.output = OutputLayer(in_channels=lstm2_hidden_size,
+        self.output = OutputLayer(in_channels=hidden_channels[-1],
                                   end_channels=end_channels,
                                   n_steps=n_sequences,
                                   device=device, act_func=act_func)
@@ -494,7 +492,7 @@ class ST_GATLSTM(torch.nn.Module):
         x, _ = self.lstm2(x)
         
         #x = self.bn(x)
-        #x = self.dropout(x)
+        x = self.dropout(x)
 
         x = torch.squeeze(x[-1, :, :])
 

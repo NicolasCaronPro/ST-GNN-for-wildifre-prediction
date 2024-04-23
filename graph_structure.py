@@ -6,11 +6,11 @@ import geopandas as gpd
 from shapely import unary_union
 import matplotlib.pyplot as plt
 from models.models import *
-from dataloader import DataLoader, InplaceGraphDataset, graph_collate_fn, Dataset, graph_collate_fn_no_label
+from torch_geometric.data import Dataset
+from torch.utils.data import DataLoader
 import warnings
 from sklearn.model_selection import train_test_split
 from shapely import Point
-from config import *
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -77,11 +77,14 @@ class GraphStructure():
 
             if doBin:
                 outputName = str2name[dept]+'binScale0.pkl'
-                bin = pickle.load(open(Path('/home/caron/Bureau/Model/HexagonalScale') / 'bin' / outputName,"rb"))
+                bin = read_object(outputName, Path('/home/caron/Bureau/Model/HexagonalScale/bin'))
+                outputName = str2name[dept]+'Influence.pkl'
+                influence = read_object(outputName, Path('/home/caron/Bureau/Model/HexagonalScale/log'))
 
-                binImageScale = create_larger_scale_bin(mask, bin)
+                binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence)
 
                 save_object(binImageScale, str2name[dept]+'binScale'+str(self.scale)+'.pkl', path / 'bin' / resStr)
+                save_object(influenceImageScale, str2name[dept]+'InfluenceScale'+str(self.scale)+'.pkl', path / 'influence' / resStr)
 
     def _raster(self, path : Path) -> None:
         """"
@@ -114,6 +117,21 @@ class GraphStructure():
         X = list(zip(self.oriLongitude, self.oriLatitues))
         self.kmeans = pickle.load(open(path / name, 'rb'))
         self.ids = self.kmeans.predict(X)
+
+    def _create_predictor(self, start, end, dir):
+        dir_predictor = root /  'Model' / 'HexagonalScale' / 'GNN' / 'influenceClustering'
+        dir_influence = root / 'Model' / 'HexagonalScale' / 'GNN' / dir / 'influence' / '2x2'
+        for dep in np.unique(self.departements):
+
+            influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
+            influence = influence[:,:,allDates.index(start):allDates.index(end)]
+            #maxInfluence = []
+            #for di in range(influence.shape[-1]):
+            #    maxInfluence.append(np.nanmax(influence[:,:,di]))
+
+            predictor = Predictor(5)
+            predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            save_object(predictor, str2name[dep]+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
 
     def _create_nodes_list(self) -> None:
         """
@@ -356,23 +374,42 @@ class GraphStructure():
     def predict_model_api_sklearn(self, X : np.array, isBin : bool) -> np.array:
         assert self.model is not None
         if not isBin:
-            return self.model.predict(X[:, [  6,   7,   8,  10,  11,  12,  13,  14,  15,  16,  17,  22,  23,
-        24,  25,  27,  28,  30,  31,  32,  34,  35,  36,  37,  38,  39,
-        40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,
-        53,  54,  55,  56,  57,  58,  59,  60,  62,  63,  64,  66,  67,
-        68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,  80,  82,
-        85,  86,  87,  88,  94,  95,  96, 100, 102, 104, 105, 108, 113,
-       114, 116, 117, 119, 121, 132, 133, 136, 137, 138, 139, 140, 146,
-       147, 157, 158, 159, 160, 162, 163, 164, 165]])
+            return self.model.predict(X[:, [  7,  10,  13,  14,  16,  22,  23,  24,  25,  28,  32,  34,  35,
+        36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  52,  53,  54,  55,  56,  57,  58,  62,  63,  64,  65,
+        66,  67,  68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,
+        80,  82,  86,  87,  88,  94,  96,  97,  99, 106, 107, 108, 109,
+       110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 124, 130,
+       131, 132, 133, 134, 135, 136, 137, 138, 140, 141, 142, 145, 146,
+       147, 148, 157, 158, 159, 160, 162, 163, 165]])
         else:
-             return self.model.predict_proba(X[:, [  6,   7,   8,  10,  11,  12,  13,  14,  15,  16,  17,  22,  23,
-        24,  25,  27,  28,  30,  31,  32,  34,  35,  36,  37,  38,  39,
-        40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,  52,
-        53,  54,  55,  56,  57,  58,  59,  60,  62,  63,  64,  66,  67,
-        68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,  80,  82,
-        85,  86,  87,  88,  94,  95,  96, 100, 102, 104, 105, 108, 113,
-       114, 116, 117, 119, 121, 132, 133, 136, 137, 138, 139, 140, 146,
-       147, 157, 158, 159, 160, 162, 163, 164, 165]])[:,1]
+             return self.model.predict_proba(X[:, [  7,  10,  13,  14,  16,  22,  23,  24,  25,  28,  32,  34,  35,
+        36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  52,  53,  54,  55,  56,  57,  58,  62,  63,  64,  65,
+        66,  67,  68,  69,  70,  71,  72,  74,  75,  76,  77,  78,  79,
+        80,  82,  86,  87,  88,  94,  96,  97,  99, 106, 107, 108, 109,
+       110, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 124, 130,
+       131, 132, 133, 134, 135, 136, 137, 138, 140, 141, 142, 145, 146,
+       147, 148, 157, 158, 159, 160, 162, 163, 165]])[:,1]
+        
+    def _predict_perference_with_Y(self, Y : np.array, isBin : bool) -> np.array:
+        res = np.empty(Y.shape[0])
+        res[0] = 0
+        for i, node in enumerate(Y):
+            if i == 0:
+                continue
+            index = np.argwhere((Y[:,4] == node[4] - 1) & (Y[:,0] == node[0]))
+            if index.shape[0] == 0:
+                res[i] = 0
+                continue
+            if not isBin: 
+                res[i] = Y[index[0], -1]
+            else:
+                res[i] = Y[index[0], -2] > 0
+        return res
+        
+    def _predict_perference_with_X(self, X : np.array, pos_feature : dict) -> np.array:
+        return X[:, pos_feature['Historical'] + 2]
 
     def _info_on_graph(self, nodes : np.array, output : Path) -> None:
         """
