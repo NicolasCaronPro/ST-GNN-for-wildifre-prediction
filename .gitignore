@@ -5,6 +5,11 @@ __pycache__/
 
 # C extensions
 *.so
+*.pkl
+*.csv
+*.geojson
+*.csv
+*.tif
 
 # Distribution / packaging
 .Python
