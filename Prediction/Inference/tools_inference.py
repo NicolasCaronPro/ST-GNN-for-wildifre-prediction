@@ -353,11 +353,8 @@ def create_spatio_temporal_sinister_image(regions : gpd.GeoDataFrame,
             continue
 
         hexaFire = regions[regions['date'] == date].copy(deep=True)
-        hexaFire['is'+sinisterType] = 0
-        hexaFire['nb'+sinisterType] = 0
 
         rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
-
         spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
 
     return spatioTemporalRaster

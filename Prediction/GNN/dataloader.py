@@ -199,8 +199,9 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str):
     print(f'Size of the train set {dateTrain.shape[0]}, size of the val set {dateVal.shape[0]}')
     
     # Generate Xtrain and Xval
-    trainMask = Xset[:,4] < dateTrain.max()
-    valMask = Xset[:,4] >= dateTrain.max()
+    trainMask = np.isin(Xset[:,4], dateTrain)
+
+    valMask = np.isin(Xset[:,4], dateVal)
 
     Xtrain = Xset[trainMask, :]
 
@@ -214,7 +215,6 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str):
     else:
         ValueError('Unknow')
         exit(1)
-    
     # Scale Features
     for featureband in range(6, Xset.shape[1]):
         Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)

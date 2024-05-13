@@ -69,6 +69,7 @@ class GraphStructure():
             maskDept = np.argwhere(self.departements == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
             geo['scale'+str(self.scale)] = self.ids[maskDept]
+            check_and_create_path(Path('log'))
             mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'scale'+str(self.scale), Path('log'), 'ori')
             mask = mask[0]
 

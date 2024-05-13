@@ -1,4 +1,4 @@
-cems_variables = ['temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+cems_variables = ['temperature', 'dwpt', 'humidite', 'precipitations', 'wdir', 'vitesse_vent', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                 'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
                 'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16']

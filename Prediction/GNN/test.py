@@ -15,7 +15,11 @@ parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
 parser.add_argument('-d', '--database', type=bool, help='Do database')
 parser.add_argument('-g', '--graph', type=bool, help='Construct graph')
+parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-dd', '--database2D', type=bool, help='Do 2D database')
+parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
+parser.add_argument('-sp', '--spec', type=str, help='spec')
+parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
 
 args = parser.parse_args()
 
@@ -24,7 +28,11 @@ nameExp = args.name
 doGraph = args.graph == 'True'
 doDatabase = args.database == 'True'
 do2D = args.database2D == 'True'
+scale = int(args.scale)
+ks = int(args.k_days)
 sinister = args.sinister
+spec = args.spec
+minPoint = args.nbpoint
 
 newFeatures = []
 
@@ -37,10 +45,6 @@ train_dir = Path(name_dir)
 
 name_dir = nameExp + '/' + sinister + '/' + 'test'
 dir_output = Path(name_dir)
-
-prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
-if dummy:
-    prefix_train += '_dummy'
 
 rmse = weighted_rmse_loss
 std = standard_deviation
@@ -63,7 +67,7 @@ methods = [('rmse', rmse, 'proba'),
             ('meac', meac, 'class')
            ]
 
-geo = gpd.read_file('regions.geojson')
+geo = gpd.read_file('regions/regions.geojson')
 
 models = [
         #('GAT', False, False, False),
@@ -78,12 +82,12 @@ models = [
 
 tradiModels = [
     ('xgboost', False),
-    #('lightgbm', False),
-    #('ngboost', False),
-    #('xgboost_bin', True),
-    #('lightgbm_bin', True),
-    #('xgboost_bin_unweighted', True),
-    #('lightgbm_bin_unweighted', True),
+    ('lightgbm', False),
+    ('ngboost', False),
+    ('xgboost_bin', True),
+    ('lightgbm_bin', True),
+    ('xgboost_bin_unweighted', True),
+    ('lightgbm_bin_unweighted', True),
     #('ngboost_bin', True)
     ]
 
@@ -100,6 +104,9 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
 
     global doDatabase
     global features
+    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
+    if dummy:
+        prefix_train += '_dummy'
 
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
@@ -174,12 +181,38 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
     except Exception as e:
         print(f'Fuck it : {e}')
         return
+    
+    # Select train features
+    pos_train_feature, _ = create_pos_feature(graphScale, 6, trainFeatures)
+    train_fet_num = [0,1,2,3,4,5]
+    for fet in trainFeatures:
+        if fet in features:
+            coef = 4 if scale > 0 else 1
+            if fet == 'Calendar':
+                maxi = len(calendar_variables)
+            elif fet == 'air':
+                maxi = len(air_variables)
+            elif fet == 'sentinel':
+                maxi = coef * len(sentinel_variables)
+            elif fet == 'Geo':
+                maxi = len(geo_variables)
+            else:
+                maxi = coef
+            train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+
+    prefix += '_'+spec
+    pos_feature = pos_train_feature
+    X = X[:, np.asarray(train_fet_num)]
+    Xtrain = Xtrain[:, np.asarray(train_fet_num)]
+    
+    prefix_train += '_'+spec
+    prefix += '_'+spec
 
     # Preprocess
     Xset, Yset = preprocess_test(X=X, Y=Y, Xtrain=Xtrain, scaling=scaling)
 
     # Features selection
-    features_importance = read_object('features_importance.pkl', train_dir)
+    features_importance = read_object('features_importance_'+spec+'.pkl', train_dir)
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)
 
@@ -257,7 +290,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
 
         save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
 
-        n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
+        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
         realVspredict2d(pred,
                     y,
                     isBin,
@@ -267,7 +300,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                     train_dir,
                     geo,
                     testDepartement,
-                    graphScale)
+                    graphScale)"""
         
         i += 1
 
@@ -314,7 +347,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
 
         save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
         
-        n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
+        """n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
         realVspredict2d(pred,
             y,
             isBin,
@@ -324,7 +357,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
             train_dir,
             geo,
             testDepartement,
-            graphScale)
+            graphScale)"""
 
         i += 1
 
@@ -446,7 +479,7 @@ testDepartement = ['departement-01-ain']
 
 # 2023 test Doubs
 testDepartement = ['departement-25-doubs']
-test('Doubs', testDates, geo, geo, testDepartement, dir_output)
+#test('Doubs', testDates, geo, geo, testDepartement, dir_output)
 
 # 2023 test Yvelines
 testDepartement = ['departement-78-yvelines']

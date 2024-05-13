@@ -16,12 +16,16 @@ parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
 parser.add_argument('-p', '--point', type=str, help='Construct n point')
+parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
 parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
 parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
 parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
+parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
+parser.add_argument('-sc', '--scale', type=str, help='Scale')
+parser.add_argument('-sp', '--spec', type=str, help='spec')
 
 args = parser.parse_args()
 
@@ -36,6 +40,10 @@ doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
 sinister = args.sinister
+minPoint = args.nbpoint
+ks = int(args.k_days)
+scale = int(args.scale)
+spec = args.spec
 
 ######################### Incorporate new features ##########################
 
@@ -45,8 +53,8 @@ newFeatures = []
 
 dir_target = root_target / sinister / 'log'
 
-geo = gpd.read_file('regions.geojson')
-geo = geo[geo['departement'].isin(['Ain', 'Doubs', 'Yvelines', 'Rhone'])].reset_index(drop=True)
+geo = gpd.read_file('regions/regions.geojson')
+geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
 
 doBaseline = True
 name_dir = nameExp + '/' + sinister + '/' + 'train'
@@ -61,11 +69,10 @@ if dummy:
 
 ########################### Create points ################################
 if doPoint:
-    minPoint = 100
 
     check_and_create_path(dir_output)
 
-    regions = gpd.read_file('regions.geojson')
+    regions = gpd.read_file('regions/regions.geojson')
     fp = pd.read_csv('sinister/'+sinister+'.csv')
 
     construct_non_point(fp, regions, maxDate, sinister, Path(nameExp))
@@ -74,7 +81,8 @@ if doPoint:
                          fp,
                          maxDate,
                          sinister,
-                         Path(nameExp))
+                         Path(nameExp),
+                         minPoint)
 
 ######################### Encoding ######################################
 
@@ -158,13 +166,38 @@ else:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
 
+# Select train features
+pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
+train_fet_num = [0,1,2,3,4,5]
+for fet in trainFeatures:
+    if fet in features:
+        coef = 4 if scale > 0 else 1
+        if fet == 'Calendar':
+            maxi = len(calendar_variables)
+        elif fet == 'air':
+            maxi = len(air_variables)
+        elif fet == 'sentinel':
+            maxi = coef * len(sentinel_variables)
+        elif fet == 'Geo':
+            maxi = len(geo_variables)
+        else:
+            maxi = coef
+        train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+
+prefix += '_'+spec
+pos_feature = pos_train_feature
+X = X[:, np.asarray(train_fet_num)]
+
+print(X.shape)
+
 ############################# Training ###########################
 
+
 # Preprocess
-Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate)
+Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate)
 
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature)
+features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec)
 
 # Train
 criterion = weighted_rmse_loss

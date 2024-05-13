@@ -643,36 +643,32 @@ def create_inference(graph,
                      Xtrain : np.array,
                      device : torch.device,
                      use_temporal_as_edges,
-                     ks : int,
+                     graphId : int,
+                     k_days : int,
                      scaling : str) -> tuple:
 
     Xset = preprocess_inference(X, Xtrain, scaling)
 
-    graphId = np.unique(X[:,4])
-
     batch = []
 
-    i = 0
-    for id in graphId:
-        if use_temporal_as_edges:
-            x, _, e = construct_graph_set(graph, id, Xset, None, ks)
-        else:
-            x, _, e = construct_graph_with_time_series(graph, id, Xset, None, ks)
+    if use_temporal_as_edges:
+        x, _, e = construct_graph_set(graph, graphId, Xset, None, k_days)
+    else:
+        x, _, e = construct_graph_with_time_series(graph, graphId, Xset, None, k_days)
 
-        if x is None:
-            continue
-        
-        batch.append([torch.tensor(x, dtype=torch.float32, device=device), torch.tensor(e, dtype=torch.long, device=device)])
-        i += 1
+    if x is None:
+        print('X is None')
+        exit(1)
+
+    batch.append([torch.tensor(x, dtype=torch.float32, device=device), torch.tensor(e, dtype=torch.long, device=device)])
 
     if len(batch) == 0:
         print('Batch is empty')
         exit(1)
-    print(len(batch))
+
     features, edges = graph_collate_fn_no_label(batch)
 
     return features, edges
-
 
 def create_inference_2D(graph, X : np.array, Xtrain : np.array, Ytrain : np.array,
                      device : torch.device, use_temporal_as_edges, ks : int, pos_feature : dict,

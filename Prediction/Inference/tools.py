@@ -581,7 +581,6 @@ def construct_graph_with_time_series(graph, date : int,
 
     maskgraph = np.argwhere((X[:,4] == date) & (X[:, 5] > 0))
     x = X[maskgraph[:,0]]
-
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,4] < date) & (X[:,4] >= date - ks)))
         if maskts.shape[0] == 0:
@@ -628,7 +627,7 @@ def construct_graph_with_time_series(graph, date : int,
 
         edges = np.row_stack((src, target)).astype(int)
 
-    if Y is not None:
+    if Y is None:
         return x, None, edges
     return x, y, edges
 

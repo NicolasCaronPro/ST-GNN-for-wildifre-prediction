@@ -1008,7 +1008,7 @@ def train_sklearn_api_model(trainDataset, valDataset,
     
     # TO DO
 
-    ############## fit ########################
+    ############## fit #########################
     leni = len(trainDataset.X)
     leniv = len(valDataset.X)
 
@@ -1093,6 +1093,8 @@ def train_sklearn_api_model(trainDataset, valDataset,
         Yw = np.ones(Ytrain.shape[0])
 
     for name, model in models:
+        if name  == 'ngboost':
+            continue
 
         if name == 'xgboost':
             fitparams={
@@ -1607,7 +1609,7 @@ def log_features(fet, pos_feature, methods):
                 if f >= res:
                     print(keys[i], fe[1], air_variables[f-res])
 
-def features_selection(doFet, Xset, Yset, dir_output, pos_feature):
+def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec):
     if doFet:
         variables = []
         df = pd.DataFrame(index=np.arange(Xset.shape[0]))
@@ -1620,9 +1622,9 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature):
 
         features_importance = get_features(df, variables, target='target', num_feats=100)
         features_importance = np.asarray(features_importance)
-        save_object(features_importance, 'features_importance.pkl', dir_output)
+        save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
     else:
-        features_importance = read_object('features_importance.pkl', dir_output)
+        features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
 
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)

@@ -7,7 +7,11 @@ from features_2D import *
 from weigh_predictor import Predictor
 from config import *
 
-def look_for_information(path : Path, departements : list, firepoint : pd.DataFrame, maxDate : str, sinister : str, dir : Path):
+def look_for_information(path : Path, departements : list,
+                         firepoint : pd.DataFrame, maxDate : str,
+                         sinister : str, dir : Path,
+                         minPoint):
+
     points = []
     all_dep_predictor = Predictor(5)
     all_maxi_influence = []
@@ -46,7 +50,10 @@ def look_for_information(path : Path, departements : list, firepoint : pd.DataFr
             mask = np.argwhere(clusterInfluence == c)[:,0]
             if departement == 'departement-01-ain':
                 mask = mask[mask > allDates.index('2018-01-01')]
-            minValue = min(minPoint, mask.shape[0])
+            if minPoint == 'full':
+                minValue = mask.shape[0]
+            else:
+                minValue = min(minPoint, mask.shape[0])
             m = np.random.choice(mask, minValue, replace=False).ravel()
             datesForDepartement += list(m)
         datesForDepartement = np.asarray(datesForDepartement)

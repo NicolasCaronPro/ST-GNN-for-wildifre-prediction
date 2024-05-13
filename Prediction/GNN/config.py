@@ -53,11 +53,23 @@ features = [
             'air',
             ]
 
-# Variable à encoder
-TARGET_ENCODE = ['jourSemaine', 'jourAnnee', 
-                 'confinement1', 'confinement2', 'couvrefeux', 
-                 'ramadan', 
-                 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder']
+# Train features 
+trainFeatures = [
+            'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+            'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
+            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'elevation',
+            'highway',
+            'population',
+            'sentinel',
+            'landcover',
+            'foret',
+            'Calendar',
+            #'Historical',
+            'Geo',
+            'air',
+            ]
 
 def get_academic_zone(name, date):
         dict_zones = {
@@ -106,8 +118,7 @@ trainDepartements = [
                 #'departement-69-rhone',
                 ]
 
-k_days = 7 # Size of the time series sequence
-minPoint = 100 # Define which train set use
+k_days = 0 # Size of the time series sequence
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
 maxDist = {0 : 5,
@@ -122,7 +133,6 @@ maxDist = {0 : 5,
         9 : 35,
         10 : 35
         }
-scale = 10
 shape2D = (25,25)
 jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \

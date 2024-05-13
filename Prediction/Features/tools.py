@@ -794,3 +794,9 @@ def get_cluster_longitude(x, cluster):
 def get_cluster_altitude(x, cluster):
     x = int(x)
     return cluster.cluster_centers_[x][2]
+
+def read_object(filename: str, path : Path):
+    if not (path / filename).is_file():
+        print(f'{path / filename} not found')
+        return None
+    return pickle.load(open(path / filename, 'rb'))

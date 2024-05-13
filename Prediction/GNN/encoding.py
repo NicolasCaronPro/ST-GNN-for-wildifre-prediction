@@ -1,9 +1,10 @@
 from tools import *
-from config import calendar_variables
+from config import *
+from array_fet import *
 
-def encode(path_to_target, maxDate, trainDepartments, dir_output):
+def encode(path_to_target, maxDate, trainDepartements, dir_output):
 
-    print(f'Create encoder for categorical features using {trainDepartments}, at max {maxDate}')
+    print(f'Create encoder for categorical features using {trainDepartements}, at max {maxDate}')
     trainMax = allDates.index(maxDate)
     foret = []
     gt = []

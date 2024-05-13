@@ -1,6 +1,6 @@
 import sys
 
-sys.path.insert(0,'/home/caron/Bureau/Model/HexagonalScale/Prediction/GNN/models')
+sys.path.insert(0,'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/models')
 
 from utils import *
 from conv_lstm import ConvLSTM
