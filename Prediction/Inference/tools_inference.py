@@ -9,6 +9,8 @@ import meteostat
 from scipy.interpolate import griddata, interp1d
 from astropy.convolution import convolve, convolve_fft
 import firedanger
+import jours_feries_france
+import vacances_scolaires_france
 
 def myFunctionDistanceDugrandCercle3D(outputShape, earth_radius=6371.0,
                                       resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214, resolution_altitude=10):
@@ -358,3 +360,47 @@ def create_spatio_temporal_sinister_image(regions : gpd.GeoDataFrame,
         spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
 
     return spatioTemporalRaster
+
+jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
+veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
+            in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
+vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
+
+def get_academic_zone(name, date):
+        dict_zones = {
+            'Aix-Marseille': ('B', 'B'),
+            'Amiens': ('B', 'B'),
+            'Besançon': ('B', 'A'),
+            'Bordeaux': ('C', 'A'),
+            'Caen': ('A', 'B'),
+            'Clermont-Ferrand': ('A', 'A'),
+            'Créteil': ('C', 'C'),
+            'Dijon': ('B', 'A'),
+            'Grenoble': ('A', 'A'),
+            'Lille': ('B', 'B'),
+            'Limoges': ('B', 'A'),
+            'Lyon': ('A', 'A'),
+            'Montpellier': ('A', 'C'),
+            'Nancy-Metz': ('A', 'B'),
+            'Nantes': ('A', 'B'),
+            'Nice': ('B', 'B'),
+            'Orléans-Tours': ('B', 'B'),
+            'Paris': ('C', 'C'),
+            'Poitiers': ('B', 'A'),
+            'Reims': ('B', 'B'),
+            'Rennes': ('A', 'B'),
+            'Rouen ': ('B', 'B'),
+            'Strasbourg': ('B', 'B'),
+            'Toulouse': ('A', 'C'),
+            'Versailles': ('C', 'C')
+        }
+        if date < dt.datetime(2016, 1, 1):
+            return dict_zones[name][0]
+        return dict_zones[name][1]
+
+ACADEMIES = {
+    '1': 'Lyon',
+    '69': 'Lyon',
+    '25': 'Besançon',
+    '78': 'Versailles',
+}

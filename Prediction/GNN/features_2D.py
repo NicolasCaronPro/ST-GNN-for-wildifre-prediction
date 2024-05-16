@@ -63,7 +63,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
         
     # For each departement
     for departement in departements:
-        print(departement)
+        logger.info(departement)
         # Define the directory for the data
         dir_data = rootDisk / departement / 'data'
         
@@ -127,7 +127,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             save_object(landcover, 'landcover.pkl', dir_output)
 
         if doSent:
-            print('Sentinel')
+            logger.info('Sentinel')
 
             summer, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'sentinel' / 'summer.tif')
             
@@ -161,7 +161,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             spring = resize(spring, mask.shape[0], mask.shape[-1], spring.shape[0])
             save_object(spring, 'spring.pkl', dir_output)
 
-            print(summer.shape, winter.shape, spring.shape, autumn.shape)
+            logger.info(summer.shape, winter.shape, spring.shape, autumn.shape)
 
         Xk = list(zip(geo.longitude, geo.latitude))
         geo['scale'] = graph._predict_node(Xk)
@@ -169,7 +169,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
         # This will take timmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmme
         for i, node in enumerate(nodeDepartement):
             if i % 500 == 0:
-                print(f'Node {i} / {nodeDepartement.shape} : {(node[:5])}')
+                logger.info(f'Node {i} / {nodeDepartement.shape} : {(node[:5])}')
 
             indD = (node[4]).astype(int)
             index_1D = np.argwhere((Xset[:,0] == node[0]) & (Xset[:,4] == node[4]))
@@ -279,10 +279,10 @@ if __name__ == '__main__':
         regions.loc[regions[regions['departement'] == (dept.split('-')[-1][0].upper()) + dept.split('-')[-1][1:]].index, 'departement'] = code
         sat0, lons, lats = rasterization(regions[regions['departement'] == code], n_pixel_y, n_pixel_x, 'scale', dir_output, dept+'_scale')
         sat0 = sat0[0]
-        print(sat0.shape)
+        logger.info(sat0.shape)
         #sat0 = read_object(dept+'rasterScale5.pkl', GNN_PATH / 'test/2023/raster/')
         #sat0 = resize_no_dim(sat0, 104, 122).round(0)
-        print(np.unique(sat0))
+        logger.info(np.unique(sat0))
         meteostat = pd.read_csv(rootDisk / dept / 'data' / 'meteostat' / 'meteostat.csv')
 
         """firepoint = pd.read_csv(root / dept / 'firepoint' / 'NATURELSfire.csv')
@@ -306,7 +306,7 @@ if __name__ == '__main__':
         Xk = list(zip(nonfirepoint.longitude, nonfirepoint.latitude)) 
         nonfirepoint['scale'] = graph._predict_node(Xk)
 
-        print(len(nonfirepoint), len(firepoint))
+        logger.info(len(nonfirepoint), len(firepoint))
 
         firepoint.drop_duplicates(subset=('date', 'scale'), inplace=True)
         nonfirepoint.drop_duplicates(subset=('date', 'scale'), inplace=True)
@@ -315,7 +315,7 @@ if __name__ == '__main__':
         nonfirepoint.dropna(subset='scale', inplace=True)
 
         
-        print(len(nonfirepoint), len(firepoint))
+        logger.info(len(nonfirepoint), len(firepoint))
 
         trainfp = firepoint[firepoint['date'] <= '2022-12-31']
         trainnfp = nonfirepoint[nonfirepoint['date'] <= '2022-12-31']
@@ -341,7 +341,7 @@ if __name__ == '__main__':
         trainnfp = nfpp[nfpp['date'] < '2023-01-01']
         test = nfpp[nfpp['date'] > '2023-01-01']
 
-        print(f'{len(trainfp)}')
+        logger.info(f'{len(trainfp)}')
 
         get_sub_nodes_feature_2D(trainfp.values, 'X')
         get_sub_nodes_feature_2D(trainnfp.values, 'X')

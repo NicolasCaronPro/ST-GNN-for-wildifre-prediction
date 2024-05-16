@@ -160,7 +160,7 @@ class ReadGraphDataset_2D(Dataset):
 #                                                                                                       #
 #########################################################################################################
 
-def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str):
+def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : int):
     """
     Preprocess the input features:
         X : input features
@@ -181,7 +181,7 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str):
     assert Xset.shape[0] == Yset.shape[0]
 
     # Get node's id and date for which weight is greater than 0
-    nodeUseForLossCalculation = Yset[Yset[:,-3] > 0]
+    nodeUseForLossCalculation = Yset[(Yset[:,-3] > 0) & (Yset[:,4] > ks)]
     dateUseForLossCalculation = np.unique(nodeUseForLossCalculation[:,4])
 
     # Sort by date
@@ -555,7 +555,6 @@ def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
         ETensor = read_object('ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
 
     except:
-
         XTensor, YTensor, ETensor = create_test(graph=graphScale, X=X, Y=Y, Xtrain=Xtrain,
                                     device=device, use_temporal_as_edges=use_temporal_as_edges, ks=k_days, scaling=scaling)
 

@@ -10,7 +10,8 @@ from array_fet import *
 def get_sub_nodes_feature(graph, subNode: np.array,
                         features : list,
                         path : Path,
-                        geo : gpd.GeoDataFrame) -> np.array:
+                        geo : gpd.GeoDataFrame,
+                        dates : np.array) -> np.array:
     
     print('Load nodes features')
 
@@ -68,18 +69,20 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     if 'Calendar' in features:
         for node in subNode:
             index = np.argwhere(subNode[:,4] == node[4])
-            X[index, pos_feature['Calendar']] = geo[geo['date'] == node[4]]['month'].values[0] # month
-            X[index, pos_feature['Calendar'] + 1] = geo[geo['date'] == node[4]]['dayofweek'].values[0] # dayofweek
-            X[index, pos_feature['Calendar'] + 2] = geo[geo['date'] == node[4]]['dayofyear'].values[0] # dayofyear
-            X[index, pos_feature['Calendar'] + 3] = geo[geo['date'] == node[4]]['dayofweek'].values[0]  >= 5 # isweekend
-            X[index, pos_feature['Calendar'] + 4] = geo[geo['date'] == node[4]]['couvrefeux'].values[0]  # couvrefeux
-            X[index, pos_feature['Calendar'] + 5] = geo[geo['date'] == node[4]]['confinement'].values[0]  # confinement
-            X[index, pos_feature['Calendar'] + 6] = geo[geo['date'] == node[4]]['ramadan'].values[0]  # ramadan
-            X[index, pos_feature['Calendar'] + 7] = geo[geo['date'] == node[4]]['bankHolidays'].values[0]  # bankHolidays
-            X[index, pos_feature['Calendar'] + 8] = geo[geo['date'] == node[4]]['bankHolidaysEve'].values[0]  # bankHolidaysEve
-            X[index, pos_feature['Calendar'] + 9] = geo[geo['date'] == node[4]]['holidays'].values[0]  # holidays
-            X[index, pos_feature['Calendar'] + 10] = geo[geo['date'] == node[4]]['holidaysBorder'].values[0]  # holidaysBorder
-
+            ddate = dates[int(node[4])]
+            X[index, pos_feature['Calendar']] = ddate.month # month
+            X[index, pos_feature['Calendar'] + 1] = ddate.timetuple().tm_yday # dayofweek
+            X[index, pos_feature['Calendar'] + 2] = ddate.weekday() # dayofyear
+            X[index, pos_feature['Calendar'] + 3] = ddate.weekday() >= 5 # isweekend
+            X[index, pos_feature['Calendar'] + 4] = pendant_couvrefeux(ddate) # couvrefeux
+            X[index, pos_feature['Calendar'] + 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+            X[index, pos_feature['Calendar'] + 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
+            X[index, pos_feature['Calendar'] + 7] = 1 if ddate in jours_feries else 0 # bankHolidays
+            X[index, pos_feature['Calendar'] + 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
+            X[index, pos_feature['Calendar'] + 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[dept])], ddate)) else 0 # holidays
+            X[index, pos_feature['Calendar'] + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dept])], ddate)) else 0 ) \
+                or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dept])], ddate)) else 0) # holidaysBorder
+        
         X[:, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar] = \
                 encoder_calendar.transform((X[:, pos_feature['Calendar'] : \
                         pos_feature['Calendar'] + size_calendar]).reshape(-1, size_calendar)).values.reshape(-1, size_calendar)
@@ -124,7 +127,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if 'highway' in features:
             save_values(geo['highway'].values, pos_feature['highway'], index, maskNode)
         if 'foret' in features:
-            save_value_with_encoding(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
+            #save_value_with_encoding(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
+            save_values(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
 
     coef = 4 if graph.scale > -1 else 1
     for node in subNode:
@@ -138,12 +142,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 save_values(geo[var].values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
 
         if 'landcover' in features: 
-            save_value_with_encoding(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
+            #save_value_with_encoding(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
+            save_values(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
 
     print('Historical')
     if 'Historical' in features:
         name = dept+'pastInfluence.pkl'
-        arrayInfluence = pickle.load(open(dir_data / 'log' / name, 'rb'))
+        arrayInfluence = pickle.load(open(Path('.') / 'log' / name, 'rb'))
         for node in subNode:
             index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
             maskNode = mask == node[0]
@@ -163,7 +168,7 @@ def create_ps(geo):
 
     return geo
 
-def fire_prediction(spatialGeo, interface, departement, features, features_selected, scaling, dir_data):
+def fire_prediction(spatialGeo, interface, departement, features, features_selected, scaling, dir_data, dates):
 
     geoDT = create_ps(interface)
 
@@ -192,7 +197,6 @@ def fire_prediction(spatialGeo, interface, departement, features, features_selec
             geoDT[cv] = 0
             
     geoDT[foret_variables] = 0
-    geoDT[calendar_variables] = 0
     geoDT[historical_variables] = 0
     geoDT[air_variables] = 0
 
@@ -218,7 +222,8 @@ def fire_prediction(spatialGeo, interface, departement, features, features_selec
                               subNode=orinode,
                               features=features,
                               geo=geoDT,
-                              path=dir_data)
+                              path=dir_data,
+                              dates=dates)
     
     print(np.unique(np.argwhere(np.isnan(X))[:,1]))
 
@@ -312,6 +317,15 @@ if __name__ == "__main__":
             'Geo',
             'air',
             ]
+    
+    features_in_feather = ['hex_id', 'date',
+                           'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+                           'temp12', 'dwpt12', 'rhum12', 'prcp12', 'wdir12', 'wspd12', 'prec24h12',
+                           'dc', 'ffmc', 'dmc', 'isi', 'bui', 'fwi',
+                           'daily_severity_rating', 'nesterov', 'munger', 'kbdi', 'angstroem',
+                           'days_since_rain', 'sum_consecutive_rainfall',
+                           'feux',
+                           ]
 
     # Load train
     graph = read_object('graph_'+scale+'.pkl', dir_data)
@@ -326,39 +340,42 @@ if __name__ == "__main__":
     dir_output = dir_interface / 'output'
     check_and_create_path(dir_output)
 
-    # Load save
-    spatialGeo = gpd.read_file(dir_incendie / 'spatial' / 'hexagones.geojson')
+    # Load feather and spatial
+    name = 'hexagones_'+sinister+'.geojson'
+    spatialGeo = gpd.read_file(dir_incendie / 'spatial' / name)
+    incendie_feather = pd.read_feather(dir_interface / 'incendie_final.feather')
+
+    # Date
+    date = dt.datetime.now().date()
+    date_ks = (date - dt.timedelta(days=k_days))
+
+    incendie_feather = incendie_feather[(incendie_feather['date'] >= date_ks) & (incendie_feather['date'] <= date)]
+    dates = np.sort(incendie_feather.date.unique())
+    print(dates)
 
     ######################### Interface ##################################
-
     interface = []
 
-    originalCols = None
+    for ks, date in enumerate(dates):
 
-    for ks in range(k_days + 1):
+        geo_data = spatialGeo.copy(deep=True)
+        geo_data.index = geo_data.hex_id
+        geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
+                                                on='hex_id')
+        geo_data['date'] = ks
+        geo_data['date_str'] = date.strftime('%Y-%ml-%d')
+        geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
+        geo_data['latitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.y))
+        interface.append(geo_data)
 
-        todays = gpd.read_file(dir_interface / 'hexagones_today.geojson')
-
-        if originalCols is None:
-            originalCols = list(todays.columns)
-
-        todays['longitude'] = todays['geometry'].apply(lambda x : float(x.centroid.x))
-        todays['latitude'] = todays['geometry'].apply(lambda x : float(x.centroid.y))
-        todays['date'] = ks
-        interface.append(todays)
-
-    tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
-    tomorrow['longitude'] = todays['longitude']
-    tomorrow['latitude'] = todays['latitude']
-    spatialGeo['longitude'] = todays['longitude']
-    spatialGeo['latitude'] = todays['latitude']
-    tomorrow['date'] = k_days + 1
-
-    interface.append(tomorrow)
     interface = pd.concat(interface).reset_index(drop=True)
 
-    # Patch
-    interface['nb'+sinister] = 1
+    if sinister == 'firepoint':
+        interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
+
+    interface.rename({'temp12' : 'temp', 'dwpt12' : 'dwpt',
+                      'rhum12' : 'rhum', 'prcp12' : 'prcp', 'wdir12' : 'wdir',
+                      'wspd12' : 'wspd', 'prec24h12' : 'prec24h',}, inplace=True, axis=1)
 
     ######################### Preprocess #################################
     n_pixel_x = 0.02875215641173088
@@ -366,35 +383,38 @@ if __name__ == "__main__":
 
     mask = read_object(dept+'rasterScale'+scale+'.pkl', dir_data / 'raster' / '2x2')
     check_and_create_path(Path('log'))
-
     inputDep = create_spatio_temporal_sinister_image(interface,
                                                     mask,
                                                     sinister,
-                                                    n_pixel_y, 
+                                                    n_pixel_y,
                                                     n_pixel_x,
                                                     Path('log'),
                                                     dept)
-    
     spa = 3
     if sinister == "firepoint":
-        dims = [(spa,spa,11),
-                (spa,spa,7),
-                (spa,spa,5),
-                (spa,spa,9)]
+        if dept == 'departement-01-ain':
+            dims = [(spa, spa, 11)]
+        elif dept == 'departement-25-doubs':
+            dims = [(spa,spa, 7)]
+        elif dept == 'departement-69-rhone':
+            dims = [(spa, spa, 5)]
+        elif dept == 'departement-78-yvelines':
+            dims = [(spa, spa, 9)]
     elif sinister == "inondation":
         dims = [(spa,spa,5)]
 
-    Probabilistic(dims, n_pixel_x, n_pixel_y, 1, None, dir_data)._process_input_raster([inputDep], 1, True, [dept], True)
+    Probabilistic(dims, n_pixel_x, n_pixel_y, 1, None, Path('./'))._process_input_raster([inputDep], 1, True, [dept], True)
 
     ######################### Construct X ################################
 
-    interface = fire_prediction(spatialGeo, interface, dept, features, features_selected, scaling, dir_data)
+    interface = fire_prediction(spatialGeo, interface, dept, features, features_selected, scaling, dir_data, dates)
 
-    if 'fire_prediction' not in originalCols:
-        originalCols.append('fire_prediction')
+    today = gpd.read_file(dir_interface / 'hexagones_today.geojson')
+    today['fire_prediction'] = interface[interface['date'] == k_days]['fire_prediction']
 
-    today = interface[interface['date'] == k_days][originalCols]
-    tomorrow = interface[interface['date'] == k_days + 1][originalCols]
+    if k_days + 1 in interface.date_ks.unique():
+        tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
+        tomorrow['fire_prediction'] = interface[interface['date'] == k_days + 1]['fire_prediction']
 
     #today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
     #tomorrow.to_file(dir_interface / 'hexagones_tomorrow.geojson',  driver='GeoJSON')

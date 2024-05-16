@@ -33,7 +33,7 @@ args = parser.parse_args()
 nameExp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
-doEncoder = args.encoder == 'True'
+doEncoder = args.encoder == "True"
 doPoint = args.point == "True"
 doGraph = args.graph == "True"
 doDatabase = args.database == "True"
@@ -56,14 +56,17 @@ dir_target = root_target / sinister / 'log'
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
 
-doBaseline = True
 name_dir = nameExp + '/' + sinister + '/' + 'train'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+if minPoint == 'full':
+    prefix = str(minPoint)+'_'+str(scale)
+else:
+    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+
 if dummy:
     prefix += '_dummy'
 
@@ -109,6 +112,10 @@ if doDatabase:
     if not dummy:
         name = 'points'+str(minPoint)+'.csv'
         ps = pd.read_csv(Path(nameExp) / sinister / name)
+        depts = [name2int[dept] for dept in trainDepartements]
+        logger.info(ps.departement.unique())
+        ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
+        logger.info(ps.departement.unique())
     else:
         name = sinister+'.csv'
         fp = pd.read_csv(Path(nameExp) / sinister / name)
@@ -166,108 +173,82 @@ else:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
 
+# Add varying time features
+if k_days > 0:
+    trainFeatures += varying_time_variables
+    features += varying_time_variables
+    pos_feature, newShape = create_pos_feature(graphScale, 6, features)
+    if doDatabase:
+        X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
+
+############################# Training ###########################
+
 # Select train features
 pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
 train_fet_num = [0,1,2,3,4,5]
 for fet in trainFeatures:
     if fet in features:
         coef = 4 if scale > 0 else 1
-        if fet == 'Calendar':
+        if fet == 'Calendar' or fet == 'Calendar_mean':
             maxi = len(calendar_variables)
-        elif fet == 'air':
+        elif fet == 'air' or fet == 'air_mean':
             maxi = len(air_variables)
         elif fet == 'sentinel':
             maxi = coef * len(sentinel_variables)
         elif fet == 'Geo':
             maxi = len(geo_variables)
+        elif fet in varying_time_variables:
+            maxi = 1
         else:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-prefix += '_'+spec
+logger.info(train_fet_num)
+prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+if spec != '':
+    prefix += '_'+spec
 pos_feature = pos_train_feature
 X = X[:, np.asarray(train_fet_num)]
 
-logger.info(X.shape)
-
-############################# Training ###########################
+logger.info(allDates.index('2023-01-01'))
+logger.info(np.max(X[:,4]))
+logger.info(np.unique(X[:,0]))
 
 # Preprocess
 Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 
+logger.info(pos_feature)
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, False)
+features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True)
 
-# Train
-criterion = weighted_rmse_loss
-epochs = 10000
-lr = 0.01
-PATIENCE_CNT = 200
-CHECKPOINT = 100
+######################## Baseline ##############################
 
-gnnModels = [
-        #('GAT', False, False),
-        #('ST-GATTCN', False, False),
-        #('ST-GATCONV', False, False),
-        #('ST-GCNCONV', False, False),
-        #('ATGN', False, False),
-        #('ST-GATLTSM', False, False),
-        #('Zhang', False, True)
-        #('ConvLSTM', False, True)
-        ]
+name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 
-trainLoader = None
-valLoader = None
-last_bool = None
+trainDataset = (Xset[Xset[:,4] < allDates.index(trainDate)], Yset[Xset[:,4] < allDates.index(trainDate)])
+valDataset = (Xset[Xset[:,4] >= allDates.index(trainDate)], Yset[Xset[:,4] >= allDates.index(trainDate)])
 
-for model, use_temporal_as_edges, is_2D_model in gnnModels:
-    logger.info(f'Fitting model {model}')
-    try:
-        logger.info('Try loading loader')
+train_sklearn_api_model(trainDataset, valDataset,
+dir_output / name,
+device='cpu',
+binary=False,
+scaling=scaling,
+features=features_selected,
+weight=True)
 
-        if not is_2D_model:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        else:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-    except:
-        logger.info(f'Reading failed, computing, loading loader_{str(use_temporal_as_edges)}.pkl')
+train_sklearn_api_model(trainDataset, valDataset,
+dir_output / name,
+device='cpu',
+binary=True,
+scaling=scaling,
+features=features_selected,
+weight=True)
 
-        last_bool = use_temporal_as_edges
-        if not is_2D_model:
-            trainLoader, valLoader = train_val_data_loader(graph=graphScale, Xset=Xset, Yset=Yset,
-                                                            maxDate=trainDate,
-                                                            batch_size=64, device=device,
-                                                            use_temporal_as_edges = use_temporal_as_edges,
-                                                            ks=k_days)
-        
-            save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-            save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        else:
-            trainLoader, valLoader = train_val_data_loader_2D(graph=graphScale,
-                                                              Xset=Xset, Yset=Yset,
-                                                              maxDate=trainDate,
-                                                              use_temporal_as_edges=use_temporal_as_edges,
-                                                              batch_size=64,
-                                                              device=device,
-                                                              scaling=scaling,
-                                                              pos_feature=pos_feature,
-                                                              pos_feature_2D=pos_feature_2D,
-                                                              ks=k_days,
-                                                              shape=(shape2D[0], shape2D[1], newShape2D),
-                                                              path=dir_output / '2D' / prefix / 'data')
-
-            save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-            save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-
-    logger.info(dico_model[model])
-    train(trainLoader=trainLoader, valLoader=valLoader,
-        PATIENCE_CNT=PATIENCE_CNT,
-        CHECKPOINT=CHECKPOINT,
-        epochs=epochs,
-        features=features_selected,
-        lr=lr,
-        criterion=criterion,
-        model=dico_model[model],
-        dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model))
+train_sklearn_api_model(trainDataset, valDataset,
+dir_output / name,
+device='cpu',
+binary=True,
+scaling=scaling,
+features=features_selected,
+weight=False)

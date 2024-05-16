@@ -103,7 +103,7 @@ if __name__ == "__main__":
                         #'departement-78-yvelines'
                         ]
 
-    regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/Prediction/GNN/regions.geojson')
+    regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions['scale0'] = regions.index
     regions.index = regions['hex_id']
     dico = regions['scale0'].to_dict()

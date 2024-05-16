@@ -98,16 +98,18 @@ metrics = {}
 
 ############################# Pipelines ##############################
 
-def test(testname, testDate, pss, geo, testDepartement, dir_output):
+def test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
+    
+    if minPoint == 'full':
+        prefix_train = str(minPoint)+'_'+str(scaleTrain)
+    else:
+        prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
 
-    prefix = str(k_days)+'_'+str(scale)
+    prefix = str(scale)
 
-    global doDatabase
-    global features
-    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
     if dummy:
         prefix_train += '_dummy'
 
@@ -177,19 +179,30 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
     else:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-
     try:
         Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
         Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
     except Exception as e:
         logger.info(f'Fuck it : {e}')
         return
-    
+
+    # Add varying time features
+    if k_days > 0:
+        trainFeatures_ = trainFeatures + varying_time_variables
+        features_ = features + varying_time_variables
+        pos_feature, newShape = create_pos_feature(graphScale, 6, features_)
+        if doDatabase:
+            X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+            save_object(X, 'X_'+prefix+'.pkl', dir_output)
+    else:
+        trainFeatures_ =  trainFeatures
+        features_ =  features
+
     # Select train features
-    pos_train_feature, _ = create_pos_feature(graphScale, 6, trainFeatures)
+    pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures:
-        if fet in features:
+    for fet in trainFeatures_:
+        if fet in features_:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -205,18 +218,22 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                 maxi = coef
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-    prefix += '_'+spec
+    logger.info(train_fet_num)
     pos_feature = pos_train_feature
     X = X[:, np.asarray(train_fet_num)]
-    
-    prefix_train += '_'+spec
-    prefix += '_'+spec
+
+    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+    if spec != '':
+        prefix_train += '_'+spec
+        prefix += '_'+spec
 
     # Preprocess
     Xset, Yset = preprocess_test(X=X, Y=Y, Xtrain=Xtrain, scaling=scaling)
 
     # Features selection
-    features_importance = read_object('features_importance_'+spec+'.pkl', train_dir)
+    features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
+
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)
 
@@ -236,55 +253,47 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                                         device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
                                         scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
         
-        """_= load_loader_test_2D(use_temporal_as_edges=False, graphScale=graphScale,
-                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
-                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
-                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
-                                        shape=(shape2D[0], shape2D[1], newShape2D), pos_feature_2D=pos_feature_2D, encoding=encoding,
-                                        Rewrite=Rewrite)"""
-        
     ITensor = YTensor[:,-3]
     Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
     YTensor = YTensor[ITensor.gt(0)]
     
     metrics['GT'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, 'gt', train_dir)
-
     i = 1
 
-    #################################### GNN ###################################################
-    for mddel, use_temporal_as_edges, isBin, is_2D_model  in models:
+    #################################### Traditionnal ##################################################
 
+    for name, isBin in tradiModels:
         logger.info('#########################')
-        logger.info(f'       {mddel}          ')
+        logger.info(f'      {name}            ')
         logger.info('#########################')
+        XTensor, YTensor, _ = load_tensor_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
+                                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                        test=testname, pos_feature=pos_feature,
+                                                        scaling=scaling, prefix=prefix, encoding=encoding)
+        XTensor = XTensor.detach().cpu().numpy()
+        XTensor = XTensor[:, features_selected, -1]
 
-        if not is_2D_model:
-            test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
-                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=False)
+        YTensor = YTensor[:,:, -1]
+        ITensor = YTensor[:,-3]
 
+        model = read_object(name+'.pkl', train_dir / Path('check_'+scaling+'/' + prefix_train + '/baseline/' + name + '/'))
+        graphScale._set_model(model)
+        Ypred = graphScale.predict_model_api_sklearn(XTensor, isBin)
+
+        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+        YTensor = YTensor[ITensor.gt(0)]
+        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+
+        if not dummy:
+            metrics[name] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
         else:
-            test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale,
-                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
-                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
-                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
-                                        shape=(shape2D[0], shape2D[1], newShape2D), pos_feature_2D=pos_feature_2D, encoding=encoding,
-                                        Rewrite=False)
-
-        graphScale._load_model_from_path(Path('check_'+scaling+'_2'+'/' + prefix_train + '/' + mddel +  '/' + 'best.pt'),
-                                        dico_model[mddel], device)
-
-        Ypred, YTensor = graphScale._predict_test_loader(test_loader, features_selected)
-
-        metrics[mddel] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, mddel, train_dir)
+            metrics[name +'_dummy'] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
 
         pred = Ypred.detach().cpu().numpy()
         y = YTensor.detach().cpu().numpy()
 
         realVspredict(pred, y,
-                      dir_output,
-                      mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
+                      dir_output, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
         
         res = np.empty((pred.shape[0], y.shape[1] + 3))
         res[:, :y.shape[1]] = y
@@ -292,24 +301,103 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
         res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
         res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-        save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-
-        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
-        realVspredict2d(pred,
-                    y,
-                    isBin,
-                    mddel,
-                    scale,
-                    dir_output / n,
-                    train_dir,
-                    geo,
-                    testDepartement,
-                    graphScale)"""
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
         
+        """n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
+        realVspredict2d(pred,
+            y,
+            isBin,
+            name,
+            scale,
+            dir_output / n,
+            train_dir,
+            geo,
+            testDepartement,
+            graphScale)"""
+
         i += 1
 
+    ######################################## Simple model ##################################
+    if not dummy:
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+        ITensor = YTensor[:,-3]
+        if testname != 'dummy':
+            """y2 = YTensor.detach().cpu().numpy()
+
+            logger.info('#########################')
+            logger.info(f'      perf_Y            ')
+            logger.info('#########################')
+            name = 'perf_Y'
+            Ypred = graphScale._predict_perference_with_Y(y2, False)
+            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+            YTensor = YTensor[ITensor.gt(0)]
+            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name)
+
+            pred = Ypred.detach().cpu().numpy()
+            y = YTensor.detach().cpu().numpy()
+
+            res = np.empty((pred.shape[0], y.shape[1] + 3))
+            res[:, :y.shape[1]] = y
+            res[:,y.shape[1]] = pred
+            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+
+            logger.info('#########################')
+            logger.info(f'      perf_Y_bin         ')
+            logger.info('#########################')
+            name = 'perf_Y_bin'
+            Ypred = graphScale._predict_perference_with_Y(y2, True)
+            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, True, scale, name, path(nameExp))
+
+            pred = Ypred.detach().cpu().numpy()
+            y = YTensor.detach().cpu().numpy()
+
+            res = np.empty((pred.shape[0], y.shape[1] + 3))
+            res[:, :y.shape[1]] = y
+            res[:,y.shape[1]] = pred
+            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
+
+        """logger.info('#########################')
+        logger.info(f'      perf_X         ')
+        logger.info('#########################')
+        name = 'perf_X'
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+                                                            
+        x = XTensor.detach().cpu().numpy()
+        
+        Ypred = graphScale._predict_perference_with_X(x, pos_feature)
+        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+        YTensor = YTensor[ITensor.gt(0)]
+        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+        metrics['perf_X'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name, path(nameExp))
+
+        pred = Ypred.detach().cpu().numpy()
+        y = YTensor.detach().cpu().numpy()
+
+        res = np.empty((pred.shape[0], y.shape[1] + 3))
+        res[:, :y.shape[1]] = y
+        res[:,y.shape[1]] = pred
+        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
+
     ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
     save_object(metrics, outname, dir_output)
 
 def dummy_test(dates):
@@ -324,31 +412,30 @@ def dummy_test(dates):
     res['departement'] = res['departement'].apply(lambda x : int2strMaj[x])
     return res
 
-
 # 69 test
 testDates = find_dates_between('2018-01-01', '2023-01-01')
 testDepartement = ['departement-69-rhone']
 
-test('69', testDates, geo, geo, testDepartement, dir_output)
+test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 testDates = find_dates_between('2023-01-01', '2023-09-11')
 testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
 
 # Dummy
 dummyGeo = dummy_test(testDates)
-#test('dummy', None, dummyGeo, geo, testDepartement, dir_output)
+#test('dummy', None, dummyGeo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test
-test('2023', testDates, geo, geo, testDepartement, dir_output)
+test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']
-#test('Ain', testDates, geo, geo, testDepartement, dir_output)
+#test('Ain', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Doubs
 testDepartement = ['departement-25-doubs']
-#test('Doubs', testDates, geo, geo, testDepartement, dir_output)
+#test('Doubs', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Yvelines
 testDepartement = ['departement-78-yvelines']
-#test('Yvelines', testDates, geo, geo, testDepartement, dir_output)
+#test('Yvelines', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)

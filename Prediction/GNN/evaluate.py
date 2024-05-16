@@ -35,19 +35,22 @@ def evaluate_met(metrics, met):
     return df.sort_values(met)
 
 def plot(df, met, dir_output, out_name):
+    
     # Les données du DataFrame
     index = df['index'].values
+    label = df['label'].values
     model = df.model.values
-    mets = np.round(df[met].values, 2)
+    mets = df[met].values
 
     # Création du graphique
-    fig = plt.figure(figsize=(10, 5))
-    scatter = plt.scatter(mets, model, c=index, cmap='jet', alpha=0.8)
+    fig = plt.figure(figsize=(15, 5))
+    scatter = plt.scatter(mets, model, c=index, label=label, cmap='jet', alpha=0.8)
     plt.xlabel('MAE')
     plt.ylabel('Model')
     plt.xlim(-0.1,1.1)
     plt.grid(True)
     fig.colorbar(scatter, label='Index')
+    plt.legend()
 
     out_name += '.png'
     plt.savefig(dir_output / out_name)
@@ -57,7 +60,7 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     f1s, maes, bcas, rmses, = [], [], [], []
 
     for elt in experiments:
-        (expe, index, prefix) = elt
+        (expe, index, label, prefix) = elt
         dir_test = Path(expe + '/' + sinister +  '/test/' + test_name + '/')
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
@@ -67,26 +70,33 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1['f1'] = f1['f1'].astype(float)
         f1['expe'] = expe
         f1['index'] = index
+        f1['label'] = label
         f1s.append(f1)
 
         # MAE score
         mae = evaluate_ca(metrics, 'meac')
+        mae = mae.groupby('model')['meac'].mean().reset_index()
         mae['meac'] = mae['meac'].astype(float)
         mae['expe'] = expe
         mae['index'] = index
+        mae['label'] = label
         maes.append(mae)
 
         # Bcas score
         bca = evaluate_ca(metrics, 'bca')
+        bca = bca.groupby('model')['bca'].mean().reset_index()
         bca['bca'] = bca['bca'].astype(float)
         bca['expe'] = expe
+        bca['label'] = label
         bca['index'] = index
         bcas.append(bca)
 
         # RMSE score
         rmse = evaluate_met(metrics, 'rmse')
+        rmse = rmse.groupby('model')['rmse'].mean().reset_index()
         rmse['rmse'] = rmse['rmse'].astype(float)
         rmse['expe'] = expe
+        rmse['label'] = label
         rmse['index'] = index
         rmses.append(rmse)
 
@@ -117,9 +127,22 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    experiments = [('exp_features', 0, 'full_0_10_noTopo_10_z-score_Catboost_2023'),
-                   ('exp_features', 1, 'full_0_10_noMeteo_10_z-score_Catboost_2023'),
-                   ('exp_features', 2, 'full_0_10_noHistorical_10_z-score_Catboost_2023'),
+    # features
+    experiments_features = [('exp_features', 0, 'noTopo', 'full_0_10_noTopo_10_z-score_Catboost_2023'),
+                   ('exp_features', 1, 'noMeteo', 'full_0_10_noMeteo_10_z-score_Catboost_2023'),
+                   ('exp_features', 2, 'noHistorical', 'full_0_10_noHistorical_10_z-score_Catboost_2023'),
+                   #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
+                   ]
+    
+    # Ks
+    experiments_ks = [('exp_ks', 0, '0', 'full_0_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 1, '1', 'full_1_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 2, '2', 'full_2_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 3, '3', 'full_3_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 4, '4', 'full_4_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 5, '5', 'full_5_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 6, '6', 'full_6_10_10_z-score_Catboost_2023_tree'),
+                   ('exp_ks', 7, '7', 'full_7_10_10_z-score_Catboost_2023_tree'),
                    #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
                    ]
     
@@ -128,4 +151,4 @@ if __name__ == "__main__":
     dir_output = Path(args.output)
     
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_ks, test_name=test_name, dir_output=dir_output, sinister=sinister)

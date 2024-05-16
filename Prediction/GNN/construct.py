@@ -110,9 +110,7 @@ def construct_database(graphScale : GraphStructure,
     name = prefix+'.csv'
     ps.to_csv(dir_output / name, index=False)
     print(np.unique(ps['scale'+str(scale)].values))
-
     ps.drop_duplicates(subset=('scale'+str(scale), 'date'), inplace=True)
-
     print(f'{len(ps)} point in the dataset. Constructing database')
 
     orinode = np.full((len(ps), 5), -1.0, dtype=float)

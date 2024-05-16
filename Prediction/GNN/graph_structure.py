@@ -23,7 +23,7 @@ class GraphStructure():
 
         for col in ['latitude', 'longitude', 'geometry', 'departement']:
             if col not in geo.columns:
-                print(f'{col} not in geo columns. Please send a correct geo dataframe')
+                logger.info(f'{col} not in geo columns. Please send a correct geo dataframe')
                 exit(2)
 
         self.nodes = None # All nodes in graph (N, 6) [id, long, lat, dep]
@@ -43,7 +43,7 @@ class GraphStructure():
 
     def _train_kmeans(self, doRaster: bool, path : Path, sinister : str) -> None:
         self.train_kmeans = True
-        print('Create node via KMEANS')
+        logger.info('Create node via KMEANS')
         X = list(zip(self.oriLongitude, self.oriLatitues))
         if self.scale != 0:
             self.numCluster = self.oriLen // (self.scale * 6)
@@ -140,7 +140,7 @@ class GraphStructure():
         """
         Create nodes list in the form (N, 4) where N is the number of Nodes [ID, longitude, latitude, departement of centroid]
         """
-        print('Creating node list')
+        logger.info('Creating node list')
         self.nodes = np.full((self.numCluster, 5), np.nan) # [id, longitude, latitude]
         self.uniqueIDS = np.unique(self.ids)
         for id in self.uniqueIDS:
@@ -158,7 +158,7 @@ class GraphStructure():
         """
         Create edges list
         """
-        print('Creating edges list')
+        logger.info('Creating edges list')
         self.edges = None # (2, E) where E is the number of edges in the graph
         src_nodes = []
         target_nodes = []
@@ -205,7 +205,7 @@ class GraphStructure():
         return res
     
     def _assign_department(self, nodes : np.array) -> np.array:
-        print('Get node department')
+        logger.info('Get node department')
         uniqueDept = np.unique(self.departements)
         dico = {}
         for key in uniqueDept:
@@ -225,7 +225,7 @@ class GraphStructure():
         return nodes
     
     def _assign_latitude_longitude(self, nodes : np.array) -> np.array:
-        print('Assign latitude longitude')
+        logger.info('Assign latitude longitude')
 
         uniqueNode = np.unique(nodes[:,0])
         for uN in uniqueNode:
@@ -255,7 +255,6 @@ class GraphStructure():
                                         [nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == target][0][1]],
                                         [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == target][0][2]],
                                     color='black')
-                            pass
                         else:
                             ax.plot([nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == target][0][1]],
                                     [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == target][0][2]], color='black')
@@ -274,7 +273,6 @@ class GraphStructure():
                                          [nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == id][0][1]],
                                          [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == id][0][2]],
                                         color='red')
-                                pass
                     nb += 1
                     if nb == time:
                         break
@@ -402,7 +400,7 @@ class GraphStructure():
 
     def _info_on_graph(self, nodes : np.array, output : Path) -> None:
         """
-        Print informatio on current global graph structure and nodes
+        logger.info informatio on current global graph structure and nodes
         """
         check_and_create_path(output)
         graphIds = np.unique(nodes[:,4])
@@ -411,25 +409,25 @@ class GraphStructure():
         for graphid in graphIds:
             size.append(nodes[nodes[:,4] == graphid].shape[0])
 
-        print(f'size : {np.unique(size)}')
+        logger.info(f'size : {np.unique(size)}')
 
-        print('**************************************************')
+        logger.info('**************************************************')
         if self.nodes is None:
-            print('No nodes found in graph')
+            logger.info('No nodes found in graph')
         else:
-            print(f'The main graph has {self.nodes.shape[0]} nodes')
+            logger.info(f'The main graph has {self.nodes.shape[0]} nodes')
         if self.edges is None:
-            print('No edges found in graph')
+            logger.info('No edges found in graph')
         else:
-            print(f'The main graph has {self.edges.shape[1]} spatial edges')
+            logger.info(f'The main graph has {self.edges.shape[1]} spatial edges')
         if self.temporalEdges is None:
-            print('No temporal edges found in graph')
+            logger.info('No temporal edges found in graph')
         else:
-            print(f'The main graph has {self.temporalEdges.shape[1]} temporal edges')
+            logger.info(f'The main graph has {self.temporalEdges.shape[1]} temporal edges')
         if nodes is not None:
-            print(f'We found {np.unique(nodes[:,4]).shape[0]} different graphs in the training set for {nodes.shape[0]} nodes')
+            logger.info(f'We found {np.unique(nodes[:,4]).shape[0]} different graphs in the training set for {nodes.shape[0]} nodes')
 
-        print(f'Mean number of nodes in sub graph : {np.mean(size)}')
-        print(f'Max number of nodes in subgraph {np.max(size)}')
-        print(f'Minimum number of nodes in subgraph {np.min(size)}')
-        print(f'Quantile at 0.05 {np.quantile(size, 0.005)}, at 0.5 {np.quantile(size, 0.5)} and at 0.95 {np.quantile(size, 0.95)}')
+        logger.info(f'Mean number of nodes in sub graph : {np.mean(size)}')
+        logger.info(f'Max number of nodes in subgraph {np.max(size)}')
+        logger.info(f'Minimum number of nodes in subgraph {np.min(size)}')
+        logger.info(f'Quantile at 0.05 {np.quantile(size, 0.005)}, at 0.5 {np.quantile(size, 0.5)} and at 0.95 {np.quantile(size, 0.95)}')

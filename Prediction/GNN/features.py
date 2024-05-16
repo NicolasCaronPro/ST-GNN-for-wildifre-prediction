@@ -12,7 +12,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
 
         assert graph.nodes is not None
         
-        print('Ground truth')
+        logger.info('Ground truth')
 
         newShape = subNode.shape[1] + 2
         Y = np.full((subNode.shape[0], newShape), -1, dtype=float)
@@ -78,7 +78,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     
     assert graph.nodes is not None
 
-    print('Load nodes features')
+    logger.info('Load nodes features')
 
     pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
 
@@ -134,7 +134,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     dir_mask = path / 'raster' / '2x2'
 
     for departement in departements:
-        print(departement)
+        logger.info(departement)
 
         dir_data = root / 'csv' / departement / 'raster'
         
@@ -142,11 +142,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         mask = pickle.load(open(dir_mask / name, 'rb'))
         nodeDepartementMask = np.argwhere(subNode[:,3] == str2int[departement.split('-')[-1]])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
-        print(nodeDepartement.shape)
+        logger.info(nodeDepartement.shape)
         if nodeDepartement.shape[0] == 0:
             continue
 
-        print('Calendar')
+        logger.info('Calendar')
         if 'Calendar' in features:
             unDate = np.unique(nodeDepartement[:,4]).astype(int)
             for unDate in unDate:
@@ -167,24 +167,24 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 X[index, pos_feature['Calendar'] + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 ) \
                     or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
 
-                #print(X[index, pos_feature['Calendar']])
+                #logger.info(X[index, pos_feature['Calendar']])
                 X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar] = \
                         encoder_calendar.transform(np.moveaxis(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar], 1, 2).reshape(-1, size_calendar)).values.reshape(-1, 1, size_calendar)
-                #print(X[index, pos_feature['Calendar']])
-                #print('#######################################')
+                #logger.info(X[index, pos_feature['Calendar']])
+                #logger.info('#######################################')
 
         ### Geo spatial
-        print('Geo')
+        logger.info('Geo')
         if 'Geo' in features:
             X[nodeDepartementMask, pos_feature['Geo']] = encoder_geo.transform([name2int[departement]]).values[0] # departement
 
-        print('Meteorological')
+        logger.info('Meteorological')
         array = None
         ### Meteo
         for i, var in enumerate(cems_variables):
             if var not in features:
                 continue
-            print(var)
+            logger.info(var)
             name = var +'raw.pkl'
             array = read_object(name, dir_data)
             for node in nodeDepartement:
@@ -196,10 +196,10 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         del array
 
-        print('Air Quality')
+        logger.info('Air Quality')
         if 'air' in features:
             for i, var in enumerate(air_variables):
-                print(var)
+                logger.info(var)
                 name = var +'raw.pkl'
                 array = read_object(name, dir_data)
                 for node in nodeDepartement:
@@ -209,7 +209,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     save_value(array[:,:,int(node[4])], pos_feature['air'] + i, index, maskNode)
 
-        print('Population elevation Highway Sentinel')
+        logger.info('Population elevation Highway Sentinel')
 
         arrayPop = None
         arrayEl = None
@@ -234,7 +234,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayOS = read_object(name, dir_data)
 
         if 'foret' in features:
-            print('Foret')
+            logger.info('Foret')
             name = 'foret.pkl'
             arrayForet = read_object(name, dir_data)
             arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
@@ -255,13 +255,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         ### Sentinel
         if 'sentinel' in features:
-            print('Sentinel')
+            logger.info('Sentinel')
             name = 'sentinel.pkl'
             arraySent = read_object(name, dir_data)
 
         ### Landcover
         if 'landcover' in features:
-            print('landcover')
+            logger.info('landcover')
             name = 'landcover.pkl'
             arrayLand = read_object(name, dir_data)
             arrayLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
@@ -284,7 +284,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         del arraySent
         del arrayLand
 
-        print('Historical')
+        logger.info('Historical')
         if 'Historical' in features:
             dir_target = root_target / sinister / 'log'
             name = departement+'pastInfluence.pkl'
@@ -300,6 +300,41 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             del arrayInfluence
 
     return X, pos_feature
+
+def add_varying_time_features(X : np.array, features : list, newShape : int, pos_feature : dict, ks : int):
+    res = np.empty((X.shape[0], newShape))
+    res[:, :X.shape[1]] = X
+    for feat in features:
+        logger.info(feat)
+        vec = feat.split('_')
+        name = vec[0]
+        methods = vec[1:]
+        index_feat = pos_feature[feat]
+        index_feat_X = pos_feature[name]
+        for met in methods:
+            if met == "mean":
+                for node in X:
+                    index_node = np.argwhere((X[:,0] == node[0]) & (X[:,4] == node[4]))
+                    index_nodes_ks = np.argwhere((X[:,0] == node[0]) & (X[:,4] < node[4]) & (X[:,4] >= node[4] - ks))
+                    if name == 'Calendar':
+                        for i, _ in enumerate(calendar_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    elif name == 'Historical':
+                        for i, _ in enumerate(historical_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    elif name == "air":
+                        for i, _ in enumerate(air_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    else:
+                        res[index_node, index_feat] = np.mean(X[index_nodes_ks, index_feat_X])
+            elif met == "sum":
+                    index_node = np.argwhere((X[:,0] == node[0]) & (X[:,4] == node[4]))
+                    index_nodes_ks = np.argwhere((X[:,0] == node[0]) & (X[:,4] < node[4]) & (X[:,4] >= node[4] - ks))
+                    res[index_node, index_feat] = np.sum(X[index_nodes_ks, index_feat_X])
+            else:
+                logger.info(f'{met} unknow method')
+                exit(1)
+    return res
 
 def get_edges_feature(graph, subNode: np.array,
                            newAxis : list) -> np.array:
