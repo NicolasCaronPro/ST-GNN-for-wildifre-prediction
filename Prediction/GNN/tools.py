@@ -1614,7 +1614,6 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):
 
         if tree:
                 save_object(features_importance, 'features_importance_tree_'+spec+'.pkl', dir_output)
-
         else:
                 save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
     else:

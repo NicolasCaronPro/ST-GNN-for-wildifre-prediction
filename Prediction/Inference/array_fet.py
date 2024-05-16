@@ -14,3 +14,10 @@ calendar_variables = ['month', 'dayofweek', 'dayofyear', 'isweekend', 'couvrefeu
 geo_variables = ['departement']
 historical_variables = ['influence']
 air_variables = ['O3', 'NO2', 'PM10', 'PM25']
+varying_time_variables = ['temp_mean', 'dwpt_mean', 'rhum_mean', 'wdir_mean', 'wspd_mean', 'prec24h_mean',
+                            'dc_mean', 'ffmc_mean', 'dmc_mean', 'nesterov_mean', 'munger_mean', 'kbdi_mean',
+                            'isi_mean', 'angstroem_mean', 'bui_mean', 'fwi_mean', 'dailySeverityRating_mean',
+                            'temp16_mean', 'dwpt16_mean', 'rhum16_mean', 'wdir16_mean', 'wspd16_mean', 'prec24h16_mean',
+                            'Calendar_mean',
+                            'Historical_mean',
+                            'air_mean']

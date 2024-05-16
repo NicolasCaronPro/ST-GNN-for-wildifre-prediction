@@ -63,7 +63,11 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+if minPoint == 'full':
+    prefix = str(minPoint)+'_'+str(scale)
+else:
+    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+
 if dummy:
     prefix += '_dummy'
 
@@ -184,7 +188,9 @@ for fet in trainFeatures:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-prefix += '_'+spec
+prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+if spec != '':
+    prefix += '_'+spec
 pos_feature = pos_train_feature
 X = X[:, np.asarray(train_fet_num)]
 
@@ -196,7 +202,7 @@ logger.info(X.shape)
 Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, False)
+features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, False)
 
 # Train
 criterion = weighted_rmse_loss

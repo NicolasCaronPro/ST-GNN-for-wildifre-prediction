@@ -1418,7 +1418,7 @@ def create_pos_feature(graph, shape, features):
     newShape = shape
     if graph.scale > 0:
         for var in features:
-            print(newShape, var)
+            #logger.info(f'{newShape}, {var}')
             pos_feature[var] = newShape
             if var == 'Calendar':
                 newShape += len(calendar_variables)
@@ -1432,11 +1432,18 @@ def create_pos_feature(graph, shape, features):
             #    newShape += len(foret_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
+            elif var in varying_time_variables:
+                if var == 'Calendar_mean':
+                    newShape += len(calendar_variables)
+                elif var == 'air_mean':
+                    newShape += len(air_variables)
+                else:
+                    newShape += 1
             else:
                 newShape += 4
     else:
         for var in features:
-            print(newShape, var)
+            #logger.info(f'{newShape}, {var}')
             pos_feature[var] = newShape
             if var == 'Calendar':
                 newShape += len(calendar_variables)
@@ -1448,6 +1455,13 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(sentinel_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
+            elif var in varying_time_variables:
+                if var == 'Calendar_mean':
+                    newShape += len(calendar_variables)
+                elif var == 'air_mean':
+                    newShape += len(air_variables)
+                else:
+                    newShape += 1
             else:
                 newShape += 1
     

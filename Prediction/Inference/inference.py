@@ -3,7 +3,20 @@ import datetime as dt
 import json
 from probabilistic import *
 import argparse
+import logging
 from array_fet import *
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
+logFormatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
+
+# Handler pour afficher les logs dans le terminal
+if (logger.hasHandlers()):
+    logger.handlers.clear()
+streamHandler = logging.StreamHandler(stream=sys.stdout)
+streamHandler.setFormatter(logFormatter)
+logger.addHandler(streamHandler)
 
 ####################### Function #################################
 
@@ -13,7 +26,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         geo : gpd.GeoDataFrame,
                         dates : np.array) -> np.array:
     
-    print('Load nodes features')
+    logger.info('Load nodes features')
 
     pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
 
@@ -65,11 +78,12 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     if 'Geo' in features:
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
-    print('Calendar')
+    logger.info('Calendar')
     if 'Calendar' in features:
         for node in subNode:
             index = np.argwhere(subNode[:,4] == node[4])
             ddate = dates[int(node[4])]
+            ddate = dt.datetime(ddate.year, ddate.month, ddate.day)
             X[index, pos_feature['Calendar']] = ddate.month # month
             X[index, pos_feature['Calendar'] + 1] = ddate.timetuple().tm_yday # dayofweek
             X[index, pos_feature['Calendar'] + 2] = ddate.weekday() # dayofyear
@@ -88,11 +102,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         pos_feature['Calendar'] + size_calendar]).reshape(-1, size_calendar)).values.reshape(-1, size_calendar)
 
     ### Geo spatial
-    print('Geo')
+    logger.info('Geo')
     if 'Geo' in features:
         X[:, pos_feature['Geo']] = encoder_geo.transform(geo['departement'].values).values[0] # departement
   
-    print('Meteorological')
+    logger.info('Meteorological')
     ### Meteo
     for i, var in enumerate(cems_variables):
         for node in subNode:
@@ -105,7 +119,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
             save_values(geo[var].values, pos_feature[var], index, maskNode)
 
-    print('Air Quality')
+    logger.info('Air Quality')
     for i, var in enumerate(air_variables):
         for node in subNode:
             maskNode = geo[geo['id'] == node[0]].index
@@ -116,19 +130,19 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                                 )
             save_value(geo[var].values, pos_feature['air'] + i, index, maskNode)
 
-    print('Population elevation Highway Sentinel')
+    logger.info('Population elevation Highway Sentinel')
     for node in subNode:
         maskNode = geo[geo['id'] == node[0]].index
         index = np.argwhere(subNode[:,0] == node[0])
         if 'population' in features:
-            save_values(geo['population'].values, pos_feature['population'], index, maskNode)
+            save_values(geo['population'].astype(float).values, pos_feature['population'], index, maskNode)
         if 'elevation' in features:
-            save_values(geo['elevation'].values, pos_feature['elevation'], index, maskNode)
+            save_values(geo['elevation'].astype(float).values, pos_feature['elevation'], index, maskNode)
         if 'highway' in features:
-            save_values(geo['highway'].values, pos_feature['highway'], index, maskNode)
+            save_values(geo['highway'].astype(float).values, pos_feature['highway'], index, maskNode)
         if 'foret' in features:
             #save_value_with_encoding(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
-            save_values(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
+            save_values(geo['foret'].astype(float).values, pos_feature['foret'], index, maskNode)
 
     coef = 4 if graph.scale > -1 else 1
     for node in subNode:
@@ -139,13 +153,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         if 'sentinel' in features:
             for band, var in enumerate(sentinel_variables):
-                save_values(geo[var].values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
+                save_values(geo[var].astype(float).values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
 
         if 'landcover' in features: 
             #save_value_with_encoding(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
-            save_values(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
+            save_values(geo['landcover'].astype(float).values, pos_feature['landcover'], index, maskNode)
 
-    print('Historical')
+    logger.info('Historical')
     if 'Historical' in features:
         name = dept+'pastInfluence.pkl'
         arrayInfluence = pickle.load(open(Path('.') / 'log' / name, 'rb'))
@@ -163,12 +177,12 @@ def create_ps(geo):
     X_kmeans = list(zip(geo.longitude, geo.latitude))
     geo['id'] = graph._predict_node(X_kmeans)
 
-    print(f'Unique id : {np.unique(geo["id"].values)}')
-    print(f'{len(geo)} point in the dataset. Constructing database')
+    logger.info(f'Unique id : {np.unique(geo["id"].values)}')
+    logger.info(f'{len(geo)} point in the dataset. Constructing database')
 
     return geo
 
-def fire_prediction(spatialGeo, interface, departement, features, features_selected, scaling, dir_data, dates):
+def fire_prediction(spatialGeo, interface, departement, features, trainFeatures, features_selected, scaling, dir_data, dates):
 
     geoDT = create_ps(interface)
 
@@ -196,8 +210,6 @@ def fire_prediction(spatialGeo, interface, departement, features, features_selec
         if cv not in geoDT.columns:
             geoDT[cv] = 0
             
-    geoDT[foret_variables] = 0
-    geoDT[historical_variables] = 0
     geoDT[air_variables] = 0
 
     geoDT['weights'] = 0
@@ -225,7 +237,7 @@ def fire_prediction(spatialGeo, interface, departement, features, features_selec
                               path=dir_data,
                               dates=dates)
     
-    print(np.unique(np.argwhere(np.isnan(X))[:,1]))
+    logger.info(np.unique(np.argwhere(np.isnan(X))[:,1]))
 
     # Today
     today_X, E = create_inference(graph,
@@ -256,6 +268,13 @@ def fire_prediction(spatialGeo, interface, departement, features, features_selec
                      scaling)
     
     if model in traditionnal_models:
+        # Add varying time features
+        if k_days > 0:
+            trainFeatures += varying_time_variables
+            features += varying_time_variables
+            pos_feature, newShape = create_pos_feature(graph, 6, features)
+            X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
         tomorrow_X = tomorrow_X.detach().cpu().numpy()
         tomorrow_X_fet = tomorrow_X[:, features_selected, :]
         tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
@@ -318,6 +337,23 @@ if __name__ == "__main__":
             'air',
             ]
     
+    trainFeatures = [
+            'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+            'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'elevation',
+            'highway',
+            'population',
+            'sentinel',
+            'landcover',
+            'foret',
+            'Calendar',
+            'Historical',
+            'Geo',
+            'air',
+            ]
+    
     features_in_feather = ['hex_id', 'date',
                            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
                            'temp12', 'dwpt12', 'rhum12', 'prcp12', 'wdir12', 'wspd12', 'prec24h12',
@@ -345,13 +381,26 @@ if __name__ == "__main__":
     spatialGeo = gpd.read_file(dir_incendie / 'spatial' / name)
     incendie_feather = pd.read_feather(dir_interface / 'incendie_final.feather')
 
+    spa = 3
+    if sinister == "firepoint":
+        if dept == 'departement-01-ain':
+            dims = [(spa, spa, 11)]
+        elif dept == 'departement-25-doubs':
+            dims = [(spa,spa, 7)]
+        elif dept == 'departement-69-rhone':
+            dims = [(spa, spa, 5)]
+        elif dept == 'departement-78-yvelines':
+            dims = [(spa, spa, 9)]
+    elif sinister == "inondation":
+        dims = [(spa,spa,5)]
+
     # Date
     date = dt.datetime.now().date()
-    date_ks = (date - dt.timedelta(days=k_days))
+    date_ks = (date - dt.timedelta(days=max(dims[0][2], k_days)))
 
     incendie_feather = incendie_feather[(incendie_feather['date'] >= date_ks) & (incendie_feather['date'] <= date)]
     dates = np.sort(incendie_feather.date.unique())
-    print(dates)
+    logger.info(dates)
 
     ######################### Interface ##################################
     interface = []
@@ -390,18 +439,6 @@ if __name__ == "__main__":
                                                     n_pixel_x,
                                                     Path('log'),
                                                     dept)
-    spa = 3
-    if sinister == "firepoint":
-        if dept == 'departement-01-ain':
-            dims = [(spa, spa, 11)]
-        elif dept == 'departement-25-doubs':
-            dims = [(spa,spa, 7)]
-        elif dept == 'departement-69-rhone':
-            dims = [(spa, spa, 5)]
-        elif dept == 'departement-78-yvelines':
-            dims = [(spa, spa, 9)]
-    elif sinister == "inondation":
-        dims = [(spa,spa,5)]
 
     Probabilistic(dims, n_pixel_x, n_pixel_y, 1, None, Path('./'))._process_input_raster([inputDep], 1, True, [dept], True)
 
