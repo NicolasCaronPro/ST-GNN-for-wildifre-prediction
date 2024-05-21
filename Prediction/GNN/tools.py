@@ -38,7 +38,7 @@ from arborescence import *
 from array_fet import *
 from weigh_predictor import *
 from features_selection import *
-from config import logger
+from config import logger, foretint2str
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -1404,12 +1404,12 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(calendar_variables)
             elif var == 'air':
                 newShape += len(air_variables)
-            #elif var == 'landcover':
-            #    newShape += len(landcover_variables)
+            elif var == 'landcover':
+                newShape += 4 * len(landcover_variables)
             elif var == 'sentinel':
                 newShape += 4 * len(sentinel_variables)
-            #elif var == 'foret':
-            #    newShape += len(foret_variables)
+            elif var == "foret":
+                newShape += 4 * len(foret_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var in varying_time_variables:
@@ -1427,12 +1427,12 @@ def create_pos_feature(graph, shape, features):
             pos_feature[var] = newShape
             if var == 'Calendar':
                 newShape += len(calendar_variables)
-            #elif var == 'landcover':
-            #    newShape += len(landcover_variables)
-            #elif var == 'foret':
-            #    newShape += len(foret_variables)
+            elif var == 'landcover':
+                newShape += len(landcover_variables)
             elif var == 'sentinel':
                 newShape += len(sentinel_variables)
+            elif var == "foret":
+                newShape += len(foret_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var in varying_time_variables:
@@ -1462,7 +1462,9 @@ def create_pos_features_2D(shape, features):
         elif var == 'sentinel':
             newShape += len(sentinel_variables)
         elif var == 'landcover':
-            newShape += 1
+            newShape += len(landcover_variables)
+        elif var == 'foret':
+            newShape += len(foret_variables)
         elif var == 'foret':
                 newShape += 1
         elif var == 'Geo':
@@ -1583,19 +1585,29 @@ def log_features(fet, pos_feature, methods):
                     next =  None
             if next is None or (f >= res and f < next and next is not None):
                 if keys[i] in cems_variables or keys[i] == 'elevation' or \
-                keys[i] == 'population' or keys[i] == 'highway' or keys[i] == 'foret' or keys[i] == 'Historical':
-                    logger.info(f'{keys[i]}, {fe[1]}, {methods[f-res]}')
+                keys[i] == 'population' or keys[i] == 'highway' or keys[i] == 'Historical':
+                    logger.info(f'{keys[i], fe[1], methods[f-res]}')
                 elif keys[i] == 'sentinel':
                     for i, v in enumerate(sentinel_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'foret':
+                    for i, v in enumerate(foret_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'landcover':
+                    for i, v in enumerate(landcover_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'Calendar' or keys[i] == 'Calendar_mean':
                     logger.info(f'{keys[i]}, {fe[1]}, {calendar_variables[f-res]}')
                 elif keys[i] == 'air' or keys[i] == 'air_mean':
-                    logger.info(f'{keys[i]}, {fe[1]}, {air_variables[f-res]}')
+                    logger.info(f'{keys[i], fe[1], air_variables[f-res]}')
                 else:
-                    logger.info(f'{keys[i]}, {fe[1]}')
+                    logger.info(f'{keys[i], fe[1]}')
                 break
 
 def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):

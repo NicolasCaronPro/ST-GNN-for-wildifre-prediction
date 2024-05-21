@@ -1,15 +1,17 @@
 cems_variables = ['temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
-                'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16']
+                'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+                'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+                'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',]
 
 sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
-landcover_variables = ['landcover']
-foret_variables = ['foret']
+landcover_variables = [#'dynamicWorld',
+                       'foret']
+foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18']
 osmnx_variables = ['highway']
 elevation_variables = ['elevation']
 population_variabes = ['population']
-calendar_variables = ['month', 'dayofweek', 'dayofyear', 'isweekend', 'couvrefeux', 'confinement',
+calendar_variables = ['month', 'dayofweek', 'dayofyear', 'isweekend', 'couvrefeux', 'confinemenent',
                     'ramadan', 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder']
 geo_variables = ['departement']
 historical_variables = ['influence']

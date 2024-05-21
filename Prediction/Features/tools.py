@@ -367,7 +367,7 @@ def rasterise_meteo_data(h3, maskh3, cems, sh, dates, dir_output):
         f = open(dir_output / outputName,"wb")
         pickle.dump(spatioTemporalRaster, f)
 
-def rasterise_air(h3, maskh3, cems, sh, dates, dir_output, name):
+def rasterise_vigicrues(h3, maskh3, cems, sh, dates, dir_output, name):
     
     lenDates = len(dates)
     print(lenDates)
@@ -486,13 +486,14 @@ def resize(input_image, height, width, dim):
                  preserve_range=True, anti_aliasing=True)
     return np.asarray(img)
 
-def resize_no_dim(input_image, height, width):
+def resize_no_dim(input_image, height, width, mode='constant', order=0,
+                 preserve_range=True, anti_aliasing=True):
     """
     Resize the input_image into heigh, with, dim
     """
     img = img_as_float(input_image)
-    img = transform.resize(img, (height, width), mode='constant', order=0,
-                 preserve_range=True, anti_aliasing=True)
+    img = transform.resize(img, (height, width), mode=mode, order=order,
+                 preserve_range=preserve_range, anti_aliasing=anti_aliasing)
     return np.asarray(img)
 
 def create_geocube(df, variables, reslons, reslats):
@@ -502,25 +503,40 @@ def create_geocube(df, variables, reslons, reslats):
     geo_grid = make_geocube(
         vector_data=df,
         measurements=variables,
-        resolution=(reslats, reslons),
+        resolution=(reslons, reslats),
         rasterize_function=rasterize_points_griddata,
         fill = 0
     )
     return geo_grid
 
-def raster_population(tifFile, dir_output, reslon, reslat):
-    #population = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
+def raster_population(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
+    population = pd.read_csv(dir_data / 'population' / 'population.csv')
     population = gpd.GeoDataFrame(population, geometry=gpd.points_from_xy(population.longitude, population.latitude))
-    population = create_geocube(population, ['population'], reslon, reslat)
+
+    population = create_geocube(population, ['population'], -reslon, reslat)
     population = population.to_array().values[0]
-
-    #population = rasterisation(population, reslat, reslon, 'population')
-
     population = resize_no_dim(population, tifFile.shape[0], tifFile.shape[1])
 
-    minusMask = np.argwhere(tifFile == -1)
-    minusMask = np.argwhere(np.isnan(tifFile))
-    population[minusMask[:,0], minusMask[:,1]] = np.nan
+    mask = np.argwhere(np.isnan(tifFile))
+    population[mask[:,0], mask[:,1]] = np.nan
+
+    """res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
+
+    unodes = np.unique(tifFile)
+    for node in unodes:
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+        if True not in np.unique(population[mask2]):
+            continue
+        res[mask1] = np.nanmax(population[mask2])
+
+    outputName = 'population22.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(population,f)
+
+    outputName = 'population2.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)"""
 
     outputName = 'population.pkl'
     f = open(dir_output / outputName,"wb")
@@ -535,28 +551,71 @@ def raster_elevation(tifFile, dir_output, elevation):
     f = open(dir_output / outputName,"wb")
     pickle.dump(elevation,f)
 
-def raster_foret(tifFile, dir_output, reslon, reslat, dir_data):
+def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, dept):
     foret = gpd.read_file(dir_data / 'BDFORET' / 'foret.geojson')
 
-    foret = rasterisation(foret, reslat, reslon, 'code', defval=0)
-    foret = resize_no_dim(foret, tifFile.shape[0], tifFile.shape[1])
+    foret = rasterisation(foret, reslat, reslon, 'code', defval=0, name=dept)
+    foret = resize_no_dim(foret, tifFile_high.shape[0], tifFile_high.shape[1])
+    bands = np.unique(foret).astype(int)
+    res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    unodes = np.unique(tifFile)
+    for node in unodes:
+
+        if node not in tifFile_high:
+            continue
+
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+
+        for band in bands:
+            res[band, mask1] = (np.argwhere(foret[mask2] == band).shape[0] / foret[mask2].shape[0]) * 100
+
+        if res[:, mask1].shape[1] == 1:
+            res2[mask1] = np.nanargmax(res[:, mask1])
+        else:
+            res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+
+    res[:, np.isnan(tifFile)] = np.nan
+
     outputName = 'foret.pkl'
     f = open(dir_output / outputName,"wb")
-    pickle.dump(foret,f)
+    pickle.dump(res,f)
 
-def raster_osmnx(tifFile, dir_output, reslon, reslat, dir_data):
-    osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
-    osmnx = osmnx[0]
-    mask = np.argwhere(np.isnan(osmnx))
+    outputName = 'foret_landcover.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res2,f)
+
+
+def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
+    osmnx_, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
+    osmnx_ = osmnx_[0]
+    osmnx = osmnx_ > 0
+    mask = np.isnan(osmnx)
     osmnx = influence_index(osmnx, mask)
-    osmnx = resize_no_dim(osmnx, tifFile.shape[0], tifFile.shape[1])
+    osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1])
+    mask = np.isnan(tifFile_high)
+    osmnx[mask] = np.nan
+    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
 
     #osmnx = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
     #osmnx = rasterisation(osmnx, reslat, reslon, 'osmnx')
 
+    unodes = np.unique(tifFile)
+    for node in unodes:
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+        if True not in np.unique(population[mask2]):
+            continue
+        res[mask1] = np.nanmean(osmnx[mask2])
+
+    """outputName = 'osmnx22.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(osmnx,f)"""
+
     outputName = 'osmnx.pkl'
     f = open(dir_output / outputName,"wb")
-    pickle.dump(osmnx,f)
+    pickle.dump(res,f)
 
 def raster_sat(base, dir_reg, dir_output, dates):
     size = '30m'
@@ -603,10 +662,18 @@ def raster_sat(base, dir_reg, dir_output, dates):
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
     res = np.full((base.shape[0], base.shape[1], len(dates)), np.nan)
+
+def raster_land(base, base_high, dir_reg, dir_output, dates):
+
+    size = '30m'
+    dir_sat = dir_reg / 'GEE' / size
+    bands = [0,1,2,3,4,5,6,7,8]
+    res = np.full((len(bands), base.shape[0], base.shape[1],  len(dates)), np.nan)
+    unodes = np.unique(base)
+    minusMask = np.argwhere(np.isnan(base))
     for tifFile in dir_sat.glob('dynamic_world/*.tif'):
 
         tifFile = tifFile.as_posix()
-
         dateFile = tifFile.split('/')[-1]
         print(dateFile)
 
@@ -620,7 +687,7 @@ def raster_sat(base, dir_reg, dir_output, dates):
         dynamicWorld = dynamicWorld.astype(np.float64)
         dynamicWorld[np.isnan(dynamicWorld)] = -1
         dynamicWorld = dynamicWorld[-1]
-        dynamicWorld = resize_no_dim(dynamicWorld, base.shape[0], base.shape[1])
+        dynamicWorld = resize_no_dim(dynamicWorld, base_high.shape[0], base_high.shape[1])
 
         if i + 9 > res.shape[2]:
             lmin = i - 7
@@ -632,8 +699,13 @@ def raster_sat(base, dir_reg, dir_output, dates):
             lmin = i - 7
             lmax = i + 10
 
-        k = lmax - lmin
-        res[:,:,lmin:lmax] = np.repeat(dynamicWorld[:,:, np.newaxis], k, axis=2)
+        for node in unodes: 
+            mask1 = res == node
+            mask2 = base_high == node
+            if mask2.shape[0] == 0:
+                continue
+            for band in bands:
+                res[band,mask1,lmin:lmax] = np.argwhere(dynamicWorld[mask2] == band).shape[0]
 
         i += 15
 
@@ -642,13 +714,13 @@ def raster_sat(base, dir_reg, dir_output, dates):
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
 
-def rasterisation(h3, lats, longs, column='cluster', defval = np.nan):
+def rasterisation(h3, lats, longs, column='cluster', defval = np.nan, name='default'):
     #h3['cluster'] = h3.index
 
-    h3.to_file('h3.geojson', driver='GeoJSON')
+    h3.to_file(name+'.geojson', driver='GeoJSON')
 
-    input_geojson = 'h3.geojson'
-    output_raster = 'h3.tif'
+    input_geojson = name+'.geojson'
+    output_raster = name+'.tif'
 
     # Si on veut rasteriser en fonction de la valeur d'un attribut du vecteur, mettre son nom ici 
     attribute_name = column
@@ -690,7 +762,7 @@ def rasterisation(h3, lats, longs, column='cluster', defval = np.nan):
     output_ds = None
     source_ds = None
 
-    res, _, _ = read_tif('h3.tif')
+    res, _, _ = read_tif(name+'.tif')
     return res[0]
 
 def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214):
@@ -723,11 +795,11 @@ def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution
 def influence_index(categorical_array, mask):
     res = np.full(categorical_array.shape, np.nan)
 
-    kernel = myFunctionDistanceDugrandCercle((90,150))
+    kernel = myFunctionDistanceDugrandCercle((30,30))
     #kernel = normalize(kernel, norm='l2')
     #res[mask[:,0], mask[:,1]] = (scipy_fft_conv(categorical_array, kernel, mode='same')[mask[:,0], mask[:,1]])
 
-    res = convolve_fft(array=categorical_array, kernel=kernel, normalize_kernel=False, mask=mask)
+    res = convolve_fft(categorical_array, kernel, normalize_kernel=True, mask=mask)
 
     return res
 

@@ -174,6 +174,7 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : in
 
     # Remove nodes where the is a feature at nan
     Xset, Yset = remove_nan_nodes(X, Y)
+    print(np.argwhere(np.isnan(X))[:,1])
 
     print(f'X shape {X.shape}, X shape after removal nan {Xset.shape}, Y shape is {Yset.shape}')
 
@@ -547,20 +548,22 @@ def create_test_loader(graph, Xset : np.array,
 
 def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device, encoding,
-                     k_days, test, pos_feature, scaling, prefix):
-    try:
+                     k_days, test, pos_feature, scaling, prefix, Rewrite):
 
-        XTensor = read_object('XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
-        YTensor = read_object('YTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
-        ETensor = read_object('ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
+    if not Rewrite:
+        XTensor = read_object('XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        if XTensor is not None:
+            XTensor = XTensor.to(device)
+            YTensor = read_object('YTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
+            ETensor = read_object('ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
+            return XTensor, YTensor, ETensor
 
-    except:
-        XTensor, YTensor, ETensor = create_test(graph=graphScale, X=X, Y=Y, Xtrain=Xtrain,
-                                    device=device, use_temporal_as_edges=use_temporal_as_edges, ks=k_days, scaling=scaling)
+    XTensor, YTensor, ETensor = create_test(graph=graphScale, X=X, Y=Y, Xtrain=Xtrain,
+                                device=device, use_temporal_as_edges=use_temporal_as_edges, ks=k_days, scaling=scaling)
 
-        save_object(XTensor, 'XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        save_object(YTensor, 'YTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        save_object(ETensor, 'ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+    save_object(XTensor, 'XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+    save_object(YTensor, 'YTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+    save_object(ETensor, 'ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
         
     return XTensor, YTensor, ETensor
 
@@ -572,16 +575,12 @@ def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
                                     use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-    try:
-
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        if loader is None:
+            loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
+                                        use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
-    except Exception as e:
-
-        loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
-                                    use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
-
-        save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+            save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
 
     return loader
 
@@ -606,28 +605,23 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                                     dir_output)
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-
-    try:
-
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+        if loader is None:
+            loader = create_test_loader_2D(graphScale,
+                                        X,
+                                        Y,
+                                        Xtrain,
+                                        Ytrain,
+                                        use_temporal_as_edges,
+                                        device,
+                                        scaling,
+                                        pos_feature,
+                                        pos_feature_2D,
+                                        k_days,
+                                        shape,
+                                        dir_output)
 
-    except Exception as e:
-
-        loader = create_test_loader_2D(graphScale,
-                                    X,
-                                    Y,
-                                    Xtrain,
-                                    Ytrain,
-                                    use_temporal_as_edges,
-                                    device,
-                                    scaling,
-                                    pos_feature,
-                                    pos_feature_2D,
-                                    k_days,
-                                    shape,
-                                    dir_output)
-
-        save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+            save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
 
     return loader
 

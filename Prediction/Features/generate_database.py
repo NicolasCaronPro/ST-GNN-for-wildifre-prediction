@@ -15,10 +15,11 @@ logger.setLevel(logging.INFO)
 logFormatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
 
 # Handler pour afficher les logs dans le terminal
+if (logger.hasHandlers()):
+    logger.handlers.clear()
 streamHandler = logging.StreamHandler(stream=sys.stdout)
 streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
-
 ################################ Database ####################################
 
 class GenerateDatabase():
@@ -75,15 +76,16 @@ class GenerateDatabase():
 
     def add_spatial(self):
         logger.info('Add spatial')
-        raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
-        raster_population(self.h3tif, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
-        raster_elevation(self.h3tif, self.dir_raster, self.elevation, self.spatialParams['dir_sat'])
-        raster_osmnx(self.h3tif, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
-        raster_foret(self.h3tif, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
+        #raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        #raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
+        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
     def add_air_qualite(self):
         assert RASTER == True
-        air_stations = pd.read_csv(self.air_params['dir'] / 'air' / 'ExportStations.csv', sep=';')
+        air_stations = pd.read_csv(self.airParams['dir'] / 'air' / 'ExportStations.csv', sep=';')
         air_stations["Date d'entrée en service (à 00h00)"] = pd.to_datetime(air_stations["Date d'entrée en service (à 00h00)"], dayfirst=True)
         gdf = gpd.GeoDataFrame(air_stations, geometry=gpd.points_from_xy(air_stations.Longitude, air_stations.Latitude))
         gdf = gdf.set_crs(epsg=4326)
@@ -97,7 +99,7 @@ class GenerateDatabase():
         'PM25': '39',
         } 
 
-        if not (self.air_params['dir'] / 'air' / 'Air_archive').is_dir():
+        if not (self.airParams['dir'] / 'air' / 'Air_archive').is_dir():
             token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MTI4NzA1NjAsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiZTI5YmJjOGItODY2Ny00ODcxLTk5YzUtYjE1NGM4NWJiNTIzIiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.J6axigDBoJY4kmMLbQfUwl-MCudxF5cm43R1WTXtt7Q'
             headers = {
                             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0',
@@ -113,7 +115,7 @@ class GenerateDatabase():
                 logger.info(f" - polluant : {polluant}")
                 for annee in range(2017, dt.datetime.now().year + 1, 2):
                     logger.info(f"   année : {annee}")
-                    if not (self.air_params['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
+                    if not (self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
                         headers1 = headers.copy()
                         headers1['Content-Type']= 'multipart/form-data; boundary=---------------------------14490471821690778178105310701'
                         headers1['Origin'] ='https://www.geodair.fr'
@@ -138,8 +140,8 @@ class GenerateDatabase():
                                     with open('/tmp/txt.csv', 'w') as f:
                                         f.write(response3.text)
                                     dg = pd.read_csv('/tmp/txt.csv', sep=';')
-                                    (self.air_params['dir'] / 'air' / 'Air_archive').mkdir(exist_ok=True, parents=True)
-                                    dg.to_csv(self.air_params['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';', index=False)
+                                    (self.airParams['dir'] / 'air' / 'Air_archive').mkdir(exist_ok=True, parents=True)
+                                    dg.to_csv(self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';', index=False)
                                     break
                                 else:
                                     logger.info(response3)
@@ -147,12 +149,12 @@ class GenerateDatabase():
                                     time.sleep(1)
                                 if cpt == 5:
                                     break
-        if not (self.air_params['dir'] / 'air' / 'archive' / 'polluants1216.csv').is_file():
+        if not (self.airParams['dir'] / 'air' / 'archive' / 'polluants1216.csv').is_file():
 
             polluants_csv = []
             for polluant in polluants:
                 for annee in range(2017, dt.datetime.now().year + 1, 2):
-                    po = pd.read_csv(self.air_params['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';')
+                    po = pd.read_csv(self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';')
                     po.rename({'valeur' : polluant}, inplace=True, axis='columns')
                     polluants_csv.append(po)
 
@@ -167,10 +169,10 @@ class GenerateDatabase():
             for polluant in polluants.keys():
                 polluants_csv[f'{polluant}16'] = polluants16[polluant]
             
-            polluants_csv.to_csv(self.air_params['dir'] / 'air' / 'Air_archive' / 'polluants1216.csv', sep=',', index=False)
+            polluants_csv.to_csv(self.airParams['dir'] / 'air' / 'Air_archive' / 'polluants1216.csv', sep=',', index=False)
 
         else:
-            polluants_csv = pd.read_csv(self.air_params['dir'] / 'air' / 'Air_archive' / 'polluants1216.csv')
+            polluants_csv = pd.read_csv(self.airParams['dir'] / 'air' / 'Air_archive' / 'polluants1216.csv')
 
         logger.info(polluants_csv.columns)
         rasterise_air_qualite(self.clusterSum, self.h3tif, polluants_csv, self.h3tif.shape, self.dates, self.dir_raster)
@@ -186,10 +188,10 @@ class GenerateDatabase():
 
         def hydroreel_date_parser(chaine):
             try:
-                return dt.datetime.strptime(chaine, "%d/%m/%Y %H:%M")
+                return dt.datetime.strptime(chaine, "%d/%m/%Y %H:%M").strftime("%Y-%m-%d %H:%M:%S")
             except:
                 #'2018-01-01 00:00:00+00:00'
-                return dt.datetime.strptime(chaine, "%Y-%m-%d %H:%M:%S+00:00")
+                return dt.datetime.strptime(chaine, "%Y-%m-%d %H:%M:%S+00:00").strftime("%Y-%m-%d %H:%M:%S")
 
         logger.info('Collecting Hydroreel stations list')
 
@@ -242,9 +244,7 @@ class GenerateDatabase():
         total = []
         for index, station in enumerate(sorted(stations_hydroreel.station)):
             logger.info(f" * on tente de mettre à jour {station}") 
-            df = pd.read_csv(dir_hydroreel / (station+'.csv'), 
-                    parse_dates=['Date'],
-                    date_parser=hydroreel_date_parser)
+            df = pd.read_csv(dir_hydroreel / (station+'.csv'))
             Date_debut = max(df['Date'])
             Date_debut += dt.timedelta(hours=1)
             Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
@@ -280,20 +280,19 @@ class GenerateDatabase():
                     Date_debut = Date_fin
                     Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
                                 Date_debut + dt.timedelta(days=3))
-                    
-            total.append(pd.read_csv(dir_hydroreel / (station+'.csv'), 
-                    parse_dates=['Date'],
-                    date_parser=hydroreel_date_parser))
-            
+
+            total.append(pd.read_csv(dir_hydroreel / (station+'.csv')))
+
         total = pd.concat(total).reset_index(drop=True)
-        total['hour'] = total['Date'].apply(lambda x : x.Date.split(' ')[1])
-        total['Date'] = total['Date'].apply(lambda x : x.Date.split(' ')[0])
+        total['Date'] = total['Date'].apply(lambda x : hydroreel_date_parser(x))
+        total['hour'] = total['Date'].apply(lambda x : x.split(' ')[1])
+        total['Date'] = total['Date'].apply(lambda x : x.split(' ')[0])
+        total.rename({'Date' : 'creneau', 'H (cm)' : 'hauteur'}, inplace=True, axis=1)
+        total = total[total['hour'] == '12:00:00']
+        total16 = total[total['hour'] == '16:00:00']
 
-        total = total[total['hour'] == '12:00']
-        total16 = total[total['hour'] == '16:00']
-
-        rasterise_air(self.clusterSum, self.h3tif, total, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues12')
-        rasterise_air(self.clusterSum, self.h3tif, total16, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues16')
+        rasterise_vigicrues(self.clusterSum, self.h3tif, total, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues12')
+        rasterise_vigicrues(self.clusterSum, self.h3tif, total16, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues16')
 
         logger.info('Constructing Hydroreel dataframe')
         df_hydro = pd.DataFrame()
@@ -443,8 +442,6 @@ class GenerateDatabase():
             sdate = start
             edate = stop
             self.dates = find_dates_between(sdate, edate)
-            #n_pixel_x = 0.0002694945852326214
-            #n_pixel_y = 0.0002694945852352859
 
             #n_pixel_x = 0.016133099692723363
             #n_pixel_y = 0.016133099692723363
@@ -454,8 +451,16 @@ class GenerateDatabase():
 
             self.resLon = n_pixel_x
             self.resLat = n_pixel_y
-            self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan)
-            logger.info(self.h3tif.shape)
+            self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')
+            logger.info(f'Low scale {self.h3tif.shape}')
+
+            n_pixel_x = 0.0002694945852326214
+            n_pixel_y = 0.0002694945852352859
+
+            self.resLon_high = n_pixel_x
+            self.resLat_high = n_pixel_y
+            self.h3tif_high = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_high')
+            logger.info(f'High scale {self.h3tif_high.shape}')
 
         if self.computeTemporal:
             self.compute_temporal()
@@ -489,6 +494,7 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
 
     outputParams  = {'start' : start,
                     'end' : stop}
+    
 
     spatialParams = {'dir_sat':  rootDisk / departement / 'data',
                     'dir' : dir_data,
@@ -550,17 +556,13 @@ if __name__ == '__main__':
     addVigicrue = args.vigicrues == "True"
 
     ################## Ain ######################
-    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, 
-           addAir, addBouchon, addVigicrue)
+    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## DOUBS ######################
-    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, 
-           addAir, addBouchon, addVigicrue)
+    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## YVELINES ######################
-    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, 
-           addAir, addBouchon, addVigicrue)
+    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## Rhone ######################
-    launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, 
-           addAir, addBouchon, addVigicrue)
+    launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)

@@ -179,11 +179,11 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     else:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-    try:
-        Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
-        Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
-    except Exception as e:
-        logger.info(f'Fuck it : {e}')
+
+    Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
+    Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
+    if Xtrain is None:
+        logger.info(f'Fuck it')
         return
 
     # Add varying time features
@@ -195,7 +195,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
             X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
-        trainFeatures_ =  trainFeatures
+        trainFeatures_ = trainFeatures
         features_ =  features
 
     # Select train features
@@ -212,6 +212,10 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                 maxi = coef * len(sentinel_variables)
             elif fet == 'Geo':
                 maxi = len(geo_variables)
+            elif fet == 'foret':
+                maxi = coef * len(foret_variables)
+            elif fet == 'landcover':
+                maxi = coef * len(landcover_variables)
             elif fet in varying_time_variables:
                 maxi = 1
             else:
@@ -246,7 +250,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
                                                             X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                             test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+                                                            scaling=scaling, prefix=prefix, encoding=encoding,
+                                                            Rewrite=False)
         
         _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
                                         X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
@@ -267,9 +272,11 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         logger.info(f'      {name}            ')
         logger.info('#########################')
         XTensor, YTensor, _ = load_tensor_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                        X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                         test=testname, pos_feature=pos_feature,
-                                                        scaling=scaling, prefix=prefix, encoding=encoding)
+                                                        scaling=scaling, prefix=prefix, encoding=encoding,
+                                                        Rewrite=True)
+        print(XTensor.shape)
         XTensor = XTensor.detach().cpu().numpy()
         XTensor = XTensor[:, features_selected, -1]
 
@@ -322,7 +329,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
                                                             X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                             test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+                                                            scaling=scaling, prefix=prefix, encoding=encoding,
+                                                            Rewrite=False)
         ITensor = YTensor[:,-3]
         if testname != 'dummy':
             """y2 = YTensor.detach().cpu().numpy()

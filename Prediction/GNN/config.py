@@ -37,6 +37,27 @@ foret = {'Châtaignier': 1,
  'Robinier': 17,
  'Sapin, épicéa': 18}
 
+foretint2str = {
+'0' : 'PasDeforet',
+'1':'Châtaignier',
+ '2': 'Chênes décidus',
+ '3': 'Conifères',
+ '4': 'Douglas',
+ '5': 'Feuillus',
+ '6': 'Hêtre',
+ '7': 'Mixte',
+ '8': 'Mélèze',
+ '9': 'NC',
+ '10': 'NR',
+ '11': 'Peuplier',
+ '12': 'Pin autre',
+ '13': 'Pin laricio, pin noir',
+ '14': 'Pin maritime',
+ '15': 'Pin sylvestre',
+ '16': 'Pins mélangés',
+ '17': 'Robinier',
+ '18': 'Sapin, épicéa'}
+
 # Variables : 
 # mean max min and std for scale > 0 else value
 features = [
@@ -44,6 +65,7 @@ features = [
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation', 'highway', 'population',
             'sentinel',
             'landcover',
@@ -60,11 +82,12 @@ trainFeatures = [
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation',
             'highway',
             'population',
             'sentinel',
-            #'landcover',
+            'landcover',
             'foret',
             'Calendar',
             'Historical',
@@ -116,7 +139,7 @@ trainDepartements = [
                 'departement-01-ain',
                 'departement-25-doubs',
                 'departement-78-yvelines',
-                #'departement-69-rhone',
+                'departement-69-rhone',
                 ]
 
 

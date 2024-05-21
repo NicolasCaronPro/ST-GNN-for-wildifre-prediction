@@ -21,7 +21,7 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
         tar = tar[:,:,:trainMax]
         gt += list(tar[~np.isnan(tar)].reshape(-1))
 
-        fore = read_object('foret.pkl', dir_data)
+        fore = read_object('foret_landcover.pkl', dir_data)
 
         fore = resize_no_dim(fore, tar.shape[0], tar.shape[1])
         fore = fore[:,:, np.newaxis]
@@ -35,7 +35,7 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
 
         calendar = np.empty((tar.shape[0], tar.shape[1], tar.shape[2], len(calendar_variables)))
         for i, date in enumerate(allDates):
-            if date == '2022-01-01':
+            if date == maxDate:
                 break
             ddate = dt.datetime.strptime(date, '%Y-%m-%d')
             calendar[:,:,i, 0] = int(date.split('-')[1]) # month

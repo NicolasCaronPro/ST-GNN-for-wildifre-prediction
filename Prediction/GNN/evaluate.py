@@ -127,28 +127,33 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+        
+    test_name = args.name
+    sinister = args.sinister
+    dir_output = Path(args.output)
+
     # features
-    experiments_features = [('exp_features', 0, 'noTopo', 'full_0_10_noTopo_10_z-score_Catboost_2023'),
-                   ('exp_features', 1, 'noMeteo', 'full_0_10_noMeteo_10_z-score_Catboost_2023'),
-                   ('exp_features', 2, 'noHistorical', 'full_0_10_noHistorical_10_z-score_Catboost_2023'),
+    experiments_features = [('exp_features', 0, 'noTopo', 'full_0_10_noTopo_10_z-score_Catboost_'+test_name),
+                   ('exp_features', 1, 'noMeteo', 'full_0_10_noMeteo_10_z-score_Catboost_'+test_name),
+                   ('exp_features', 2, 'noHistorical', 'full_0_10_noHistorical_10_z-score_Catboost_'+test_name),
                    #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
                    ]
     
     # Ks
-    experiments_ks = [('exp_ks', 0, '0', 'full_0_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 1, '1', 'full_1_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 2, '2', 'full_2_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 3, '3', 'full_3_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 4, '4', 'full_4_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 5, '5', 'full_5_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 6, '6', 'full_6_10_10_z-score_Catboost_2023_tree'),
-                   ('exp_ks', 7, '7', 'full_7_10_10_z-score_Catboost_2023_tree'),
+    experiments_ks = [('exp_ks', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 1, '1', 'full_1_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 2, '2', 'full_2_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 3, '3', 'full_3_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 4, '4', 'full_4_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 5, '5', 'full_5_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 6, '6', 'full_6_10_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 7, '7', 'full_7_10_10_z-score_Catboost_'+test_name+'_tree'),
                    #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
                    ]
-    
-    test_name = args.name
-    sinister = args.sinister
-    dir_output = Path(args.output)
+                   
+    # Inference
+    experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
+                      ]
     
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_ks, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)

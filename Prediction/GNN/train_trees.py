@@ -198,12 +198,16 @@ for fet in trainFeatures:
             maxi = coef * len(sentinel_variables)
         elif fet == 'Geo':
             maxi = len(geo_variables)
+        elif fet == 'foret':
+            maxi = coef * len(foret_variables)
+        elif fet == 'landcover':
+            maxi = coef * len(landcover_variables)
         elif fet in varying_time_variables:
             maxi = 1
         else:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
-
+        
 logger.info(train_fet_num)
 prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
 if spec != '':
@@ -211,7 +215,7 @@ if spec != '':
 pos_feature = pos_train_feature
 X = X[:, np.asarray(train_fet_num)]
 
-logger.info(allDates.index('2023-01-01'))
+logger.info(pos_feature)
 logger.info(np.max(X[:,4]))
 logger.info(np.unique(X[:,0]))
 
@@ -249,6 +253,14 @@ train_sklearn_api_model(trainDataset, valDataset,
 dir_output / name,
 device='cpu',
 binary=True,
+scaling=scaling,
+features=features_selected,
+weight=False)
+
+train_sklearn_api_model(trainDataset, valDataset,
+dir_output / name,
+device='cpu',
+binary=False,
 scaling=scaling,
 features=features_selected,
 weight=False)

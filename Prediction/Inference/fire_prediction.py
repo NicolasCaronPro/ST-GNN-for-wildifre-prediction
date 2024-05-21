@@ -29,6 +29,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info('Load nodes features')
 
     pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
+    logger.info(pos_feature)
 
     def save_values(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
@@ -67,9 +68,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-
-    if 'foret' in features:
-        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
+        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)        
 
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
@@ -116,7 +115,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             index = np.argwhere((subNode[:,0] == node[0])
                                 & (subNode[:,4] == node[4])
                                 )
-
+            
             save_values(geo[var].values, pos_feature[var], index, maskNode)
 
     logger.info('Air Quality')
@@ -141,8 +140,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if 'highway' in features:
             save_values(geo['highway'].astype(float).values, pos_feature['highway'], index, maskNode)
         if 'foret' in features:
-            #save_value_with_encoding(geo['foret'].values, pos_feature['foret'], index, maskNode, encoder_foret)
-            save_values(geo['foret'].astype(float).values, pos_feature['foret'], index, maskNode)
+            for band in foret_variables:
+                save_values(geo[band].astype(float).values, pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
+        if 'landcover' in features:
+            save_value_with_encoding(geo['foret_landcover'].astype(float).values, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
+
 
     coef = 4 if graph.scale > -1 else 1
     for node in subNode:
@@ -155,9 +157,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             for band, var in enumerate(sentinel_variables):
                 save_values(geo[var].astype(float).values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
 
-        if 'landcover' in features: 
+        #if 'landcover' in features: 
             #save_value_with_encoding(geo['landcover'].values, pos_feature['landcover'], index, maskNode, encoder_landcover)
-            save_values(geo['landcover'].astype(float).values, pos_feature['landcover'], index, maskNode)
+        #    save_values(geo['landcover'].astype(float).values, pos_feature['landcover'] + (landcover_variables.index('dynamicWorld') * 4), index, maskNode)
 
     logger.info('Historical')
     if 'Historical' in features:
@@ -183,7 +185,7 @@ def create_ps(geo):
     return geo
 
 def fire_prediction(spatialGeo, interface, departement, features, trainFeatures, features_selected, scaling, dir_data, dates):
-
+    
     geoDT = create_ps(interface)
 
     # Based tree models
@@ -218,15 +220,14 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     orinode = geoDT.drop_duplicates(['id', 'date'])[columns].values
     orinode = graph._assign_latitude_longitude(orinode)
     orinode = graph._assign_department(orinode)
-    orinode[np.isin(orinode[:, 4], [ks, ks+1]), 5] = 1
+    orinode[np.isin(orinode[:, 4], [k_today, k_tomorrow]), 5] = 1
     
-    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
     if model not in traditionnal_models:
         name_model =  model + '/' + 'best.pt'
-        dir = 'check_'+scaling + '/' + prefix + '/'
+        dir = 'check_'+scaling + '/' + prefix_train + '/'
         graph._load_model_from_path(dir_data / dir / name_model, dico_model[model], device)
     else:
-        dir = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
+        dir = 'check_'+scaling + '/' + prefix_train + '/' + '/baseline'
         model_ = read_object(model+'.pkl', dir_data / dir / model)
         graph._set_model(model_)
 
@@ -245,8 +246,8 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
                      Xtrain,
                      device,
                      False,
-                     k_days,
-                     k_days,
+                     k_today,
+                     int(args.days),
                      scaling)
     
     if model in traditionnal_models:
@@ -257,42 +258,94 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     else:
         today_Y = graph._predict_tensor(today_X_fet, E)
 
-    # Tomorrow
-    tomorrow_X, E = create_inference(graph,
-                     X,
-                     Xtrain,
-                     device,
-                     False,
-                     k_days + 1,
-                     k_days,
-                     scaling)
+    if k_tomorrow in np.unique(X[:,4]):
+        tomorrow_X, E = create_inference(graph,
+                        X,
+                        Xtrain,
+                        device,
+                        False,
+                        k_tomorrow,
+                        int(args.days),
+                        scaling)
     
-    if model in traditionnal_models:
-        # Add varying time features
-        if k_days > 0:
-            trainFeatures += varying_time_variables
-            features += varying_time_variables
-            pos_feature, newShape = create_pos_feature(graph, 6, features)
-            X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-        tomorrow_X = tomorrow_X.detach().cpu().numpy()
-        tomorrow_X_fet = tomorrow_X[:, features_selected, :]
-        tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
-        tomorrow_Y = graph.predict_model_api_sklearn(tomorrow_X_fet, False)
-    else:
-        tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
+        if model in traditionnal_models:
+            # Add varying time features
+            if int(args.days) > 0:
+                trainFeatures += varying_time_variables
+                features += varying_time_variables
+                pos_feature, newShape = create_pos_feature(graph, 6, features)
+                X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+            save_object(X, 'X_'+prefix+'.pkl', dir_output)
+            tomorrow_X = tomorrow_X.detach().cpu().numpy()
+            tomorrow_X_fet = tomorrow_X[:, features_selected, :]
+            tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
+            tomorrow_Y = graph.predict_model_api_sklearn(tomorrow_X_fet, False)
+        else:
+            tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
 
     unodes = np.unique(orinode[:,0])
 
     for node in unodes:
+        geoDT.loc[geoDT[(geoDT['date'] == k_today) &
+                                (geoDT['id'] == node)].index, 'fire_prediction_raw'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
+        
+        geoDT.loc[geoDT[(geoDT['date'] == k_today) &
+                                (geoDT['id'] == node)].index, 'fire_prediction'] = order_class(predictor, predictor.predict(today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]]))[0]
+        
+        if k_tomorrow in np.unique(X[:,4]):
 
-        interface.loc[interface[(interface['date'] == k_days) &
-                                (interface['id'] == node)].index, 'fire_prediction'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
-        
-        interface.loc[interface[(interface['date'] == k_days + 1) &
-                                (interface['id'] == node)].index, 'fire_prediction'] = tomorrow_Y[np.argwhere(tomorrow_X[:, 0, 0] == node)[:,0]][0]
-        
-    return interface
+            geoDT.loc[interface[(geoDT['date'] == k_tomorrow) &
+                                    (geoDT['id'] == node)].index, 'fire_prediction_raw'] = tomorrow_Y[np.argwhere(tomorrow_X[:, 0, 0] == node)[:,0]][0]
+            
+            geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow) &
+                                (geoDT['id'] == node)].index, 'fire_prediction'] = order_class(predictor, predictor.predict(tomorrow_Y[np.argwhere(tomorrow_X[:, 0, 0] == node)[:,0]]))[0]
+    
+    geoDT['fire_prediction_dept'] = 0
+
+    today_risk = geoDT[(geoDT['date'] == k_today)].groupby('id')['fire_prediction_raw'].mean().values
+    tomorrow_risk = geoDT[(geoDT['date'] == k_tomorrow)].groupby('id')['fire_prediction_raw'].mean().values
+    today_risk = np.nansum(today_risk)
+    tomorrow_risk = np.nansum(tomorrow_risk)
+
+    geoDT.loc[geoDT[(geoDT['date'] == k_today)].index, 'fire_prediction_dept'] = order_class(predictor, predictorDept.predict(np.array(today_risk)))[0]
+    geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow)].index, 'fire_prediction_dept'] = order_class(predictor, predictorDept.predict(np.array(tomorrow_risk)))[0]
+
+    return geoDT
+
+def add_varying_time_features(X : np.array, features : list, newShape : int, pos_feature : dict, ks : int):
+    res = np.empty((X.shape[0], newShape))
+    res[:, :X.shape[1]] = X
+    for feat in features:
+        logger.info(feat)
+        vec = feat.split('_')
+        name = vec[0]
+        methods = vec[1:]
+        index_feat = pos_feature[feat]
+        index_feat_X = pos_feature[name]
+        for met in methods:
+            if met == "mean":
+                for node in X:
+                    index_node = np.argwhere((X[:,0] == node[0]) & (X[:,4] == node[4]))
+                    index_nodes_ks = np.argwhere((X[:,0] == node[0]) & (X[:,4] < node[4]) & (X[:,4] >= node[4] - ks))
+                    if name == 'Calendar':
+                        for i, _ in enumerate(calendar_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    elif name == 'Historical':
+                        for i, _ in enumerate(historical_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    elif name == "air":
+                        for i, _ in enumerate(air_variables):
+                            res[index_node, index_feat + i] = np.mean(X[index_nodes_ks, index_feat_X + i])
+                    else:
+                        res[index_node, index_feat] = np.mean(X[index_nodes_ks, index_feat_X])
+            elif met == "sum":
+                    index_node = np.argwhere((X[:,0] == node[0]) & (X[:,4] == node[4]))
+                    index_nodes_ks = np.argwhere((X[:,0] == node[0]) & (X[:,4] < node[4]) & (X[:,4] >= node[4] - ks))
+                    res[index_node, index_feat] = np.sum(X[index_nodes_ks, index_feat_X])
+            else:
+                logger.info(f'{met} unknow method')
+                exit(1)
+    return res
 
 ######################## Read geo dataframe ######################
 
@@ -318,15 +371,18 @@ if __name__ == "__main__":
     model = args.model
     minPoint = args.nbpoint
     scaling='z-score' # Scale to used
-    dir_data = Path('../GNN/final/' + sinister + '/train')
+
+    dir_data = Path('../GNN/inference/' + sinister + '/train')
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Features 
     features = [
             'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-            'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
+            'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation', 'highway', 'population',
             'sentinel',
             'landcover',
@@ -342,6 +398,7 @@ if __name__ == "__main__":
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation',
             'highway',
             'population',
@@ -351,7 +408,7 @@ if __name__ == "__main__":
             'Calendar',
             'Historical',
             'Geo',
-            'air',
+            #'air',
             ]
     
     features_in_feather = ['hex_id', 'date',
@@ -359,15 +416,32 @@ if __name__ == "__main__":
                            'temp12', 'dwpt12', 'rhum12', 'prcp12', 'wdir12', 'wspd12', 'prec24h12',
                            'dc', 'ffmc', 'dmc', 'isi', 'bui', 'fwi',
                            'daily_severity_rating', 'nesterov', 'munger', 'kbdi', 'angstroem',
-                           'days_since_rain', 'sum_consecutive_rainfall',
+                           'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
                            'feux',
                            ]
+    if minPoint == 'full':
+        prefix_train = str(minPoint)+'_'+str(scale)
+    else:
+        prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+
+    prefix = str(scale)
+
+    traditionnal_models = ['xgboost', 'lightgbm', 'ngboost']
 
     # Load train
     graph = read_object('graph_'+scale+'.pkl', dir_data)
-    Xtrain = read_object('X_'+str(minPoint)+'_'+str(k_days)+'_'+str(graph.scale)+'.pkl', dir_data)
-    Ytrain = read_object('Y_'+str(minPoint)+'_'+str(k_days)+'_'+str(graph.scale)+'.pkl', dir_data)
-    features_importance = read_object('features_importance.pkl', dir_data)
+    Xtrain = read_object('X_'+prefix_train+'.pkl', dir_data)
+    Ytrain = read_object('Y_'+prefix_train+'.pkl', dir_data)
+    predictor = read_object(dept+'Predictor'+str(scale)+'.pkl', dir_data / 'influenceClustering')
+    predictorDept = read_object(dept+'PredictorDepartement.pkl', dir_data / 'influenceClustering')
+
+    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+
+    if model in traditionnal_models:
+        features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', dir_data)
+    else:
+        features_importance = read_object('features_importance_'+prefix_train+'.pkl', dir_data)
+        
     features_selected = np.unique(features_importance[:,0]).astype(int)
 
     # Arborescence
@@ -394,14 +468,17 @@ if __name__ == "__main__":
     elif sinister == "inondation":
         dims = [(spa,spa,5)]
 
+    k_days = max(dims[0][2], k_days)
+
     # Date
-    date = dt.datetime.now().date()
-    date_ks = (date - dt.timedelta(days=max(dims[0][2], k_days)))
+    #date = dt.datetime.now().date()
+    date = dt.datetime.strptime('2024-05-16', '%Y-%m-%d').date()
+    date_ks = (date - dt.timedelta(days=k_days))
 
     incendie_feather = incendie_feather[(incendie_feather['date'] >= date_ks) & (incendie_feather['date'] <= date)]
     dates = np.sort(incendie_feather.date.unique())
     logger.info(dates)
-
+    
     ######################### Interface ##################################
     interface = []
 
@@ -412,12 +489,17 @@ if __name__ == "__main__":
         geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
                                                 on='hex_id')
         geo_data['date'] = ks
-        geo_data['date_str'] = date.strftime('%Y-%ml-%d')
+        geo_data['date_str'] = date.strftime('%Y-%m-%d')
         geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
         geo_data['latitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.y))
         interface.append(geo_data)
 
     interface = pd.concat(interface).reset_index(drop=True)
+
+    interface.fillna(0, inplace=True)
+
+    k_today = interface.date.max() - 1
+    k_tomorrow = interface.date.max()
 
     if sinister == 'firepoint':
         interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
@@ -444,14 +526,18 @@ if __name__ == "__main__":
 
     ######################### Construct X ################################
 
-    interface = fire_prediction(spatialGeo, interface, dept, features, features_selected, scaling, dir_data, dates)
+    interface = fire_prediction(spatialGeo, interface, dept, features, trainFeatures, features_selected, scaling, dir_data, dates)
 
     today = gpd.read_file(dir_interface / 'hexagones_today.geojson')
-    today['fire_prediction'] = interface[interface['date'] == k_days]['fire_prediction']
+    today['fire_prediction_raw'] = interface[interface['date'] == k_today]['fire_prediction_raw'].values
+    today['fire_prediction'] = interface[interface['date'] == k_today]['fire_prediction'].values
+    today['fire_prediction_dept'] = interface[interface['date'] == k_today]['fire_prediction_dept'].values
 
-    if k_days + 1 in interface.date_ks.unique():
+    if k_tomorrow in interface.date.unique():
         tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
-        tomorrow['fire_prediction'] = interface[interface['date'] == k_days + 1]['fire_prediction']
+        tomorrow['fire_prediction'] = interface[interface['date'] == k_tomorrow]['fire_prediction'].values
+        tomorrow['fire_prediction_raw'] = interface[interface['date'] == k_tomorrow]['fire_prediction_raw'].values
+        tomorrow['fire_prediction_dept'] = interface[interface['date'] == k_tomorrow]['fire_prediction_dept'].values
 
-    #today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
-    #tomorrow.to_file(dir_interface / 'hexagones_tomorrow.geojson',  driver='GeoJSON')
+    today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
+    tomorrow.to_file(dir_interface / 'hexagones_tomorrow.geojson',  driver='GeoJSON')

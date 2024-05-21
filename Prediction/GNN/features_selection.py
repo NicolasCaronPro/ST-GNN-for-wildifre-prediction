@@ -19,7 +19,6 @@ else:
     from sklearn.model_selection import GridSearchCV, train_test_split
     from sklearn.preprocessing import MinMaxScaler
 
-
 from xgboost import XGBRegressor
 from sklearn.feature_selection import SelectFromModel, SelectKBest, chi2, RFE
 from sklearn.ensemble import ExtraTreesRegressor
@@ -144,6 +143,7 @@ def get_features(df, variables, target='appels', num_feats=100, learn_mode = 'sl
             'max_depth': 7,
             'num_leaves': 2**7,
             'verbose': -1,
+            'random_state':42,
             'early_stopping_round':10
         }
         

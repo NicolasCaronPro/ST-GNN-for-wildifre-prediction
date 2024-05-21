@@ -120,8 +120,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-
-    if 'foret' in features:
         encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
 
     if 'Calendar' in features:
@@ -132,7 +130,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
     dir_mask = path / 'raster' / '2x2'
-
+    logging.info(f'Shape of X {X.shape}')
     for departement in departements:
         logger.info(departement)
 
@@ -237,7 +235,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             logger.info('Foret')
             name = 'foret.pkl'
             arrayForet = read_object(name, dir_data)
-            arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
+            #arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
+
+        if 'landcover' in features:
+            logger.info('Foret landcover')
+            name = 'foret_landcover.pkl'
+            arrayForetLandcover = read_object(name, dir_data)
+            #arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
 
         if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
             unode = np.unique(nodeDepartement[:,0])
@@ -250,8 +254,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     save_values(arrayEl, pos_feature['elevation'], index, maskNode)
                 if 'highway' in features:
                     save_values(arrayOS, pos_feature['highway'], index, maskNode)
-                if 'foret' in features: 
-                    save_value_with_encoding(arrayForet, pos_feature['foret'], index, maskNode, encoder_foret)
+                if 'foret' in features:
+                    for band in foret_variables:
+                        save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
+                if 'landcover' in features:
+                    save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
 
         ### Sentinel
         if 'sentinel' in features:
@@ -271,12 +278,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             for node in nodeDepartement:
                 maskNode = mask == node[0]
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+
                 if 'sentinel' in features:
                     for band, var in enumerate(sentinel_variables):
                         save_values(arraySent[band,:, :,int(node[4])], pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
 
-                if 'landcover' in features: 
-                    save_value_with_encoding(arrayLand[:,:,int(node[4])], pos_feature['landcover'], index, maskNode, encoder_landcover)
+                #if 'landcover' in features: 
+                #    save_value_with_encoding(arrayLand[:,:,int(node[4])], pos_feature['landcover'] + (landcover_variables.index('dynamicWorld') * 4), index, maskNode, encoder_landcover)
 
         del arrayPop
         del arrayEl
@@ -288,7 +296,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if 'Historical' in features:
             dir_target = root_target / sinister / 'log'
             name = departement+'pastInfluence.pkl'
-            arrayInfluence = pickle.load(open(dir_target / name, 'rb'))
+            arrayInfluence = read_object(name, dir_target)
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                 maskNode = mask == node[0]
@@ -296,7 +304,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     continue
 
                 save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
-
+                
             del arrayInfluence
 
     return X, pos_feature
