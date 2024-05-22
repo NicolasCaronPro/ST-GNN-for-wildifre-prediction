@@ -13,6 +13,7 @@ __pycache__/
 *.csv
 *.tif
 *.png
+*.feather
 
 # Distribution / packaging
 .Python
