@@ -86,11 +86,14 @@ models = [
 tradiModels = [
     ('xgboost', False),
     ('lightgbm', False),
-    #('ngboost', False),
+    ('ngboost', False),
     ('xgboost_bin', True),
     ('lightgbm_bin', True),
     ('xgboost_bin_unweighted', True),
     ('lightgbm_bin_unweighted', True),
+    ('xgboost_unweighted', False),
+    ('lightgbm_unweighted', False),
+    ('ngboost_unweighted', False),
     #('ngboost_bin', True)
     ]
 
@@ -117,7 +120,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     dir_output = dir_output / testname
     if doGraph:
         graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
-        graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output)
+        graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)

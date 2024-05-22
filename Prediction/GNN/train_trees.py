@@ -101,7 +101,7 @@ if doGraph:
                                  geo, nmax, k_days,
                                  dir_output,
                                  True)
-    graphScale._create_predictor(minDate, maxDate, dir_output)
+    graphScale._create_predictor(minDate, maxDate, dir_output, sinister)
     doDtabase = True
 else:
     graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)

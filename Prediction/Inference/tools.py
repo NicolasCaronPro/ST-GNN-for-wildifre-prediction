@@ -337,7 +337,6 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     else:
         pixel_size_x = abs(longs[0][0] - longs[0][1])
         pixel_size_y = abs(lats[0][0] - lats[1][0])
-        logger.info(f'px {pixel_size_x}, py {pixel_size_y}')
         
     source_ds = ogr.Open(input_geojson)
  

@@ -198,7 +198,7 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     
     temporal = ['temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
+                'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
                 'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16'
                 ]
     
@@ -208,10 +208,6 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     geoDT[geo_variables] = int(departement.split('-')[1])
 
     geoDT[landcover_variables] = 0
-    for cv in cems_variables:
-        if cv not in geoDT.columns:
-            geoDT[cv] = 0
-            
     geoDT[air_variables] = 0
 
     geoDT['weights'] = 0
@@ -219,9 +215,11 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weights']
     orinode = geoDT.drop_duplicates(['id', 'date'])[columns].values
     orinode = graph._assign_latitude_longitude(orinode)
-    orinode = graph._assign_department(orinode)
+    #orinode = graph._assign_department(orinode)
+
+    orinode[:,3] = name2int[departement]
     orinode[np.isin(orinode[:, 4], [k_today, k_tomorrow]), 5] = 1
-    
+
     if model not in traditionnal_models:
         name_model =  model + '/' + 'best.pt'
         dir = 'check_'+scaling + '/' + prefix_train + '/'
@@ -284,7 +282,7 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
             tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
 
     unodes = np.unique(orinode[:,0])
-
+    print(unodes)
     for node in unodes:
         geoDT.loc[geoDT[(geoDT['date'] == k_today) &
                                 (geoDT['id'] == node)].index, 'fire_prediction_raw'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
@@ -307,9 +305,8 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     today_risk = np.nansum(today_risk)
     tomorrow_risk = np.nansum(tomorrow_risk)
 
-    geoDT.loc[geoDT[(geoDT['date'] == k_today)].index, 'fire_prediction_dept'] = order_class(predictor, predictorDept.predict(np.array(today_risk)))[0]
-    geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow)].index, 'fire_prediction_dept'] = order_class(predictor, predictorDept.predict(np.array(tomorrow_risk)))[0]
-
+    geoDT.loc[geoDT[(geoDT['date'] == k_today)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(today_risk)))[0]
+    geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(tomorrow_risk)))[0]
     return geoDT
 
 def add_varying_time_features(X : np.array, features : list, newShape : int, pos_feature : dict, ks : int):
@@ -471,11 +468,10 @@ if __name__ == "__main__":
     k_days = max(dims[0][2], k_days)
 
     # Date
-    #date = dt.datetime.now().date()
-    date = dt.datetime.strptime('2024-05-16', '%Y-%m-%d').date()
-    date_ks = (date - dt.timedelta(days=k_days))
-
-    incendie_feather = incendie_feather[(incendie_feather['date'] >= date_ks) & (incendie_feather['date'] <= date)]
+    date_today = dt.datetime.now().date()
+    #date = dt.datetime.strptime('2024-05-15', '%Y-%m-%d').date()
+    date_ks = (date_today - dt.timedelta(days=k_days))
+    incendie_feather = incendie_feather[(incendie_feather['date'] >= date_ks) & (incendie_feather['date'] <= date_today)]
     dates = np.sort(incendie_feather.date.unique())
     logger.info(dates)
     
@@ -488,6 +484,7 @@ if __name__ == "__main__":
         geo_data.index = geo_data.hex_id
         geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
                                                 on='hex_id')
+        geo_data.reset_index(inplace=True)
         geo_data['date'] = ks
         geo_data['date_str'] = date.strftime('%Y-%m-%d')
         geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
@@ -495,18 +492,21 @@ if __name__ == "__main__":
         interface.append(geo_data)
 
     interface = pd.concat(interface).reset_index(drop=True)
-
-    interface.fillna(0, inplace=True)
-
-    k_today = interface.date.max() - 1
-    k_tomorrow = interface.date.max()
+    if date_today in incendie_feather.date.unique():
+        print('here')
+        k_today = interface.date.max() - 1
+        k_tomorrow = interface.date.max()
+    else:
+        k_today = interface.date.max()
+        k_tomorrow = k_today + 1
 
     if sinister == 'firepoint':
         interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
 
     interface.rename({'temp12' : 'temp', 'dwpt12' : 'dwpt',
                       'rhum12' : 'rhum', 'prcp12' : 'prcp', 'wdir12' : 'wdir',
-                      'wspd12' : 'wspd', 'prec24h12' : 'prec24h',}, inplace=True, axis=1)
+                      'wspd12' : 'wspd', 'prec24h12' : 'prec24h',
+                      'daily_severity_rating' : 'dailySeverityRating'}, inplace=True, axis=1)
 
     ######################### Preprocess #################################
     n_pixel_x = 0.02875215641173088
@@ -529,15 +529,26 @@ if __name__ == "__main__":
     interface = fire_prediction(spatialGeo, interface, dept, features, trainFeatures, features_selected, scaling, dir_data, dates)
 
     today = gpd.read_file(dir_interface / 'hexagones_today.geojson')
-    today['fire_prediction_raw'] = interface[interface['date'] == k_today]['fire_prediction_raw'].values
-    today['fire_prediction'] = interface[interface['date'] == k_today]['fire_prediction'].values
-    today['fire_prediction_dept'] = interface[interface['date'] == k_today]['fire_prediction_dept'].values
+
+    fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
+
+    for ff in fire_feature:
+        if ff in today.columns:
+            today.drop(ff, inplace=True, axis=1)
+    interface[interface['date'] == k_today].to_file('interface/geodt.geojson', driver='GeoJSON')
+    today = today.set_index('hex_id').join(interface[interface['date'] == k_today].set_index('hex_id')[fire_feature],
+                                                on='hex_id')
+    today.reset_index(inplace=True)
+    today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
 
     if k_tomorrow in interface.date.unique():
-        tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
-        tomorrow['fire_prediction'] = interface[interface['date'] == k_tomorrow]['fire_prediction'].values
-        tomorrow['fire_prediction_raw'] = interface[interface['date'] == k_tomorrow]['fire_prediction_raw'].values
-        tomorrow['fire_prediction_dept'] = interface[interface['date'] == k_tomorrow]['fire_prediction_dept'].values
 
-    today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
-    tomorrow.to_file(dir_interface / 'hexagones_tomorrow.geojson',  driver='GeoJSON')
+        tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
+        for ff in fire_feature:
+            if ff in tomorrow.columns:
+                tomorrow.drop(ff, inplace=True, axis=1)
+
+        tomorrow = tomorrow.set_index('hex_id').join(interface[interface['date'] == k_tomorrow].set_index('hex_id')[fire_feature],
+                                                on='hex_id')
+        tomorrow.reset_index(inplace=True)
+        tomorrow.to_file(dir_interface / 'hexagones_tomorrow.geojson',  driver='GeoJSON')

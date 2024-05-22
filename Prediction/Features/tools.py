@@ -591,9 +591,9 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     osmnx_, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
     osmnx_ = osmnx_[0]
     osmnx = osmnx_ > 0
-    mask = np.isnan(osmnx)
-    osmnx = influence_index(osmnx, mask)
+    mask = np.isnan(tifFile_high)
     osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1])
+    osmnx = influence_index(osmnx, mask)
     mask = np.isnan(tifFile_high)
     osmnx[mask] = np.nan
     res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
@@ -605,7 +605,7 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     for node in unodes:
         mask1 = tifFile == node
         mask2 = tifFile_high == node
-        if True not in np.unique(population[mask2]):
+        if True not in np.unique(mask2):
             continue
         res[mask1] = np.nanmean(osmnx[mask2])
 
@@ -614,6 +614,37 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     pickle.dump(osmnx,f)"""
 
     outputName = 'osmnx.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+
+def raster_water(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
+    dir_sat = dir_data / 'GEE' / 'landcover' 
+    water, _, _ = read_tif(dir_sat / 'summer.tif')
+    water = water[-1]
+    water = water == 0
+    mask = np.isnan(tifFile_high)
+    water = resize_no_dim(water, tifFile_high.shape[0], tifFile_high.shape[1])
+    water[mask] = np.nan
+    water = influence_index(water, mask)
+    mask = np.isnan(tifFile_high)
+    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
+
+    #osmnx = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
+    #osmnx = rasterisation(osmnx, reslat, reslon, 'osmnx')
+
+    unodes = np.unique(tifFile)
+    for node in unodes:
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+        if True not in np.unique(mask2):
+            continue
+        res[mask1] = np.nanmean(water[mask2])
+
+    """outputName = 'osmnx22.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(osmnx,f)"""
+
+    outputName = 'water.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
 

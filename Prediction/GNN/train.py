@@ -176,18 +176,25 @@ train_fet_num = [0,1,2,3,4,5]
 for fet in trainFeatures:
     if fet in features:
         coef = 4 if scale > 0 else 1
-        if fet == 'Calendar':
+        if fet == 'Calendar' or fet == 'Calendar_mean':
             maxi = len(calendar_variables)
-        elif fet == 'air':
+        elif fet == 'air' or fet == 'air_mean':
             maxi = len(air_variables)
         elif fet == 'sentinel':
             maxi = coef * len(sentinel_variables)
         elif fet == 'Geo':
             maxi = len(geo_variables)
+        elif fet == 'foret':
+            maxi = coef * len(foret_variables)
+        elif fet == 'landcover':
+            maxi = coef * len(landcover_variables)
+        elif fet in varying_time_variables:
+            maxi = 1
         else:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
-
+        
+logger.info(train_fet_num)
 prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
 if spec != '':
     prefix += '_'+spec
@@ -228,18 +235,16 @@ last_bool = None
 
 for model, use_temporal_as_edges, is_2D_model in gnnModels:
     logger.info(f'Fitting model {model}')
-    try:
-        logger.info('Try loading loader')
+    logger.info('Try loading loader')
+    if not is_2D_model:
+        trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+    else:
+        trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+        valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
 
-        if not is_2D_model:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        else:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-    except:
-        logger.info(f'Reading failed, computing, loading loader_{str(use_temporal_as_edges)}.pkl')
-
+    logger.info(f'Reading failed, computing, loading loader_{str(use_temporal_as_edges)}.pkl')
+    if trainLoader is None:
         last_bool = use_temporal_as_edges
         if not is_2D_model:
             trainLoader, valLoader = train_val_data_loader(graph=graphScale, Xset=Xset, Yset=Yset,

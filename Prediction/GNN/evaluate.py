@@ -155,5 +155,10 @@ if __name__ == "__main__":
     experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
                       ]
     
+                       
+    # exp
+    experiments_inference = [('exp1', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
+                      ]
+    
     check_and_create_path(dir_output)
     load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)

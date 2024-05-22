@@ -575,6 +575,7 @@ def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
                                     use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+    else:
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
         if loader is None:
             loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
@@ -606,22 +607,22 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-        if loader is None:
-            loader = create_test_loader_2D(graphScale,
-                                        X,
-                                        Y,
-                                        Xtrain,
-                                        Ytrain,
-                                        use_temporal_as_edges,
-                                        device,
-                                        scaling,
-                                        pos_feature,
-                                        pos_feature_2D,
-                                        k_days,
-                                        shape,
-                                        dir_output)
+    if loader is None:
+        loader = create_test_loader_2D(graphScale,
+                                    X,
+                                    Y,
+                                    Xtrain,
+                                    Ytrain,
+                                    use_temporal_as_edges,
+                                    device,
+                                    scaling,
+                                    pos_feature,
+                                    pos_feature_2D,
+                                    k_days,
+                                    shape,
+                                    dir_output)
 
-            save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+        save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
 
     return loader
 

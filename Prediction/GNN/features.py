@@ -226,6 +226,12 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             name = 'elevation.pkl'
             arrayEl = read_object(name, dir_data)
 
+        if 'dynamicWorld' in features:
+            arrayDW = []
+            for band in dynamic_world_variables:
+                name = band+'.pkl'
+                arrayDW.append(read_object(name, dir_data))
+
         ### OSMNX
         if 'highway' in features:
             name = 'osmnx.pkl'
@@ -254,6 +260,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     save_values(arrayEl, pos_feature['elevation'], index, maskNode)
                 if 'highway' in features:
                     save_values(arrayOS, pos_feature['highway'], index, maskNode)
+                if 'dynamicWorld' in features:
+                    for i, band in dynamic_world_variables:
+                        save_values(arrayDW[i], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(band) * 4), index, maskNode)
                 if 'foret' in features:
                     for band in foret_variables:
                         save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)

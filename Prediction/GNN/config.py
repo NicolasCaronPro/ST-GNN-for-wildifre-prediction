@@ -73,6 +73,7 @@ features = [
             'Calendar',
             'Historical',
             'Geo',
+            #dynamicWorld,
             'air',
             ]
 
@@ -86,12 +87,13 @@ trainFeatures = [
             'elevation',
             'highway',
             'population',
-            'sentinel',
+            #'sentinel',
             'landcover',
             'foret',
             'Calendar',
             'Historical',
             'Geo',
+            #dynamicWorld,
             #'air',
             ]
 
@@ -138,8 +140,8 @@ departements = ['departement-01-ain',
 trainDepartements = [
                 'departement-01-ain',
                 'departement-25-doubs',
+                #'departement-69-rhone',
                 'departement-78-yvelines',
-                'departement-69-rhone',
                 ]
 
 

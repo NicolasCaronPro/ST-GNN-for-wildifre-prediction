@@ -121,31 +121,30 @@ class GraphStructure():
         self.kmeans = pickle.load(open(path / name, 'rb'))
         self.ids = self.kmeans.predict(X)
 
-    def _create_predictor(self, start, end, dir):
+    def _create_predictor(self, start, end, dir, sinister):
         dir_influence = root_graph / dir / 'influence' / '2x2'
         dir_predictor = root_graph / dir / 'influenceClustering'
 
         # Scale Shape
         for dep in np.unique(self.departements):
-
             influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
-
             predictor = Predictor(5)
             predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
             save_object(predictor, str2name[dep]+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
 
+        dir_target = root_target / sinister / 'log'
         # Departement
         for dep in np.unique(self.departements):
-            influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
+            influence = read_object(str2name[dep]+'Influence.pkl', dir_target)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
             influence = influence.reshape(-1, influence.shape[2])
             influence = np.nansum(influence, axis=0)
-            print(influence.shape)
+            print(np.min(influence), np.max(influence), np.mean(influence))
             predictor = Predictor(5)
             predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
             save_object(predictor, str2name[dep]+'PredictorDepartement.pkl', path=dir_predictor)
@@ -223,7 +222,7 @@ class GraphStructure():
         uniqueDept = np.unique(self.departements)
         dico = {}
         for key in uniqueDept:
-            mask = np.argwhere(self.departements == key)
+            mask = np.argwhere(self.departements.values == key)
             geoDep = unary_union(self.oriGeometry[mask[:,0]])
             dico[key] = geoDep
 

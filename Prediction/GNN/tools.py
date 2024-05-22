@@ -706,7 +706,6 @@ def order_class(predictor, pred):
     for c in range(cc.shape[0]):
         mask = np.argwhere(pred == classes[c])
         res[mask] = c
-
     return res
 
 def realVspredict(ypred, y, dir_output, name):
@@ -1069,8 +1068,6 @@ def train_sklearn_api_model(trainDataset, valDataset,
         Yw = np.ones(Ytrain.shape[0])
 
     for name, model in models:
-        if name  == 'ngboost':
-            continue
 
         if name == 'xgboost':
             fitparams={
@@ -1410,6 +1407,8 @@ def create_pos_feature(graph, shape, features):
                 newShape += 4 * len(sentinel_variables)
             elif var == "foret":
                 newShape += 4 * len(foret_variables)
+            elif var == 'dynamicWorld':
+                newShape += 4 * len(dynamic_world_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var in varying_time_variables:
