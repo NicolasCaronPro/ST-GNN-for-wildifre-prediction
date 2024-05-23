@@ -312,9 +312,22 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if node[4] - 1 < 0:
                     continue
 
-                save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
+                save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
                 
             del arrayInfluence
+
+        logger.info('Vigicrues')
+        if 'vigicrues' in features:
+            for var in vigicrues_variables:
+                array = read_object('vigicrues'+var, dir_data)
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
+
+                    save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Vigicrues'] + (4 * vigicrues_variables.index(var)), index, maskNode)
+                del array
 
     return X, pos_feature
 

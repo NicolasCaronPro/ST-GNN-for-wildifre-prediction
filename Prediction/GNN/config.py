@@ -69,11 +69,11 @@ features = [
             'elevation', 'highway', 'population',
             'sentinel',
             'landcover',
+            'vigicrues',
             'foret',
             'Calendar',
             'Historical',
             'Geo',
-            #dynamicWorld,
             'air',
             ]
 
@@ -88,12 +88,12 @@ trainFeatures = [
             'highway',
             'population',
             #'sentinel',
+            #'vigicrues',
             'landcover',
             'foret',
             'Calendar',
             'Historical',
             'Geo',
-            #dynamicWorld,
             #'air',
             ]
 
@@ -190,7 +190,7 @@ Rewrite = True
 scaling='z-score' # Scale to used
 encoding='Catboost' # How we encode the categorical variable
 
-# Neural networks
+"""# Neural networks
 dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                         heads=[4, 4, 2],
                         dropout=dropout,
@@ -260,4 +260,4 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                                           n_sequences=k_days,
                                           dropout=dropout,
                                           device=device, act_func=act_func)
-                    }
+                    }"""

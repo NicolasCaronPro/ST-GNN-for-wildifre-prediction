@@ -188,6 +188,8 @@ for fet in trainFeatures:
             maxi = coef * len(foret_variables)
         elif fet == 'landcover':
             maxi = coef * len(landcover_variables)
+        elif fet == 'vigicrues':
+                maxi = len(vigicrues_variables)
         elif fet in varying_time_variables:
             maxi = 1
         else:

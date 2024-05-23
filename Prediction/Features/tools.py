@@ -370,7 +370,6 @@ def rasterise_meteo_data(h3, maskh3, cems, sh, dates, dir_output):
 def rasterise_vigicrues(h3, maskh3, cems, sh, dates, dir_output, name):
     
     lenDates = len(dates)
-    print(lenDates)
     spatioTemporalRaster = np.full((sh[0], sh[1], lenDates), np.nan)
 
     for i, date in enumerate(dates):
@@ -378,8 +377,12 @@ def rasterise_vigicrues(h3, maskh3, cems, sh, dates, dir_output, name):
             print(date)
         #ddate = dt.datetime.strptime(date, "%Y-%m-%d")
         cems_grid = create_grid_cems(cems, date, 0, 'hauteur')
-
-        h3['hauteur'] = interpolate_gridd('hauteur', cems_grid, h3.longitude.values, h3.latitude.values, 'linear')
+        if cems_grid is None:
+            continue
+        if len(cems_grid) < 4:
+            continue
+        cems_grid = cems_grid[cems_grid['hauteur'] >= 0]
+        h3['hauteur'] = interpolate_gridd('hauteur', cems_grid, h3.longitude.values, h3.latitude.values, 'nearest')
 
         rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, 'hauteur')
 
@@ -586,7 +589,6 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
     f = open(dir_output / outputName,"wb")
     pickle.dump(res2,f)
 
-
 def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     osmnx_, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
     osmnx_ = osmnx_[0]
@@ -618,13 +620,17 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     pickle.dump(res,f)
 
 def raster_water(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
+    dir_sat = dir_data / 'GEE' / 'sentinel' 
+    sen, _, _ = read_tif(dir_sat / 'summer.tif')
+    mask = np.isnan(sen[0])
     dir_sat = dir_data / 'GEE' / 'landcover' 
     water, _, _ = read_tif(dir_sat / 'summer.tif')
     water = water[-1]
-    water = water == 0
-    mask = np.isnan(tifFile_high)
-    water = resize_no_dim(water, tifFile_high.shape[0], tifFile_high.shape[1])
+    water = (water == 0).astype(float)
     water[mask] = np.nan
+
+    water = resize_no_dim(water, tifFile_high.shape[0], tifFile_high.shape[1])
+    mask = np.isnan(water)
     water = influence_index(water, mask)
     mask = np.isnan(tifFile_high)
     res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
@@ -639,10 +645,6 @@ def raster_water(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
         if True not in np.unique(mask2):
             continue
         res[mask1] = np.nanmean(water[mask2])
-
-    """outputName = 'osmnx22.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(osmnx,f)"""
 
     outputName = 'water.pkl'
     f = open(dir_output / outputName,"wb")

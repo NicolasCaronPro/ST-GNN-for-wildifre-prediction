@@ -17,7 +17,6 @@ parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
 
@@ -32,7 +31,6 @@ do2D = args.database2D == "True"
 doDatabase = True
 do2D = False"""
 scale = int(args.scale)
-ks = int(args.k_days)
 sinister = args.sinister
 spec = args.spec
 minPoint = args.nbpoint
@@ -119,8 +117,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
-        graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, False)
+        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
@@ -204,8 +202,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     # Select train features
     pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures_:
-        if fet in features_:
+    for fet in trainFeatures:
+        if fet in features:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -219,6 +217,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                 maxi = coef * len(foret_variables)
             elif fet == 'landcover':
                 maxi = coef * len(landcover_variables)
+            elif fet == 'vigicrues':
+                maxi = len(vigicrues_variables)
             elif fet in varying_time_variables:
                 maxi = 1
             else:

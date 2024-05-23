@@ -11,6 +11,7 @@ foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11',
 osmnx_variables = ['highway']
 elevation_variables = ['elevation']
 population_variabes = ['population']
+vigicrues_variables = ['12', '16']
 dynamic_world_variables = ['water',
                        #'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow'
                        ]

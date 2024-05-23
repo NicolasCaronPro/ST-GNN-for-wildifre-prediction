@@ -82,7 +82,7 @@ class GenerateDatabase():
         #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
         #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
-        raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
 
     def add_air_qualite(self):
         assert RASTER == True
@@ -98,7 +98,7 @@ class GenerateDatabase():
         #'SO2': '01',
         'PM10': '24',
         'PM25': '39',
-        } 
+        }
 
         if not (self.airParams['dir'] / 'air' / 'Air_archive').is_dir():
             token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MTI4NzA1NjAsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiZTI5YmJjOGItODY2Ny00ODcxLTk5YzUtYjE1NGM4NWJiNTIzIiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.J6axigDBoJY4kmMLbQfUwl-MCudxF5cm43R1WTXtt7Q'
@@ -150,6 +150,7 @@ class GenerateDatabase():
                                     time.sleep(1)
                                 if cpt == 5:
                                     break
+                                
         if not (self.airParams['dir'] / 'air' / 'archive' / 'polluants1216.csv').is_file():
 
             polluants_csv = []
@@ -179,11 +180,47 @@ class GenerateDatabase():
         rasterise_air_qualite(self.clusterSum, self.h3tif, polluants_csv, self.h3tif.shape, self.dates, self.dir_raster)
 
     def compute_hauteur_riviere(self):
-
-        START = dt.datetime.strptime(self.vigicrueParams['start'], '%Y-%m-%d') 
-        STOP = dt.datetime.strptime(self.vigicrueParams['end'], '%Y-%m-%d') 
+        code = self.departement.split('-')[1]
         dir_logs = Path('./')
         dir_hydroreel = self.vigicrueParams['dir'] / 'hydroreel'
+        dir_france_hydroreel = Path('/home/caron/Bureau/csv/france/data/hydroreel')
+        check_and_create_path(dir_france_hydroreel)
+        ################################ Create file ####################################################
+        if not (dir_france_hydroreel / 'stations_hydroreel.csv').is_file():
+            if not (dir_hydroreel / 'stations_hydroreel_all.csv').is_file():
+                print("On récupère sur le net les stations hydroréel")
+                url="https://www.hydro.eaufrance.fr/rechercher/ajax/entites-hydrometriques?hydro_entities_search%5Blabel%5D%5Bvalue%5D=&hydro_entities_search%5Bcode%5D=&hydro_entities_search%5BhydroRegion%5D=&hydro_entities_search%5BsiteTypes%5D%5B%5D=53b64673-5725-4967-9880-b775b65bdc9e&hydro_entities_search%5BsiteTypes%5D%5B%5D=913a1b84-0e48-44e1-a7c7-ab8a867b34ee&hydro_entities_search%5BsiteTypes%5D%5B%5D=672aecb1-d629-426e-85a1-60882db8b30e&hydro_entities_search%5BsiteTypes%5D%5B%5D=7a358b42-a4c6-4ee8-b019-722c1871cc3a&hydro_entities_search%5BtopoWatershedAreaMin%5D=&hydro_entities_search%5BtopoWatershedAreaMax%5D=&hydro_entities_search%5BsiteStatus%5D=&hydro_entities_search%5BstartedDateMin%5D=&hydro_entities_search%5BstartedDateMax%5D=&hydro_entities_search%5BkmPointMin%5D=&hydro_entities_search%5BkmPointMax%5D=&hydro_entities_search%5BstationTypes%5D%5B%5D=a642c792-d0fc-40ec-91c2-f0790391dba6&hydro_entities_search%5BstationTypes%5D%5B%5D=fbe2b93c-e34d-43bf-8f7b-4acbdaee8af0&hydro_entities_search%5BstationTypes%5D%5B%5D=5df2125a-ad73-4147-bb73-32da7982a978&hydro_entities_search%5BrddSandreCode%5D=&hydro_entities_search%5Bactive%5D=1"
+                r = requests.get(url)
+                dico = json.loads(r.text)
+                txt = "id;nom;X;Y\n"
+                txt += '\n'.join([';'.join([dico['sites'][k]['stations'][0]['CdStationHydro'], dico['sites'][k]['stations'][0]['LbStationHydro'].replace(';', ',').replace('[', '').replace(']','').replace(' ','_'), dico['sites'][k]['stations'][0]['CoordStationHydro']['CoordXStationHydro'], dico['sites'][k]['stations'][0]['CoordStationHydro']['CoordYStationHydro']]) for k in range(len(dico['sites']))])
+                with open('/tmp/stations.csv', 'w') as f:
+                    f.write(txt)
+                df = pd.read_csv('/tmp/stations.csv', sep=';')
+                gdf = gpd.GeoDataFrame(df, geometry=gpd.points_from_xy(df.X, df.Y))
+                gdf.crs = "EPSG:4326"
+                df = gpd.sjoin(gdf, depts)
+                df = df[['id', 'nom_left', 'X', 'Y', 'code_insee']]
+                df.columns = ['station', 'nom', 'longitude', 'latitude', 'departement']
+                df.to_csv(dir_france_hydroreel / 'stations_hydroreel_all.csv', index=False, sep=';')
+            else:
+                df = pd.read_csv(dir_france_hydroreel / 'stations_hydroreel_all.csv', sep=';')
+
+            print("On crée la liste des stations hydroréel")
+            dg = pd.read_csv(dir_france_hydroreel / "stations_result_france_12052023_1_95.csv")
+            dg['dep_aval'] = dg.dep_aval.astype(str).str.zfill(2)
+            print(f"Nombre de stations dont le {code} est en aval: {len(dg.loc[dg.dep_aval==code])}")
+            stations_amont = list(dg.loc[dg.dep_aval==code].station)
+            print(f"Nombre de stations dans le département {code} : {len(df.loc[df['departement'] == code])}")
+            stations_hydroreel = df[(df['station'].isin(stations_amont)) | (df['departement'] == code)]
+            stations_hydroreel.to_csv(dir_hydroreel / 'stations_hydroreel.csv')
+        else:
+            stations_hydroreel = pd.read_csv(dir_hydroreel / 'stations_hydroreel.csv')
+        #########################################################################
+
+        START = dt.datetime.strptime(self.vigicrueParams['start'], '%Y-%m-%d') 
+        STOP = dt.datetime.strptime(self.vigicrueParams['end'], '%Y-%m-%d')
+
         rname = 'stations_'+self.departement.split('-')[1]+'_full.csv'
         fic_name = dir_hydroreel / rname
 
@@ -196,7 +233,6 @@ class GenerateDatabase():
 
         logger.info('Collecting Hydroreel stations list')
 
-        stations_hydroreel = pd.read_csv(fic_name, sep=',', dtype={'departement': str})
         stations_a_ignorer = []
         for station in sorted(list(stations_hydroreel.station)):
             #if not (dir_hydroreel / f"{station}.csv").is_file():
@@ -246,7 +282,9 @@ class GenerateDatabase():
         for index, station in enumerate(sorted(stations_hydroreel.station)):
             logger.info(f" * on tente de mettre à jour {station}") 
             df = pd.read_csv(dir_hydroreel / (station+'.csv'))
-            Date_debut = max(df['Date'])
+            """Date_debut = max(df['Date'])
+            if isinstance(Date_debut, str):
+                Date_debut = dt.datetime.strptime(Date_debut, '%Y-%m-%dT%H:%M:%S')
             Date_debut += dt.timedelta(hours=1)
             Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
                         Date_debut + dt.timedelta(days=3))
@@ -280,7 +318,7 @@ class GenerateDatabase():
                             f.write(f'{dt.datetime.now()},{url}\n')
                     Date_debut = Date_fin
                     Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
-                                Date_debut + dt.timedelta(days=3))
+                                Date_debut + dt.timedelta(days=3))"""
 
             total.append(pd.read_csv(dir_hydroreel / (station+'.csv')))
 
@@ -295,7 +333,7 @@ class GenerateDatabase():
         rasterise_vigicrues(self.clusterSum, self.h3tif, total, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues12')
         rasterise_vigicrues(self.clusterSum, self.h3tif, total16, self.h3tif.shape, self.dates, self.dir_raster, 'vigicrues16')
 
-        logger.info('Constructing Hydroreel dataframe')
+        """logger.info('Constructing Hydroreel dataframe')
         df_hydro = pd.DataFrame()
         moyennes = {}
         for Hydro_station in dir_hydroreel.iterdir():
@@ -327,99 +365,7 @@ class GenerateDatabase():
 
         logger.info(f"On sauvegarde le dataframe hydroréel, de taille {df_hydro.shape}")
 
-        df_hydro['creneau'] = df_hydro.index
-    
-    def compute_bouchon(self):
-        
-        for i, date in enumerate(self.dates):
-            logger.info(date)
-            bison_urls = ["https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapBouchonsFranceEntiere.html",
-                        "https://tipi.bison-fute.gouv.fr/bison-fute-ouvert/publicationsDIR/Evenementiel-DIR/cnir/RecapTraficFranceEntiere.html"]
-
-            dir_trafic = self.bouchonParams['dir'] / 'trafic'
-            (dir_trafic).mkdir(exist_ok=True, parents=True)
-            (dir_trafic / 'raw').mkdir(exist_ok=True, parents=True)
-
-            keys = ['nature', 'horodate', 'axe', 'sens_cardinal', 'point_repere', 'longueur_pr', 'commune']
-            qnames = ['nature', 'ligne_horodate_fin_exception_ve', 'axe', 'sens_cardinal', 'pr', 'longueur', 'commune']
-
-            def process_data(next_element, keys, qnames, importance, department_name, df):
-                data = {}
-
-                for key, qname in zip(keys, qnames):
-                    try:
-                        element = next_element.find('span', {'qname': qname})
-                        element = next_element.find('span', class_=qname) if not element else element # if qname is not found, try with class
-                        data[key] = element.get_text(strip=True) if element else None
-                    except AttributeError:
-                        data[key] = None
-
-                data['date'] = date
-                data['department'] = department_name
-                data['importance'] = len(importance)
-
-                new_row_df = pd.DataFrame(data, index=[0])
-                updated_df = pd.concat([df, new_row_df], ignore_index=True)
-
-                return updated_df
-
-            for index, bison_url in enumerate(bison_urls):
-                html = requests.get(bison_url)
-
-                bsobj = BeautifulSoup(html.content, 'html.parser')
-
-                df = pd.DataFrame()
-
-                departments = bsobj.find_all('span', class_='rupture')
-                initial_rows = df.shape[0]
-
-                for department in departments:
-                    department_name = department.find('a').get_text(strip=True)
-                    if department_name.split(' ')[1] != self.departement.split('-')[1]:
-                        continue
-                    next_element = department.find_next_sibling()
-                    while next_element and next_element.name != 'span' and 'rupture' not in next_element.get('class', []):
-                        if next_element.name == 'div' and 'interligne' in next_element['class'][0]:
-                            elements = next_element.find_all('span', {'qname': 'element'})
-                            for element in elements:
-                                importance = next_element.find('span', {'qname': 'importance_vr_reduit'}).get_text(strip=True)
-                                df = process_data(element, keys, qnames, importance, department_name, df)
-
-                        next_element = next_element.find_next_sibling()
-
-                df.drop_duplicates(inplace=True) # I don't want to add elements I already have in my df
-
-                df.to_csv(dir_trafic / f'raw/bison_fute_{"trafic" if "Trafic" in bison_url else "bouchons"}_raw_{date}.csv', index=False)
-
-                df.fillna(value=np.nan, inplace=True)
-                df['sens_cardinal'] = df['sens_cardinal'].str.replace(r'^\(|sens(?=\s)', '', regex=True).str.strip()
-                df['longueur_pr'] = df['longueur_pr'].str.replace(' environ', '')
-                df['longueur_pr'].fillna('', inplace=True)
-                df['longueur_pr'] = df['longueur_pr'].apply(lambda x: x.replace("(sur ", ''))
-                df['longueur_pr'] = df['longueur_pr'].apply(lambda x: x.replace(' km)', ''))
-                df['longueur_pr'] = df['longueur_pr'].str.replace('de longueur indéterminée', 'nan')
-                df['longueur_pr'] = df['longueur_pr'].str.replace(',', '.')
-                df['longueur_pr'] = df['longueur_pr'].apply(lambda x: float(x) if x not in ['nan', ''] else np.nan)
-                df = df.rename(columns={'longueur_pr': 'longueur_pr (km)'})
-
-                df['department_number'] = df['department'].str.extract(r'Département (\d+)')
-                df['department_name'] = df['department'].str.extract(r'\(([^()]+)\)')
-                df.drop(columns=['department'], inplace=True)
-
-                new_order = ['date', 'department_number', 'department_name'] + [col for col in df.columns if col not in ['date', 'department_number', 'department_name']]
-                df = df[new_order]
-
-                df.to_csv(dir_trafic / f'bison_fute_{"trafic" if "Trafic" in bison_url else "bouchons"}_{date}.csv', index=False)
-                if index == 0:
-                    dg = df.loc[(df.department_number==department)&(df.importance>=2)]
-                    dg['news'] = dg.apply(lambda x: f"{x['nature']} de {x['longueur_pr (km)']} km sur l'axe {x['axe']}, {x['commune']}", axis=1)
-                else:
-                    liste = ['Accident', 'Incendie', 'Manifestation sociale', 'Effondrement', 'Éboulement',
-                            'Glissement de terrain', 'Animal errant', 'Produit sur chaussée',
-                            'Véhicule en panne', 'Obstacle', 'Véhicule abandonné', 'Véhicule arrêté']
-                    dg = df.loc[(df.nature.isin(liste))&(df.importance>=2)&(df.department_number==department)]
-                    dg['news'] = dg.apply(lambda x: f"{x['nature']} {x['commune']}, axe {x['axe']}", axis=1)
-                news_trafic = list(dg.news.values)                
+        df_hydro['creneau'] = df_hydro.index"""            
 
     def compute_nappes_phréatique(self):
         pass
@@ -436,32 +382,31 @@ class GenerateDatabase():
         self.h3['longitude'] = self.h3['geometry'].apply(lambda x : float(x.centroid.x))
         self.h3['altitude'] = 0
 
-        if RASTER:
-            self.clusterSum = self.h3.copy(deep=True)
-            self.clusterSum['cluster'] = self.clusterSum.index.values.astype(int)
-            self.cluster = None
-            sdate = start
-            edate = stop
-            self.dates = find_dates_between(sdate, edate)
+        self.clusterSum = self.h3.copy(deep=True)
+        self.clusterSum['cluster'] = self.clusterSum.index.values.astype(int)
+        self.cluster = None
+        sdate = start
+        edate = stop
+        self.dates = find_dates_between(sdate, edate)
 
-            #n_pixel_x = 0.016133099692723363
-            #n_pixel_y = 0.016133099692723363
+        #n_pixel_x = 0.016133099692723363
+        #n_pixel_y = 0.016133099692723363
 
-            n_pixel_x = 0.02875215641173088
-            n_pixel_y = 0.020721094073767096
+        n_pixel_x = 0.02875215641173088
+        n_pixel_y = 0.020721094073767096
 
-            self.resLon = n_pixel_x
-            self.resLat = n_pixel_y
-            self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')
-            logger.info(f'Low scale {self.h3tif.shape}')
+        self.resLon = n_pixel_x
+        self.resLat = n_pixel_y
+        self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')
+        logger.info(f'Low scale {self.h3tif.shape}')
 
-            n_pixel_x = 0.0002694945852326214
-            n_pixel_y = 0.0002694945852352859
+        n_pixel_x = 0.0002694945852326214
+        n_pixel_y = 0.0002694945852352859
 
-            self.resLon_high = n_pixel_x
-            self.resLat_high = n_pixel_y
-            self.h3tif_high = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_high')
-            logger.info(f'High scale {self.h3tif_high.shape}')
+        self.resLon_high = n_pixel_x
+        self.resLat_high = n_pixel_y
+        self.h3tif_high = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_high')
+        logger.info(f'High scale {self.h3tif_high.shape}')
 
         if self.computeTemporal:
             self.compute_temporal()
@@ -471,9 +416,6 @@ class GenerateDatabase():
 
         if self.addAir:
             self.add_air_qualite()
-
-        if self.addBouchon:
-            self.compute_bouchon()
         
         if self.addVigicrue:
             self.compute_hauteur_riviere()
@@ -496,7 +438,6 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
     outputParams  = {'start' : start,
                     'end' : stop}
     
-
     spatialParams = {'dir_sat':  rootDisk / departement / 'data',
                     'dir' : dir_data,
                     'elevation_file' : 'elevation.tif',
@@ -535,7 +476,8 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
 
 if __name__ == '__main__':
     RASTER = True
-
+    depts = gpd.read_file('/home/caron/Bureau/csv/france/data/departements/departements-20180101.shp')
+    depts = depts.to_crs("EPSG:4326")
     parser = argparse.ArgumentParser(
         prog='Train',
         description='Create graph and database according to config.py and tained model',
@@ -557,13 +499,13 @@ if __name__ == '__main__':
     addVigicrue = args.vigicrues == "True"
 
     ################## Ain ######################
-    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## DOUBS ######################
-    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## YVELINES ######################
-    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
 
     ################## Rhone ######################
     launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)

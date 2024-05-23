@@ -171,7 +171,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             #if node[4] - 1 < 0:
             #    continue
 
-            save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
+            save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
 
     return X
 
@@ -247,15 +247,20 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
                      k_today,
                      int(args.days),
                      scaling)
-    
-    if model in traditionnal_models:
-        today_X = today_X.detach().cpu().numpy()
-        today_X_fet = today_X[:, features_selected, :]
-        today_X_fet = today_X_fet.reshape(today_X_fet.shape[0], -1)
-        today_Y = graph.predict_model_api_sklearn(today_X_fet, False)
-    else:
-        today_Y = graph._predict_tensor(today_X_fet, E)
 
+    if today_X is None:
+    
+        if model in traditionnal_models:
+            today_X = today_X.detach().cpu().numpy()
+            today_X_fet = today_X[:, features_selected, :]
+            today_X_fet = today_X_fet.reshape(today_X_fet.shape[0], -1)
+            today_Y = graph.predict_model_api_sklearn(today_X_fet, False)
+        else:
+            today_Y = graph._predict_tensor(today_X_fet, E)
+    else:
+        today_X = None
+
+    tomorrow_Y = None
     if k_tomorrow in np.unique(X[:,4]):
         tomorrow_X, E = create_inference(graph,
                         X,
@@ -265,32 +270,37 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
                         k_tomorrow,
                         int(args.days),
                         scaling)
-    
-        if model in traditionnal_models:
-            # Add varying time features
-            if int(args.days) > 0:
-                trainFeatures += varying_time_variables
-                features += varying_time_variables
-                pos_feature, newShape = create_pos_feature(graph, 6, features)
-                X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-            save_object(X, 'X_'+prefix+'.pkl', dir_output)
-            tomorrow_X = tomorrow_X.detach().cpu().numpy()
-            tomorrow_X_fet = tomorrow_X[:, features_selected, :]
-            tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
-            tomorrow_Y = graph.predict_model_api_sklearn(tomorrow_X_fet, False)
+        
+        if tomorrow_X is not None:
+            if model in traditionnal_models:
+                # Add varying time features
+                if int(args.days) > 0:
+                    trainFeatures += varying_time_variables
+                    features += varying_time_variables
+                    pos_feature, newShape = create_pos_feature(graph, 6, features)
+                    X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+                save_object(X, 'X_'+prefix+'.pkl', dir_output)
+                tomorrow_X = tomorrow_X.detach().cpu().numpy()
+                tomorrow_X_fet = tomorrow_X[:, features_selected, :]
+                tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
+                tomorrow_Y = graph.predict_model_api_sklearn(tomorrow_X_fet, False)
+            else:
+                tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
         else:
-            tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
+            tomorrow_Y = None
 
+    fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
+    geoDT[fire_feature] = np.nan
     unodes = np.unique(orinode[:,0])
-    print(unodes)
     for node in unodes:
-        geoDT.loc[geoDT[(geoDT['date'] == k_today) &
-                                (geoDT['id'] == node)].index, 'fire_prediction_raw'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
-        
-        geoDT.loc[geoDT[(geoDT['date'] == k_today) &
-                                (geoDT['id'] == node)].index, 'fire_prediction'] = order_class(predictor, predictor.predict(today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]]))[0]
-        
-        if k_tomorrow in np.unique(X[:,4]):
+        if today_X is not None:
+            geoDT.loc[geoDT[(geoDT['date'] == k_today) &
+                                    (geoDT['id'] == node)].index, 'fire_prediction_raw'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
+            
+            geoDT.loc[geoDT[(geoDT['date'] == k_today) &
+                                    (geoDT['id'] == node)].index, 'fire_prediction'] = order_class(predictor, predictor.predict(today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]]))[0]
+            
+        if k_tomorrow in np.unique(X[:,4]) and tomorrow_Y is not None:
 
             geoDT.loc[interface[(geoDT['date'] == k_tomorrow) &
                                     (geoDT['id'] == node)].index, 'fire_prediction_raw'] = tomorrow_Y[np.argwhere(tomorrow_X[:, 0, 0] == node)[:,0]][0]
@@ -300,13 +310,16 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     
     geoDT['fire_prediction_dept'] = 0
 
-    today_risk = geoDT[(geoDT['date'] == k_today)].groupby('id')['fire_prediction_raw'].mean().values
-    tomorrow_risk = geoDT[(geoDT['date'] == k_tomorrow)].groupby('id')['fire_prediction_raw'].mean().values
-    today_risk = np.nansum(today_risk)
-    tomorrow_risk = np.nansum(tomorrow_risk)
+    if today_X is not None:
+        today_risk = geoDT[(geoDT['date'] == k_today)].groupby('id')['fire_prediction_raw'].mean().values
+        today_risk = np.nansum(today_risk)
+        geoDT.loc[geoDT[(geoDT['date'] == k_today)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(today_risk)))[0]
+        
+    if k_tomorrow in np.unique(X[:,4]) and tomorrow_Y is not None:
+        tomorrow_risk = geoDT[(geoDT['date'] == k_tomorrow)].groupby('id')['fire_prediction_raw'].mean().values
+        tomorrow_risk = np.nansum(tomorrow_risk)
+        geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(tomorrow_risk)))[0]
 
-    geoDT.loc[geoDT[(geoDT['date'] == k_today)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(today_risk)))[0]
-    geoDT.loc[geoDT[(geoDT['date'] == k_tomorrow)].index, 'fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(tomorrow_risk)))[0]
     return geoDT
 
 def add_varying_time_features(X : np.array, features : list, newShape : int, pos_feature : dict, ks : int):
@@ -493,7 +506,6 @@ if __name__ == "__main__":
 
     interface = pd.concat(interface).reset_index(drop=True)
     if date_today in incendie_feather.date.unique():
-        print('here')
         k_today = interface.date.max() - 1
         k_tomorrow = interface.date.max()
     else:
@@ -535,14 +547,12 @@ if __name__ == "__main__":
     for ff in fire_feature:
         if ff in today.columns:
             today.drop(ff, inplace=True, axis=1)
-    interface[interface['date'] == k_today].to_file('interface/geodt.geojson', driver='GeoJSON')
     today = today.set_index('hex_id').join(interface[interface['date'] == k_today].set_index('hex_id')[fire_feature],
                                                 on='hex_id')
     today.reset_index(inplace=True)
     today.to_file(dir_interface / 'hexagones_today.geojson', driver='GeoJSON')
 
     if k_tomorrow in interface.date.unique():
-
         tomorrow = gpd.read_file(dir_interface / 'hexagones_tomorrow.geojson')
         for ff in fire_feature:
             if ff in tomorrow.columns:

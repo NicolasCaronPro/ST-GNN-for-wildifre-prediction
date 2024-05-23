@@ -114,8 +114,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
-        graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, False)
+        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
@@ -184,9 +184,9 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
     except Exception as e:
         logger.info(f'Fuck it : {e}')
         return
-    
+
     # Select train features
-    pos_train_feature, _ = create_pos_feature(graphScale, 6, trainFeatures)
+    pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
     train_fet_num = [0,1,2,3,4,5]
     for fet in trainFeatures:
         if fet in features:
@@ -199,6 +199,12 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                 maxi = coef * len(sentinel_variables)
             elif fet == 'Geo':
                 maxi = len(geo_variables)
+            elif fet == 'foret':
+                maxi = coef * len(foret_variables)
+            elif fet == 'landcover':
+                maxi = coef * len(landcover_variables)
+            elif fet == 'vigicrues':
+                    maxi = len(vigicrues_variables)
             elif fet in varying_time_variables:
                 maxi = 1
             else:

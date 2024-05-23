@@ -57,7 +57,7 @@ def plot(df, met, dir_output, out_name):
 
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
-    f1s, maes, bcas, rmses, = [], [], [], []
+    f1s, f12s, maes, bcas, rmses, = [], [], [], [], []
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
@@ -72,6 +72,14 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1['index'] = index
         f1['label'] = label
         f1s.append(f1)
+
+        # F1 score
+        f12 = evaluate_f1(metrics, 'f1no_weighted')
+        f12['f1no_weighted'] = f12['f1'].astype(float)
+        f12['expe'] = expe
+        f12['index'] = index
+        f12['label'] = label
+        f12s.append(f12)
 
         # MAE score
         mae = evaluate_ca(metrics, 'meac')
@@ -103,14 +111,17 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     f1s = pd.concat(f1s).reset_index(drop=True)
     maes = pd.concat(maes).reset_index(drop=True)
     bcas = pd.concat(bcas).reset_index(drop=True)
+    f12s = pd.concat(f12s).reset_index(drop=True)
     rmses = pd.concat(rmses).reset_index(drop=True)
 
     f1s.to_csv(dir_output / 'f1s.csv')
     maes.to_csv(dir_output / 'maes.csv')
     bcas.to_csv(dir_output / 'bcas.csv')
+    f12s.to_csv(dir_output / 'f12s.csv')
     rmses.to_csv(dir_output / 'rmses.csv')
 
     plot(f1s, 'f1', dir_output, 'f1')
+    plot(f12s, 'f1no_weighted', dir_output, 'f1no_weighted')
     plot(maes, 'meac', dir_output, 'meac')
     plot(bcas, 'bca', dir_output, 'bca')
     plot(rmses, 'rmse', dir_output, 'rmse')
@@ -127,7 +138,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-        
     test_name = args.name
     sinister = args.sinister
     dir_output = Path(args.output)
@@ -148,17 +158,16 @@ if __name__ == "__main__":
                    ('exp_ks', 5, '5', 'full_5_10_10_z-score_Catboost_'+test_name+'_tree'),
                    ('exp_ks', 6, '6', 'full_6_10_10_z-score_Catboost_'+test_name+'_tree'),
                    ('exp_ks', 7, '7', 'full_7_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
                    ]
                    
     # Inference
     experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
-                      ]
-    
+                            ]
                        
     # exp
     experiments_inference = [('exp1', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
-                      ]
+                             ('exp1', 1, '0', 'full_7_10_10_z-score_Catboost_'+test_name+'_dl')
+                            ]
     
     check_and_create_path(dir_output)
     load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)

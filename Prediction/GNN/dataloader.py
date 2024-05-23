@@ -570,18 +570,20 @@ def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
 def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device, k_days,
                      test, pos_feature, scaling, encoding, prefix, Rewrite):
+    loader = None
     if Rewrite:
         loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
                                     use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
     else:
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        if loader is None:
-            loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
-                                        use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
+    if loader is None:
+        loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
+                                    use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
-            save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
 
     return loader
 
@@ -590,6 +592,7 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device,
                      k_days, test, pos_feature, scaling, encoding, prefix,
                      shape, pos_feature_2D, Rewrite):
+    loader = None
     if Rewrite:
         loader = create_test_loader_2D(graphScale,
                                     X,
@@ -606,6 +609,8 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                                     dir_output)
 
         save_object(loader, 'loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+        loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+    else:
         loader = read_object('loader_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
     if loader is None:
         loader = create_test_loader_2D(graphScale,
