@@ -77,12 +77,12 @@ class GenerateDatabase():
     def add_spatial(self):
         logger.info('Add spatial')
         #raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
-        #raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
         #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
-        raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
+        #raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
 
     def add_air_qualite(self):
         assert RASTER == True

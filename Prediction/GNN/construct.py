@@ -126,7 +126,7 @@ def construct_database(graphScale : GraphStructure,
 
     graphScale._info_on_graph(subNode, Path('log'))
 
-    Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output)
+    Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_train)
 
     subNode[:,-1] = Y[:,-3]
 

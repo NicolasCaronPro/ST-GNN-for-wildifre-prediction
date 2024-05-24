@@ -22,12 +22,16 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
         gt += list(tar[~np.isnan(tar)].reshape(-1))
 
         fore = read_object('foret_landcover.pkl', dir_data)
-
         fore = resize_no_dim(fore, tar.shape[0], tar.shape[1])
         fore = fore[:,:, np.newaxis]
         fore = np.repeat(fore, repeats=tar.shape[2], axis=2)
-
         foret += list(fore[~np.isnan(tar)])
+        
+        osmnx = read_object('osmnx_landcover.pkl', dir_data)
+        osmnx = resize_no_dim(osmnx, tar.shape[0], tar.shape[1])
+        osmnx = osmnx[:,:, np.newaxis]
+        osmnx = np.repeat(fore, repeats=tar.shape[2], axis=2)
+        osmnx += list(osmnx[~np.isnan(tar)])
 
         land = read_object('landcover.pkl', dir_data)[:,:,:trainMax]
         land[~np.isnan(tar)] = np.round(land[~np.isnan(tar)])
@@ -89,6 +93,11 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
     encoder.fit(foret, gt)
     save_object(encoder, 'encoder_foret.pkl', dir_output)
 
+    # OSMNX
+    encoder = CatBoostEncoder(cols=np.arange(0, 1))
+    encoder.fit(osmnx, gt)
+    save_object(encoder, 'encoder_osmnx.pkl', dir_output)
+    
     # Geo
     encoder = CatBoostEncoder(cols=np.arange(0, 1))
     encoder.fit(geo_array, gt)

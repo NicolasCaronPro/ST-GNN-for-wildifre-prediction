@@ -89,13 +89,15 @@ if __name__ == "__main__":
 
     ###################################### Data loading ###################################
     root = Path('/home/caron/Bureau/csv')
-    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/Prediction/Target/'+sinister)
+    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister)
+
     if sinister == "firepoint":
         departements = ['departement-01-ain',
                         'departement-25-doubs',
                         'departement-69-rhone', 
                         'departement-78-yvelines'
                         ]
+        
     elif sinister == "inondation":
         departements = [#'departement-01-ain',
                         'departement-25-doubs',
@@ -149,7 +151,7 @@ if __name__ == "__main__":
                                     n_pixel_y=n_pixel_y, n_pixel_x=n_pixel_x, read=read)
 
     fp = pd.concat(fp).reset_index(drop=True)
-    fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/Prediction/GNN/'+sinister+'.csv', index=False)
+    fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/'+sinister+'.csv', index=False)
 
     model = Probabilistic(dims, n_pixel_x, n_pixel_y, 1, logistic, dir_output)
 

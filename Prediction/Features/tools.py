@@ -562,9 +562,14 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
     bands = np.unique(foret).astype(int)
     res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
     res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
-    unodes = np.unique(tifFile)
-    for node in unodes:
+    res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
 
+    unodes = np.unique(tifFile)
+    foret_2 = np.empty((len(bands),*foret.shape))
+    for band in bands:
+        foret_2[band] = influence_index(foret == band, np.isnan(foret))
+
+    for node in unodes:
         if node not in tifFile_high:
             continue
 
@@ -573,6 +578,7 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
 
         for band in bands:
             res[band, mask1] = (np.argwhere(foret[mask2] == band).shape[0] / foret[mask2].shape[0]) * 100
+            res3[mask1] = np.nanmean(foret_2[mask2])
 
         if res[:, mask1].shape[1] == 1:
             res2[mask1] = np.nanargmax(res[:, mask1])
@@ -589,66 +595,55 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
     f = open(dir_output / outputName,"wb")
     pickle.dump(res2,f)
 
-def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
-    osmnx_, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
-    osmnx_ = osmnx_[0]
-    osmnx = osmnx_ > 0
-    mask = np.isnan(tifFile_high)
-    osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1])
-    osmnx = influence_index(osmnx, mask)
-    mask = np.isnan(tifFile_high)
-    osmnx[mask] = np.nan
-    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
+    outputName = 'foret_influence.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res3,f)
 
-    #osmnx = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
-    #osmnx = rasterisation(osmnx, reslat, reslon, 'osmnx')
+def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
+    osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
+    osmnx = osmnx[0]
+
+    mask = np.isnan(tifFile_high)
+    osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1]).astype(int)
+    osmnx[mask] = np.nan
+    bands = np.unique(osmnx)
+
+    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res3 = np.full((np.nanmax(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+    
+    osmnx_2 = np.empty((np.nanmax(bands) + 1, *osmnx.shape))
+
+    for band in bands:
+        osmnx_2[band] = influence_index(osmnx == band, mask)
 
     unodes = np.unique(tifFile)
     for node in unodes:
         mask1 = tifFile == node
         mask2 = tifFile_high == node
+
         if True not in np.unique(mask2):
             continue
-        res[mask1] = np.nanmean(osmnx[mask2])
 
-    """outputName = 'osmnx22.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(osmnx,f)"""
+        res[band, mask1] = (np.argwhere(osmnx[mask2] == band).shape[0] / osmnx[mask2].shape[0]) * 100
+        res3[band, mask1] = np.nanmean(osmnx_2[mask2])
+
+        if res[:, mask1].shape[1] == 1:
+            res2[mask1] = np.nanargmax(res[:, mask1])
+        else:
+            res2[mask1] = np.nanargmax(res[:, mask1][:,0])
 
     outputName = 'osmnx.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
 
-def raster_water(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
-    dir_sat = dir_data / 'GEE' / 'sentinel' 
-    sen, _, _ = read_tif(dir_sat / 'summer.tif')
-    mask = np.isnan(sen[0])
-    dir_sat = dir_data / 'GEE' / 'landcover' 
-    water, _, _ = read_tif(dir_sat / 'summer.tif')
-    water = water[-1]
-    water = (water == 0).astype(float)
-    water[mask] = np.nan
-
-    water = resize_no_dim(water, tifFile_high.shape[0], tifFile_high.shape[1])
-    mask = np.isnan(water)
-    water = influence_index(water, mask)
-    mask = np.isnan(tifFile_high)
-    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
-
-    #osmnx = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
-    #osmnx = rasterisation(osmnx, reslat, reslon, 'osmnx')
-
-    unodes = np.unique(tifFile)
-    for node in unodes:
-        mask1 = tifFile == node
-        mask2 = tifFile_high == node
-        if True not in np.unique(mask2):
-            continue
-        res[mask1] = np.nanmean(water[mask2])
-
-    outputName = 'water.pkl'
+    outputName = 'osmnx_landcover.pkl'
     f = open(dir_output / outputName,"wb")
-    pickle.dump(res,f)
+    pickle.dump(res2,f)
+
+    outputName = 'osmnx_influence.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res3,f)
 
 def raster_sat(base, dir_reg, dir_output, dates):
     size = '30m'
@@ -696,56 +691,79 @@ def raster_sat(base, dir_reg, dir_output, dates):
     pickle.dump(res,f)
     res = np.full((base.shape[0], base.shape[1], len(dates)), np.nan)
 
-def raster_land(base, base_high, dir_reg, dir_output, dates):
+def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
 
     size = '30m'
-    dir_sat = dir_reg / 'GEE' / size
+    dir_sat = dir_reg / 'GEE' / size / 'season_landcover'
     bands = [0,1,2,3,4,5,6,7,8]
-    res = np.full((len(bands), base.shape[0], base.shape[1],  len(dates)), np.nan)
-    unodes = np.unique(base)
-    minusMask = np.argwhere(np.isnan(base))
-    for tifFile in dir_sat.glob('dynamic_world/*.tif'):
+    res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1], len(dates)), fill_value=0.0)
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1], len(dates)), fill_value=np.nan)
+    unodes = np.unique(tifFile)
+    minusMask = np.argwhere(np.isnan(tifFile))
 
-        tifFile = tifFile.as_posix()
-        dateFile = tifFile.split('/')[-1]
-        print(dateFile)
+    season = {
+    'summer' : ('06-01', '08-31'),
+    'winter' : ('12-01', '02-28'),
+    'autumn' : ('09-01', '11-30'),
+    'spring' : ('03-01', '05-31')
+    }
 
-        date = dateFile.split('.')[0]
-        if date not in dates:
-            continue
+    years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023']
 
-        i = dates.index(date)
+    for year in years:
+        for seas, item in season.items():
+            name = seas+'_'+year+'.tif'
+            dynamicWorld, _, _ = read_tif(dir_sat / name)
+            dynamicWorld = dynamicWorld[0]
+            dynamicWorld = resize_no_dim(dynamicWorld, tifFile_high.shape[0], tifFile_high.shape[1])
+            dynamicWorld_2 = np.empty((len(bands),*dynamicWorld.shape))
 
-        dynamicWorld, _, _ = read_tif(dir_sat / 'dynamic_world' / dateFile)
-        dynamicWorld = dynamicWorld.astype(np.float64)
-        dynamicWorld[np.isnan(dynamicWorld)] = -1
-        dynamicWorld = dynamicWorld[-1]
-        dynamicWorld = resize_no_dim(dynamicWorld, base_high.shape[0], base_high.shape[1])
-
-        if i + 9 > res.shape[2]:
-            lmin = i - 7
-            lmax = res.shape[2]
-        elif i == 0:
-            lmin = 0
-            lmax = i + 10
-        else:
-            lmin = i - 7
-            lmax = i + 10
-
-        for node in unodes: 
-            mask1 = res == node
-            mask2 = base_high == node
-            if mask2.shape[0] == 0:
-                continue
             for band in bands:
-                res[band,mask1,lmin:lmax] = np.argwhere(dynamicWorld[mask2] == band).shape[0]
+                dynamicWorld_2[band] = influence_index(dynamicWorld == band, np.isnan(dynamicWorld)) 
+            
+            date_min = year+'-'+item[0]
+            date_max = year+'-'+item[1]
+            if date_min in dates:
+                index_min = dates.index(date_min)
+            else:
+                index_min = 0
+            if date_max in dates:
+                index_max = dates.index(date_max)
+            else:
+                index_max = -1
 
-        i += 15
+            for node in unodes:
+                    if node not in tifFile_high:
+                        continue
 
-    res[minusMask[:,0], minusMask[:,1], :] = np.nan
+                    mask1 = tifFile == node
+                    mask2 = tifFile_high == node
+                    if True not in np.unique(mask2):
+                        continue
+                    for band in bands:
+                        res[band, mask1, index_min:index_max] = (np.argwhere(dynamicWorld[mask2] == band).shape[0] / dynamicWorld[mask2].shape[0]) * 100
+                        res3[band, mask1] = np.nanmean(dynamicWorld_2[band, mask2])
+
+                    if res[:, mask1].shape[1] == 1:
+                        res2[mask1] = np.nanargmax(res[:, mask1])
+                    else:
+                        res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+
+    res[:, minusMask[:,0], minusMask[:,1], :] = np.nan
     outputName = 'landcover.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
+
+    res2[minusMask[:,0], minusMask[:,1]] = np.nan
+    outputName = 'landcover_encoder.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+
+    res3[:, minusMask[:,0], minusMask[:,1]] = np.nan
+    outputName = 'landcover_influence.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res3,f)
 
 def rasterisation(h3, lats, longs, column='cluster', defval = np.nan, name='default'):
     #h3['cluster'] = h3.index

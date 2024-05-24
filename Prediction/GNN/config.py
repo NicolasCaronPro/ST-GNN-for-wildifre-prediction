@@ -18,7 +18,9 @@ ACADEMIES = {
     '78': 'Versailles',
 }
 
-foret = {'Châtaignier': 1,
+foret = {
+'PasDeforet' : 0,
+'Châtaignier': 1,
  'Chênes décidus': 2,
  'Conifères': 3,
  'Douglas': 4,
@@ -75,6 +77,9 @@ features = [
             'Historical',
             'Geo',
             'air',
+            #'dynamicWorld_influnce',
+            #'foret_influence',
+            #'highway_influence'
             ]
 
 # Train features 
@@ -88,7 +93,7 @@ trainFeatures = [
             'highway',
             'population',
             #'sentinel',
-            #'vigicrues',
+            'vigicrues',
             'landcover',
             'foret',
             'Calendar',
@@ -143,7 +148,6 @@ trainDepartements = [
                 #'departement-69-rhone',
                 'departement-78-yvelines',
                 ]
-
 
 ############################ Logger ######################################
 

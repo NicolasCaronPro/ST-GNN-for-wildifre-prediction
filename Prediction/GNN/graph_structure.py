@@ -144,7 +144,7 @@ class GraphStructure():
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
             influence = influence.reshape(-1, influence.shape[2])
             influence = np.nansum(influence, axis=0)
-            print(np.min(influence), np.max(influence), np.mean(influence))
+            print(np.sum(influence), np.mean(influence))
             predictor = Predictor(5)
             predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
             save_object(predictor, str2name[dep]+'PredictorDepartement.pkl', path=dir_predictor)

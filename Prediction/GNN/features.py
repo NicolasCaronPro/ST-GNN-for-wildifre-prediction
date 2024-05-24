@@ -82,6 +82,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
 
+    logger.info(pos_feature)
+
     def save_values(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
@@ -120,6 +122,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
+        encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
         encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
 
     if 'Calendar' in features:
@@ -129,7 +132,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     if 'Geo' in features:
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
-    dir_mask = path / 'raster' / '2x2'
+    dir_mask = dir_train / 'raster' / '2x2'
     logging.info(f'Shape of X {X.shape}')
     for departement in departements:
         logger.info(departement)
@@ -227,60 +230,81 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayEl = read_object(name, dir_data)
 
         if 'dynamicWorld' in features:
-            arrayDW = []
-            for band in dynamic_world_variables:
-                name = band+'.pkl'
-                arrayDW.append(read_object(name, dir_data))
+            arrayDW = read_object('landcover.pkl', dir_data)
+
+        if 'dynamicWorld_influence' in features:
+            arrayDWInfluence = read_object('landcover_influence.pkl', dir_data)
 
         ### OSMNX
         if 'highway' in features:
             name = 'osmnx.pkl'
             arrayOS = read_object(name, dir_data)
 
+        if 'highway_influence' in features:
+            logger.info('highway_influence')
+            name = 'highway_influence.pkl'
+            arrayOSInfluence = read_object(name, dir_data)
+
         if 'foret' in features:
             logger.info('Foret')
             name = 'foret.pkl'
             arrayForet = read_object(name, dir_data)
-            #arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
+
+        if 'foret_influence' in features:
+            logger.info('foret_influence')
+            name = 'foret_influence.pkl'
+            arrayForetInfluence = read_object(name, dir_data)
 
         if 'landcover' in features:
             logger.info('Foret landcover')
             name = 'foret_landcover.pkl'
             arrayForetLandcover = read_object(name, dir_data)
-            #arrayForet = resize_no_dim(arrayForet, mask.shape[0], mask.shape[1])
+
+            logger.info('Dynamic World landcover')
+            name = 'landcover.pkl'
+            arrayLand = read_object(name, dir_data)
+            arrayLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
+
+            logger.info('OSMNX landcover')
+            name = 'osmnx_landcover.pkl'
+            arrayOSLand = read_object(name, dir_data)
+            arrayOSLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
 
         if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
             unode = np.unique(nodeDepartement[:,0])
             for node in unode:
                 maskNode = mask == node
                 index = np.argwhere(subNode[:,0] == node)
+                
                 if 'population' in features:
                     save_values(arrayPop, pos_feature['population'], index, maskNode)
+                
                 if 'elevation' in features:
                     save_values(arrayEl, pos_feature['elevation'], index, maskNode)
+                
+                if 'highway_influence' in features:
+                    save_values(arrayOSInfluence, pos_feature['highway_influence'], index, maskNode)
+
                 if 'highway' in features:
                     save_values(arrayOS, pos_feature['highway'], index, maskNode)
-                if 'dynamicWorld' in features:
-                    for i, band in dynamic_world_variables:
-                        save_values(arrayDW[i], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(band) * 4), index, maskNode)
+
+                if 'foret_influence' in features:
+                    for band in foret_influence_variables:
+                        save_values(arrayForetInfluence[int(band), :, :], pos_feature['foret_influence'] + (foret_influence_variables.index(band) * 4), index, maskNode)
+
                 if 'foret' in features:
                     for band in foret_variables:
                         save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
+                
                 if 'landcover' in features:
                     save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
+                    save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
 
         ### Sentinel
         if 'sentinel' in features:
             logger.info('Sentinel')
             name = 'sentinel.pkl'
             arraySent = read_object(name, dir_data)
-
-        ### Landcover
-        if 'landcover' in features:
-            logger.info('landcover')
-            name = 'landcover.pkl'
-            arrayLand = read_object(name, dir_data)
-            arrayLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
 
         coef = 4 if graph.scale > -1 else 1
         if arraySent is not None or arrayLand is not None:
@@ -291,10 +315,19 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'sentinel' in features:
                     for band, var in enumerate(sentinel_variables):
                         save_values(arraySent[band,:, :,int(node[4])], pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
-
-                #if 'landcover' in features: 
-                #    save_value_with_encoding(arrayLand[:,:,int(node[4])], pos_feature['landcover'] + (landcover_variables.index('dynamicWorld') * 4), index, maskNode, encoder_landcover)
-
+                
+                if 'landcover' in features:
+                    save_value_with_encoding(arrayLand[:,:,int(node[4])], pos_feature['landcover'] + (landcover_variables.index('landcover') * 4), index, maskNode, encoder_landcover)
+                        
+                if 'dynamicWorld' in features:
+                    for i, band in dynamic_world_variables:
+                        save_values(arrayDW[i], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(band) * 4), index, maskNode)
+                          
+                if 'dynamicWorld_influence' in features:
+                    for i, band in dynamic_world_influence_variables:
+                        save_values(arrayDWInfluence[i], pos_feature['dynamicWorld_influence'] + (dynamic_world_influence_variables.index(band) * 4), index, maskNode)
+                
+        
         del arrayPop
         del arrayEl
         del arrayOS
@@ -312,21 +345,21 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if node[4] - 1 < 0:
                     continue
 
-                save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
+                save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
                 
             del arrayInfluence
 
         logger.info('Vigicrues')
         if 'vigicrues' in features:
             for var in vigicrues_variables:
-                array = read_object('vigicrues'+var, dir_data)
+                array = read_object('vigicrues'+var+'.pkl', dir_data)
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     maskNode = mask == node[0]
                     if node[4] - 1 < 0:
                         continue
 
-                    save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Vigicrues'] + (4 * vigicrues_variables.index(var)), index, maskNode)
+                    save_values(array[:,:, int(node[4])], pos_feature['vigicrues'] + (4 * vigicrues_variables.index(var)), index, maskNode)
                 del array
 
     return X, pos_feature

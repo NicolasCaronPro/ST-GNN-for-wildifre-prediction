@@ -202,8 +202,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     # Select train features
     pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures:
-        if fet in features:
+    for fet in trainFeatures_:
+        if fet in features_:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)

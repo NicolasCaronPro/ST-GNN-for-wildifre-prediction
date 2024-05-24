@@ -209,7 +209,7 @@ for fet in trainFeatures:
         else:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
-        
+
 logger.info(train_fet_num)
 prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
 if spec != '':

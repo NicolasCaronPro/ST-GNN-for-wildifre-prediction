@@ -1406,12 +1406,22 @@ def create_pos_feature(graph, shape, features):
                 newShape += 4 * len(sentinel_variables)
             elif var == "foret":
                 newShape += 4 * len(foret_variables)
+            elif var == 'foret_influence':
+                newShape += 4 * len(foret_influence_variables)
             elif var == 'dynamicWorld':
                 newShape += 4 * len(dynamic_world_variables)
+            elif var == 'dynamicWorld_influence':
+                newShape += 4 * len(dynamic_world_influence_variables)
+            elif var == 'highway':
+                newShape += 4 * len(osmnx_variables)
+            elif var == 'highway_influence':
+                newShape += 4 * len(osmnx_influence_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
                 newShape += 4 * len(vigicrues_variables)
+            elif var == 'Historical':
+                newShape += 4 * len(historical_variables)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1432,10 +1442,22 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(sentinel_variables)
             elif var == "foret":
                 newShape += len(foret_variables)
+            elif var == 'foret_influence':
+                newShape += len(foret_influence_variables)
+            elif var == 'dynamicWorld':
+                newShape += len(dynamic_world_variables)
+            elif var == 'dynamicWorld_influence':
+                newShape += len(dynamic_world_influence_variables)
+            elif var == 'highway':
+                newShape += len(osmnx_variables)
+            elif var == 'highway_influence':
+                newShape += len(osmnx_influence_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
                 newShape += len(vigicrues_variables)
+            elif var == 'Historical':
+                newShape += len(historical_variables)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1586,7 +1608,7 @@ def log_features(fet, pos_feature, methods):
                     next =  None
             if next is None or (f >= res and f < next and next is not None):
                 if keys[i] in cems_variables or keys[i] == 'elevation' or \
-                keys[i] == 'population' or keys[i] == 'highway' or keys[i] == 'Historical':
+                keys[i] == 'population' or keys[i] == 'Historical':
                     logger.info(f'{keys[i], fe[1], methods[f-res]}')
                 elif keys[i] == 'sentinel':
                     for i, v in enumerate(sentinel_variables):
@@ -1598,6 +1620,36 @@ def log_features(fet, pos_feature, methods):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'foret_influence':
+                    for i, v in enumerate(foret_influence_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'highway' :
+                    for i, v in enumerate(osmnx_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'highway_influence' :
+                    for i, v in enumerate(osmnx_influence_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'dynamicWorld' :
+                    for i, v in enumerate(dynamic_world_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'dynamicWorld_influence' :
+                    for i, v in enumerate(dynamic_world_influence_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'vigicrues':
+                    for i, v in enumerate(vigicrues_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'vigicrues{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'landcover':
                     for i, v in enumerate(landcover_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:

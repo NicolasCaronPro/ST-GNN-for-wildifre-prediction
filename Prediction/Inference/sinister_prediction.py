@@ -248,8 +248,8 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
                      int(args.days),
                      scaling)
 
-    if today_X is None:
-    
+
+    if today_X is not None:
         if model in traditionnal_models:
             today_X = today_X.detach().cpu().numpy()
             today_X_fet = today_X[:, features_selected, :]
@@ -258,7 +258,7 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
         else:
             today_Y = graph._predict_tensor(today_X_fet, E)
     else:
-        today_X = None
+        today_Y = None
 
     tomorrow_Y = None
     if k_tomorrow in np.unique(X[:,4]):
@@ -288,12 +288,11 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
                 tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
         else:
             tomorrow_Y = None
-
     fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
     geoDT[fire_feature] = np.nan
     unodes = np.unique(orinode[:,0])
     for node in unodes:
-        if today_X is not None:
+        if today_Y is not None:
             geoDT.loc[geoDT[(geoDT['date'] == k_today) &
                                     (geoDT['id'] == node)].index, 'fire_prediction_raw'] = today_Y[np.argwhere(today_X[:, 0, 0] == node)[:,0]][0]
             
@@ -519,7 +518,7 @@ if __name__ == "__main__":
                       'rhum12' : 'rhum', 'prcp12' : 'prcp', 'wdir12' : 'wdir',
                       'wspd12' : 'wspd', 'prec24h12' : 'prec24h',
                       'daily_severity_rating' : 'dailySeverityRating'}, inplace=True, axis=1)
-
+    print(interface['nbfirepoint'].sum())
     ######################### Preprocess #################################
     n_pixel_x = 0.02875215641173088
     n_pixel_y = 0.020721094073767096
