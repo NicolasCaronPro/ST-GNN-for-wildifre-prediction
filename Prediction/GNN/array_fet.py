@@ -29,6 +29,7 @@ osmnx_influence_variables = ['0', '1', '2', '3', '4']
 dynamic_world_influence_variables = ['water',
                             'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow'
                          ]
+
 historical_variables = ['influence']
 
 elevation_variables = ['elevation']

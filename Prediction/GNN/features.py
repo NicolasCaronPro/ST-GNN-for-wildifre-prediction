@@ -275,7 +275,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             for node in unode:
                 maskNode = mask == node
                 index = np.argwhere(subNode[:,0] == node)
-                
+
                 if 'population' in features:
                     save_values(arrayPop, pos_feature['population'], index, maskNode)
                 
@@ -295,7 +295,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'foret' in features:
                     for band in foret_variables:
                         save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
-                
+
                 if 'landcover' in features:
                     save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
                     save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
@@ -327,7 +327,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     for i, band in dynamic_world_influence_variables:
                         save_values(arrayDWInfluence[i], pos_feature['dynamicWorld_influence'] + (dynamic_world_influence_variables.index(band) * 4), index, maskNode)
                 
-        
         del arrayPop
         del arrayEl
         del arrayOS

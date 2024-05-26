@@ -77,9 +77,6 @@ features = [
             'Historical',
             'Geo',
             'air',
-            #'dynamicWorld_influnce',
-            #'foret_influence',
-            #'highway_influence'
             ]
 
 # Train features 

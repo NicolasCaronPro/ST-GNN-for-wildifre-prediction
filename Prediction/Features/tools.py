@@ -523,24 +523,6 @@ def raster_population(tifFile, tifFile_high, dir_output, reslon, reslat, dir_dat
     mask = np.argwhere(np.isnan(tifFile))
     population[mask[:,0], mask[:,1]] = np.nan
 
-    """res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
-
-    unodes = np.unique(tifFile)
-    for node in unodes:
-        mask1 = tifFile == node
-        mask2 = tifFile_high == node
-        if True not in np.unique(population[mask2]):
-            continue
-        res[mask1] = np.nanmax(population[mask2])
-
-    outputName = 'population22.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(population,f)
-
-    outputName = 'population2.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(res,f)"""
-
     outputName = 'population.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(population,f)
@@ -565,7 +547,8 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
     res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
 
     unodes = np.unique(tifFile)
-    foret_2 = np.empty((len(bands),*foret.shape))
+    foret_2 = np.empty((np.max(bands) + 1,*foret.shape))
+
     for band in bands:
         foret_2[band] = influence_index(foret == band, np.isnan(foret))
 
@@ -578,7 +561,7 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
 
         for band in bands:
             res[band, mask1] = (np.argwhere(foret[mask2] == band).shape[0] / foret[mask2].shape[0]) * 100
-            res3[mask1] = np.nanmean(foret_2[mask2])
+            res3[band, mask1] = np.nanmean(foret_2[band, mask2])
 
         if res[:, mask1].shape[1] == 1:
             res2[mask1] = np.nanargmax(res[:, mask1])
@@ -586,6 +569,8 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
             res2[mask1] = np.nanargmax(res[:, mask1][:,0])
 
     res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
 
     outputName = 'foret.pkl'
     f = open(dir_output / outputName,"wb")
@@ -604,15 +589,17 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     osmnx = osmnx[0]
 
     mask = np.isnan(tifFile_high)
-    osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1]).astype(int)
+    osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1])
     osmnx[mask] = np.nan
+    print(np.unique(osmnx))
     bands = np.unique(osmnx)
-
-    res = np.zeros((tifFile.shape[0], tifFile.shape[1]))
+    bands = bands[~np.isnan(bands)].astype(int)
+    res = np.zeros(((np.nanmax(bands) + 1), tifFile.shape[0], tifFile.shape[1]), dtype=float)
     res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
-    res3 = np.full((np.nanmax(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+    res3 = np.full(((np.nanmax(bands) + 1), tifFile.shape[0], tifFile.shape[1]), fill_value=0.0, dtype=float)
+    res4 = np.zeros((tifFile.shape[0], tifFile.shape[1]), dtype=float)
     
-    osmnx_2 = np.empty((np.nanmax(bands) + 1, *osmnx.shape))
+    osmnx_2 = np.empty(((np.nanmax(bands) + 1), *osmnx.shape))
 
     for band in bands:
         osmnx_2[band] = influence_index(osmnx == band, mask)
@@ -624,14 +611,22 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
 
         if True not in np.unique(mask2):
             continue
-
-        res[band, mask1] = (np.argwhere(osmnx[mask2] == band).shape[0] / osmnx[mask2].shape[0]) * 100
-        res3[band, mask1] = np.nanmean(osmnx_2[mask2])
+        
+        for band in bands:
+            res[band, mask1] = (np.argwhere(osmnx[mask2] == band).shape[0] / osmnx[mask2].shape[0]) * 100
+            res3[band, mask1] = np.nanmean(osmnx_2[band, mask2])
+            if band > 0:
+                res4[mask1] = res4[mask1] + res[band, mask1]
 
         if res[:, mask1].shape[1] == 1:
             res2[mask1] = np.nanargmax(res[:, mask1])
         else:
             res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
+    res4[np.isnan(tifFile)] = np.nan
 
     outputName = 'osmnx.pkl'
     f = open(dir_output / outputName,"wb")
@@ -644,6 +639,10 @@ def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
     outputName = 'osmnx_influence.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res3,f)
+
+    outputName = 'osmnx_landcover_2.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res4,f)
 
 def raster_sat(base, dir_reg, dir_output, dates):
     size = '30m'
@@ -694,7 +693,7 @@ def raster_sat(base, dir_reg, dir_output, dates):
 def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
 
     size = '30m'
-    dir_sat = dir_reg / 'GEE' / size / 'season_landcover'
+    dir_sat = dir_reg / 'GEE' / size / 'landcover_season'
     bands = [0,1,2,3,4,5,6,7,8]
     res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1], len(dates)), fill_value=0.0)
     res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
@@ -713,6 +712,7 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
 
     for year in years:
         for seas, item in season.items():
+
             name = seas+'_'+year+'.tif'
             dynamicWorld, _, _ = read_tif(dir_sat / name)
             dynamicWorld = dynamicWorld[0]
@@ -750,18 +750,19 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
                     else:
                         res2[mask1] = np.nanargmax(res[:, mask1][:,0])
 
-    res[:, minusMask[:,0], minusMask[:,1], :] = np.nan
-    outputName = 'landcover.pkl'
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
+
+    outputName = 'dynamic_world.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res,f)
 
-    res2[minusMask[:,0], minusMask[:,1]] = np.nan
-    outputName = 'landcover_encoder.pkl'
+    outputName = 'dynamic_world_landcover.pkl'
     f = open(dir_output / outputName,"wb")
-    pickle.dump(res,f)
+    pickle.dump(res2,f)
 
-    res3[:, minusMask[:,0], minusMask[:,1]] = np.nan
-    outputName = 'landcover_influence.pkl'
+    outputName = 'dynamic_world_influence.pkl'
     f = open(dir_output / outputName,"wb")
     pickle.dump(res3,f)
 
@@ -828,8 +829,7 @@ def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution
     # Coordonnées du point central
     center_lat = latitudes[outputShape[0] // 2, outputShape[1] // 2]
     center_lon = longitudes[outputShape[0] // 2, outputShape[1] // 2]
-    print(center_lat, center_lon)
-    
+
     # Convertir les coordonnées géographiques en radians
     latitudes_rad = np.radians(latitudes)
     longitudes_rad = np.radians(longitudes)
@@ -897,43 +897,3 @@ def add_osmnx(clusterSum, dataset, dir_reg, kmeans, tifFile):
         dataset.loc[indexDataset, 'highway_std'] =  np.nanstd(density[clusterMask])
     
     return dataset
-
-##################################################################################################
-#                                       Cluster
-##################################################################################################
-
-def get_cluster(x, y, z, cluster, scaler):
-    #X = scaler.transform([[x, y]])
-    X = [[x, y]]
-    return cluster.predict(X)[0]
-
-def get_cluster_polygon(polygon, z, scaler, cluster):
-    center = polygon.centroid
-    x = float(center.y)
-    y = float(center.x)
-    #X = scaler.transform([[x, y]])
-    X = [[x, y]]
-    return cluster.predict(X)[0]
-
-def gmm_bic_score(estimator, X):
-    """Callable to pass to GridSearchCV that will use the BIC score."""
-    # Make it negative since GridSearchCV expects a score to maximize
-    return -estimator.bic(X)
-
-def get_cluster_latitude(x, cluster):
-    x = int(x)
-    return cluster.cluster_centers_[x][0]
-
-def get_cluster_longitude(x, cluster):
-    x = int(x)
-    return cluster.cluster_centers_[x][1]
-
-def get_cluster_altitude(x, cluster):
-    x = int(x)
-    return cluster.cluster_centers_[x][2]
-
-def read_object(filename: str, path : Path):
-    if not (path / filename).is_file():
-        print(f'{path / filename} not found')
-        return None
-    return pickle.load(open(path / filename, 'rb'))
