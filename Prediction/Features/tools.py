@@ -395,6 +395,31 @@ def rasterise_vigicrues(h3, maskh3, cems, sh, dates, dir_output, name):
         f = open(dir_output / outputName,"wb")
         pickle.dump(spatioTemporalRaster, f)
 
+def rasterise_nappes(h3, maskh3, cems, sh, dates, dir_output, var):
+    
+    lenDates = len(dates)
+    spatioTemporalRaster = np.full((sh[0], sh[1], lenDates), np.nan)
+
+    for i, date in enumerate(dates):
+        if i % 200 == 0:
+            print(date)
+        cems_grid = create_grid_cems(cems, date, 0, var)
+        if cems_grid is None:
+            continue
+        cems_grid = cems_grid[cems_grid[var] >= 0]
+        h3[var] = interpolate_gridd(var, cems_grid, h3.longitude.values, h3.latitude.values, 'nearest')
+
+        rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, var)
+
+        if rasterVar.shape != sh:
+            rasterVar = resize(rasterVar, sh[0], sh[1], 1)
+
+        spatioTemporalRaster[:,:, i] = rasterVar
+
+        outputName = var+'.pkl'
+        f = open(dir_output / outputName,"wb")
+        pickle.dump(spatioTemporalRaster, f)
+
 def rasterise_air_qualite(h3, maskh3, air, sh, dates, dir_output):
     air_variables = ['NO2', 'O3', 'PM10', 'PM25',
                      'NO216', 'O316', 'PM1016', 'PM2516']
@@ -897,3 +922,9 @@ def add_osmnx(clusterSum, dataset, dir_reg, kmeans, tifFile):
         dataset.loc[indexDataset, 'highway_std'] =  np.nanstd(density[clusterMask])
     
     return dataset
+
+def read_object(filename: str, path : Path):
+    if not (path / filename).is_file():
+        print(f'{path / filename} not found')
+        return None
+    return pickle.load(open(path / filename, 'rb'))

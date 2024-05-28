@@ -32,7 +32,7 @@ def evaluate_met(metrics, met):
         df.loc[i, 'model'] = key
         df.loc[i, met] = value[met]
         i += 1
-    return df.sort_values(met)
+    return df.sort_values(met)    
 
 def plot(df, met, dir_output, out_name):
     
@@ -55,9 +55,36 @@ def plot(df, met, dir_output, out_name):
     out_name += '.png'
     plt.savefig(dir_output / out_name)
 
+def plot_variation(df, base_label, met, dir_output, out_name):
+
+    base_df = df[df['index'] == base_label]
+
+    # Les données du DataFrame
+    base_mets = base_df[met].values
+
+    index = df['index'].values
+    label = df['label'].values
+    model = df.model.values
+    mets = base_mets - df[met].values
+
+    # Création du graphique
+    fig = plt.figure(figsize=(15, 5))
+    scatter = plt.scatter(mets, model, c=index, label=label, cmap='jet', alpha=0.8)
+    plt.xlabel('MAE')
+    plt.ylabel('Model')
+    plt.xlim(-0.1,1.1)
+    plt.grid(True)
+    fig.colorbar(scatter, label='Index')
+    plt.legend()
+
+    out_name += '.png'
+    plt.savefig(dir_output / out_name)
+
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
     f1s, f12s, maes, bcas, rmses, = [], [], [], [], []
+
+    (_, _, base_label, _) = experiments[0]
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
@@ -125,6 +152,12 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(maes, 'meac', dir_output, 'meac')
     plot(bcas, 'bca', dir_output, 'bca')
     plot(rmses, 'rmse', dir_output, 'rmse')
+    
+    plot_variation(f1s, base_label, 'f1_variation', dir_output, 'f1_variation')
+    plot_variation(f12s, base_label, 'f1no_weighted_variation', dir_output, 'f1no_weighted_variation')
+    plot_variation(maes, base_label, 'meac_variation', dir_output, 'meac_variation')
+    plot_variation(bcas, base_label, 'bca_variation', dir_output, 'bca_variation')
+    plot_variation(rmses, base_label, 'rmse_variation', dir_output, 'rmse_variation')
 
 if __name__ == "__main__":
 

@@ -30,6 +30,7 @@ class GenerateDatabase():
                  addAir, airParams,
                  addBouchon, bouchonParams,
                  addVigicrue, vigicrueParams,
+                 addNappes, nappesParams,
                  region, h3,
                  dir_raster
                  ):
@@ -53,6 +54,9 @@ class GenerateDatabase():
 
         self.addVigicrue = addVigicrue
         self.vigicrueParams = vigicrueParams
+
+        self.addNappes = addNappes
+        self.nappesParams = nappesParams
 
         self.dir_raster = dir_raster
 
@@ -80,7 +84,7 @@ class GenerateDatabase():
         raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
-        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
         #raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
 
@@ -368,7 +372,51 @@ class GenerateDatabase():
         df_hydro['creneau'] = df_hydro.index"""            
 
     def compute_nappes_phréatique(self):
-        pass
+        code = self.departement.split('-')[1]
+        dir_logs = Path('./')
+        dir_nappes = self.nappesParams['dir'] / 'nappes'
+        check_and_create_path(dir_nappes)
+        if not (dir_nappes / 'liste_stations.csv').is_file():
+            date_mesure = '2017-06-12'
+            url=f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/stations?code_departement={code}&format=geojson&size=20&date_recherche={date_mesure}"
+            r = requests.get(url)
+            if r.status_code == 200 or r.status_code == 206:
+                response = json.loads(r.text)
+                response_features = response['features']
+
+                dg = []
+
+                for i, elt in enumerate(response_features):
+                    dico_elt = {}
+                    dico_elt['longitude'] = [elt['properties']['x']]
+                    dico_elt['latitude'] = [elt['properties']['y']]
+                    dico_elt['code_bss'] = [elt['properties']['code_bss']]
+                    dg.append(pd.DataFrame.from_dict(dico_elt))
+                dg = pd.concat(dg)
+                dg.to_csv(dir_nappes / 'liste_stations.csv', index=False)
+        else:
+            dg = pd.read_csv(dir_nappes / 'liste_stations.csv')
+
+        dg['code_bss_suff'] = dg['code_bss'].apply(lambda x : x.split('/')[1])
+        dg['code_bss_pre'] = dg['code_bss'].apply(lambda x : x.split('/')[0])
+        date_debut = self.nappesParams['start']
+        date_fin = self.nappesParams['end']
+        df = []
+        for index, row in dg.iterrows():
+            url=f"https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/chroniques?code_bss={row['code_bss_pre']}%2F{row['code_bss_suff']}&date_debut_mesure={date_debut}&date_fin_mesure={date_fin}"
+            r = requests.get(url)
+            if r.status_code == 200 or r.status_code == 206:
+                response = json.loads(r.text)
+                datas = response['data']
+                df.append(pd.DataFrame.from_dict(datas))
+            else:
+                logger.info(f'Error {r.status_code}')
+        df = pd.concat(df).reset_index(drop=True)
+        df = df.set_index('code_bss').join(dg.set_index('code_bss')).reset_index()
+        df.rename({'date_mesure': 'creneau'}, inplace=True, axis=1)
+        df.to_csv(dir_nappes / 'mesures.csv', index=False)
+        rasterise_nappes(self.clusterSum, self.h3tif, df, self.h3tif.shape, self.dates, self.dir_raster, 'niveau_nappe_eau')
+        rasterise_nappes(self.clusterSum, self.h3tif, df, self.h3tif.shape, self.dates, self.dir_raster, 'profondeur_nappe')
 
     def process(self, start, stop):
         logger.info(self.departement)
@@ -417,11 +465,14 @@ class GenerateDatabase():
         if self.addAir:
             self.add_air_qualite()
         
+        if self.addNappes:
+            self.compute_nappes_phréatique()
+        
         if self.addVigicrue:
             self.compute_hauteur_riviere()
 
 def launch(departement, computeMeteoStat, computeTemporal, addSpatial, 
-           addAir, addBouchon, addVigicrue):
+           addAir, addBouchon, addVigicrue, addNappes):
 
     dir_data = root / departement / 'data'
     dir_meteostat = dir_data / 'meteostat'
@@ -429,7 +480,7 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
     check_and_create_path(dir_raster)
 
     start = '2017-06-12'
-    stop = '2024-05-16'
+    stop = dt.datetime.now().date().strftime('%Y-%m-%d')
 
     meteostatParams = {'start' : '2016-01-01',
                     'end' : stop,
@@ -453,6 +504,10 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
     vigicrueParams = {'dir' : dir_data,
                       'start' : start,
                         'end' : stop}
+    
+    nappesParams = {'dir' : dir_data,
+                      'start' : start,
+                        'end' : stop}
 
     region_path = dir_data / 'geo/geo.geojson'
     region = json.load(open(region_path))
@@ -469,6 +524,7 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
                     addAir, airParams,
                     addBouchon, bouchonParams,
                     addVigicrue, vigicrueParams,
+                    addNappes, nappesParams,
                     region, h3,
                     dir_raster)
 
@@ -483,10 +539,11 @@ if __name__ == '__main__':
         description='Create graph and database according to config.py and tained model',
     )
     parser.add_argument('-m', '--meteostat', type=str, help='Compute meteostat')
-    parser.add_argument('-t', '--temporal', type=str, help='temporal')
-    parser.add_argument('-s', '--spatial', type=str, help='spatial')
-    parser.add_argument('-a', '--air', type=str, help='air')
+    parser.add_argument('-t', '--temporal', type=str, help='Temporal')
+    parser.add_argument('-s', '--spatial', type=str, help='Spatial')
+    parser.add_argument('-a', '--air', type=str, help='Air')
     parser.add_argument('-v', '--vigicrues', type=str, help='Vigicrues')
+    parser.add_argument('-n', '--nappes', type=str, help='Nappes')
 
     args = parser.parse_args()
 
@@ -496,16 +553,17 @@ if __name__ == '__main__':
     addSpatial = args.spatial == "True"
     addAir = args.air == 'True'
     addBouchon = False
+    addNappes = args.nappes == 'True'
     addVigicrue = args.vigicrues == "True"
 
     ################## Ain ######################
-    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## DOUBS ######################
-    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## YVELINES ######################
-    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    #launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## Rhone ######################
-    launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue)
+    launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)

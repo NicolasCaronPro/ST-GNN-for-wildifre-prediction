@@ -5,11 +5,13 @@ from array_fet import *
 def encode(path_to_target, maxDate, trainDepartements, dir_output):
 
     print(f'Create encoder for categorical features using {trainDepartements}, at max {maxDate}')
+    stop_calendar = 11
     trainMax = allDates.index(maxDate)
     foret = []
     gt = []
     landcover = []
-    calendar_array = [[] for j in calendar_variables]
+    osmnx = []
+    calendar_array = [[] for j in range(stop_calendar)]
     geo_array = []
     for dep in trainDepartements:
         
@@ -27,17 +29,18 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
         fore = np.repeat(fore, repeats=tar.shape[2], axis=2)
         foret += list(fore[~np.isnan(tar)])
         
-        osmnx = read_object('osmnx_landcover.pkl', dir_data)
-        osmnx = resize_no_dim(osmnx, tar.shape[0], tar.shape[1])
-        osmnx = osmnx[:,:, np.newaxis]
-        osmnx = np.repeat(fore, repeats=tar.shape[2], axis=2)
-        osmnx += list(osmnx[~np.isnan(tar)])
+        os = read_object('osmnx_landcover.pkl', dir_data)
+        os = resize_no_dim(os, tar.shape[0], tar.shape[1])
+        os = os[:,:, np.newaxis]
+        os = np.repeat(os, repeats=tar.shape[2], axis=2)
+        osmnx += list(os[~np.isnan(tar)])
 
-        land = read_object('landcover.pkl', dir_data)[:,:,:trainMax]
-        land[~np.isnan(tar)] = np.round(land[~np.isnan(tar)])
-        landcover += list(land[~np.isnan(tar)])
+        land = read_object('dynamic_world_landcover.pkl', dir_data)[:,:trainMax]
+        land = land[:,:, np.newaxis]
+        land = np.repeat(land, repeats=tar.shape[2], axis=2)
+        landcover += list(land[~np.isnan(land)])
 
-        calendar = np.empty((tar.shape[0], tar.shape[1], tar.shape[2], len(calendar_variables)))
+        calendar = np.empty((tar.shape[0], tar.shape[1], tar.shape[2], stop_calendar))
         for i, date in enumerate(allDates):
             if date == maxDate:
                 break
@@ -55,15 +58,16 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
             calendar[:,:,i, 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 ) \
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0) # holidaysBorder
 
-        for j, _ in enumerate(calendar_variables):
+        for j in range(stop_calendar):
             calendar_array[j] += list(calendar[~np.isnan(tar), j])
 
         geo = np.empty((tar.shape[0], tar.shape[1], tar.shape[2], len(geo_variables)))
         geo[:,:,:] = name2int[dep]
         geo_array += list(geo[~np.isnan(tar)])
-        
+
     gt = np.asarray(gt)
     foret = np.asarray(foret)
+    osmnx = np.asarray(osmnx)
     landcover = np.asarray(landcover)
     calendar_array = np.asarray(calendar_array)
     geo_array = np.asarray(geo_array)
@@ -74,12 +78,13 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
     foret = foret.reshape(-1,1)
     landcover = landcover.reshape(-1,1)
     calendar_array = np.moveaxis(calendar_array, 0, 1)
+    osmnx = osmnx.reshape(-1,1)
     geo_array = geo_array.reshape(-1,1)
 
     print(gt.shape, foret.shape, landcover.shape, calendar_array.shape, geo_array.shape)
 
     # Calendar
-    encoder = CatBoostEncoder(cols=np.arange(0, len(calendar_variables)))
+    encoder = CatBoostEncoder(cols=np.arange(0, stop_calendar))
     encoder.fit(calendar_array, gt)
     save_object(encoder, 'encoder_calendar.pkl', dir_output)
 
@@ -102,7 +107,6 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
     encoder = CatBoostEncoder(cols=np.arange(0, 1))
     encoder.fit(geo_array, gt)
     save_object(encoder, 'encoder_geo.pkl', dir_output)
-
 
 if __name__ == '__main__':
     traindepartements = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']

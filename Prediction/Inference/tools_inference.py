@@ -54,7 +54,7 @@ def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
 
     if semi:
-        kernel[:,:,dim[2]//2:] = 0.0
+        kernel[:,:,(dim[2]//2) + 1:] = 0.0
 
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
 

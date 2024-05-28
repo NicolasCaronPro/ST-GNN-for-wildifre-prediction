@@ -17,9 +17,9 @@ parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 
 args = parser.parse_args()
 
@@ -28,11 +28,8 @@ nameExp = args.name
 doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
-"""doGraph = True
-doDatabase = True
-do2D = False"""
 scale = int(args.scale)
-ks = int(args.k_days)
+nbfeatures = args.NbFeatures
 sinister = args.sinister
 spec = args.spec
 minPoint = args.nbpoint
@@ -201,10 +198,20 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                 maxi = len(geo_variables)
             elif fet == 'foret':
                 maxi = coef * len(foret_variables)
+            elif fet == 'highway':
+                maxi = coef * len(osmnx_variables)
             elif fet == 'landcover':
                 maxi = coef * len(landcover_variables)
+            elif fet == 'dynamicWorld':
+                maxi = coef * len(dynamic_world_variables)
             elif fet == 'vigicrues':
-                    maxi = len(vigicrues_variables)
+                maxi = coef * len(vigicrues_variables)
+            elif fet == 'nappes':
+                maxi = coef * len(nappes_variables)
+            elif fet == 'AutoRegressionReg':
+                maxi = len(auto_regression_variable_reg)
+            elif fet == 'AutoRegressionBin':
+                maxi = len(auto_regression_variable_bin)
             elif fet in varying_time_variables:
                 maxi = 1
             else:

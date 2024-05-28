@@ -23,9 +23,9 @@ parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validat
 parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-#parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 
 args = parser.parse_args()
 
@@ -39,9 +39,9 @@ doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
+nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 minPoint = args.nbpoint
-#ks = int(args.k_days)
 scale = int(args.scale)
 spec = args.spec
 
@@ -168,7 +168,6 @@ if do2D:
                                                  sinister,
                                                  dir_output,
                                                  prefix)
-    
 else:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
@@ -200,12 +199,20 @@ for fet in trainFeatures:
             maxi = len(geo_variables)
         elif fet == 'foret':
             maxi = coef * len(foret_variables)
+        elif fet == 'highway':
+            maxi = coef * len(osmnx_variables)
         elif fet == 'landcover':
             maxi = coef * len(landcover_variables)
         elif fet == 'dynamicWorld':
-            maxi += coef * len(dynamic_world_variables)
+            maxi = coef * len(dynamic_world_variables)
         elif fet == 'vigicrues':
-            maxi = len(vigicrues_variables)
+            maxi = coef * len(vigicrues_variables)
+        elif fet == 'nappes':
+            maxi = coef * len(nappes_variables)
+        elif fet == 'AutoRegressionReg':
+            maxi = len(auto_regression_variable_reg)
+        elif fet == 'AutoRegressionBin':
+            maxi = len(auto_regression_variable_bin)
         elif fet in varying_time_variables:
             maxi = 1
         else:
@@ -228,7 +235,7 @@ Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 
 logger.info(pos_feature)
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True)
+features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures)
 
 ######################## Baseline ##############################
 

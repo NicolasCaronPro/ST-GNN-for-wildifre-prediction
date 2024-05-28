@@ -1420,8 +1420,14 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
                 newShape += 4 * len(vigicrues_variables)
+            elif var == 'nappes':
+                newShape += 4 * len(nappes_variables)
             elif var == 'Historical':
                 newShape += 4 * len(historical_variables)
+            elif var == 'AutoRegressionReg':
+                newShape = 4 * len(auto_regression_variable_reg)
+            elif var == 'AutoRegressionBin':
+                newShape = 4 * len(auto_regression_variable_bin)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1442,22 +1448,18 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(sentinel_variables)
             elif var == "foret":
                 newShape += len(foret_variables)
-            elif var == 'foret_influence':
-                newShape += len(foret_influence_variables)
             elif var == 'dynamicWorld':
                 newShape += len(dynamic_world_variables)
-            elif var == 'dynamicWorld_influence':
-                newShape += len(dynamic_world_influence_variables)
             elif var == 'highway':
                 newShape += len(osmnx_variables)
-            elif var == 'highway_influence':
-                newShape += len(osmnx_influence_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
                 newShape += len(vigicrues_variables)
             elif var == 'Historical':
                 newShape += len(historical_variables)
+            elif var == 'AutoRegression':
+                newShape += len(auto_regression_variable)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1620,18 +1622,8 @@ def log_features(fet, pos_feature, methods):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
-                elif keys[i] == 'foret_influence':
-                    for i, v in enumerate(foret_influence_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'highway' :
                     for i, v in enumerate(osmnx_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
-                elif keys[i] == 'highway_influence' :
-                    for i, v in enumerate(osmnx_influence_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
@@ -1640,21 +1632,25 @@ def log_features(fet, pos_feature, methods):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
-                elif keys[i] == 'dynamicWorld_influence' :
-                    for i, v in enumerate(dynamic_world_influence_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'vigicrues':
                     for i, v in enumerate(vigicrues_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'vigicrues{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'nappes':
+                    for i, v in enumerate(nappes_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'landcover':
                     for i, v in enumerate(landcover_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'AutoRegressionReg':
+                    logger.info(f'{keys[i], fe[1], auto_regression_variable_reg[f-res]}')
+                elif keys[i] == 'AutoRegressionBin':
+                    logger.info(f'{keys[i], fe[1], auto_regression_variable_bin[f-res]}')
                 elif keys[i] == 'Calendar' or keys[i] == 'Calendar_mean':
                     logger.info(f'{keys[i]}, {fe[1]}, {calendar_variables[f-res]}')
                 elif keys[i] == 'air' or keys[i] == 'air_mean':
@@ -1663,7 +1659,7 @@ def log_features(fet, pos_feature, methods):
                     logger.info(f'{keys[i], fe[1]}')
                 break
 
-def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):
+def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures):
     if doFet:
         variables = []
         df = pd.DataFrame(index=np.arange(Xset.shape[0]))
@@ -1674,18 +1670,18 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):
 
         df['target'] = Yset[:,-1]
 
-        features_importance = get_features(df, variables, target='target', num_feats=100)
+        features_importance = get_features(df, variables, target='target', num_feats=NbFeatures)
         features_importance = np.asarray(features_importance)
 
         if tree:
-                save_object(features_importance, 'features_importance_tree_'+spec+'.pkl', dir_output)
+                save_object(features_importance, 'features_importance_tree_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
         else:
-                save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
+                save_object(features_importance, 'features_importance_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
     else:
         if tree:
-                features_importance = read_object('features_importance_tree_'+spec+'.pkl', dir_output)
+                features_importance = read_object('features_importance_tree_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
         else:
-                features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
+                features_importance = read_object('features_importance_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
 
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)

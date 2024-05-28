@@ -4,6 +4,8 @@ import argparse
 
 foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18']
 sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
+osmnx_variables = ['0', '1', '2', '3', '4']
+dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']
 
 def raster2geojson(data, mask, h3, var, encoder):
     if var == 'sentinel':
@@ -15,12 +17,7 @@ def raster2geojson(data, mask, h3, var, encoder):
     else:
         unode = np.unique(mask)
         for node in unode:
-            if var != 'sentinel' and var != 'foret':
-                dataNode = data[(mask == node) & ~(np.isnan(data))]
-                if encoder is not None:
-                    dataNode = encoder.transform(dataNode.reshape(-1,1))
-                h3.loc[h3['scale0'] == node, var] = np.mean(dataNode) 
-            elif var == 'sentinel':
+            if var == 'sentinel':
                 for band, v2 in enumerate(sentinel_variables):
                     dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
                     h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode) 
@@ -28,6 +25,19 @@ def raster2geojson(data, mask, h3, var, encoder):
                 for band, v2 in enumerate(foret_variables):
                     dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
                     h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode) 
+            elif var == "osmnx":
+                for band, v2 in enumerate(osmnx_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode)
+            elif var == 'dynamic_world':
+                for band, v2 in enumerate(dynamic_world_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode)
+            else:
+                dataNode = data[(mask == node) & ~(np.isnan(data))]
+                if encoder is not None:
+                    dataNode = encoder.transform(dataNode.reshape(-1,1))
+                h3.loc[h3['scale0'] == node, var] = np.mean(dataNode) 
             
     return h3
 
@@ -49,7 +59,7 @@ if __name__ == "__main__":
     sinister = args.sinister
 
     departements = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
-    variables = ['sentinel', 'osmnx', 'landcover', 'population', 'elevation', 'foret_landcover', 'foret']
+    variables = ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover', 'foret', 'dynamic_world']
 
     root_data = Path('/home/caron/Bureau/csv')
     root_raster = Path('/home/caron/Bureau/csv')
@@ -62,8 +72,8 @@ if __name__ == "__main__":
     dico = regions['scale0'].to_dict()
     regions.reset_index(drop=True, inplace=True)
     
-    date_to_choose = '2022-06-07'
     allDates = find_dates_between('2017-06-12', '2023-09-11')
+    date_to_choose = allDates[-1]
     index = allDates.index(date_to_choose)
     for departement in departements:
         print(departement)
@@ -79,17 +89,15 @@ if __name__ == "__main__":
                 print(h3[var].unique())
             else:
                 data = read_object(var+'.pkl', dir_raster)
-                if var == 'landcover':
-                    data[~np.isnan(data)] = np.round(data[~np.isnan(data)])
-                if var in ['landcover', 'foret']:
+                if var in ['dynamic_world_landcover', 'foret']:
                     encoder = read_object('encoder_'+var+'.pkl', dir_encoder)
                 else:
                     encoder = None
                 if var ==  'sentinel':
                     data = data[:,:,:, index]
-                elif var  == 'landcover':
-                    data = data[:,:, index]
-                    
+                elif var  == 'dynamic_world':
+                    data = data[:,:,:, index]
+
                 h3 = raster2geojson(data, mask, h3, var, encoder)
 
         outname = 'hexagones_'+sinister+'.geojson'

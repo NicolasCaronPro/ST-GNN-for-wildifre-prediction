@@ -168,12 +168,24 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 X[index, pos_feature['Calendar'] + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 ) \
                     or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
 
-                #logger.info(X[index, pos_feature['Calendar']])
-                X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar] = \
-                        encoder_calendar.transform(np.moveaxis(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar], 1, 2).reshape(-1, size_calendar)).values.reshape(-1, 1, size_calendar)
-                #logger.info(X[index, pos_feature['Calendar']])
-                #logger.info('#######################################')
-
+                stop_calendar = 11
+                
+                X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar] = \
+                        encoder_calendar.transform(np.moveaxis(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar)
+                
+                for ir in range(stop_calendar, size_calendar):
+                    var_ir = calendar_variables[ir]
+                    if var_ir == 'mean':
+                        X[index, pos_feature['Calendar'] + ir] = np.mean(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                    elif var_ir == 'max':
+                        X[index, pos_feature['Calendar'] + ir] = np.max(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                    elif var_ir == 'min':
+                        X[index, pos_feature['Calendar'] + ir] = np.min(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                    elif var_ir == 'sum':
+                        X[index, pos_feature['Calendar'] + ir] = np.sum(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                    else:
+                        logger.info(f'Unknow operation {var_ir}')
+                        exit(1)
         ### Geo spatial
         logger.info('Geo')
         if 'Geo' in features:
@@ -230,45 +242,33 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayEl = read_object(name, dir_data)
 
         if 'dynamicWorld' in features:
-            arrayDW = read_object('landcover.pkl', dir_data)
-
-        if 'dynamicWorld_influence' in features:
-            arrayDWInfluence = read_object('landcover_influence.pkl', dir_data)
+            arrayDW = read_object('dynamic_world.pkl', dir_data)
 
         ### OSMNX
         if 'highway' in features:
             name = 'osmnx.pkl'
             arrayOS = read_object(name, dir_data)
 
-        if 'highway_influence' in features:
-            logger.info('highway_influence')
-            name = 'highway_influence.pkl'
-            arrayOSInfluence = read_object(name, dir_data)
-
         if 'foret' in features:
             logger.info('Foret')
             name = 'foret.pkl'
             arrayForet = read_object(name, dir_data)
 
-        if 'foret_influence' in features:
-            logger.info('foret_influence')
-            name = 'foret_influence.pkl'
-            arrayForetInfluence = read_object(name, dir_data)
-
         if 'landcover' in features:
-            logger.info('Foret landcover')
-            name = 'foret_landcover.pkl'
-            arrayForetLandcover = read_object(name, dir_data)
+            if 'foret' in landcover_variables:
+                logger.info('Foret landcover')
+                name = 'foret_landcover.pkl'
+                arrayForetLandcover = read_object(name, dir_data)
 
-            logger.info('Dynamic World landcover')
-            name = 'landcover.pkl'
-            arrayLand = read_object(name, dir_data)
-            arrayLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
+            if 'landcover' in landcover_variables:
+                logger.info('Dynamic World landcover')
+                name = 'dynamic_world_landcover.pkl'
+                arrayLand = read_object(name, dir_data)
 
-            logger.info('OSMNX landcover')
-            name = 'osmnx_landcover.pkl'
-            arrayOSLand = read_object(name, dir_data)
-            arrayOSLand[~np.isnan(arrayLand)] = np.round(arrayLand[~np.isnan(arrayLand)])
+            if 'highway' in landcover_variables:
+                logger.info('OSMNX landcover')
+                name = 'osmnx_landcover.pkl'
+                arrayOSLand = read_object(name, dir_data)
 
         if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
             unode = np.unique(nodeDepartement[:,0])
@@ -281,24 +281,20 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 
                 if 'elevation' in features:
                     save_values(arrayEl, pos_feature['elevation'], index, maskNode)
-                
-                if 'highway_influence' in features:
-                    save_values(arrayOSInfluence, pos_feature['highway_influence'], index, maskNode)
 
                 if 'highway' in features:
-                    save_values(arrayOS, pos_feature['highway'], index, maskNode)
-
-                if 'foret_influence' in features:
-                    for band in foret_influence_variables:
-                        save_values(arrayForetInfluence[int(band), :, :], pos_feature['foret_influence'] + (foret_influence_variables.index(band) * 4), index, maskNode)
+                    for band in osmnx_variables:
+                        save_values(arrayOS[int(band), :, :], pos_feature['highway'] + (osmnx_variables.index(band) * 4), index, maskNode)
 
                 if 'foret' in features:
                     for band in foret_variables:
                         save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
 
                 if 'landcover' in features:
-                    save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
-                    save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
+                    if 'foret' in landcover_variables:
+                        save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
+                    if 'highway' in landcover_variables:
+                        save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
 
         ### Sentinel
         if 'sentinel' in features:
@@ -317,16 +313,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         save_values(arraySent[band,:, :,int(node[4])], pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
                 
                 if 'landcover' in features:
-                    save_value_with_encoding(arrayLand[:,:,int(node[4])], pos_feature['landcover'] + (landcover_variables.index('landcover') * 4), index, maskNode, encoder_landcover)
-                        
+                    if 'landcover' in landcover_variables:
+                        save_value_with_encoding(arrayLand[:,:], pos_feature['landcover'] + (landcover_variables.index('landcover') * 4), index, maskNode, encoder_landcover)
+
                 if 'dynamicWorld' in features:
-                    for i, band in dynamic_world_variables:
+                    for band in dynamic_world_variables:
                         save_values(arrayDW[i], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(band) * 4), index, maskNode)
-                          
-                if 'dynamicWorld_influence' in features:
-                    for i, band in dynamic_world_influence_variables:
-                        save_values(arrayDWInfluence[i], pos_feature['dynamicWorld_influence'] + (dynamic_world_influence_variables.index(band) * 4), index, maskNode)
-                
+
         del arrayPop
         del arrayEl
         del arrayOS
@@ -344,9 +337,31 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if node[4] - 1 < 0:
                     continue
 
-                save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
-                
+                save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
             del arrayInfluence
+
+        logger.info('AutoRegression')
+        if 'AutoRegression' in features:
+            dir_target = path / 'influence' / '2x2'
+            dir_bin = path / 'bin' / '2x2'
+            arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target)
+            arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+            for node in nodeDepartement:
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = mask == node[0]
+                if node[4] - 1 < 0:
+                    continue
+                
+                for band in auto_regression_variable_reg:
+                    step = int(band.split('-')[-1])
+                    save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegression'] + auto_regression_variable_reg.index(band), index, maskNode)
+                
+                for band in auto_regression_variable_bin:
+                    step = int(band.split('-')[-1])
+                    save_value(arrayBin[:,:, int(node[4] - step)], pos_feature['AutoRegression'] + auto_regression_variable_bin.index(band), index, maskNode)
+
+            del arrayInfluence
+            del arrayBin
 
         logger.info('Vigicrues')
         if 'vigicrues' in features:
@@ -359,6 +374,19 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         continue
 
                     save_values(array[:,:, int(node[4])], pos_feature['vigicrues'] + (4 * vigicrues_variables.index(var)), index, maskNode)
+                del array
+
+        logger.info('nappes')
+        if 'nappes' in features:
+            for var in nappes_variables:
+                array = read_object(var+'.pkl', dir_data)
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
+
+                    save_values(array[:,:, int(node[4])], pos_feature['nappes'] + (4 * nappes_variables.index(var)), index, maskNode)
                 del array
 
     return X, pos_feature

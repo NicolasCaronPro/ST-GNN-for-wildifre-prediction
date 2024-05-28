@@ -19,6 +19,7 @@ parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 
 args = parser.parse_args()
 
@@ -27,11 +28,9 @@ nameExp = args.name
 doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
-"""doGraph = True
-doDatabase = True
-do2D = False"""
 scale = int(args.scale)
 sinister = args.sinister
+nbfeatures = args.NbFeatures
 spec = args.spec
 minPoint = args.nbpoint
 
@@ -202,8 +201,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     # Select train features
     pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures_:
-        if fet in features_:
+    for fet in trainFeatures:
+        if fet in features:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -215,12 +214,20 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                 maxi = len(geo_variables)
             elif fet == 'foret':
                 maxi = coef * len(foret_variables)
+            elif fet == 'highway':
+                maxi = coef * len(osmnx_variables)
             elif fet == 'landcover':
                 maxi = coef * len(landcover_variables)
             elif fet == 'dynamicWorld':
-                maxi += coef * len(dynamic_world_variables)
+                maxi = coef * len(dynamic_world_variables)
             elif fet == 'vigicrues':
-                maxi = len(vigicrues_variables)
+                maxi = coef * len(vigicrues_variables)
+            elif fet == 'nappes':
+                maxi = coef * len(nappes_variables)
+            elif fet == 'AutoRegressionReg':
+                maxi = len(auto_regression_variable_reg)
+            elif fet == 'AutoRegressionBin':
+                maxi = len(auto_regression_variable_bin)
             elif fet in varying_time_variables:
                 maxi = 1
             else:

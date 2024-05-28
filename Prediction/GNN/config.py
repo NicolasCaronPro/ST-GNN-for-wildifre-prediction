@@ -68,15 +68,20 @@ features = [
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
             'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
-            'elevation', 'highway', 'population',
+            'elevation', 'population',
             'sentinel',
             'landcover',
             'vigicrues',
             'foret',
+            'highway',
+            'dynamicWorld',
             'Calendar',
             'Historical',
             'Geo',
             'air',
+            'nappes',
+            'AutoRegressionReg',
+            'AutoRegressionBin'
             ]
 
 # Train features 
@@ -86,17 +91,20 @@ trainFeatures = [
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
             'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
-            'elevation',
-            'highway',
-            'population',
-            #'sentinel',
-            'vigicrues',
+            'elevation', 'population',
+            'sentinel',
             'landcover',
+            'vigicrues',
             'foret',
+            'highway',
+            'dynamicWorld',
             'Calendar',
             'Historical',
             'Geo',
-            #'air',
+            'air',
+            'nappes',
+            'AutoRegressionReg',
+            'AutoRegressionBin'
             ]
 
 def get_academic_zone(name, date):
@@ -132,18 +140,18 @@ def get_academic_zone(name, date):
         return dict_zones[name][1]
 
 # All department for which we have data
-departements = ['departement-01-ain',
+departements = [#'departement-01-ain',
                 'departement-25-doubs',
-                'departement-69-rhone',
-                'departement-78-yvelines'
+                #'departement-69-rhone',
+                #'departement-78-yvelines'
                 ]
 
 # We trained only on those 3 departmenet
 trainDepartements = [
-                'departement-01-ain',
+                #'departement-01-ain',
                 'departement-25-doubs',
                 #'departement-69-rhone',
-                'departement-78-yvelines',
+                #'departement-78-yvelines',
                 ]
 
 ############################ Logger ######################################

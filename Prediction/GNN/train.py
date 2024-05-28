@@ -23,9 +23,9 @@ parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validat
 parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-#parser.add_argument('-ks', '--k_days', type=str, help='Number of days of timeseries')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 
 args = parser.parse_args()
 
@@ -41,7 +41,7 @@ do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
 sinister = args.sinister
 minPoint = args.nbpoint
-#ks = int(args.k_days)
+nbfeatures = args.NbFeatures
 scale = int(args.scale)
 spec = args.spec
 
@@ -186,10 +186,20 @@ for fet in trainFeatures:
             maxi = len(geo_variables)
         elif fet == 'foret':
             maxi = coef * len(foret_variables)
+        elif fet == 'highway':
+            maxi = coef * len(osmnx_variables)
         elif fet == 'landcover':
             maxi = coef * len(landcover_variables)
+        elif fet == 'dynamicWorld':
+            maxi = coef * len(dynamic_world_variables)
         elif fet == 'vigicrues':
-                maxi = len(vigicrues_variables)
+            maxi = coef * len(vigicrues_variables)
+        elif fet == 'nappes':
+            maxi = coef * len(nappes_variables)
+        elif fet == 'AutoRegressionReg':
+            maxi = len(auto_regression_variable_reg)
+        elif fet == 'AutoRegressionBin':
+            maxi = len(auto_regression_variable_bin)
         elif fet in varying_time_variables:
             maxi = 1
         else:
@@ -274,7 +284,7 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
             save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
             save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
 
-    logger.info(dico_model[model])
+    logger.info(gnnModels[model])
     train(trainLoader=trainLoader, valLoader=valLoader,
         PATIENCE_CNT=PATIENCE_CNT,
         CHECKPOINT=CHECKPOINT,
@@ -282,5 +292,5 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
         features=features_selected,
         lr=lr,
         criterion=criterion,
-        model=dico_model[model],
+        model=gnnModels[model],
         dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model))
