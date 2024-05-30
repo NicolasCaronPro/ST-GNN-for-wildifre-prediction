@@ -82,15 +82,16 @@ def get_features(df, variables, target='appels', num_feats=100, learn_mode = 'sl
     embeded_lr_feature = [X.columns[i] for i in true_indices]
     #embeded_lr_feature = []
     #if not gpu:
-    """print("   - Chi-2 selector")
-    X_norm = MinMaxScaler().fit_transform(X[variables])
-    chi_selector = SelectKBest(chi2, k=num_feats)
-    chi_selector.fit(X_norm, y)
-    chi_support = chi_selector.get_support()
-    #chi_feature = X.loc[:, chi_support].columns.tolist()
-    chi_feature = [item for index, item in enumerate(X.columns) if chi_support[index]]
-    #else:"""
-    #    chi_feature = []
+    print("   - Chi-2 selector")
+    if False:
+        X_norm = MinMaxScaler().fit_transform(X[variables])
+        chi_selector = SelectKBest(chi2, k=num_feats)
+        chi_selector.fit(X_norm, y)
+        chi_support = chi_selector.get_support()
+        #chi_feature = X.loc[:, chi_support].columns.tolist()
+        chi_feature = [item for index, item in enumerate(X.columns) if chi_support[index]]
+    else:
+        chi_feature = []
     if not gpu:
         print("   - Extra trees")
         model = ExtraTreesRegressor(n_jobs=-1, max_depth=7)
@@ -173,7 +174,7 @@ def get_features(df, variables, target='appels', num_feats=100, learn_mode = 'sl
         rfe_feature = X.loc[:,rfe_support].columns.tolist()
     else:
         rfe_feature = []
-    total = high_variance+Liste_Pearson+Liste_Kendall+Liste_Spearman+embeded_lr_feature+embeded_rf_feature+xt_features+features_xgb+embeded_lgb_feature+rfe_feature
+    total = high_variance+Liste_Pearson+Liste_Kendall+Liste_Spearman+embeded_lr_feature+embeded_rf_feature+xt_features+features_xgb+embeded_lgb_feature+rfe_feature+chi_feature
     total = sorted(set([(k, total.count(k)) for k in total if total.count(k)>1]), key=lambda x:x[1], reverse=True)[:num_feats]
     return total
     final = [k for k in total if k[0]=='en_cours']

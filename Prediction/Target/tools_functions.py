@@ -281,9 +281,8 @@ def laplacien3D(outputShape):
 def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
     dimX, dimY, dimZ = dimS
     if mode == "laplace":
-        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimY, resolution_lat=dimX, resolution_altitude=dimZ) + 1
+        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + 1
         kernel = 1 / kernel 
-        #kernel = laplacien3D(dim)
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
 

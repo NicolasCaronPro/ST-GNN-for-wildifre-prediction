@@ -34,8 +34,11 @@ from skimage import img_as_float
 from category_encoders import TargetEncoder, CatBoostEncoder
 import convertdate
 from skimage import transform
+from arborescence import *
 from array_fet import *
 from weigh_predictor import *
+from features_selection import *
+from config import logger, foretint2str, osmnxint2str
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -95,25 +98,6 @@ name2int = {
     'departement-78-yvelines' : 78
 }
 
-foretint2str = {'1':'Châtaignier',
- '2': 'Chênes décidus',
- '3': 'Conifères',
- '4': 'Douglas',
- '5': 'Feuillus',
- '6': 'Hêtre',
- '7': 'Mixte',
- '8': 'Mélèze',
- '9': 'NC',
- '10': 'NR',
- '11': 'Peuplier',
- '12': 'Pin autre',
- '13': 'Pin laricio, pin noir',
- '14': 'Pin maritime',
- '15': 'Pin sylvestre',
- '16': 'Pins mélangés',
- '17': 'Robinier',
- '18': 'Sapin, épicéa'}
-
 def create_larger_scale_image(input, proba, bin):
     probaImageScale = np.full(proba.shape, np.nan)
     binImageScale = np.full(proba.shape, np.nan)
@@ -154,7 +138,7 @@ def find_dates_between(start, end):
             date += delta
     return res
 
-allDates = find_dates_between('2017-06-12', '2023-09-11')
+allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
 
 def save_object(obj, filename: str, path : Path):
     check_and_create_path(path)
@@ -166,9 +150,9 @@ def save_object_torch(obj, filename : str, path : Path):
     torch.save(obj, path/filename)
 
 def read_object(filename: str, path : Path):
-    #if not (path / filename).is_file():
-    #    print(f'{path / filename} not found')
-    #    return None
+    if not (path / filename).is_file():
+        logger.info(f'{path / filename} not found')
+        return None
     return pickle.load(open(path / filename, 'rb'))
 
 def read_object_torch(filename: str, path : Path):
@@ -337,6 +321,7 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     else:
         pixel_size_x = abs(longs[0][0] - longs[0][1])
         pixel_size_y = abs(lats[0][0] - lats[1][0])
+        logger.info(f'px {pixel_size_x}, py {pixel_size_y}')
         
     source_ds = ogr.Open(input_geojson)
  
@@ -569,19 +554,20 @@ def construct_graph_set(graph, date, X, Y, ks):
 def concat_temporal_graph_into_time_series(array : np.array, ks : int, isY=False) -> np.array:
     uniqueNodes = np.unique(array[:,0])
     res = []
-    print(array.shape)
+
     for uNode in uniqueNodes:
         arrayNode = array[array[:,0] == uNode]
         ind = np.lexsort([arrayNode[:,4]])
 
         #ind = np.flip(ind)
         arrayNode = arrayNode[ind]
-        if ks + 1 < arrayNode.shape[0]:
-            continue
-        
+
+        if ks + 1 > arrayNode.shape[0]:
+            return None
         res.append(arrayNode[:ks+1])
+
     res = np.asarray(res)
-    res = np.moveaxis(res, 1, 2)
+    res = np.moveaxis(res, 1,2)
     return res
 
 def construct_graph_with_time_series(graph, date : int,
@@ -597,9 +583,8 @@ def construct_graph_with_time_series(graph, date : int,
     """
 
     maskgraph = np.argwhere((X[:,4] == date) & (X[:, 5] > 0))
-    print(np.unique(X[:, 4]), ks, date)
-
     x = X[maskgraph[:,0]]
+
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,4] < date) & (X[:,4] >= date - ks)))
         if maskts.shape[0] == 0:
@@ -607,6 +592,7 @@ def construct_graph_with_time_series(graph, date : int,
     
         xts = X[maskts[:,0]]
         x = np.concatenate((x, xts))
+
     if Y is not None:
         y = Y[maskgraph[:,0]]
         if ks != 0:
@@ -720,7 +706,6 @@ def order_class(predictor, pred):
     for c in range(cc.shape[0]):
         mask = np.argwhere(pred == classes[c])
         res[mask] = c
-
     return res
 
 def realVspredict(ypred, y, dir_output, name):
@@ -1031,39 +1016,6 @@ def train_sklearn_api_model(trainDataset, valDataset,
     Xval = valDataset[0]
     Yval = valDataset[1]
 
-    #################################################################################################
-    #                                                                                               #
-    #                                     PREPROCESS                                                #
-    #                   Like the preprocess function -> TO DO : merge into one                      #
-    #                                                                                               #
-    #                                                                                               #
-    #################################################################################################
-
-    # Define the scale method
-    if scaling == 'MinMax':
-        scaler = min_max_scaler
-    elif scaling == 'z-score':
-        scaler = standart_scaler
-    elif scaling == "robust":
-        scaler = robust_scaler
-    else:
-        ValueError('Unknow')
-        exit(1)
-    
-    # Scale Features
-    for featureband in range(6, Xtrain.shape[1]):
-        Xval[:,featureband] = scaler(Xval[:,featureband], Xtrain[:, featureband], concat=False)
-        Xtrain[:,featureband] = scaler(Xtrain[:,featureband], Xtrain[:, featureband], concat=False)
-
-    logger.info(f'Check {scaling} standardisation Train : {np.nanmax(Xtrain[:,6:])}, {np.nanmin(Xtrain[:,6:])}')
-    logger.info(f'Check {scaling} standardisation Val : {np.nanmax(Xval[:,6:])}, {np.nanmin(Xval[:,6:])}')
-
-    Xtrain = Xtrain[Ytrain[:,-3] > 0][:, features]
-    Ytrain = Ytrain[Ytrain[:,-3] > 0]
-
-    Xval = Xval[Yval[:,-3] > 0][:, features]
-    Yval = Yval[Yval[:,-3] > 0]
-
     logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape}')
 
     if not binary:
@@ -1083,8 +1035,6 @@ def train_sklearn_api_model(trainDataset, valDataset,
         Yw = np.ones(Ytrain.shape[0])
 
     for name, model in models:
-        if name  == 'ngboost':
-            continue
 
         if name == 'xgboost':
             fitparams={
@@ -1154,8 +1104,11 @@ def add_metrics(methods : list, i : int,
             res[name+'no_weighted'] = mett
         
         elif target == 'class':
-            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-3])
+            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-3], top=None)
             res[name] = mett
+
+            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=None, top=10)
+            res[name+'top10'] = mett
 
         logger.info(name)
 
@@ -1231,7 +1184,7 @@ def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tens
     return (bestScore, prec, rec, bestBound)
 
 def class_risk(ypred, ytrue, departements : list, isBin : bool,
-               scale : int, modelName: str, dir : Path, weights = None) -> dict:
+               scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1274,7 +1227,7 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
     return res
 
 def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                   scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                   scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1318,7 +1271,7 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
     return res
 
 def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                            scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                            scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1358,11 +1311,12 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
         yweights = weightsNumpy[mask].reshape(-1)
 
         res[nameDep] = balanced_accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
-            
+
     return res
 
 def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
-                              scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                              scale : int, modelName: str,
+                              dir : Path, weights = None, top : int = None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1374,7 +1328,7 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
         weightsNumpy = np.ones(ytrue.shape[0])
 
     dir_predictor = root_graph / dir / 'influenceClustering'
-    
+
     ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
@@ -1398,11 +1352,18 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
                 save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
             ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
-        
+
         yweights = weightsNumpy[mask].reshape(-1)
 
+        if top is not None:
+            minBound = np.nanmax(ytrue[:,-1]) * (1 - top/100)
+            mask = ytrue[:,-1] > minBound
+            ytrueclass = ytrueclass[mask]
+            ypredclass = ypredclass[mask]
+            yweights = None
+
         res[nameDep] = mean_absolute_error(ytrueclass, ypredclass, sample_weight=yweights)
-            
+
     return res
 
 def create_pos_feature(graph, shape, features):
@@ -1412,7 +1373,6 @@ def create_pos_feature(graph, shape, features):
     newShape = shape
     if graph.scale > 0:
         for var in features:
-            #logger.info(f'{newShape}, {var}')
             pos_feature[var] = newShape
             if var == 'Calendar':
                 newShape += len(calendar_variables)
@@ -1424,8 +1384,22 @@ def create_pos_feature(graph, shape, features):
                 newShape += 4 * len(sentinel_variables)
             elif var == "foret":
                 newShape += 4 * len(foret_variables)
+            elif var == 'dynamicWorld':
+                newShape += 4 * len(dynamic_world_variables)
+            elif var == 'highway':
+                newShape += 4 * len(osmnx_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
+            elif var == 'vigicrues':
+                newShape += 4 * len(vigicrues_variables)
+            elif var == 'nappes':
+                newShape += 4 * len(nappes_variables)
+            elif var == 'Historical':
+                newShape += 4 * len(historical_variables)
+            elif var == 'AutoRegressionReg':
+                newShape += len(auto_regression_variable_reg)
+            elif var == 'AutoRegressionBin':
+                newShape += len(auto_regression_variable_bin)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1437,7 +1411,6 @@ def create_pos_feature(graph, shape, features):
                 newShape += 4
     else:
         for var in features:
-            #logger.info(f'{newShape}, {var}')
             pos_feature[var] = newShape
             if var == 'Calendar':
                 newShape += len(calendar_variables)
@@ -1447,8 +1420,20 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(sentinel_variables)
             elif var == "foret":
                 newShape += len(foret_variables)
+            elif var == 'dynamicWorld':
+                newShape += len(dynamic_world_variables)
+            elif var == 'highway':
+                newShape += len(osmnx_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
+            elif var == 'vigicrues':
+                newShape += len(vigicrues_variables)
+            elif var == 'Historical':
+                newShape += len(historical_variables)
+            elif var == 'AutoRegressionReg':
+                newShape += len(auto_regression_variable_reg)
+            elif var == 'AutoRegressionBin':
+                newShape += len(auto_regression_variable_bin)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1599,7 +1584,7 @@ def log_features(fet, pos_feature, methods):
                     next =  None
             if next is None or (f >= res and f < next and next is not None):
                 if keys[i] in cems_variables or keys[i] == 'elevation' or \
-                keys[i] == 'population' or keys[i] == 'highway' or keys[i] == 'Historical':
+                keys[i] == 'population' or keys[i] == 'Historical':
                     logger.info(f'{keys[i], fe[1], methods[f-res]}')
                 elif keys[i] == 'sentinel':
                     for i, v in enumerate(sentinel_variables):
@@ -1611,11 +1596,35 @@ def log_features(fet, pos_feature, methods):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'highway' :
+                    for i, v in enumerate(osmnx_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{osmnxint2str[v], fe[1], methods[meth_index]}')
+                elif keys[i] == 'dynamicWorld' :
+                    for i, v in enumerate(dynamic_world_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'vigicrues':
+                    for i, v in enumerate(vigicrues_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'vigicrues{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'nappes':
+                    for i, v in enumerate(nappes_variables):
+                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
+                            meth_index = f - ((i * 4) + res)
+                            logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'landcover':
                     for i, v in enumerate(landcover_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
+                elif keys[i] == 'AutoRegressionReg':
+                    logger.info(f'{keys[i], fe[1], auto_regression_variable_reg[f-res]}')
+                elif keys[i] == 'AutoRegressionBin':
+                    logger.info(f'{keys[i], fe[1], auto_regression_variable_bin[f-res]}')
                 elif keys[i] == 'Calendar' or keys[i] == 'Calendar_mean':
                     logger.info(f'{keys[i]}, {fe[1]}, {calendar_variables[f-res]}')
                 elif keys[i] == 'air' or keys[i] == 'air_mean':
@@ -1624,7 +1633,7 @@ def log_features(fet, pos_feature, methods):
                     logger.info(f'{keys[i], fe[1]}')
                 break
 
-def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):
+def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures):
     if doFet:
         variables = []
         df = pd.DataFrame(index=np.arange(Xset.shape[0]))
@@ -1635,7 +1644,7 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree):
 
         df['target'] = Yset[:,-1]
 
-        features_importance = get_features(df, variables, target='target', num_feats=100)
+        features_importance = get_features(df, variables, target='target', num_feats=NbFeatures)
         features_importance = np.asarray(features_importance)
 
         if tree:

@@ -8,7 +8,8 @@ import itertools
 
 def get_sub_nodes_ground_truth(graph, subNode: np.array,
                            departements : list,
-                           oriNode : np.array, path : Path) -> np.array:
+                           oriNode : np.array, path : Path,
+                           train_dir : Path) -> np.array:
 
         assert graph.nodes is not None
         
@@ -22,7 +23,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
         dir_mask = path / 'raster' / '2x2'
         dir_bin = path / 'bin' / '2x2'
         dir_proba = path / 'influence' / '2x2'
-        dir_predictor = path / 'influenceClustering'
+        dir_predictor = train_dir / 'influenceClustering'
 
         for departement in departements:
 
@@ -33,6 +34,9 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             mask = read_object(departement+'rasterScale'+str(graph.scale)+'.pkl', dir_mask)
             array = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_proba)
             arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+
+            if array is None:
+                continue
 
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -132,8 +136,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     if 'Geo' in features:
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
-    dir_mask = dir_train / 'raster' / '2x2'
-    logging.info(f'Shape of X {X.shape}')
+    dir_mask = path / 'raster' / '2x2'
+    logging.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
     for departement in departements:
         logger.info(departement)
 
@@ -202,8 +206,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             array = read_object(name, dir_data)
             for node in nodeDepartement:
                 maskNode = mask == node[0]
-                if True not in maskNode:
-                    continue
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                 save_values(array[:,:,int(node[4])], pos_feature[var], index, maskNode)
 
@@ -217,12 +219,10 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 array = read_object(name, dir_data)
                 for node in nodeDepartement:
                     maskNode = mask == node[0]
-                    if True not in maskNode:
-                        continue
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     save_value(array[:,:,int(node[4])], pos_feature['air'] + i, index, maskNode)
 
-        logger.info('Population elevation Highway Sentinel')
+        logger.info('Population elevation Highway Sentinel Foret')
 
         arrayPop = None
         arrayEl = None
@@ -240,9 +240,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if 'elevation' in features: 
             name = 'elevation.pkl'
             arrayEl = read_object(name, dir_data)
-
-        if 'dynamicWorld' in features:
-            arrayDW = read_object('dynamic_world.pkl', dir_data)
 
         ### OSMNX
         if 'highway' in features:
@@ -275,10 +272,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             for node in unode:
                 maskNode = mask == node
                 index = np.argwhere(subNode[:,0] == node)
-
                 if 'population' in features:
                     save_values(arrayPop, pos_feature['population'], index, maskNode)
-                
+
                 if 'elevation' in features:
                     save_values(arrayEl, pos_feature['elevation'], index, maskNode)
 
@@ -296,16 +292,22 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     if 'highway' in landcover_variables:
                         save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
 
+        logger.info('Sentinel Dynamic World')
         ### Sentinel
         if 'sentinel' in features:
             logger.info('Sentinel')
             name = 'sentinel.pkl'
             arraySent = read_object(name, dir_data)
 
+        if 'dynamicWorld' in features:
+            arrayDW = read_object('dynamic_world.pkl', dir_data)
+
         coef = 4 if graph.scale > -1 else 1
         if arraySent is not None or arrayLand is not None:
             for node in nodeDepartement:
                 maskNode = mask == node[0]
+                if True not in np.unique(maskNode):
+                    continue
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
 
                 if 'sentinel' in features:
@@ -317,8 +319,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         save_value_with_encoding(arrayLand[:,:], pos_feature['landcover'] + (landcover_variables.index('landcover') * 4), index, maskNode, encoder_landcover)
 
                 if 'dynamicWorld' in features:
-                    for band in dynamic_world_variables:
-                        save_values(arrayDW[i], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(band) * 4), index, maskNode)
+                    for band, var in enumerate(dynamic_world_variables):
+                        save_values(arrayDW[band, :, :, int(node[4])], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(var) * 4), index, maskNode)
 
         del arrayPop
         del arrayEl
@@ -331,21 +333,20 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             dir_target = root_target / sinister / 'log'
             name = departement+'pastInfluence.pkl'
             arrayInfluence = read_object(name, dir_target)
-            for node in nodeDepartement:
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = mask == node[0]
-                if node[4] - 1 < 0:
-                    continue
+            if arrayInfluence is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
 
-                save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
-            del arrayInfluence
+                    save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
+                del arrayInfluence
 
-        logger.info('AutoRegression')
-        if 'AutoRegression' in features:
-            dir_target = path / 'influence' / '2x2'
-            dir_bin = path / 'bin' / '2x2'
+        logger.info('AutoRegressionReg')
+        if 'AutoRegressionReg' in features:
+            dir_target = dir_train / 'influence' / '2x2'
             arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target)
-            arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                 maskNode = mask == node[0]
@@ -354,13 +355,23 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 
                 for band in auto_regression_variable_reg:
                     step = int(band.split('-')[-1])
-                    save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegression'] + auto_regression_variable_reg.index(band), index, maskNode)
-                
-                for band in auto_regression_variable_bin:
-                    step = int(band.split('-')[-1])
-                    save_value(arrayBin[:,:, int(node[4] - step)], pos_feature['AutoRegression'] + auto_regression_variable_bin.index(band), index, maskNode)
+                    save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegressionReg'] + auto_regression_variable_reg.index(band), index, maskNode)
 
             del arrayInfluence
+
+        logger.info('AutoRegressionBin')
+        if 'AutoRegressionBin' in features:
+            dir_bin = dir_train / 'bin' / '2x2'
+            arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+            for node in nodeDepartement:
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = mask == node[0]
+                if node[4] - 1 < 0:
+                    continue
+
+                for band in auto_regression_variable_bin:
+                    step = int(band.split('-')[-1])
+                    save_value(arrayBin[:,:, int(node[4] - step)], pos_feature['AutoRegressionBin'] + auto_regression_variable_bin.index(band), index, maskNode)
             del arrayBin
 
         logger.info('Vigicrues')

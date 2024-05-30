@@ -60,6 +60,14 @@ foretint2str = {
  '17': 'Robinier',
  '18': 'Sapin, épicéa'}
 
+osmnxint2str = {
+'0' : 'PasDeRoute',
+'1':'motorway',
+ '2': 'primary',
+ '3': 'secondary',
+ '4': 'tertiary',
+ '5': 'path'}
+
 # Variables : 
 # mean max min and std for scale > 0 else value
 features = [
@@ -68,7 +76,8 @@ features = [
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
             'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
-            'elevation', 'population',
+            'elevation',
+            'population',
             'sentinel',
             'landcover',
             'vigicrues',
@@ -91,10 +100,11 @@ trainFeatures = [
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
             'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
-            'elevation', 'population',
+            'elevation',
+            'population',
             'sentinel',
             'landcover',
-            'vigicrues',
+            #'vigicrues',
             'foret',
             'highway',
             'dynamicWorld',
@@ -140,25 +150,24 @@ def get_academic_zone(name, date):
         return dict_zones[name][1]
 
 # All department for which we have data
-departements = [#'departement-01-ain',
+departements = ['departement-01-ain',
                 'departement-25-doubs',
-                #'departement-69-rhone',
-                #'departement-78-yvelines'
+                'departement-69-rhone',
+                'departement-78-yvelines'
                 ]
 
 # We trained only on those 3 departmenet
 trainDepartements = [
-                #'departement-01-ain',
+                'departement-01-ain',
                 'departement-25-doubs',
                 #'departement-69-rhone',
-                #'departement-78-yvelines',
+                'departement-78-yvelines',
                 ]
 
 ############################ Logger ######################################
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
-
 logFormatter = logging.Formatter("%(asctime)s [%(levelname)-5.5s]  %(message)s")
 
 # Handler pour afficher les logs dans le terminal
@@ -206,9 +215,9 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                         bias=True,
                         device=device,
                         act_func=act_func,
-                        n_sequences=k_days),
+                        n_sequences=k_days + 1),
 
-                    'ST-GATTCN': STGATCN(n_sequences=k_days,
+                    'ST-GATTCN': STGATCN(n_sequences=k_days + 1,
                                         num_of_layers=3,
                                         in_channels=in_dim,
                                          end_channels=64,
@@ -219,7 +228,7 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                                          heads=6, act_func=act_func,
                                          device=device),
                                         
-                    'ST-GATCONV': STGATCONV(k_days,
+                    'ST-GATCONV': STGATCONV(k_days + 1,
                                             num_of_layers=3,
                                             in_channels=in_dim,
                                             hidden_channels=32,
@@ -230,7 +239,7 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                                             act_func=act_func,
                                             device=device),
 
-                    'ST-GCNCONV' : STGCNCONV(k_days,
+                    'ST-GCNCONV' : STGCNCONV(k_days + 1,
                                             num_of_layers=3,
                                             in_channels=in_dim,
                                             hidden_channels=64,
@@ -243,7 +252,7 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                     'ATGN' : TemporalGNN(in_channels=in_dim,
                                         hidden_channels=64,
                                         out_channels=64,
-                                        n_sequences=k_days,
+                                        n_sequences=k_days + 1,
                                         device=device,
                                         act_func=act_func,
                                         dropout=dropout),
@@ -252,7 +261,7 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                                             hidden_channels=[64, 64, 64],
                                              out_channels=64,
                                              end_channels=32,
-                                             n_sequences=k_days,
+                                             n_sequences=k_days + 1,
                                              device=device, act_func=act_func, heads=6, dropout=dropout),
 
                     'Zhang' : Zhang(in_channels=in_dim_2D,
@@ -261,12 +270,12 @@ dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
                                     dropout=dropout,
                                     binary=False,
                                     device=device,
-                                    n_sequences=k_days),
+                                    n_sequences=k_days + 1),
 
                     'ConvLSTM' : CONVLSTM(in_channels=in_dim_2D,
                                         hidden_dim=[32, 32, 32],
                                           end_channels=64,
-                                          n_sequences=k_days,
+                                          n_sequences=k_days + 1,
                                           dropout=dropout,
                                           device=device, act_func=act_func)
                     }"""

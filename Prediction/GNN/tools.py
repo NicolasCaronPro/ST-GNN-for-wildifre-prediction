@@ -38,7 +38,7 @@ from arborescence import *
 from array_fet import *
 from weigh_predictor import *
 from features_selection import *
-from config import logger, foretint2str
+from config import logger, foretint2str, osmnxint2str
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -138,7 +138,7 @@ def find_dates_between(start, end):
             date += delta
     return res
 
-allDates = find_dates_between('2017-06-12', '2023-09-11')
+allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
 
 def save_object(obj, filename: str, path : Path):
     check_and_create_path(path)
@@ -1010,44 +1010,11 @@ def train_sklearn_api_model(trainDataset, valDataset,
 
     ############## fit #########################
 
-    Xtrain = trainDataset[0]
+    Xtrain = trainDataset[0][:, features]
     Ytrain = trainDataset[1]
 
-    Xval = valDataset[0]
+    Xval = valDataset[0][:, features]
     Yval = valDataset[1]
-
-    #################################################################################################
-    #                                                                                               #
-    #                                     PREPROCESS                                                #
-    #                   Like the preprocess function -> TO DO : merge into one                      #
-    #                                                                                               #
-    #                                                                                               #
-    #################################################################################################
-
-    # Define the scale method
-    if scaling == 'MinMax':
-        scaler = min_max_scaler
-    elif scaling == 'z-score':
-        scaler = standart_scaler
-    elif scaling == "robust":
-        scaler = robust_scaler
-    else:
-        ValueError('Unknow')
-        exit(1)
-    
-    # Scale Features
-    for featureband in range(6, Xtrain.shape[1]):
-        Xval[:,featureband] = scaler(Xval[:,featureband], Xtrain[:, featureband], concat=False)
-        Xtrain[:,featureband] = scaler(Xtrain[:,featureband], Xtrain[:, featureband], concat=False)
-
-    logger.info(f'Check {scaling} standardisation Train : {np.nanmax(Xtrain[:,6:])}, {np.nanmin(Xtrain[:,6:])}')
-    logger.info(f'Check {scaling} standardisation Val : {np.nanmax(Xval[:,6:])}, {np.nanmin(Xval[:,6:])}')
-
-    Xtrain = Xtrain[Ytrain[:,-3] > 0][:, features]
-    Ytrain = Ytrain[Ytrain[:,-3] > 0]
-
-    Xval = Xval[Yval[:,-3] > 0][:, features]
-    Yval = Yval[Yval[:,-3] > 0]
 
     logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape}')
 
@@ -1137,8 +1104,11 @@ def add_metrics(methods : list, i : int,
             res[name+'no_weighted'] = mett
         
         elif target == 'class':
-            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-3])
+            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-3], top=None)
             res[name] = mett
+
+            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=None, top=10)
+            res[name+'top10'] = mett
 
         logger.info(name)
 
@@ -1214,7 +1184,7 @@ def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tens
     return (bestScore, prec, rec, bestBound)
 
 def class_risk(ypred, ytrue, departements : list, isBin : bool,
-               scale : int, modelName: str, dir : Path, weights = None) -> dict:
+               scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1257,7 +1227,7 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
     return res
 
 def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                   scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                   scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1301,7 +1271,7 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
     return res
 
 def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                            scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                            scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1341,11 +1311,12 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
         yweights = weightsNumpy[mask].reshape(-1)
 
         res[nameDep] = balanced_accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
-            
+
     return res
 
 def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
-                              scale : int, modelName: str, dir : Path, weights = None) -> dict:
+                              scale : int, modelName: str,
+                              dir : Path, weights = None, top : int = None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1357,7 +1328,7 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
         weightsNumpy = np.ones(ytrue.shape[0])
 
     dir_predictor = root_graph / dir / 'influenceClustering'
-    
+
     ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
@@ -1381,11 +1352,17 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
                 save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
             ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
-        
+
         yweights = weightsNumpy[mask].reshape(-1)
+        if top is not None:
+            minBound = np.nanmax(ytrue[mask,-1]) * (1 - top/100)
+            mask2 = (ytrue[mask,-1] > minBound)[:,0]
+            ytrueclass = ytrueclass[mask2]
+            ypredclass = ypredclass[mask2]
+            yweights = None
 
         res[nameDep] = mean_absolute_error(ytrueclass, ypredclass, sample_weight=yweights)
-            
+
     return res
 
 def create_pos_feature(graph, shape, features):
@@ -1406,16 +1383,10 @@ def create_pos_feature(graph, shape, features):
                 newShape += 4 * len(sentinel_variables)
             elif var == "foret":
                 newShape += 4 * len(foret_variables)
-            elif var == 'foret_influence':
-                newShape += 4 * len(foret_influence_variables)
             elif var == 'dynamicWorld':
                 newShape += 4 * len(dynamic_world_variables)
-            elif var == 'dynamicWorld_influence':
-                newShape += 4 * len(dynamic_world_influence_variables)
             elif var == 'highway':
                 newShape += 4 * len(osmnx_variables)
-            elif var == 'highway_influence':
-                newShape += 4 * len(osmnx_influence_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
@@ -1425,9 +1396,9 @@ def create_pos_feature(graph, shape, features):
             elif var == 'Historical':
                 newShape += 4 * len(historical_variables)
             elif var == 'AutoRegressionReg':
-                newShape = 4 * len(auto_regression_variable_reg)
+                newShape += len(auto_regression_variable_reg)
             elif var == 'AutoRegressionBin':
-                newShape = 4 * len(auto_regression_variable_bin)
+                newShape += len(auto_regression_variable_bin)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1458,8 +1429,10 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(vigicrues_variables)
             elif var == 'Historical':
                 newShape += len(historical_variables)
-            elif var == 'AutoRegression':
-                newShape += len(auto_regression_variable)
+            elif var == 'AutoRegressionReg':
+                newShape += len(auto_regression_variable_reg)
+            elif var == 'AutoRegressionBin':
+                newShape += len(auto_regression_variable_bin)
             elif var in varying_time_variables:
                 if var == 'Calendar_mean':
                     newShape += len(calendar_variables)
@@ -1626,12 +1599,12 @@ def log_features(fet, pos_feature, methods):
                     for i, v in enumerate(osmnx_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                            logger.info(f'{osmnxint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'dynamicWorld' :
                     for i, v in enumerate(dynamic_world_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
                             meth_index = f - ((i * 4) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                            logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'vigicrues':
                     for i, v in enumerate(vigicrues_variables):
                         if f >= (i * 4) + res and (i + 1) * 4 + res > f:
@@ -1674,14 +1647,14 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, N
         features_importance = np.asarray(features_importance)
 
         if tree:
-                save_object(features_importance, 'features_importance_tree_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
+                save_object(features_importance, 'features_importance_tree_'+spec+'.pkl', dir_output)
         else:
-                save_object(features_importance, 'features_importance_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
+                save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
     else:
         if tree:
-                features_importance = read_object('features_importance_tree_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
+                features_importance = read_object('features_importance_tree_'+spec+'.pkl', dir_output)
         else:
-                features_importance = read_object('features_importance_'+str(NbFeatures)+'_'+spec+'.pkl', dir_output)
+                features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
 
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)

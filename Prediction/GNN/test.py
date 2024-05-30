@@ -13,8 +13,8 @@ parser = argparse.ArgumentParser(
 
 parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
+parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
@@ -25,11 +25,11 @@ args = parser.parse_args()
 
 # Input config
 nameExp = args.name
-doGraph = args.graph == "True"
 doDatabase = args.database == "True"
+doGraph = args.graph == "True"
 do2D = args.database2D == "True"
 scale = int(args.scale)
-nbfeatures = args.NbFeatures
+nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 spec = args.spec
 minPoint = args.nbpoint
@@ -71,52 +71,41 @@ geo = gpd.read_file('regions/regions.geojson')
 
 models = [
         #('GAT', False, False, False),
-        #('ST-GATTCN', False, False, False),
-        #('ST-GATCONV', False, False, False),
-        #('ATGN', False, False, False),
-        #('ST-GATLTSM', False, False, False),
-        #('ST-GCNCONV', False, False, False),
+        ('ST-GATTCN', False, False, False),
+        ('ST-GATCONV', False, False, False),
+        ('ATGN', False, False, False),
+        ('ST-GATLTSM', False, False, False),
+        ('ST-GCNCONV', False, False, False),
         #('Zhang', False, False, True),
         #('ConvLSTM', False, False, True)
         ]
-
-tradiModels = [
-    ('xgboost', False),
-    ('lightgbm', False),
-    #('ngboost', False),
-    ('xgboost_bin', True),
-    ('lightgbm_bin', True),
-    ('xgboost_bin_unweighted', True),
-    ('lightgbm_bin_unweighted', True),
-    #('ngboost_bin', True)
-    ]
 
 metrics = {}
 
 ############################# Pipelines ##############################
 
-def test(testname, testDate, pss, geo, testDepartement, dir_output):
+def test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
 
     prefix = str(k_days)+'_'+str(scale)
 
-    global doDatabase
-    global features
-    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
-    if dummy:
-        prefix_train += '_dummy'
+    if minPoint == 'full':
+        prefix_train = str(minPoint)+'_'+str(scaleTrain)
+    else:
+        prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scaleTrain)
+
+    prefix = str(scale)
 
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, False)
-        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
+        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
-
     ########################## Construct database #############################
     if doDatabase:
         pss = pss[pss['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
@@ -183,10 +172,9 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
         return
 
     # Select train features
-    pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures:
-        if fet in features:
+    for fet in features:
+        if fet in trainFeatures:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -218,18 +206,17 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
                 maxi = coef
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-    prefix += '_'+spec
-    pos_feature = pos_train_feature
+    pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
     X = X[:, np.asarray(train_fet_num)]
     
-    prefix_train += '_'+spec
-    prefix += '_'+spec
-
-    # Preprocess
-    Xset, Yset = preprocess_test(X=X, Y=Y, Xtrain=Xtrain, scaling=scaling)
+    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+    if spec != '':
+        prefix_train += '_'+spec
+        prefix += '_'+spec
 
     # Features selection
-    features_importance = read_object('features_importance_'+spec+'.pkl', train_dir)
+    features_importance = read_object('features_importance_'+prefix_train+'.pkl', train_dir)
     log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = np.unique(features_importance[:,0]).astype(int)
 
@@ -242,7 +229,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output):
         XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
                                                             X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                             test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+                                                            scaling=scaling, prefix=prefix, encoding=encoding, Rewrite=True)
         
         _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
                                         X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
@@ -339,10 +326,10 @@ def dummy_test(dates):
 
 
 # 69 test
-testDates = find_dates_between('2018-01-01', '2023-01-01')
-testDepartement = ['departement-69-rhone']
-
-test('69', testDates, geo, geo, testDepartement, dir_output)
+if sinister != 'inondation':
+    testDates = find_dates_between('2018-01-01', '2023-01-01')
+    testDepartement = ['departement-69-rhone']
+    test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 testDates = find_dates_between('2023-01-01', '2023-09-11')
 testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
@@ -352,7 +339,7 @@ dummyGeo = dummy_test(testDates)
 #test('dummy', None, dummyGeo, geo, testDepartement, dir_output)
 
 # 2023 test
-test('2023', testDates, geo, geo, testDepartement, dir_output)
+test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']

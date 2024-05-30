@@ -177,17 +177,16 @@ if k_days > 0:
     trainFeatures += varying_time_variables
     features += varying_time_variables
     pos_feature, newShape = create_pos_feature(graphScale, 6, features)
-    if doDatabase:
+    if True:
         X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
 ############################# Training ###########################
 
 # Select train features
-pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
 train_fet_num = [0,1,2,3,4,5]
-for fet in trainFeatures:
-    if fet in features:
+for fet in features:
+    if fet in trainFeatures:
         coef = 4 if scale > 0 else 1
         if fet == 'Calendar' or fet == 'Calendar_mean':
             maxi = len(calendar_variables)
@@ -219,13 +218,12 @@ for fet in trainFeatures:
             maxi = coef
         train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-logger.info(train_fet_num)
-prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 if spec != '':
     prefix += '_'+spec
-pos_feature = pos_train_feature
+logger.info(pos_feature)
+pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
-
 logger.info(pos_feature)
 logger.info(np.max(X[:,4]))
 logger.info(np.unique(X[:,0]))
@@ -233,7 +231,6 @@ logger.info(np.unique(X[:,0]))
 # Preprocess
 Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 
-logger.info(pos_feature)
 # Features selection
 features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures)
 

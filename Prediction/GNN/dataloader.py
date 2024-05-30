@@ -174,7 +174,7 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : in
 
     # Remove nodes where the is a feature at nan
     Xset, Yset = remove_nan_nodes(X, Y)
-    print(np.argwhere(np.isnan(X))[:,1])
+    print(f'We found nan at {np.unique(np.argwhere(np.isnan(X))[:,1])}')
 
     print(f'X shape {X.shape}, X shape after removal nan {Xset.shape}, Y shape is {Yset.shape}')
 
@@ -233,11 +233,6 @@ def preprocess_test(X, Y, Xtrain, scaling):
     print(f'X shape {X.shape}, X shape after removal nan {Xset.shape}')
     assert Xset.shape[0] > 0
 
-    # Sort by date
-    ind = np.lexsort([Yset[:,4]])
-    Xset = Xset[ind]
-    Yset = Yset[ind]
-
     # Define the scaler
     if scaling == 'MinMax':
         scaler = min_max_scaler
@@ -251,8 +246,8 @@ def preprocess_test(X, Y, Xtrain, scaling):
 
     # Scaling Features
     for featureband in range(6, Xset.shape[1]):
-        Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
-        
+        Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=True)
+
     print(f'Check {scaling} standardisation test : {np.nanmax(Xset[:,6:])}, {np.nanmin(Xset[:,6:])}')
 
     return Xset, Yset
@@ -432,14 +427,12 @@ def train_val_data_loader_2D(graph,
 #                                                                                                       #
 #########################################################################################################
 
-def create_test(graph, X : np.array, Y : np.array, Xtrain : np.array, 
+def create_test(graph, Xset : np.array, Yset : np.array,
                 device : torch.device, use_temporal_as_edges: bool,
-                ks :int, scaling :str) -> tuple:
+                ks :int,) -> tuple:
     """
     """
     assert use_temporal_as_edges is not None
-
-    Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
 
     print(np.nanmax(Xset[:,6:]), np.nanmin(Xset[:,6:]))
     graphId = np.unique(Xset[:,4])
@@ -558,8 +551,8 @@ def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
             ETensor = read_object('ETensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output).to(device)
             return XTensor, YTensor, ETensor
 
-    XTensor, YTensor, ETensor = create_test(graph=graphScale, X=X, Y=Y, Xtrain=Xtrain,
-                                device=device, use_temporal_as_edges=use_temporal_as_edges, ks=k_days, scaling=scaling)
+    XTensor, YTensor, ETensor = create_test(graph=graphScale, Xset=X, Yset=Y,
+                                device=device, use_temporal_as_edges=use_temporal_as_edges, ks=k_days)
 
     save_object(XTensor, 'XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
     save_object(YTensor, 'YTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)

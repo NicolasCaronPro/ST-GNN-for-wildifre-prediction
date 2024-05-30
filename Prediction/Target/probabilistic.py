@@ -12,7 +12,7 @@ class Probabilistic():
                  learner,
                  dir_output: Path):
         
-        self.dim = dims # (longitude, latitude, temporal)
+        self.dim = dims
         self.precision = (precision_x, precision_y, precision_z)
         self.learner = learner
         self.dir_output = dir_output

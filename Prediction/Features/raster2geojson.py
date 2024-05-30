@@ -4,7 +4,7 @@ import argparse
 
 foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18']
 sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
-osmnx_variables = ['0', '1', '2', '3', '4']
+osmnx_variables = ['0', '1', '2', '3', '4', '5']
 dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']
 
 def raster2geojson(data, mask, h3, var, encoder):
@@ -64,7 +64,7 @@ if __name__ == "__main__":
     root_data = Path('/home/caron/Bureau/csv')
     root_raster = Path('/home/caron/Bureau/csv')
     dir_mask = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/raster')
-    dir_encoder = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/final/'+sinister+'/train//Encoder/')
+    dir_encoder = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/final/'+sinister+'/train/Encoder/')
 
     regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions['scale0'] = regions.index

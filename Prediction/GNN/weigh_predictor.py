@@ -6,17 +6,18 @@ class Predictor():
         self.kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
 
     def fit(self, X : np.array):
+        self.train_X = X
         self.kmeans.fit(X.reshape(-1,1))
         self.cluster_centers = self.kmeans.cluster_centers_
         Xpre = self.kmeans.predict(X.reshape(-1,1))
         self.histogram = np.bincount(Xpre)
         self.highNumberClass = np.argwhere(self.histogram == np.max(self.histogram))
-        #print(f'High number class found at index {self.highNumberClass} \
-        #      with value of {self.cluster_centers[self.highNumberClass]} \
-        #      and number of {self.histogram[self.highNumberClass]}')
 
-    def predict(self, X : np.array):
-        pred = self.kmeans.predict(X.reshape(-1,1))
+    def predict(self, X : np.array, min_class : int = 0):
+        pred = self.kmeans.predict(X.reshape(-1,1)) + min_class
+        mask = self.train_X > np.nanmax(self.train_X)
+        if True in np.unique(mask):
+            pred[mask] += 1
         return pred
     
     def weight(self, c : int):
@@ -32,4 +33,7 @@ class Predictor():
         return self.kmeans.cluster_centers_[c]
 
     def log(self):
+        print('############# Histogram ###############')
         print(self.histogram)
+        print('############# Cluster Centers ###############')
+        print(self.kmeans.cluster_centers_)

@@ -64,7 +64,7 @@ methods = [('rmse', rmse, 'proba'),
            ('poisson', po, 'proba'),
            ('ca', ca, 'class'),
            ('bca', bca, 'class'),
-            ('meac', meac, 'class')
+            ('meac', meac, 'class'),
            ]
 
 geo = gpd.read_file('regions/regions.geojson')
@@ -116,7 +116,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, False)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
         #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
         doDatabase = True
     else:
@@ -199,10 +199,9 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         features_ =  features
 
     # Select train features
-    pos_train_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     train_fet_num = [0,1,2,3,4,5]
-    for fet in trainFeatures:
-        if fet in features:
+    for fet in features_:
+        if fet in trainFeatures_:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -234,18 +233,16 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                 maxi = coef
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-    logger.info(train_fet_num)
-    pos_feature = pos_train_feature
+    pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     X = X[:, np.asarray(train_fet_num)]
-
-    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
-    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)
+    logger.info(pos_feature)
+    prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+    prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     if spec != '':
         prefix_train += '_'+spec
         prefix += '_'+spec
 
-    # Preprocess
-    Xset, Yset = preprocess_test(X=X, Y=Y, Xtrain=Xtrain, scaling=scaling)
+    Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
 
     # Features selection
     features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
@@ -260,7 +257,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
 
     if Rewrite:
         XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
-                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                             test=testname, pos_feature=pos_feature,
                                                             scaling=scaling, prefix=prefix, encoding=encoding,
                                                             Rewrite=False)
@@ -284,11 +281,10 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         logger.info(f'      {name}            ')
         logger.info('#########################')
         XTensor, YTensor, _ = load_tensor_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                                        X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
                                                         test=testname, pos_feature=pos_feature,
                                                         scaling=scaling, prefix=prefix, encoding=encoding,
                                                         Rewrite=True)
-        print(XTensor.shape)
         XTensor = XTensor.detach().cpu().numpy()
         XTensor = XTensor[:, features_selected, -1]
 
@@ -298,7 +294,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         model = read_object(name+'.pkl', train_dir / Path('check_'+scaling+'/' + prefix_train + '/baseline/' + name + '/'))
         graphScale._set_model(model)
         Ypred = graphScale.predict_model_api_sklearn(XTensor, isBin)
-
+        
         Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
         YTensor = YTensor[ITensor.gt(0)]
         Ypred = torch.masked_select(Ypred, ITensor.gt(0))
@@ -433,10 +429,11 @@ def dummy_test(dates):
     return res
 
 # 69 test
-testDates = find_dates_between('2018-01-01', '2023-01-01')
-testDepartement = ['departement-69-rhone']
+if sinister != 'inondation':
+    testDates = find_dates_between('2018-01-01', '2023-01-01')
+    testDepartement = ['departement-69-rhone']
+    test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
-test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 testDates = find_dates_between('2023-01-01', '2023-09-11')
 testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']

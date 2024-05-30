@@ -1,6 +1,7 @@
 from tools import *
 import matplotlib.pyplot as plt
 import argparse
+import matplotlib.colors as mcolors
 
 def evaluate_ca(metrics, met):
     df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'departement', met])
@@ -34,55 +35,69 @@ def evaluate_met(metrics, met):
         i += 1
     return df.sort_values(met)    
 
-def plot(df, met, dir_output, out_name):
-    
-    # Les données du DataFrame
+def plot(df, met, dir_output, out_name, color):
     index = df['index'].values
     label = df['label'].values
     model = df.model.values
     mets = df[met].values
+    
+    scatters = []
+    labels = []
+    scatters_unique = []
 
-    # Création du graphique
     fig = plt.figure(figsize=(15, 5))
-    scatter = plt.scatter(mets, model, c=index, label=label, cmap='jet', alpha=0.8)
-    plt.xlabel('MAE')
+    for i, m in enumerate(mets):
+        sc = plt.scatter(m, model[i], c=color[index[i]], alpha=0.8)
+        scatters.append(sc)
+        if label[i] not in labels:
+            labels.append(label[i])
+            scatters_unique.append(sc)
+
+    plt.xlabel(met)
     plt.ylabel('Model')
-    plt.xlim(-0.1,1.1)
     plt.grid(True)
-    fig.colorbar(scatter, label='Index')
-    plt.legend()
+    plt.legend(scatters_unique, labels, loc='upper left', ncol=3)
 
     out_name += '.png'
     plt.savefig(dir_output / out_name)
 
-def plot_variation(df, base_label, met, dir_output, out_name):
+def plot_variation(df, base_label, met, dir_output, out_name, color):
 
-    base_df = df[df['index'] == base_label]
+    base_df = df[df['label'] == base_label]
 
     # Les données du DataFrame
     base_mets = base_df[met].values
+    base_mets = np.repeat(base_mets, len(df) / len(base_mets))
 
     index = df['index'].values
     label = df['label'].values
     model = df.model.values
     mets = base_mets - df[met].values
 
-    # Création du graphique
+    scatters = []
+    labels = []
+    scatters_unique = []
+
     fig = plt.figure(figsize=(15, 5))
-    scatter = plt.scatter(mets, model, c=index, label=label, cmap='jet', alpha=0.8)
-    plt.xlabel('MAE')
+    for i, m in enumerate(mets):
+        sc = plt.scatter(m, model[i], c=color[index[i]], alpha=0.8)
+        scatters.append(sc)
+        if label[i] not in labels:
+            labels.append(label[i])
+            scatters_unique.append(sc)
+
+    plt.xlabel(met)
     plt.ylabel('Model')
-    plt.xlim(-0.1,1.1)
+    #plt.xlim(-0.1,1.1)
     plt.grid(True)
-    fig.colorbar(scatter, label='Index')
-    plt.legend()
+    plt.legend(scatters_unique, labels, loc='upper right', ncol=3)
 
     out_name += '.png'
     plt.savefig(dir_output / out_name)
 
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
-    f1s, f12s, maes, bcas, rmses, = [], [], [], [], []
+    f1s, f12s, maes, bcas, rmses, maetop10s = [], [], [], [], [], []
 
     (_, _, base_label, _) = experiments[0]
 
@@ -117,6 +132,15 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         mae['label'] = label
         maes.append(mae)
 
+        # MAE score
+        maetop10 = evaluate_ca(metrics, 'meactop10')
+        maetop10 = maetop10.groupby('model')['meactop10'].mean().reset_index()
+        maetop10['meactop10'] = maetop10['meactop10'].astype(float)
+        maetop10['expe'] = expe
+        maetop10['index'] = index
+        maetop10['label'] = label
+        maetop10s.append(maetop10)
+
         # Bcas score
         bca = evaluate_ca(metrics, 'bca')
         bca = bca.groupby('model')['bca'].mean().reset_index()
@@ -140,24 +164,35 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     bcas = pd.concat(bcas).reset_index(drop=True)
     f12s = pd.concat(f12s).reset_index(drop=True)
     rmses = pd.concat(rmses).reset_index(drop=True)
+    maetop10s = pd.concat(maetop10s).reset_index(drop=True)
 
     f1s.to_csv(dir_output / 'f1s.csv')
     maes.to_csv(dir_output / 'maes.csv')
     bcas.to_csv(dir_output / 'bcas.csv')
     f12s.to_csv(dir_output / 'f12s.csv')
     rmses.to_csv(dir_output / 'rmses.csv')
+    maetop10.to_csv(dir_output / 'maetop10.csv')
 
-    plot(f1s, 'f1', dir_output, 'f1')
-    plot(f12s, 'f1no_weighted', dir_output, 'f1no_weighted')
-    plot(maes, 'meac', dir_output, 'meac')
-    plot(bcas, 'bca', dir_output, 'bca')
-    plot(rmses, 'rmse', dir_output, 'rmse')
-    
-    plot_variation(f1s, base_label, 'f1_variation', dir_output, 'f1_variation')
-    plot_variation(f12s, base_label, 'f1no_weighted_variation', dir_output, 'f1no_weighted_variation')
-    plot_variation(maes, base_label, 'meac_variation', dir_output, 'meac_variation')
-    plot_variation(bcas, base_label, 'bca_variation', dir_output, 'bca_variation')
-    plot_variation(rmses, base_label, 'rmse_variation', dir_output, 'rmse_variation')
+    index_colors = f1s['index'].values
+
+    color = {}
+    for i in index_colors:
+        color[i] = random.choice(list(mcolors.CSS4_COLORS.keys()))
+
+    index_colors = np.unique(index)
+
+    plot(f1s, 'f1', dir_output, 'f1', color)
+    plot(f12s, 'f1no_weighted', dir_output, 'f1no_weighted', color)
+    plot(maes, 'meac', dir_output, 'meac', color)
+    plot(bcas, 'bca', dir_output, 'bca', color)
+    plot(rmses, 'rmse', dir_output, 'rmse', color)
+    plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
+
+    """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
+    plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
+    plot_variation(maes, base_label, 'meac', dir_output, 'meac_variation', color)
+    plot_variation(bcas, base_label, 'bca', dir_output, 'bca_variation', color)
+    plot_variation(rmses, base_label, 'rmse', dir_output, 'rmse_variation', color)"""
 
 if __name__ == "__main__":
 
@@ -176,31 +211,49 @@ if __name__ == "__main__":
     dir_output = Path(args.output)
 
     # features
-    experiments_features = [('exp_features', 0, 'noTopo', 'full_0_10_noTopo_10_z-score_Catboost_'+test_name),
-                   ('exp_features', 1, 'noMeteo', 'full_0_10_noMeteo_10_z-score_Catboost_'+test_name),
-                   ('exp_features', 2, 'noHistorical', 'full_0_10_noHistorical_10_z-score_Catboost_'+test_name),
-                   #('exp_features', 3, '100_7_10_noIndex_10_z-score_Catboost_2023')
+    experiments_features = [('exp1', 0, 'All', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 1, 'noForet', 'full_0_10_100_noForet_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 2, 'noHistorical', 'full_0_10_100_noHistorical_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 3, 'noMeteo', 'full_0_10_100_noMeteo_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 4, 'noIndex', 'full_0_10_100_noIndex_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 5, 'noSentinel', 'full_0_10_100_noSentinel_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 6, 'noLandcover', 'full_0_10_100_noLandcover_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 7, 'noCalendar', 'full_0_10_100_noCalendar_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 8, 'noGeo', 'full_0_10_100_noGeo_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 9, 'noOSMNX', 'full_0_10_100_noOSMNX_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 10, 'noAutoReg', 'full_0_10_100_noAutoReg_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 11, 'noAutoBin', 'full_0_10_100_noAutoBin_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 12, 'noPop', 'full_0_10_100_noPop_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 13, 'noNappes', 'full_0_10_100_noNappes_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp1', 14, 'noAir', 'full_0_10_100_noAir_10_z-score_Catboost_'+test_name+'_tree'),
+                   #('exp1', 15, 'noEle', 'full_0_10_100_noEle_10_z-score_Catboost_'+test_name+'_tree'),
                    ]
     
     # Ks
-    experiments_ks = [('exp_ks', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 1, '1', 'full_1_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 2, '2', 'full_2_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 3, '3', 'full_3_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 4, '4', 'full_4_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 5, '5', 'full_5_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 6, '6', 'full_6_10_10_z-score_Catboost_'+test_name+'_tree'),
-                   ('exp_ks', 7, '7', 'full_7_10_10_z-score_Catboost_'+test_name+'_tree'),
+    experiments_ks = [('exp_ks', 0, '0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 1, '1', 'full_1_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 2, '2', 'full_2_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 3, '3', 'full_3_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 4, '4', 'full_4_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 5, '5', 'full_5_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 6, '6', 'full_6_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                   ('exp_ks', 7, '7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                    ]
+    
+    # Scale
+    experiments_scale = [('exp1', 10, '10', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('exp1', 5, '5', 'full_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
+                             ('exp_scale_2', 2, '2', 'full_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
+                            ]
                    
     # Inference
     experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
                             ]
                        
     # exp
-    experiments_inference = [('exp1', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
+    experiments_dl = [('exp1', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
                              ('exp1', 1, '0', 'full_7_10_10_z-score_Catboost_'+test_name+'_dl')
                             ]
     
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_scale, test_name=test_name, dir_output=dir_output, sinister=sinister)
