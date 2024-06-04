@@ -624,6 +624,341 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
 
     return loader
 
+def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                           methods,
+                           testname,
+                           pos_feature,
+                           prefix,
+                           prefix_train,
+                           dummy,
+                           models,
+                           dir_output,
+                           device,
+                           k_days,
+                           Rewrite, 
+                           encoding,
+                           scaling,
+                           testDepartement,
+                           train_dir):
+    
+    if Xset.shape[0] == 0:
+        logger.info(f'{testname} is empty, skip')
+        return
+    
+    scale = graphScale.scale
+    metrics = {}
+
+    ################################ Ground Truth ############################################
+    logger.info('#########################')
+    logger.info(f'       GT              ')
+    logger.info('#########################')
+
+    if Rewrite:
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding,
+                                                            Rewrite=False)
+        
+        _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
+                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
+                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
+                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
+        
+    ITensor = YTensor[:,-3]
+    Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
+    YTensor = YTensor[ITensor.gt(0)]
+    
+    metrics['GT'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, 'gt', train_dir)
+    i = 1
+
+    #################################### Traditionnal ##################################################
+
+    for name, isBin, optimize_feature in models:
+        optimize_str = 'optimize_features' if optimize_feature else 'no_optimize_features'
+        n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_' + optimize_str + '_' + encoding+'_'+testname
+        model_dir = train_dir / Path('check_'+scaling + '_' + optimize_str + '/' + prefix_train + '/baseline/' + name + '/')
+        
+        logger.info('#########################')
+        logger.info(f'      {name}            ')
+        logger.info('#########################')
+        XTensor, YTensor, _ = load_tensor_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
+                                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                        test=testname, pos_feature=pos_feature,
+                                                        scaling=scaling, prefix=prefix, encoding=encoding,
+                                                        Rewrite=True)
+        
+        features_selected = read_object('features.pkl', model_dir)
+
+        XTensor = XTensor.detach().cpu().numpy()
+        XTensor = XTensor[:, features_selected, -1]
+
+        YTensor = YTensor[:,:, -1]
+        ITensor = YTensor[:,-3]
+
+        model = read_object(name+'.pkl', model_dir)
+        graphScale._set_model(model)
+        Ypred = graphScale.predict_model_api_sklearn(XTensor, isBin)
+        
+        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+        YTensor = YTensor[ITensor.gt(0)]
+        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+
+        if not dummy:
+            metrics[name] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
+        else:
+            metrics[name +'_dummy'] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
+
+        pred = Ypred.detach().cpu().numpy()
+        y = YTensor.detach().cpu().numpy()
+
+        if isBin:
+            y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
+
+        realVspredict(pred, y,
+                      dir_output / n, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
+        
+        res = np.empty((pred.shape[0], y.shape[1] + 3))
+        res[:, :y.shape[1]] = y
+        res[:,y.shape[1]] = pred
+        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+
+        for dept in testDepartement:
+            dir_mask = dir_output / 'raster' / '2x2'
+            resSum = array2image(res, dir_mask, scale, dept, 'sum', -3, dir_output / n, dept+'_prediction.pkl')
+            ySum = array2image(y, dir_mask, scale, dept, 'sum', -1, dir_output / n, dept+'_gt.pkl')
+            fireSum = array2image(y, dir_mask, scale, dept, 'sum', -2, dir_output / n, dept+'_fire.pkl')
+            
+            fig, ax = plt.subplots(1, 3, figsize=(10,5))
+            im = ax[0].imshow(resSum, vmin=np.nanmin(ySum), vmax=np.nanmax(ySum),  cmap='jet')
+            ax[0].set_title('Sum of Prediction')
+            fig.colorbar(im, ax=ax[0], orientation='vertical')
+            im = ax[1].imshow(ySum, vmin=np.nanmin(ySum), vmax=np.nanmax(ySum),  cmap='jet')
+            ax[1].set_title('Sum of Target')
+            fig.colorbar(im, ax=ax[1], orientation='vertical')
+            im = ax[2].imshow(fireSum, vmin=np.nanmin(fireSum), vmax=np.nanmax(fireSum),  cmap='jet')
+            ax[2].set_title('Sum of Fire')
+            fig.colorbar(im, ax=ax[2], orientation='vertical')
+            susec = dept+'_susecptibility.png'
+            plt.tight_layout()
+            plt.savefig(dir_output / n / susec)
+
+        """
+        realVspredict2d(pred,
+            y,
+            isBin,
+            name,
+            scale,
+            dir_output / n,
+            train_dir,
+            geo,
+            testDepartement,
+            graphScale)"""
+
+        i += 1
+
+    ######################################## Simple model ##################################
+    if not dummy:
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding,
+                                                            Rewrite=False)
+        ITensor = YTensor[:,-3]
+        if testname != 'dummy':
+            """y2 = YTensor.detach().cpu().numpy()
+
+            logger.info('#########################')
+            logger.info(f'      perf_Y            ')
+            logger.info('#########################')
+            name = 'perf_Y'
+            Ypred = graphScale._predict_perference_with_Y(y2, False)
+            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+            YTensor = YTensor[ITensor.gt(0)]
+            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name)
+
+            pred = Ypred.detach().cpu().numpy()
+            y = YTensor.detach().cpu().numpy()
+
+            res = np.empty((pred.shape[0], y.shape[1] + 3))
+            res[:, :y.shape[1]] = y
+            res[:,y.shape[1]] = pred
+            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+
+            logger.info('#########################')
+            logger.info(f'      perf_Y_bin         ')
+            logger.info('#########################')
+            name = 'perf_Y_bin'
+            Ypred = graphScale._predict_perference_with_Y(y2, True)
+            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, True, scale, name, path(nameExp))
+
+            pred = Ypred.detach().cpu().numpy()
+            y = YTensor.detach().cpu().numpy()
+
+            res = np.empty((pred.shape[0], y.shape[1] + 3))
+            res[:, :y.shape[1]] = y
+            res[:,y.shape[1]] = pred
+            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
+
+        """logger.info('#########################')
+        logger.info(f'      perf_X         ')
+        logger.info('#########################')
+        name = 'perf_X'
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding)
+                                                            
+        x = XTensor.detach().cpu().numpy()
+        
+        Ypred = graphScale._predict_perference_with_X(x, pos_feature)
+        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
+        YTensor = YTensor[ITensor.gt(0)]
+        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
+        metrics['perf_X'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name, path(nameExp))
+
+        pred = Ypred.detach().cpu().numpy()
+        y = YTensor.detach().cpu().numpy()
+
+        res = np.empty((pred.shape[0], y.shape[1] + 3))
+        res[:, :y.shape[1]] = y
+        res[:,y.shape[1]] = pred
+        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
+
+    ########################################## Save metrics ################################ 
+    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
+    save_object(metrics, outname, dir_output)
+
+def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                           methods,
+                           testname,
+                           pos_feature,
+                           prefix,
+                           prefix_train,
+                           dummy,
+                           models,
+                           dir_output,
+                           device,
+                           k_days,
+                           Rewrite, 
+                           encoding,
+                           scaling,
+                           testDepartement,
+                           train_dir,
+                           dico_model,
+                           pos_feature_2D,
+                           shape2D):
+    
+    scale = graphScale.scale
+    metrics = {}
+    ################################ Ground Truth ############################################
+    logger.info('#########################')
+    logger.info(f'       GT              ')
+    logger.info('#########################')
+
+    if Rewrite:
+        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
+                                                            X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
+                                                            test=testname, pos_feature=pos_feature,
+                                                            scaling=scaling, prefix=prefix, encoding=encoding, Rewrite=True)
+
+        _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
+                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
+                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
+                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
+        
+        """_= load_loader_test_2D(use_temporal_as_edges=False, graphScale=graphScale,
+                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
+                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
+                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
+                                        shape=(shape2D[0], shape2D[1], newShape2D), pos_feature_2D=pos_feature_2D, encoding=encoding,
+                                        Rewrite=Rewrite)"""
+        
+    ITensor = YTensor[:,-3]
+    Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
+    YTensor = YTensor[ITensor.gt(0)]
+    
+    metrics['GT'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, 'gt', train_dir)
+
+    i = 1
+
+    #################################### GNN ###################################################
+    for mddel, use_temporal_as_edges, isBin, is_2D_model  in models:
+        model_dir = train_dir / Path('check_'+scaling+'/' + prefix_train + '/' + mddel +  '/')
+        logger.info('#########################')
+        logger.info(f'       {mddel}          ')
+        logger.info('#########################')
+
+        if not is_2D_model:
+            test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
+                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
+                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
+                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=False)
+
+        else:
+            test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale,
+                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
+                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
+                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
+                                        shape=(shape2D[0], shape2D[1], shape2D[2]), pos_feature_2D=pos_feature_2D, encoding=encoding,
+                                        Rewrite=False)
+
+        graphScale._load_model_from_path(model_dir / 'best.pt', dico_model[mddel], device)
+
+        features_selected = read_object('features.pkl', model_dir)
+
+        Ypred, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device)
+
+        metrics[mddel] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, mddel, train_dir)
+
+        pred = Ypred.detach().cpu().numpy()
+        y = YTensor.detach().cpu().numpy()
+
+        realVspredict(pred, y,
+                      dir_output,
+                      mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
+        
+        res = np.empty((pred.shape[0], y.shape[1] + 3))
+        res[:, :y.shape[1]] = y
+        res[:,y.shape[1]] = pred
+        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
+
+        save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+
+        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
+        realVspredict2d(pred,
+                    y,
+                    isBin,
+                    mddel,
+                    scale,
+                    dir_output / n,
+                    train_dir,
+                    geo,
+                    testDepartement,
+                    graphScale)"""
+        
+        i += 1
+
+    ########################################## Save metrics ################################ 
+    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
+    save_object(metrics, outname, dir_output)
+
 #########################################################################################################
 #                                                                                                       #
 #                                         Inference                                                     #

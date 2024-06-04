@@ -99,22 +99,22 @@ trainFeatures = [
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+            #'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation',
             'population',
             'sentinel',
             'landcover',
             #'vigicrues',
-            'foret',
+            #'foret',
             'highway',
-            'dynamicWorld',
+            #'dynamicWorld',
             'Calendar',
             'Historical',
             'Geo',
             'air',
-            'nappes',
-            'AutoRegressionReg',
-            'AutoRegressionBin'
+            #'nappes',
+            #'AutoRegressionReg',
+            #'AutoRegressionBin'
             ]
 
 def get_academic_zone(name, date):
@@ -200,82 +200,81 @@ veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
 device = torch.device('cpu')
-in_dim = 100 # Number of features we use to train GNN and based tree models
-in_dim_2D = 52 # Number of features we use to train CNN models
-dropout = 0.03
-act_func = 'relu'
 Rewrite = True
 scaling='z-score' # Scale to used
 encoding='Catboost' # How we encode the categorical variable
 
-"""# Neural networks
-dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
-                        heads=[4, 4, 2],
-                        dropout=dropout,
-                        bias=True,
-                        device=device,
-                        act_func=act_func,
-                        n_sequences=k_days + 1),
+def make_models(in_dim, in_dim_2D, dropout, act_func):
+    # Neural networks
+    dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
+                            heads=[4, 4, 2],
+                            dropout=dropout,
+                            bias=True,
+                            device=device,
+                            act_func=act_func,
+                            n_sequences=k_days + 1),
 
-                    'ST-GATTCN': STGATCN(n_sequences=k_days + 1,
-                                        num_of_layers=3,
-                                        in_channels=in_dim,
-                                         end_channels=64,
-                                         skip_channels=32,
-                                         residual_channels=32,
-                                         dilation_channels=32,
-                                         dropout=dropout,
-                                         heads=6, act_func=act_func,
-                                         device=device),
-                                        
-                    'ST-GATCONV': STGATCONV(k_days + 1,
+                        'ST-GATTCN': STGATCN(n_sequences=k_days + 1,
                                             num_of_layers=3,
                                             in_channels=in_dim,
-                                            hidden_channels=32,
-                                            residual_channels=64,
-                                            end_channels=32,
+                                            end_channels=64,
+                                            skip_channels=32,
+                                            residual_channels=32,
+                                            dilation_channels=32,
                                             dropout=dropout,
-                                            heads=6,
-                                            act_func=act_func,
+                                            heads=6, act_func=act_func,
                                             device=device),
+                                            
+                        'ST-GATCONV': STGATCONV(k_days + 1,
+                                                num_of_layers=3,
+                                                in_channels=in_dim,
+                                                hidden_channels=32,
+                                                residual_channels=64,
+                                                end_channels=32,
+                                                dropout=dropout,
+                                                heads=6,
+                                                act_func=act_func,
+                                                device=device),
 
-                    'ST-GCNCONV' : STGCNCONV(k_days + 1,
-                                            num_of_layers=3,
-                                            in_channels=in_dim,
+                        'ST-GCNCONV' : STGCNCONV(k_days + 1,
+                                                num_of_layers=3,
+                                                in_channels=in_dim,
+                                                hidden_channels=64,
+                                                residual_channels=64,
+                                                end_channels=32,
+                                                dropout=dropout,
+                                                act_func=act_func,
+                                                device=device),
+
+                        'ATGN' : TemporalGNN(in_channels=in_dim,
                                             hidden_channels=64,
-                                            residual_channels=64,
-                                            end_channels=32,
-                                            dropout=dropout,
+                                            out_channels=64,
+                                            n_sequences=k_days + 1,
+                                            device=device,
                                             act_func=act_func,
-                                            device=device),
+                                            dropout=dropout),
 
-                    'ATGN' : TemporalGNN(in_channels=in_dim,
-                                        hidden_channels=64,
-                                        out_channels=64,
-                                        n_sequences=k_days + 1,
+                    'ST-GATLTSM' : ST_GATLSTM(in_channels=in_dim,
+                                                hidden_channels=[64, 64, 64],
+                                                out_channels=64,
+                                                end_channels=32,
+                                                n_sequences=k_days + 1,
+                                                device=device, act_func=act_func, heads=6, dropout=dropout),
+
+                        'Zhang' : Zhang(in_channels=in_dim_2D,
+                                    hidden_channels=64,
+                                        end_channels=128,
+                                        dropout=dropout,
+                                        binary=False,
                                         device=device,
-                                        act_func=act_func,
-                                        dropout=dropout),
+                                        n_sequences=k_days + 1),
 
-                   'ST-GATLTSM' : ST_GATLSTM(in_channels=in_dim,
-                                            hidden_channels=[64, 64, 64],
-                                             out_channels=64,
-                                             end_channels=32,
-                                             n_sequences=k_days + 1,
-                                             device=device, act_func=act_func, heads=6, dropout=dropout),
-
-                    'Zhang' : Zhang(in_channels=in_dim_2D,
-                                hidden_channels=64,
-                                    end_channels=128,
-                                    dropout=dropout,
-                                    binary=False,
-                                    device=device,
-                                    n_sequences=k_days + 1),
-
-                    'ConvLSTM' : CONVLSTM(in_channels=in_dim_2D,
-                                        hidden_dim=[32, 32, 32],
-                                          end_channels=64,
-                                          n_sequences=k_days + 1,
-                                          dropout=dropout,
-                                          device=device, act_func=act_func)
-                    }"""
+                        'ConvLSTM' : CONVLSTM(in_channels=in_dim_2D,
+                                            hidden_dim=[32, 32, 32],
+                                            end_channels=64,
+                                            n_sequences=k_days + 1,
+                                            dropout=dropout,
+                                            device=device, act_func=act_func)
+                        }
+    
+    return dico_model

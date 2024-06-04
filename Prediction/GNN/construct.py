@@ -24,17 +24,19 @@ def look_for_information(path : Path, departements : list,
         if influence is None:
             continue
 
-        influence = influence[:,:,allDates.index('2017-06-17'):allDates.index(maxDate)]
+        influence = influence[:,:,allDates.index('2017-06-17'):]
         print(influence.shape)
         datesForDepartement = []
         for di in range(influence.shape[-1]):
+            if di > allDates.index(maxDate):
+                break
             maxInfluence.append(np.nanmax(influence[:,:,di]))
         
         all_maxi_influence += maxInfluence
 
-        predictor = Predictor(5)
+        """predictor = Predictor(5)
         predictor.fit(np.asarray(influence[~np.isnan(influence)]))
-        save_object(predictor, departement+'PredictorFull.pkl', path=dir / sinister / 'influenceClustering')
+        save_object(predictor, departement+'PredictorFull.pkl', path=dir / sinister / 'influenceClustering')"""
 
         predictor = Predictor(5)
         predictor.fit(np.asarray(maxInfluence))
@@ -45,7 +47,7 @@ def look_for_information(path : Path, departements : list,
         classes = np.unique(clusterInfluence)
         histogram = np.bincount(clusterInfluence)
         histogram = histogram.astype(float)
-        histogram = (histogram * 0.8).astype(int)
+        #histogram = (histogram * 0.8).astype(int)
         for c in classes:
             mask = np.argwhere(clusterInfluence == c)[:,0]
             if departement == 'departement-01-ain':
@@ -56,8 +58,10 @@ def look_for_information(path : Path, departements : list,
                 minValue = min(minPoint, mask.shape[0])
             m = np.random.choice(mask, minValue, replace=False).ravel()
             datesForDepartement += list(m)
-        datesForDepartement = np.asarray(datesForDepartement)
         
+        datesForDepartement += list(np.arange(allDates.index(maxDate), influence.shape[-1]))
+        datesForDepartement = np.asarray(datesForDepartement)
+
         fp = firepoint[firepoint['departement'] == name2int[departement]].copy(deep=True)
 
         iterables = [datesForDepartement, list(fp.latitude)]

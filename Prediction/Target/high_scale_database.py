@@ -151,7 +151,7 @@ if __name__ == "__main__":
                                     n_pixel_y=n_pixel_y, n_pixel_x=n_pixel_x, read=read)
 
     fp = pd.concat(fp).reset_index(drop=True)
-    fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/'+sinister+'.csv', index=False)
+    fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/'+sinister+'.csv', index=False)
 
     model = Probabilistic(dims, n_pixel_x, n_pixel_y, 1, logistic, dir_output)
 

@@ -29,7 +29,7 @@ doDatabase = args.database == "True"
 doGraph = args.graph == "True"
 do2D = args.database2D == "True"
 scale = int(args.scale)
-nbfeatures = int(args.NbFeatures)
+nbfeatures = int(args.NbFeatures) if args.NbFeatures != 'all' else args.NbFeatures
 sinister = args.sinister
 spec = args.spec
 minPoint = args.nbpoint
@@ -163,7 +163,6 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     else:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-
     try:
         Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
         Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
@@ -215,102 +214,39 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         prefix_train += '_'+spec
         prefix += '_'+spec
 
+    Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
+
     # Features selection
-    features_importance = read_object('features_importance_'+prefix_train+'.pkl', train_dir)
-    log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
-    features_selected = np.unique(features_importance[:,0]).astype(int)
+    if nbfeatures != 'all':    
+        features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
+        log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
+        features_selected = np.unique(features_importance[:,0]).astype(int)
+    else:
+        features_selected = np.arange(0, X.shape[1])
 
-    ################################ Ground Truth ############################################
-    logger.info('#########################')
-    logger.info(f'       GT              ')
-    logger.info('#########################')
+    # Make models
+    dico_model = make_models(features_selected.shape[0], 0.03, 'relu')
 
-    if Rewrite:
-        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
-                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
-                                                            test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding, Rewrite=True)
-        
-        _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
-        
-        """_= load_loader_test_2D(use_temporal_as_edges=False, graphScale=graphScale,
-                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
-                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
-                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
-                                        shape=(shape2D[0], shape2D[1], newShape2D), pos_feature_2D=pos_feature_2D, encoding=encoding,
-                                        Rewrite=Rewrite)"""
-        
-    ITensor = YTensor[:,-3]
-    Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
-    YTensor = YTensor[ITensor.gt(0)]
-    
-    metrics['GT'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, 'gt', train_dir)
+    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                           methods,
+                           testname,
+                           pos_feature,
+                           prefix,
+                           prefix_train,
+                           dummy,
+                           models,
+                           dir_output,
+                           device,
+                           k_days,
+                           Rewrite, 
+                           encoding,
+                           scaling,
+                           testDepartement,
+                           train_dir,
+                           dico_model,
+                           pos_feature_2D,
+                           shape2D)
 
-    i = 1
-
-    #################################### GNN ###################################################
-    for mddel, use_temporal_as_edges, isBin, is_2D_model  in models:
-
-        logger.info('#########################')
-        logger.info(f'       {mddel}          ')
-        logger.info('#########################')
-
-        if not is_2D_model:
-            test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
-                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=False)
-
-        else:
-            test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale,
-                                              dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
-                                            Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
-                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
-                                        shape=(shape2D[0], shape2D[1], newShape2D), pos_feature_2D=pos_feature_2D, encoding=encoding,
-                                        Rewrite=False)
-
-        graphScale._load_model_from_path(Path('check_'+scaling+'_2'+'/' + prefix_train + '/' + mddel +  '/' + 'best.pt'),
-                                        dico_model[mddel], device)
-
-        Ypred, YTensor = graphScale._predict_test_loader(test_loader, features_selected)
-
-        metrics[mddel] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, mddel, train_dir)
-
-        pred = Ypred.detach().cpu().numpy()
-        y = YTensor.detach().cpu().numpy()
-
-        realVspredict(pred, y,
-                      dir_output,
-                      mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
-        
-        res = np.empty((pred.shape[0], y.shape[1] + 3))
-        res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred
-        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
-        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
-
-        save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-
-        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
-        realVspredict2d(pred,
-                    y,
-                    isBin,
-                    mddel,
-                    scale,
-                    dir_output / n,
-                    train_dir,
-                    geo,
-                    testDepartement,
-                    graphScale)"""
-        
-        i += 1
-
-    ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
-    save_object(metrics, outname, dir_output)
 
 def dummy_test(dates):
     name = sinister+".csv"

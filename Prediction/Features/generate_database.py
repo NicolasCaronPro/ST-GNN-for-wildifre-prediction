@@ -84,7 +84,7 @@ class GenerateDatabase():
         raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
-        raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
         #raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
 
@@ -557,13 +557,13 @@ if __name__ == '__main__':
     addVigicrue = args.vigicrues == "True"
 
     ################## Ain ######################
-    #launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## DOUBS ######################
-    #launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## YVELINES ######################
-    #launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## Rhone ######################
     launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)

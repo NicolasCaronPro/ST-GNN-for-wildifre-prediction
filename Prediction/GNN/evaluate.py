@@ -177,7 +177,7 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
     color = {}
     for i in index_colors:
-        color[i] = random.choice(list(mcolors.CSS4_COLORS.keys()))
+        color[i] = random.choice(list(mcolors.XKCD_COLORS.keys()))
 
     index_colors = np.unique(index)
 
@@ -251,9 +251,9 @@ if __name__ == "__main__":
                             ]
                        
     # exp
-    experiments_dl = [('exp1', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('exp1', 1, '0', 'full_7_10_10_z-score_Catboost_'+test_name+'_dl')
+    experiments_dl = [('exp1', 0, 'Tree based', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('exp1', 1, 'GNN', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl')
                             ]
     
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_scale, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_dl, test_name=test_name, dir_output=dir_output, sinister=sinister)

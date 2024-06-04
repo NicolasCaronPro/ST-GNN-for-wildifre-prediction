@@ -7,34 +7,34 @@ import argparse
 
 ########################### Input Arg ######################################
 
-parser = argparse.ArgumentParser(
-    prog='Test',
-)
+if __name__ == '__main__':
 
-parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
-parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-d', '--database', type=str, help='Do database')
-parser.add_argument('-g', '--graph', type=str, help='Construct graph')
-parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-sp', '--spec', type=str, help='spec')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
+    parser = argparse.ArgumentParser(
+        prog='Test',
+    )
 
-args = parser.parse_args()
+    parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
+    parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
+    parser.add_argument('-d', '--database', type=str, help='Do database')
+    parser.add_argument('-g', '--graph', type=str, help='Construct graph')
+    parser.add_argument('-sc', '--scale', type=str, help='Scale')
+    parser.add_argument('-sp', '--spec', type=str, help='spec')
+    parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
+    parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 
-# Input config
-nameExp = args.name
-doGraph = args.graph == "True"
-doDatabase = args.database == "True"
-do2D = args.database2D == "True"
-scale = int(args.scale)
-sinister = args.sinister
-nbfeatures = args.NbFeatures
-spec = args.spec
-minPoint = args.nbpoint
+    args = parser.parse_args()
 
-newFeatures = []
+    # Input config
+    nameExp = args.name
+    doGraph = args.graph == "True"
+    doDatabase = args.database == "True"
+    scale = int(args.scale)
+    sinister = args.sinister
+    nbfeatures = args.NbFeatures
+    spec = args.spec
+    minPoint = args.nbpoint
+
+    geo = gpd.read_file('regions/regions.geojson')
 
 ############### Global variable ###############
 
@@ -67,20 +67,7 @@ methods = [('rmse', rmse, 'proba'),
             ('meac', meac, 'class'),
            ]
 
-geo = gpd.read_file('regions/regions.geojson')
-
 models = [
-        #('GAT', False, False, False),
-        #('ST-GATTCN', False, False, False),
-        #('ST-GATCONV', False, False, False),
-        #('ATGN', False, False, False),
-        #('ST-GATLTSM', False, False, False),
-        #('ST-GCNCONV', False, False, False),
-        #('Zhang', False, False, True),
-        #('ConvLSTM', False, False, True)
-        ]
-
-tradiModels = [
     ('xgboost', False),
     ('lightgbm', False),
     ('ngboost', False),
@@ -98,7 +85,7 @@ metrics = {}
 
 ############################# Pipelines ##############################
 
-def test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
+def process_test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
@@ -117,7 +104,6 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     dir_output = dir_output / testname
     if doGraph:
         graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
-        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
@@ -151,34 +137,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
 
         graphScale._info_on_graph(X, dir_output)
 
-    if len(newFeatures) > 0:
-        logger.info(X.shape)
-        subnode = X[:,:6]
-        XnewFeatures, _ = get_sub_nodes_feature(graphScale, subnode, testDepartement, newFeatures, sinister, dir_output)
-        newX = np.empty((X.shape[0], X.shape[1] + XnewFeatures.shape[1] - 6))
-        newX[:,:X.shape[1]] = X
-        newX[:, X.shape[1]:] = XnewFeatures[:,6:]
-        X = newX
-        features += newFeatures
-        logger.info(X.shape)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
     pos_feature, _ = create_pos_feature(graphScale, 6, features)
-
-    if do2D:
-        subnode = X[:,:6]
-        pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
-                                                 subnode.shape[1],
-                                                 X,
-                                                 scaling,
-                                                 pos_feature,
-                                                 testDepartement,
-                                                 features,
-                                                 dir_output,
-                                                 prefix)
-    else:
-        subnode = X[:,:6]
-        pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
 
     Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
     Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
@@ -245,176 +204,29 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
 
     # Features selection
-    features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
+    if nbfeatures != 'all':    
+        features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
+        log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
+        features_selected = np.unique(features_importance[:,0]).astype(int)
+    else:
+        features_selected = np.arange(0, X.shape[1])
 
-    log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
-    features_selected = np.unique(features_importance[:,0]).astype(int)
-
-    ################################ Ground Truth ############################################
-    logger.info('#########################')
-    logger.info(f'       GT              ')
-    logger.info('#########################')
-
-    if Rewrite:
-        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
-                                                            X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
-                                                            test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding,
-                                                            Rewrite=False)
-        
-        _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
-        
-    ITensor = YTensor[:,-3]
-    Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
-    YTensor = YTensor[ITensor.gt(0)]
-    
-    metrics['GT'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, 'gt', train_dir)
-    i = 1
-
-    #################################### Traditionnal ##################################################
-
-    for name, isBin in tradiModels:
-        logger.info('#########################')
-        logger.info(f'      {name}            ')
-        logger.info('#########################')
-        XTensor, YTensor, _ = load_tensor_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
-                                                        test=testname, pos_feature=pos_feature,
-                                                        scaling=scaling, prefix=prefix, encoding=encoding,
-                                                        Rewrite=True)
-        XTensor = XTensor.detach().cpu().numpy()
-        XTensor = XTensor[:, features_selected, -1]
-
-        YTensor = YTensor[:,:, -1]
-        ITensor = YTensor[:,-3]
-
-        model = read_object(name+'.pkl', train_dir / Path('check_'+scaling+'/' + prefix_train + '/baseline/' + name + '/'))
-        graphScale._set_model(model)
-        Ypred = graphScale.predict_model_api_sklearn(XTensor, isBin)
-        
-        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
-        YTensor = YTensor[ITensor.gt(0)]
-        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
-
-        if not dummy:
-            metrics[name] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
-        else:
-            metrics[name +'_dummy'] = add_metrics(methods, i, Ypred, YTensor, testDepartement, isBin, scale, name, train_dir)
-
-        pred = Ypred.detach().cpu().numpy()
-        y = YTensor.detach().cpu().numpy()
-
-        realVspredict(pred, y,
-                      dir_output, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'.png')
-        
-        res = np.empty((pred.shape[0], y.shape[1] + 3))
-        res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred
-        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
-        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
-
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-        
-        """n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
-        realVspredict2d(pred,
-            y,
-            isBin,
-            name,
-            scale,
-            dir_output / n,
-            train_dir,
-            geo,
-            testDepartement,
-            graphScale)"""
-
-        i += 1
-
-    ######################################## Simple model ##################################
-    if not dummy:
-        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
-                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
-                                                            test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding,
-                                                            Rewrite=False)
-        ITensor = YTensor[:,-3]
-        if testname != 'dummy':
-            """y2 = YTensor.detach().cpu().numpy()
-
-            logger.info('#########################')
-            logger.info(f'      perf_Y            ')
-            logger.info('#########################')
-            name = 'perf_Y'
-            Ypred = graphScale._predict_perference_with_Y(y2, False)
-            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
-            YTensor = YTensor[ITensor.gt(0)]
-            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
-            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name)
-
-            pred = Ypred.detach().cpu().numpy()
-            y = YTensor.detach().cpu().numpy()
-
-            res = np.empty((pred.shape[0], y.shape[1] + 3))
-            res[:, :y.shape[1]] = y
-            res[:,y.shape[1]] = pred
-            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
-            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
-
-            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-
-            logger.info('#########################')
-            logger.info(f'      perf_Y_bin         ')
-            logger.info('#########################')
-            name = 'perf_Y_bin'
-            Ypred = graphScale._predict_perference_with_Y(y2, True)
-            Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
-            Ypred = torch.masked_select(Ypred, ITensor.gt(0))
-            metrics[name] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, True, scale, name, path(nameExp))
-
-            pred = Ypred.detach().cpu().numpy()
-            y = YTensor.detach().cpu().numpy()
-
-            res = np.empty((pred.shape[0], y.shape[1] + 3))
-            res[:, :y.shape[1]] = y
-            res[:,y.shape[1]] = pred
-            res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
-            res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
-
-            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
-
-        """logger.info('#########################')
-        logger.info(f'      perf_X         ')
-        logger.info('#########################')
-        name = 'perf_X'
-        XTensor, YTensor, ETensor = load_tensor_test(use_temporal_as_edges=True, graphScale=graphScale, dir_output=dir_output,
-                                                            X=X, Y=Y, Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days,
-                                                            test=testname, pos_feature=pos_feature,
-                                                            scaling=scaling, prefix=prefix, encoding=encoding)
-                                                            
-        x = XTensor.detach().cpu().numpy()
-        
-        Ypred = graphScale._predict_perference_with_X(x, pos_feature)
-        Ypred = torch.tensor(Ypred, dtype=torch.float32, device=device)
-        YTensor = YTensor[ITensor.gt(0)]
-        Ypred = torch.masked_select(Ypred, ITensor.gt(0))
-        metrics['perf_X'] = add_metrics(methods, 0, Ypred, YTensor, testDepartement, False, scale, name, path(nameExp))
-
-        pred = Ypred.detach().cpu().numpy()
-        y = YTensor.detach().cpu().numpy()
-
-        res = np.empty((pred.shape[0], y.shape[1] + 3))
-        res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred
-        res[:,y.shape[1]+1] = np.sqrt((y[:,-3] * (pred - y[:,-1]) ** 2))
-        res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
-
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)"""
-
-    ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
-    save_object(metrics, outname, dir_output)
+    test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                           methods,
+                           testname,
+                           pos_feature,
+                           prefix,
+                           prefix_train,
+                           dummy,
+                           models,
+                           dir_output,
+                           device,
+                           k_days,
+                           Rewrite, 
+                           encoding,
+                           scaling,
+                           testDepartement,
+                           train_dir)
 
 def dummy_test(dates):
     name = sinister+".csv"
@@ -428,22 +240,27 @@ def dummy_test(dates):
     res['departement'] = res['departement'].apply(lambda x : int2strMaj[x])
     return res
 
-# 69 test
-if sinister != 'inondation':
+if sinister == 'firepoint':
+    # 69 test
     testDates = find_dates_between('2018-01-01', '2023-01-01')
     testDepartement = ['departement-69-rhone']
     test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    testDates = find_dates_between('2023-01-01', '2023-09-11')
+    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
 
+    # 2023 test
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
-testDates = find_dates_between('2023-01-01', '2023-09-11')
-testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+if sinister == 'inondation':
+    # 69 test
+    testDates = find_dates_between('2018-01-01', '2023-09-11')
+    testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    testDates = find_dates_between('2023-01-01', '2023-09-11')
+    testDepartement = ['departement-25-doubs']
 
-# Dummy
-dummyGeo = dummy_test(testDates)
-#test('dummy', None, dummyGeo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
-
-# 2023 test
-test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    # 2023 test
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']

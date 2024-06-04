@@ -25,7 +25,9 @@ parser.add_argument('-f', '--featuresSelection', type=str, help='Do features sel
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
+parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-t', '--doTest', type=str, help='Launch test')
 
 args = parser.parse_args()
 
@@ -39,6 +41,8 @@ doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
+optimize_feature = args.optimizeFeature == "True"
+doTest = args.doTest == "True"
 nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 minPoint = args.nbpoint
@@ -95,6 +99,9 @@ if doEncoder:
 ########################## Do Graph ######################################
 
 if doGraph:
+    logger.info('#################################')
+    logger.info('#      Construct   Graph        #')
+    logger.info('#################################')
     graphScale = construct_graph(scale,
                                  maxDist[scale],
                                  sinister,
@@ -109,6 +116,9 @@ else:
 ########################## Do Database ####################################
 
 if doDatabase:
+    logger.info('#####################################')
+    logger.info('#      Construct   Database         #')
+    logger.info('#####################################')
     if not dummy:
         name = 'points'+str(minPoint)+'.csv'
         ps = pd.read_csv(Path(nameExp) / sinister / name)
@@ -124,13 +134,13 @@ if doDatabase:
         ps = pd.concat((fp, nfp)).reset_index(drop=True)
         ps = ps.copy(deep=True)
         ps = ps[ps['date'].isin(allDates)]
-        ps = ps[ps['date'] < maxDate]
+        #ps = ps[ps['date'] < maxDate]
         ps['date'] = [allDates.index(date) - 1 for date in ps.date]
 
     X, Y, pos_feature = construct_database(graphScale,
                                            ps, scale, k_days,
-                                           trainDepartements,
-                                           features, sinister,
+                                           departements,
+                                            features, sinister,
                                            dir_output,
                                            dir_output,
                                            prefix,
@@ -144,18 +154,6 @@ else:
     Y = read_object('Y_'+prefix+'.pkl', dir_output)
     pos_feature, newshape = create_pos_feature(graphScale, 6, features)
 
-if len(newFeatures) > 0:
-    X = X[:, :pos_feature['Geo'] + 1]
-    subnode = X[:,:6]
-    XnewFeatures, _ = get_sub_nodes_feature(graphScale, subnode, trainDepartements, newFeatures, dir_output)
-    newX = np.empty((X.shape[0], X.shape[1] + XnewFeatures.shape[1] - 6))
-    newX[:,:X.shape[1]] = X
-    newX[:, X.shape[1]:] = XnewFeatures[:,6:]
-    X = newX
-    features += newFeatures
-    logger.info(X.shape)
-    save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
 if do2D:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
@@ -163,7 +161,7 @@ if do2D:
                                                  X,
                                                  scaling,
                                                  pos_feature,
-                                                 trainDepartements,
+                                                 departements,
                                                  features,
                                                  sinister,
                                                  dir_output,
@@ -181,6 +179,7 @@ if k_days > 0:
         X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
+save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
 ############################# Training ###########################
 
 # Select train features
@@ -235,40 +234,166 @@ Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures)
 
 ######################## Baseline ##############################
+optimize_str = 'optimize_features' if optimize_feature else 'no_optimize_features'
+name = 'check_'+scaling + '_' + optimize_str + '/' + prefix + '/' + '/baseline'
+trainCode = [name2int[dept] for dept in trainDepartements]
+trainDataset = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))], Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
 
-name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
+valDataset = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))],
+              Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))])
 
-trainDataset = (Xset[Xset[:,4] < allDates.index(trainDate)], Yset[Xset[:,4] < allDates.index(trainDate)])
-valDataset = (Xset[Xset[:,4] >= allDates.index(trainDate)], Yset[Xset[:,4] >= allDates.index(trainDate)])
+testDataset = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))],
+               Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))])
 
-train_sklearn_api_model(trainDataset, valDataset,
-dir_output / name,
-device='cpu',
-binary=False,
-scaling=scaling,
-features=features_selected,
-weight=True)
+train_sklearn_api_model(trainDataset=trainDataset,
+                        valDataset=valDataset,
+                        testDataset=testDataset,
+                        pos_feature=pos_feature,
+                        graph=graphScale,
+                        dir_output=dir_output / name,
+                        dir_train = dir_output,
+                        device='cpu',
+                        binary=False,
+                        scaling=scaling,
+                        features=features_selected,
+                        optimize_feature=optimize_feature,
+                        departements=departements,
+                        weight=True)
 
-train_sklearn_api_model(trainDataset, valDataset,
-dir_output / name,
-device='cpu',
-binary=True,
-scaling=scaling,
-features=features_selected,
-weight=True)
+train_sklearn_api_model(trainDataset=trainDataset,
+                        valDataset=valDataset,
+                        testDataset=testDataset,
+                        graph=graphScale,
+                        pos_feature=pos_feature,
+                        dir_train = dir_output,
+                        dir_output=dir_output / name,
+                        device='cpu',
+                        binary=True,
+                        scaling=scaling,
+                        optimize_feature=optimize_feature,
+                        features=features_selected,
+                        departements=departements,
+                        weight=True)
 
-train_sklearn_api_model(trainDataset, valDataset,
-dir_output / name,
-device='cpu',
-binary=True,
-scaling=scaling,
-features=features_selected,
-weight=False)
+train_sklearn_api_model(trainDataset=trainDataset,
+                        valDataset=valDataset,
+                        testDataset=testDataset,
+                        graph=graphScale,
+                        pos_feature=pos_feature,
+                        dir_train = dir_output,
+                        dir_output=dir_output / name,
+                        device='cpu',
+                        binary=True,
+                        scaling=scaling,
+                        optimize_feature=optimize_feature,
+                        features=features_selected,
+                        departements=departements,
+                        weight=False)
 
-train_sklearn_api_model(trainDataset, valDataset,
-dir_output / name,
-device='cpu',
-binary=False,
-scaling=scaling,
-features=features_selected,
-weight=False)
+train_sklearn_api_model(trainDataset=trainDataset,
+                        valDataset=valDataset,
+                        testDataset=testDataset,
+                        graph=graphScale,
+                        pos_feature=pos_feature,
+                        dir_train = dir_output,
+                        dir_output=dir_output / name,
+                        device='cpu',
+                        binary=False,
+                        scaling=scaling,
+                        optimize_feature=optimize_feature,
+                        features=features_selected,
+                        departements=departements,
+                        weight=False)
+
+if doTest:
+
+    Xtrain = trainDataset[0]
+    Ytrain = trainDataset[1]
+
+    Xtest = testDataset[0]
+    Ytest = testDataset[1]
+
+    name_dir = nameExp + '/' + sinister + '/' + 'train'
+    train_dir = Path(name_dir)
+
+    name_dir = nameExp + '/' + sinister + '/' + 'test'
+    dir_output = Path(name_dir)
+
+    rmse = weighted_rmse_loss
+    std = standard_deviation
+    cal = quantile_prediction_error
+    f1 = my_f1_score
+    ca = class_accuracy
+    bca = balanced_class_accuracy
+    ck = class_risk
+    po = poisson_loss
+    meac = mean_absolute_error_class
+
+    methods = [('rmse', rmse, 'proba'),
+            ('std', std, 'proba'),
+            ('cal', cal, 'bin'),
+            ('f1', f1, 'bin'),
+            ('class', ck, 'class'),
+            ('poisson', po, 'proba'),
+            ('ca', ca, 'class'),
+            ('bca', bca, 'class'),
+                ('meac', meac, 'class'),
+            ]
+
+    models = [
+        ('xgboost', False),
+        ('lightgbm', False),
+        ('ngboost', False),
+        ('xgboost_bin', True),
+        ('lightgbm_bin', True),
+        ('xgboost_bin_unweighted', True),
+        ('lightgbm_bin_unweighted', True),
+        ('xgboost_unweighted', False),
+        ('lightgbm_unweighted', False),
+        ('ngboost_unweighted', False),
+        #('ngboost_bin', True)
+        ]
+    
+    # 69 test
+    testDepartement = ['departement-69-rhone']
+    Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
+    Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
+
+    test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                        methods,
+                        '69',
+                        pos_feature,
+                        prefix,
+                        prefix,
+                        dummy,
+                        models,
+                        dir_output,
+                        device,
+                        k_days,
+                        Rewrite, 
+                        encoding,
+                        scaling,
+                        testDepartement,
+                        train_dir)
+    
+    # 2023 test
+    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+    Xset = Xtest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
+    Yset = Ytest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
+    
+    test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                        methods,
+                        '2023',
+                        pos_feature,
+                        prefix,
+                        prefix,
+                        dummy,
+                        models,
+                        dir_output,
+                        device,
+                        k_days,
+                        Rewrite, 
+                        encoding,
+                        scaling,
+                        testDepartement,
+                        train_dir)

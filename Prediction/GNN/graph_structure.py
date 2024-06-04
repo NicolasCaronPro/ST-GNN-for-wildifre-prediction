@@ -126,6 +126,7 @@ class GraphStructure():
         dir_predictor = root_graph / dir / 'influenceClustering'
 
         # Scale Shape
+        logger.info(f'######### {self.scale} scale ##########')
         for dep in np.unique(self.departements):
             influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
             if influence is None:
@@ -133,8 +134,10 @@ class GraphStructure():
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
             predictor = Predictor(5)
             predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            predictor.log(logger)
             save_object(predictor, str2name[dep]+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
 
+        logger.info('######### Departement Scale ##########')
         dir_target = root_target / sinister / 'log'
         # Departement
         for dep in np.unique(self.departements):
@@ -144,9 +147,9 @@ class GraphStructure():
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
             influence = influence.reshape(-1, influence.shape[2])
             influence = np.nansum(influence, axis=0)
-            print(np.sum(influence), np.mean(influence))
             predictor = Predictor(5)
             predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            predictor.log(logger)
             save_object(predictor, str2name[dep]+'PredictorDepartement.pkl', path=dir_predictor)
         
     def _create_nodes_list(self) -> None:

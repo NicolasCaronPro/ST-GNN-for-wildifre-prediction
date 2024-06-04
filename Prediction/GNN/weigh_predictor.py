@@ -14,6 +14,7 @@ class Predictor():
         self.highNumberClass = np.argwhere(self.histogram == np.max(self.histogram))
 
     def predict(self, X : np.array, min_class : int = 0):
+        X = X.astype(float)
         pred = self.kmeans.predict(X.reshape(-1,1)) + min_class
         mask = self.train_X > np.nanmax(self.train_X)
         if True in np.unique(mask):
@@ -32,8 +33,14 @@ class Predictor():
     def get_centroid(self, c : int):
         return self.kmeans.cluster_centers_[c]
 
-    def log(self):
-        print('############# Histogram ###############')
-        print(self.histogram)
-        print('############# Cluster Centers ###############')
-        print(self.kmeans.cluster_centers_)
+    def log(self, logger = None):
+        if logger is not None:
+            logger.info('############# Histogram ###############')
+            logger.info(self.histogram)
+            logger.info('############# Cluster Centers ###############')
+            logger.info(self.kmeans.cluster_centers_)
+        else:
+            print('############# Histogram ###############')
+            print(self.histogram)
+            print('############# Cluster Centers ###############')
+            print(self.kmeans.cluster_centers_)

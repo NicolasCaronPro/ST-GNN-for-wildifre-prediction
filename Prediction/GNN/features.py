@@ -36,11 +36,13 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
 
             if array is None:
+                Y[:, -3] = 0
+                Y[:, -2] = 0
+                Y[:, -1] = 0
                 continue
 
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                indexOri = np.argwhere((oriNode[:,0] == node[0]) & (oriNode[:,4] == node[4]))
                 maskNode = mask == node[0]
                 if node[4] + 1 >= array.shape[-1]:
                 #################
@@ -63,7 +65,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                     # Nb events
                     values = (np.unique(arrayBin[maskNode, int(node[4] + 1)]))[0]
                     Y[index, -2] = values
-            
+
             predictor = read_object(departement+'Predictor'+str(graph.scale)+'.pkl', dir_predictor)
             mask = np.argwhere((Y[:,3] == str2int[departement.split('-')[-1]]) & (Y[:,-3] == 1))[:,0]
             if mask.shape[0] != 0:
@@ -84,9 +86,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     logger.info('Load nodes features')
 
+    pos_feature_train, _ = create_pos_feature(graph, subNode.shape[1], trainFeatures)
     pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
 
     logger.info(pos_feature)
+    logger.info(pos_feature_train)
 
     def save_values(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
@@ -347,32 +351,34 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if 'AutoRegressionReg' in features:
             dir_target = dir_train / 'influence' / '2x2'
             arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target)
-            for node in nodeDepartement:
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = mask == node[0]
-                if node[4] - 1 < 0:
-                    continue
-                
-                for band in auto_regression_variable_reg:
-                    step = int(band.split('-')[-1])
-                    save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegressionReg'] + auto_regression_variable_reg.index(band), index, maskNode)
+            if arrayInfluence is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
+                    
+                    for band in auto_regression_variable_reg:
+                        step = int(band.split('-')[-1])
+                        save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegressionReg'] + auto_regression_variable_reg.index(band), index, maskNode)
 
-            del arrayInfluence
+                del arrayInfluence
 
         logger.info('AutoRegressionBin')
         if 'AutoRegressionBin' in features:
             dir_bin = dir_train / 'bin' / '2x2'
             arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
-            for node in nodeDepartement:
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = mask == node[0]
-                if node[4] - 1 < 0:
-                    continue
+            if arrayBin is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
 
-                for band in auto_regression_variable_bin:
-                    step = int(band.split('-')[-1])
-                    save_value(arrayBin[:,:, int(node[4] - step)], pos_feature['AutoRegressionBin'] + auto_regression_variable_bin.index(band), index, maskNode)
-            del arrayBin
+                    for band in auto_regression_variable_bin:
+                        step = int(band.split('-')[-1])
+                        save_value(arrayBin[:,:, int(node[4] - step)], pos_feature['AutoRegressionBin'] + auto_regression_variable_bin.index(band), index, maskNode)
+                del arrayBin
 
         logger.info('Vigicrues')
         if 'vigicrues' in features:

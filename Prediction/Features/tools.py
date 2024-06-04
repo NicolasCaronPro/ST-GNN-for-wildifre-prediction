@@ -770,10 +770,10 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
                         res[band, mask1, index_min:index_max] = (np.argwhere(dynamicWorld[mask2] == band).shape[0] / dynamicWorld[mask2].shape[0]) * 100
                         res3[band, mask1] = np.nanmean(dynamicWorld_2[band, mask2])
 
-                    if res[:, mask1].shape[1] == 1:
-                        res2[mask1] = np.nanargmax(res[:, mask1])
+                    if res[:, mask1, index_min:index_max].shape[1] == 1:
+                        res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max])
                     else:
-                        res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+                        res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max][:,0])
 
     res[:, np.isnan(tifFile)] = np.nan
     res2[np.isnan(tifFile)] = np.nan
