@@ -227,9 +227,6 @@ Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 # Features selection
 features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, False, nbfeatures)
 
-# Make models
-dico_model = make_models(features_selected.shape[0], 0.03, 'relu')
-
 # Train
 criterion = weighted_rmse_loss
 epochs = 10000
@@ -304,17 +301,16 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
         features=features_selected,
         lr=lr,
         criterion=criterion,
-        model=dico_model[model],
+        model=model,
         dir_output=dir_output / Path('check_'+scaling + '_' + optimize_str + '/' + prefix + '/' + model))
 
 if doTest:
     trainCode = [name2int[dept] for dept in trainDepartements]
 
-    Xtrain = Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))]
-    Ytrain = Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))]
+    Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))], Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
 
-    Xtest = Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))]
-    Ytest = Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))]
+    Xtest, Ytest  = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] > allDates.index('2018-01-01')))],
+                Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] > allDates.index('2018-01-01')))])
 
     name_dir = nameExp + '/' + sinister + '/' + 'train'
     train_dir = Path(name_dir)
@@ -356,8 +352,8 @@ if doTest:
     
     # 69 test
     testDepartement = ['departement-69-rhone']
-    Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
-    Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
+    Xset = Xtest[(Xtest[:, 3] == 69)]
+    Yset = Ytest[(Xtest[:, 3] == 69)]
 
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                         methods,
@@ -378,8 +374,8 @@ if doTest:
     
     # 2023 test
     testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-    Xset = Xtest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
-    Yset = Ytest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
+    Xset = Xtest[(Xtest[:, 3] != 69)]
+    Yset = Ytest[(Xtest[:, 3] != 69)]
     
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                         methods,

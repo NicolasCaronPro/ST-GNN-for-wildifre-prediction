@@ -194,6 +194,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
     pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
     X = X[:, np.asarray(train_fet_num)]
+    Xtrain = Xtrain[:, np.asarray(train_fet_num)]
     logger.info(pos_feature)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
@@ -206,7 +207,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     # Features selection
     if nbfeatures != 'all':    
         features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
-        log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
+        log_features(features_importance, scale, pos_feature, ['min', 'mean', 'max', 'std'])
         features_selected = np.unique(features_importance[:,0]).astype(int)
     else:
         features_selected = np.arange(0, X.shape[1])
@@ -244,11 +245,11 @@ if sinister == 'firepoint':
     # 69 test
     testDates = find_dates_between('2018-01-01', '2023-01-01')
     testDepartement = ['departement-69-rhone']
-    test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    
+    # 2023 test
     testDates = find_dates_between('2023-01-01', '2023-09-11')
     testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-
-    # 2023 test
     process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 if sinister == 'inondation':
@@ -256,10 +257,10 @@ if sinister == 'inondation':
     testDates = find_dates_between('2018-01-01', '2023-09-11')
     testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
     process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
-    testDates = find_dates_between('2023-01-01', '2023-09-11')
-    testDepartement = ['departement-25-doubs']
 
     # 2023 test
+    testDates = find_dates_between('2023-01-01', '2023-09-11')
+    testDepartement = ['departement-25-doubs']
     process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
 
 # 2023 test Ain

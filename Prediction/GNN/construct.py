@@ -55,7 +55,7 @@ def look_for_information(path : Path, departements : list,
             if minPoint == 'full':
                 minValue = mask.shape[0]
             else:
-                minValue = min(minPoint, mask.shape[0])
+                minValue = min(int(minPoint), mask.shape[0])
             m = np.random.choice(mask, minValue, replace=False).ravel()
             datesForDepartement += list(m)
         
@@ -130,11 +130,14 @@ def construct_database(graphScale : GraphStructure,
 
     graphScale._info_on_graph(subNode, Path('log'))
 
+    if graphScale.scale == 0:
+        X, pos_feature = get_sub_nodes_feature_2(graphScale, subNode, departements, features, sinister, dir_output, dir_train)
+    else:
+        X, pos_feature = get_sub_nodes_feature(graphScale, subNode, departements, features, sinister, dir_output, dir_train)
+
     Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output, dir_train)
 
     subNode[:,-1] = Y[:,-3]
-
-    X, pos_feature = get_sub_nodes_feature(graphScale, subNode, departements, features, sinister, dir_output, dir_train)
 
     return X, Y, pos_feature
 

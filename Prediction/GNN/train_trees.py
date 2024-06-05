@@ -122,7 +122,7 @@ if doDatabase:
     if not dummy:
         name = 'points'+str(minPoint)+'.csv'
         ps = pd.read_csv(Path(nameExp) / sinister / name)
-        depts = [name2int[dept] for dept in trainDepartements]
+        depts = [name2int[dept] for dept in departements]
         logger.info(ps.departement.unique())
         ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
         logger.info(ps.departement.unique())
@@ -231,19 +231,20 @@ logger.info(np.unique(X[:,0]))
 Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
 
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures)
+features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures, scale)
 
 ######################## Baseline ##############################
-optimize_str = 'optimize_features' if optimize_feature else 'no_optimize_features'
-name = 'check_'+scaling + '_' + optimize_str + '/' + prefix + '/' + '/baseline'
+name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 trainCode = [name2int[dept] for dept in trainDepartements]
-trainDataset = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))], Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
+
+trainDataset = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))],
+                Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
 
 valDataset = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))],
               Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))])
 
-testDataset = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))],
-               Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)))])
+testDataset = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] >= allDates.index('2018-01-01')))],
+               Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] >= allDates.index('2018-01-01')))])
 
 train_sklearn_api_model(trainDataset=trainDataset,
                         valDataset=valDataset,
@@ -260,7 +261,7 @@ train_sklearn_api_model(trainDataset=trainDataset,
                         departements=departements,
                         weight=True)
 
-train_sklearn_api_model(trainDataset=trainDataset,
+"""train_sklearn_api_model(trainDataset=trainDataset,
                         valDataset=valDataset,
                         testDataset=testDataset,
                         graph=graphScale,
@@ -303,7 +304,7 @@ train_sklearn_api_model(trainDataset=trainDataset,
                         optimize_feature=optimize_feature,
                         features=features_selected,
                         departements=departements,
-                        weight=False)
+                        weight=False)"""
 
 if doTest:
 
@@ -337,27 +338,28 @@ if doTest:
             ('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
-                ('meac', meac, 'class'),
+            ('meac', meac, 'class'),
             ]
 
     models = [
         ('xgboost', False),
-        ('lightgbm', False),
-        ('ngboost', False),
+        ('xgboost_optimize_feature', False),
+        #('lightgbm', False),
+        #('ngboost', False),
         ('xgboost_bin', True),
-        ('lightgbm_bin', True),
+        #('lightgbm_bin', True),
         ('xgboost_bin_unweighted', True),
-        ('lightgbm_bin_unweighted', True),
+        #('lightgbm_bin_unweighted', True),
         ('xgboost_unweighted', False),
-        ('lightgbm_unweighted', False),
-        ('ngboost_unweighted', False),
+        #('lightgbm_unweighted', False),
+        #('ngboost_unweighted', False),
         #('ngboost_bin', True)
         ]
     
     # 69 test
     testDepartement = ['departement-69-rhone']
-    Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
-    Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:, 4] < allDates.index(maxDate))]
+    Xset = Xtest[(Xtest[:, 3] == 69)]
+    Yset = Ytest[(Xtest[:, 3] == 69)]
 
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                         methods,
@@ -367,7 +369,7 @@ if doTest:
                         prefix,
                         dummy,
                         models,
-                        dir_output,
+                        dir_output / '69',
                         device,
                         k_days,
                         Rewrite, 
@@ -378,9 +380,9 @@ if doTest:
     
     # 2023 test
     testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-    Xset = Xtest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
-    Yset = Ytest[(Xtest[:, 3] != 69) & (Xtest[:, 4] >= allDates.index(maxDate))]
-    
+    Xset = Xtest[(Xtest[:, 3] != 69)]
+    Yset = Ytest[(Xtest[:, 3] != 69)]
+
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                         methods,
                         '2023',
@@ -389,7 +391,7 @@ if doTest:
                         prefix,
                         dummy,
                         models,
-                        dir_output,
+                        dir_output / '2023',
                         device,
                         k_days,
                         Rewrite, 

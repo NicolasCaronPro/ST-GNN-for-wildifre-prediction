@@ -246,7 +246,7 @@ def preprocess_test(X, Y, Xtrain, scaling):
 
     # Scaling Features
     for featureband in range(6, Xset.shape[1]):
-        Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=True)
+        Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
 
     print(f'Check {scaling} standardisation test : {np.nanmax(Xset[:,6:])}, {np.nanmin(Xset[:,6:])}')
 
@@ -660,11 +660,6 @@ def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                                                             scaling=scaling, prefix=prefix, encoding=encoding,
                                                             Rewrite=False)
         
-        _ = load_loader_test(use_temporal_as_edges=False, graphScale=graphScale, dir_output=dir_output,
-                                        X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=Rewrite)
-        
     ITensor = YTensor[:,-3]
     Ypred = torch.masked_select(YTensor[:,-1], ITensor.gt(0))
     YTensor = YTensor[ITensor.gt(0)]
@@ -674,10 +669,9 @@ def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
 
     #################################### Traditionnal ##################################################
 
-    for name, isBin, optimize_feature in models:
-        optimize_str = 'optimize_features' if optimize_feature else 'no_optimize_features'
-        n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_' + optimize_str + '_' + encoding+'_'+testname
-        model_dir = train_dir / Path('check_'+scaling + '_' + optimize_str + '/' + prefix_train + '/baseline/' + name + '/')
+    for name, isBin in models:
+        n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        model_dir = train_dir / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
         
         logger.info('#########################')
         logger.info(f'      {name}            ')
@@ -727,7 +721,7 @@ def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         for dept in testDepartement:
-            dir_mask = dir_output / 'raster' / '2x2'
+            dir_mask = train_dir / 'raster' / '2x2'
             resSum = array2image(res, dir_mask, scale, dept, 'sum', -3, dir_output / n, dept+'_prediction.pkl')
             ySum = array2image(y, dir_mask, scale, dept, 'sum', -1, dir_output / n, dept+'_gt.pkl')
             fireSum = array2image(y, dir_mask, scale, dept, 'sum', -2, dir_output / n, dept+'_fire.pkl')

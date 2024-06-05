@@ -33,7 +33,20 @@ def evaluate_met(metrics, met):
         df.loc[i, 'model'] = key
         df.loc[i, met] = value[met]
         i += 1
-    return df.sort_values(met)    
+    return df.sort_values(met)
+
+def evaluate_cr(metrics, met):
+    df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', met])
+    i = 0
+    for key, value in metrics.items():
+        df.loc[i, 'model'] = key
+        print(value[met])
+        df.loc[i, met] = value[met]
+        i += 1
+    return df.sort_values(met)
+
+def plot_cr(df, met, dir_output, out_name, color):
+    pass
 
 def plot(df, met, dir_output, out_name, color):
     index = df['index'].values
@@ -97,7 +110,7 @@ def plot_variation(df, base_label, met, dir_output, out_name, color):
 
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
-    f1s, f12s, maes, bcas, rmses, maetop10s = [], [], [], [], [], []
+    f1s, f12s, maes, bcas, rmses, maetop10s, crs = [], [], [], [], [], [], []
 
     (_, _, base_label, _) = experiments[0]
 
@@ -159,12 +172,22 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         rmse['index'] = index
         rmses.append(rmse)
 
+        """# CR score
+        cr = evaluate_cr(metrics, 'class')
+        cr = cr.groupby('model')['class'].mean().reset_index()
+        cr['class'] = cr['cr'].astype(float)
+        cr['expe'] = expe
+        cr['label'] = label
+        cr['index'] = index
+        crs.append(cr)"""
+
     f1s = pd.concat(f1s).reset_index(drop=True)
     maes = pd.concat(maes).reset_index(drop=True)
     bcas = pd.concat(bcas).reset_index(drop=True)
     f12s = pd.concat(f12s).reset_index(drop=True)
     rmses = pd.concat(rmses).reset_index(drop=True)
     maetop10s = pd.concat(maetop10s).reset_index(drop=True)
+    #crs = pd.concat(crs).reset_index(drop=True)
 
     f1s.to_csv(dir_output / 'f1s.csv')
     maes.to_csv(dir_output / 'maes.csv')
@@ -172,6 +195,7 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     f12s.to_csv(dir_output / 'f12s.csv')
     rmses.to_csv(dir_output / 'rmses.csv')
     maetop10.to_csv(dir_output / 'maetop10.csv')
+    #crs.to_csv(dir_output / 'crs.csv')
 
     index_colors = f1s['index'].values
 
@@ -187,6 +211,7 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(bcas, 'bca', dir_output, 'bca', color)
     plot(rmses, 'rmse', dir_output, 'rmse', color)
     plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
+    #plot_cr(cr, 'cr', dir_output, 'cr', color)
 
     """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
     plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
@@ -249,6 +274,10 @@ if __name__ == "__main__":
     # Inference
     experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
                             ]
+    
+    # ECAI
+    experiments_ecai = [('ecai', 0, '0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                            ]
                        
     # exp
     experiments_dl = [('exp1', 0, 'Tree based', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
@@ -256,4 +285,4 @@ if __name__ == "__main__":
                             ]
     
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_dl, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_ecai, test_name=test_name, dir_output=dir_output, sinister=sinister)
