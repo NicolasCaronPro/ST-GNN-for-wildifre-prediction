@@ -264,25 +264,26 @@ if __name__ == "__main__":
                    ('exp_ks', 6, '6', 'full_6_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                    ('exp_ks', 7, '7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                    ]
-    
+
     # Scale
-    experiments_scale = [('exp1', 10, '10', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('exp1', 5, '5', 'full_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
-                             ('exp_scale_2', 2, '2', 'full_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
+    experiments_scale = [('ecai', 10, '10', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('ecai', 2, '2', '20_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
+                             ('ecai', 1, '1', '20_0_1_100_1_z-score_Catboost_'+test_name+'_tree'),
+                             ('try_0_scale', 0, '0', '20_0_0_20_0_z-score_Catboost_'+test_name+'_tree'),
                             ]
-                   
+
     # Inference
     experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
                             ]
-    
+
     # ECAI
     experiments_ecai = [('ecai', 0, '0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                             ]
-                       
+
     # exp
     experiments_dl = [('exp1', 0, 'Tree based', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                              ('exp1', 1, 'GNN', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl')
                             ]
-    
+
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_ecai, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_scale, test_name=test_name, dir_output=dir_output, sinister=sinister)

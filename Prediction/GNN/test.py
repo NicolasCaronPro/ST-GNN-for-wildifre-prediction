@@ -147,7 +147,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         logger.info(X.shape)
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
-    pos_feature, _ = create_pos_feature(graphScale, 6, features)
+    pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
 
     if do2D:
         subnode = X[:,:6]
@@ -205,7 +205,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                 maxi = coef
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-    pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
+    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
     X = X[:, np.asarray(train_fet_num)]
     
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)

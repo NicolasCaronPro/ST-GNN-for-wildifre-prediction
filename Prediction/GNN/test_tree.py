@@ -103,7 +103,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True, False)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
@@ -137,7 +137,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
         graphScale._info_on_graph(X, dir_output)
 
-    pos_feature, _ = create_pos_feature(graphScale, 6, features)
+    pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
 
     Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
     Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
@@ -149,7 +149,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     if k_days > 0:
         trainFeatures_ = trainFeatures + varying_time_variables
         features_ = features + varying_time_variables
-        pos_feature, newShape = create_pos_feature(graphScale, 6, features_)
+        pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features_)
         if doDatabase:
             X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
@@ -192,7 +192,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                 maxi = coef
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
 
-    pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures_)
+    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures_)
     X = X[:, np.asarray(train_fet_num)]
     Xtrain = Xtrain[:, np.asarray(train_fet_num)]
     logger.info(pos_feature)

@@ -8,7 +8,8 @@ from weigh_predictor import Predictor
 from config import *
 
 def look_for_information(path : Path, departements : list,
-                         firepoint : pd.DataFrame, maxDate : str,
+                         firepoint : pd.DataFrame,
+                         regions : gpd.GeoDataFrame, maxDate : str,
                          sinister : str, dir : Path,
                          minPoint):
 
@@ -58,12 +59,12 @@ def look_for_information(path : Path, departements : list,
                 minValue = min(int(minPoint), mask.shape[0])
             m = np.random.choice(mask, minValue, replace=False).ravel()
             datesForDepartement += list(m)
-        
+
         datesForDepartement += list(np.arange(allDates.index(maxDate), influence.shape[-1]))
         datesForDepartement = np.asarray(datesForDepartement)
 
-        fp = firepoint[firepoint['departement'] == name2int[departement]].copy(deep=True)
-
+        #fp = firepoint[firepoint['departement'] == name2int[departement]].copy(deep=True)
+        fp = regions[regions['departement'] == name2str[departement]]
         iterables = [datesForDepartement, list(fp.latitude)]
         ps = pd.DataFrame(index=pd.MultiIndex.from_product(iterables, names=('date', 'latitude'))).reset_index()
 
@@ -83,17 +84,20 @@ def look_for_information(path : Path, departements : list,
     save_object(all_dep_predictor, 'PredictorAll.pkl', path=dir / sinister / 'influenceClustering')
 
     points = pd.concat(points)
+    points['departement'] = points['departement'].apply(lambda x : str2intMaj[x])
     check_and_create_path(dir/sinister)
     name = 'points'+str(minPoint)+'.csv'
     points.to_csv(dir / sinister / name, index=False)
 
-def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster):
+def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures):
     graphScale = GraphStructure(scale, geo, maxDist, nmax)
     graphScale._train_kmeans(doRaster=doRaster, path=dir_output, sinister=sinister)
     graphScale._create_nodes_list()
     graphScale._create_edges_list()
     graphScale._create_temporal_edges_list(allDates, k_days=k_days)
     graphScale.nodes = graphScale._assign_department(graphScale.nodes)
+    if doEdgesFeatures:
+        graphScale.edges = get_edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
     save_object(graphScale, 'graph_'+str(scale)+'.pkl', dir_output)
     return graphScale
 
@@ -120,7 +124,7 @@ def construct_database(graphScale : GraphStructure,
     orinode = np.full((len(ps), 5), -1.0, dtype=float)
     orinode[:,0] = ps['scale'+str(scale)].values
     orinode[:,4] = ps['date']
-    
+
     orinode = generate_subgraph(graphScale, 0, 0, orinode)
 
     subNode = add_k_temporal_node(k_days=k_days, nodes=orinode)

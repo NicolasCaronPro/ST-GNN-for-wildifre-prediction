@@ -86,6 +86,13 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
     
     logger.info(np.unique(np.argwhere(np.isnan(X))[:,1]))
 
+    if int(args.days) > 0:
+        trainFeatures += varying_time_variables
+        features += varying_time_variables
+        pos_feature, newShape = create_pos_feature(graph.scale, 6, features)
+        X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+
+
     # Today
     today_X, E = create_inference(graph,
                      X,
@@ -121,21 +128,17 @@ def fire_prediction(spatialGeo, interface, departement, features, trainFeatures,
         
         if tomorrow_X is not None:
             if model in traditionnal_models:
-                # Add varying time features
-                if int(args.days) > 0:
-                    trainFeatures += varying_time_variables
-                    features += varying_time_variables
-                    pos_feature, newShape = create_pos_feature(graph, 6, features)
-                    X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-                save_object(X, 'X_'+prefix+'.pkl', dir_output)
+
                 tomorrow_X = tomorrow_X.detach().cpu().numpy()
                 tomorrow_X_fet = tomorrow_X[:, features_selected, :]
                 tomorrow_X_fet = tomorrow_X_fet.reshape(tomorrow_X_fet.shape[0], -1)
                 tomorrow_Y = graph.predict_model_api_sklearn(tomorrow_X_fet, False)
+
             else:
                 tomorrow_Y = graph._predict_tensor(tomorrow_X_fet, E)
         else:
             tomorrow_Y = None
+
     fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
     geoDT[fire_feature] = np.nan
     unodes = np.unique(orinode[:,0])

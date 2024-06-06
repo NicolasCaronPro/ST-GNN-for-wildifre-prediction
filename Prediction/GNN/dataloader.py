@@ -160,7 +160,7 @@ class ReadGraphDataset_2D(Dataset):
 #                                                                                                       #
 #########################################################################################################
 
-def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : int):
+def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, trainDate : str, trainDepartements : list, ks : int):
     """
     Preprocess the input features:
         X : input features
@@ -181,10 +181,6 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : in
     assert Xset.shape[0] > 0
     assert Xset.shape[0] == Yset.shape[0]
 
-    # Get node's id and date for which weight is greater than 0
-    nodeUseForLossCalculation = Yset[(Yset[:,-3] > 0) & (Yset[:,4] > ks)]
-    dateUseForLossCalculation = np.unique(nodeUseForLossCalculation[:,4])
-
     # Sort by date
     ind = np.lexsort([Yset[:,4]])
     Xset = Xset[ind]
@@ -194,17 +190,12 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : in
     #dateTrain, dateVal = train_test_split(dateUseForLossCalculation, test_size=test_size, random_state=42)
     #dateTrain = dateUseForLossCalculation[: int(dateUseForLossCalculation.shape[0] * (1 - test_size))]
     #dateVal = dateUseForLossCalculation[int(dateUseForLossCalculation.shape[0] * (1 - test_size)):]
-    dateTrain =  dateUseForLossCalculation[dateUseForLossCalculation < allDates.index(maxDate)]
-    dateVal =  dateUseForLossCalculation[dateUseForLossCalculation >= allDates.index(maxDate)]
 
-    print(f'Size of the train set {dateTrain.shape[0]}, size of the val set {dateVal.shape[0]}')
+    trainCode = [name2int[dept] for dept in trainDepartements]
+
+    Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,0], trainCode))],
+                      Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,0], trainCode))])
     
-    # Generate Xtrain and Xval
-    trainMask = np.isin(Xset[:,4], dateTrain)
-
-    valMask = np.isin(Xset[:,4], dateVal)
-
-    Xtrain = Xset[trainMask, :]
 
     # Define the scale method
     if scaling == 'MinMax':
@@ -216,15 +207,29 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str, ks : in
     else:
         ValueError('Unknow')
         exit(1)
+
     # Scale Features
     for featureband in range(6, Xset.shape[1]):
         Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
     
-    # Log
-    print(f'Check {scaling} standardisation Train : {np.nanmax(Xset[trainMask,6:])}, {np.nanmin(Xset[trainMask,6:])}')
-    print(f'Check {scaling} standardisation Val : {np.nanmax(Xset[valMask,6:])}, {np.nanmin(Xset[valMask,6:])}')
+    Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))],
+                      Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))])
 
-    return Xset, Yset
+    Xval, Yval = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))],
+                    Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))])
+    
+    Xtest, Ytest = (Xset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) | ((Xset[:,4] < allDates.index(maxDate)) & (~np.isin(Xset[:,3], trainCode)))],
+                    Yset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) | ((Xset[:,4] < allDates.index(maxDate)) & (~np.isin(Xset[:,3], trainCode)))])
+    
+    logger.info(f'Size of the train set {Xtrain.shape[0]}, size of the val set {Xval.shape[0]}, size of the test set {Xtest.shape[0]}')
+    logger.info(f'Unique train dates set {np.unique(Xtrain[:,4]).shape[0]}, val dates {np.unique(Xval[:,4]).shape[0]}, test dates {np.unique(Xtest[:,4]).shape[0]}')
+
+    # Log
+    logger.info(f'Check {scaling} standardisation Train : {np.nanmax(Xtrain[:,6:])}, {np.nanmin(Xtrain[:,6:])}')
+    logger.info(f'Check {scaling} standardisation Val : {np.nanmax(Xval[:,6:])}, {np.nanmin(Xval[:,6:])}')
+    logger.info(f'Check {scaling} standardisation Test : {np.nanmax(Xtest[:,6:])}, {np.nanmin(Xtest[:,6:])}')
+
+    return (Xtrain, Ytrain), (Xval, Yval), (Xtest, Ytest)
 
 def preprocess_test(X, Y, Xtrain, scaling):
 
@@ -248,7 +253,7 @@ def preprocess_test(X, Y, Xtrain, scaling):
     for featureband in range(6, Xset.shape[1]):
         Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
 
-    print(f'Check {scaling} standardisation test : {np.nanmax(Xset[:,6:])}, {np.nanmin(Xset[:,6:])}')
+    logger.info(f'Check {scaling} standardisation test : {np.nanmax(Xset[:,6:])}, {np.nanmin(Xset[:,6:])}')
 
     return Xset, Yset
 
@@ -284,21 +289,25 @@ def preprocess_inference(X, Xtrain, scaling):
 #########################################################################################################
 
 def create_dataset(graph,
-                    Xset,
-                    Yset,
-                    maxDate,
+                    train,
+                    val,
+                    test,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int):
     """
     
     """
-    dateTrain = np.unique(Xset[Xset[:,4] < allDates.index(maxDate)][:,4])
-    dateVal = np.unique(Xset[Xset[:,4] > allDates.index(maxDate)][:,4])
-    
-    nodeUseForLossCalculation = Yset[Yset[:,-3] > 0]
 
-    dateUseForLossCalculation = np.unique(nodeUseForLossCalculation[:,4])
+    Xtrain, Ytrain = train
+    
+    Xval, Yval = val
+
+    Xtest, Ytest = test
+
+    dateTrain = np.unique(Xtrain[:,4])
+    dateVal = np.unique(Xval[:,4])
+    dateTest = np.unique(Xtest[:,4])
     
     Xst = []
     Yst = []
@@ -308,54 +317,83 @@ def create_dataset(graph,
     YsV = []
     EsV = []
 
-    for id in dateUseForLossCalculation:
+    XsTe = []
+    YsTe = []
+    EsTe = []
+
+    for id in dateTrain:
         if use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, Xset, Yset, ks)
+            x, y, e = construct_graph_set(graph, id, Xtrain, Ytrain, ks)
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, Xset, Yset, ks)
+            x, y, e = construct_graph_with_time_series(graph, id, Xtrain, Ytrain, ks)
+
+        if x is None:
+            continue
+    
+        Xst.append(x)
+        Yst.append(y)
+        Est.append(e)
+
+    for id in dateVal:
+        if use_temporal_as_edges:
+            x, y, e = construct_graph_set(graph, id, Xval, Yval, ks)
+        else:
+            x, y, e = construct_graph_with_time_series(graph, id, Xval, Yval, ks)
+
         if x is None:
             continue
         
-        if id in dateTrain:
-            Xst.append(x)
-            Yst.append(y)
-            Est.append(e)
-        elif id in dateVal:
-            XsV.append(x)
-            YsV.append(y)
-            EsV.append(e)
+        XsV.append(x)
+        YsV.append(y)
+        EsV.append(e)
+
+    for id in dateTest:
+        if use_temporal_as_edges:
+            x, y, e = construct_graph_set(graph, id, Xtest, Ytest, ks)
         else:
-            ValueError('Unknow date', id)
+            x, y, e = construct_graph_with_time_series(graph, id, Xtest, Ytest, ks)
+
+        if x is None:
+            continue
+    
+        XsTe.append(x)
+        YsTe.append(y)
+        EsTe.append(e)
     
     assert len(Xst) > 0
     assert len(XsV) > 0
+    assert len(XsTe) > 0
 
     trainDataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
     valDataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
-    return trainDataset, valDataset
+    testDatset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
+    return trainDataset, valDataset, testDatset
 
 def train_val_data_loader(graph,
-                          Xset,
-                          Yset,
-                          maxDate,
+                          train,
+                          val,
+                          test,
                         use_temporal_as_edges : bool,
                         batch_size,
                         device,
                         ks : int) -> None:
 
-    trainDataset, valDataset = create_dataset(graph,
-                                Xset, Yset, maxDate, use_temporal_as_edges,
+    trainDataset, valDataset, testDataset = create_dataset(graph,
+                                train,
+                                val,
+                                test, use_temporal_as_edges,
                                 device, ks)
 
     trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
     valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
-    return trainLoader, valLoader
+    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
+    return trainLoader, valLoader, testLoader
 
 
 def train_val_data_loader_2D(graph,
-                             Xset : np.array,
-                             Yset : np.array,
-                             maxDate : str,
+                            train,
+                            val,
+                            test,
                             use_temporal_as_edges : bool,
                             batch_size : int,
                             device: torch.device,
@@ -366,11 +404,17 @@ def train_val_data_loader_2D(graph,
                             shape : tuple,
                             path : Path) -> None:
     
-    
-    nodeUseForLossCalculation = Yset[Yset[:,-3] > 0]
 
-    dateUseForLossCalculation = np.unique(nodeUseForLossCalculation[:,4])
-    
+    Xtrain, Ytrain = train
+
+    Xval, Yval = val
+
+    Xtest, Ytest = test
+
+    dateTrain = np.unique(Xtrain[:,4])
+    dateVal = np.unique(Xval[:,4])
+    dateTest = np.unique(Xtest[:,4])
+
     Xst = []
     Yst = []
     Est = []
@@ -379,19 +423,31 @@ def train_val_data_loader_2D(graph,
     YsV = []
     EsV = []
 
-    Xtrain = Xset[Xset[:,4] < allDates.index(maxDate)]
-    Ytrain = Yset[Yset[:,4] < allDates.index(maxDate)]
+    XsTe = []
+    YsTe = []
+    EsTe = []
 
-    Xval = Xset[Xset[:,4] < allDates.index(maxDate)]
-
-    dateTrain = np.unique(Xtrain[:,4])
-    dateVal = np.unique(Xval[:,4])
-    
-    for id in dateUseForLossCalculation:
+    for id in dateTrain:
         if use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, Xset, Yset, ks)
+            x, y, e = construct_graph_set(graph, id, Xtrain, Ytrain, ks)
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, Xset, Yset, ks)
+            x, y, e = construct_graph_with_time_series(graph, id, Xtrain, Ytrain, ks)
+
+        if x is None:
+            continue
+
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        save_object(x, str(id)+'.pkl', path / scaling)
+    
+        Xst.append(x)
+        Yst.append(y)
+        Est.append(e)
+
+    for id in dateVal:
+        if use_temporal_as_edges:
+            x, y, e = construct_graph_set(graph, id, Xval, Yval, ks)
+        else:
+            x, y, e = construct_graph_with_time_series(graph, id, Xval, Yval, ks)
 
         if x is None:
             continue
@@ -399,16 +455,30 @@ def train_val_data_loader_2D(graph,
         x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
         save_object(x, str(id)+'.pkl', path / scaling)
         
-        if id in dateTrain:
-            Xst.append(str(id)+'.pkl')
-            Yst.append(y)
-            Est.append(e)
-        elif id in dateVal:
-            XsV.append(str(id)+'.pkl')
-            YsV.append(y)
-            EsV.append(e)
+        XsV.append(x)
+        YsV.append(y)
+        EsV.append(e)
+
+    for id in dateTest:
+        if use_temporal_as_edges:
+            x, y, e = construct_graph_set(graph, id, Xtest, Ytest, ks)
         else:
-            ValueError('Unknow date', id)
+            x, y, e = construct_graph_with_time_series(graph, id, Xtest, Ytest, ks)
+
+        if x is None:
+            continue
+
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        save_object(x, str(id)+'.pkl', path / scaling)
+    
+        XsTe.append(x)
+        YsTe.append(y)
+        EsTe.append(e)
+    
+    assert len(Xst) > 0
+    assert len(XsV) > 0
+    assert len(XsTe) > 0
+
     
     assert len(Xst) > 0
     assert len(XsV) > 0
@@ -416,10 +486,12 @@ def train_val_data_loader_2D(graph,
     
     trainDataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / scaling)
     valDataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path  / scaling)
+    testDataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path  / scaling)
     
     trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
     valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
-    return trainLoader, valLoader
+    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
+    return trainLoader, valLoader, testLoader
 
 #########################################################################################################
 #                                                                                                       #
@@ -691,6 +763,8 @@ def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         ITensor = YTensor[:,-3]
 
         model = read_object(name+'.pkl', model_dir)
+        if model is None:
+            continue
         graphScale._set_model(model)
         Ypred = graphScale.predict_model_api_sklearn(XTensor, isBin)
         
@@ -964,24 +1038,26 @@ def create_inference(graph,
                      Xtrain : np.array,
                      device : torch.device,
                      use_temporal_as_edges,
+                     graphId : int,
                      ks : int,
                      scaling : str) -> tuple:
 
     Xset = preprocess_inference(X, Xtrain, scaling)
 
-    graphId = np.unique(X[:,4])
+    graphId = [graphId]
 
     batch = []
 
-    i = 0
     for id in graphId:
         if use_temporal_as_edges:
             x, e = construct_graph_set(graph, id, Xset, None, ks)
         else:
             x, e = construct_graph_with_time_series(graph, id, Xset, None, ks)
+        if x is None:
+            continue
         batch.append([torch.tensor(x, dtype=torch.float32, device=device), torch.tensor(e, dtype=torch.long, device=device)])
-        i += 1
-
+    if len(batch) == 0:
+        return None, None
     features, edges = graph_collate_fn_no_label(batch)
 
     return features, edges

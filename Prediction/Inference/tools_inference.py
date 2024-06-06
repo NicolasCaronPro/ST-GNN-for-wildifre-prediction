@@ -23,13 +23,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     
     logger.info('Load nodes features')
 
-    pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
+    pos_feature, newShape = create_pos_feature(graph.scale, subNode.shape[1], features)
     logger.info(pos_feature)
 
     def save_values(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
-        if graph.scale > -1:
+        if graph.scale > 0:
             X[indexNode, indexVvar] = round(np.nanmean(array[mask]), 3)
             X[indexNode, indexVvar+1] = round(np.nanmin(array[mask]), 3)
             X[indexNode, indexVvar+2] = round(np.nanmax(array[mask]), 3)
@@ -48,7 +48,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     def save_value_with_encoding(array, indexVvar, indexNode, mask, encoder):
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
-        if graph.scale > -1:
+        if graph.scale > 0:
             X[indexNode, indexVvar] = round(np.nanmean(encode_values), 3)
             X[indexNode, indexVvar+1] = round(np.nanmin(encode_values), 3)
             X[indexNode, indexVvar+2] = round(np.nanmax(encode_values), 3)

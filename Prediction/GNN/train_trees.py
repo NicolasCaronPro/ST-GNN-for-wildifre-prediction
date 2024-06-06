@@ -86,6 +86,7 @@ if doPoint:
     look_for_information(dir_target,
                          departements,
                          fp,
+                         regions,
                          maxDate,
                          sinister,
                          Path(nameExp),
@@ -107,6 +108,7 @@ if doGraph:
                                  sinister,
                                  geo, nmax, k_days,
                                  dir_output,
+                                 True,
                                  True)
     graphScale._create_predictor(minDate, maxDate, dir_output, sinister)
     doDtabase = True
@@ -126,6 +128,7 @@ if doDatabase:
         logger.info(ps.departement.unique())
         ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
         logger.info(ps.departement.unique())
+        ps['date'] = ps['date'] - 1
     else:
         name = sinister+'.csv'
         fp = pd.read_csv(Path(nameExp) / sinister / name)
@@ -134,7 +137,6 @@ if doDatabase:
         ps = pd.concat((fp, nfp)).reset_index(drop=True)
         ps = ps.copy(deep=True)
         ps = ps[ps['date'].isin(allDates)]
-        #ps = ps[ps['date'] < maxDate]
         ps['date'] = [allDates.index(date) - 1 for date in ps.date]
 
     X, Y, pos_feature = construct_database(graphScale,
@@ -152,7 +154,7 @@ if doDatabase:
 else:
     X = read_object('X_'+prefix+'.pkl', dir_output)
     Y = read_object('Y_'+prefix+'.pkl', dir_output)
-    pos_feature, newshape = create_pos_feature(graphScale, 6, features)
+    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
 
 if do2D:
     subnode = X[:,:6]
@@ -174,7 +176,7 @@ else:
 if k_days > 0:
     trainFeatures += varying_time_variables
     features += varying_time_variables
-    pos_feature, newShape = create_pos_feature(graphScale, 6, features)
+    pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
     if True:
         X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
@@ -221,30 +223,22 @@ prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 if spec != '':
     prefix += '_'+spec
 logger.info(pos_feature)
-pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
+pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
 logger.info(pos_feature)
 logger.info(np.max(X[:,4]))
 logger.info(np.unique(X[:,0]))
 
 # Preprocess
-Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
+trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate, trainDate=trainDate, trainDepartements=trainDepartements, ks=k_days)
 
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, True, nbfeatures, scale)
+features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, True, nbfeatures, scale)
 
 ######################## Baseline ##############################
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 trainCode = [name2int[dept] for dept in trainDepartements]
 
-trainDataset = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))],
-                Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
-
-valDataset = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))],
-              Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:, 3], trainCode))])
-
-testDataset = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] >= allDates.index('2018-01-01')))],
-               Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] >= allDates.index('2018-01-01')))])
 
 train_sklearn_api_model(trainDataset=trainDataset,
                         valDataset=valDataset,
@@ -261,7 +255,7 @@ train_sklearn_api_model(trainDataset=trainDataset,
                         departements=departements,
                         weight=True)
 
-"""train_sklearn_api_model(trainDataset=trainDataset,
+train_sklearn_api_model(trainDataset=trainDataset,
                         valDataset=valDataset,
                         testDataset=testDataset,
                         graph=graphScale,
@@ -304,7 +298,7 @@ train_sklearn_api_model(trainDataset=trainDataset,
                         optimize_feature=optimize_feature,
                         features=features_selected,
                         departements=departements,
-                        weight=False)"""
+                        weight=False)
 
 if doTest:
 
@@ -344,16 +338,16 @@ if doTest:
     models = [
         ('xgboost', False),
         ('xgboost_optimize_feature', False),
-        #('lightgbm', False),
-        #('ngboost', False),
+        ('lightgbm', False),
+        ('ngboost', False),
         ('xgboost_bin', True),
-        #('lightgbm_bin', True),
+        ('lightgbm_bin', True),
         ('xgboost_bin_unweighted', True),
-        #('lightgbm_bin_unweighted', True),
+        ('lightgbm_bin_unweighted', True),
         ('xgboost_unweighted', False),
-        #('lightgbm_unweighted', False),
-        #('ngboost_unweighted', False),
-        #('ngboost_bin', True)
+        ('lightgbm_unweighted', False),
+        ('ngboost_unweighted', False),
+        ('ngboost_bin', True)
         ]
     
     # 69 test

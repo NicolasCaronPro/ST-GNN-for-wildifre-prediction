@@ -86,8 +86,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     logger.info('Load nodes features')
 
-    pos_feature_train, _ = create_pos_feature(graph, subNode.shape[1], trainFeatures)
-    pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
+    pos_feature_train, _ = create_pos_feature(graph.scale, subNode.shape[1], trainFeatures)
+    pos_feature, newShape = create_pos_feature(graph.scale, subNode.shape[1], features)
 
     logger.info(pos_feature)
     logger.info(pos_feature_train)
@@ -408,7 +408,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     return X, pos_feature
 
-
 def get_sub_nodes_feature_2(graph, subNode: np.array,
                         departements : list,
                         features : list, sinister : str,
@@ -419,15 +418,35 @@ def get_sub_nodes_feature_2(graph, subNode: np.array,
 
     logger.info('Load nodes features')
 
-    pos_feature_train, _ = create_pos_feature(graph, subNode.shape[1], trainFeatures)
-    pos_feature, newShape = create_pos_feature(graph, subNode.shape[1], features)
+    #pos_feature_train, _ = create_pos_feature(graph.scale, subNode.shape[1], trainFeatures)
+    pos_feature, newShape_image = create_pos_feature(0, subNode.shape[1], features)
 
+    if graph.scale > 0:
+        pos_feature_2, newShape = create_pos_feature(graph.scale, subNode.shape[1], features)
+    else:
+        newShape = newShape_image
+    
     logger.info(pos_feature)
-    logger.info(pos_feature_train)
+    #logger.info(pos_feature_train)
 
     X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
-
     X[:,:subNode.shape[1]] = subNode
+
+    def save_values(array, indexVvar, indexNode, mask):
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+        if graph.scale > 0:
+            X[indexNode, indexVvar] = round(np.nanmean(array[mask]), 3)
+            X[indexNode, indexVvar+1] = round(np.nanmin(array[mask]), 3)
+            X[indexNode, indexVvar+2] = round(np.nanmax(array[mask]), 3)
+            X[indexNode, indexVvar+3] = round(np.nanstd(array[mask]), 3)
+        else:
+            X[indexNode, indexVvar] = np.nanmean(array[mask])
+
+    def save_value(array, indexVvar, indexNode, mask):
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+        X[indexNode, indexVvar] = np.nanmean(array[mask])
 
     dir_encoder = dir_train / 'Encoder'
 
@@ -460,7 +479,7 @@ def get_sub_nodes_feature_2(graph, subNode: np.array,
             continue
         
         num_dates = np.unique(X[:,4]).astype(int)
-        Xdept = np.empty((np.unique(X[:,4]).shape[0], *mask.shape, X.shape[1]))
+        Xdept = np.empty((np.unique(X[:,4]).shape[0], *mask.shape, newShape_image))
         Xdept[:, :, :, 0] = mask
 
         logger.info('Calendar')
@@ -677,9 +696,50 @@ def get_sub_nodes_feature_2(graph, subNode: np.array,
             for unode in np.unique(X[index, 0]):
                 index2 = np.argwhere((X[:,4] == date) & (X[:,0] == unode))[:,0]
                 masknodes = mask == unode
-                values = Xdept[i, masknodes].reshape(-1, newShape)
-                X[index2, 6:] = values[0, 6:]
-
+                values = Xdept[i, masknodes]
+                if graph.scale == 0:
+                    values = values.reshape(-1, newShape)
+                    X[index2, 6:] = values[0, 6:]
+                else:
+                    for fet in features:
+                        if fet == 'Calendar' or fet == 'Calendar_mean':
+                            for bi, band in enumerate(calendar_variables):
+                                save_value(values[:,:, pos_feature[fet] + bi], pos_feature_2[fet] + bi, index2, masknodes)
+                        elif fet == 'air' or fet == 'air_mean':
+                            for bi, band in enumerate(air_variables):
+                                save_value(values[:,:, pos_feature['fet'] + bi], pos_feature_2[fet] + bi, index2, masknodes)
+                        elif fet == 'sentinel':
+                            for bi, band in enumerate(sentinel_variables):
+                                save_values(values[:,:, pos_feature['sentinel'] + bi], pos_feature_2['sentinel'] + (4 * bi), index2, masknodes)
+                        elif fet == 'Geo':
+                            save_value(values[:,:, pos_feature[fet]], pos_feature_2[fet], index2, masknodes)
+                        elif fet == 'foret':
+                            for bi, band in enumerate(foret_variables):
+                                save_values(values[:,:, pos_feature['foret'] + bi], pos_feature_2['foret'] + (4 * bi), index2, masknodes)
+                        elif fet == 'highway':
+                            for bi, band in enumerate(osmnx_variables):
+                                save_values(values[:,:, pos_feature['highway'] + bi], pos_feature_2['highway'] + (4 * bi), index2, masknodes)
+                        elif fet == 'landcover':
+                            for bi, band in enumerate(landcover_variables):
+                                save_values(values[:,:, pos_feature['landcover'] + bi], pos_feature_2['landcover'] + (4 * bi), index2, masknodes)
+                        elif fet == 'dynamicWorld':
+                            for bi, band in enumerate(dynamic_world_variables):
+                                save_values(values[:,:, pos_feature['dynamicWorld'] + bi], pos_feature_2['dynamicWorld'] + (4 * bi), index2, masknodes)
+                        elif fet == 'vigicrues':
+                           for bi, band in enumerate(vigicrues_variables):
+                                save_values(values[:,:, pos_feature['vigicrues'] + bi], pos_feature_2['vigicrues'] + (4 * bi), index2, masknodes)
+                        elif fet == 'nappes':
+                            for bi, band in enumerate(nappes_variables):
+                                save_values(values[:,:, pos_feature['nappes'] + bi], pos_feature_2['nappes'] + (4 * bi), index2, masknodes)
+                        elif fet == 'AutoRegressionReg':
+                            save_value(values[:,:, pos_feature[fet]], pos_feature_2[fet], index2, masknodes)
+                        elif fet == 'AutoRegressionBin':
+                            save_value(values[:,:, pos_feature[fet]], pos_feature_2[fet], index2, masknodes)
+                        else:
+                            save_value(values[:,:, pos_feature[fet]], pos_feature_2[fet], index2, masknodes)
+                        
+    if graph.scale > 0:
+        pos_feature = pos_feature_2
     return X, pos_feature
 
 def add_varying_time_features(X : np.array, features : list, newShape : int, pos_feature : dict, ks : int):
@@ -717,43 +777,77 @@ def add_varying_time_features(X : np.array, features : list, newShape : int, pos
                 exit(1)
     return res
 
-def get_edges_feature(graph, subNode: np.array,
-                           newAxis : list) -> np.array:
-        """ 
-        """
+def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFrame) -> np.array:
+
         assert graph.edges is not None
-        
+        assert graph.nodes is not None
+
+        subNode = graph.nodes
+
         if newAxis == []:
             return
-
-        edges = np.repeat(graph.edges[:, np.newaxis], k = len(newAxis))
 
         n_pixel_x = 0.02875215641173088
         n_pixel_y = 0.020721094073767096
 
+        edges = np.copy(graph.edges)
+
+        X = list(zip(regions.longitude, regions.latitude))
+        regions['id'] = graph._predict_node(X)
+
         if 'slope' in newAxis:
+            originalShape = edges.shape[0]
+            res = np.empty((originalShape + 1, edges.shape[1]), dtype=float)
+            res[: originalShape] = edges
+
             for node in subNode:
-                edgesNode = graph.edges[graph.edges[0] == node[0]]
-                altitude = graph.dataset[graph.dataset['id'] == node[0]]['elevation_mean']
+                dept = node[3]
+                departement = int2name[int(dept)]
+                dir_data = root / 'csv' / departement / 'raster'
+                dir_mask = root_graph / path / 'raster' / '2x2'
+
+                mask = read_object(departement+'rasterScale'+str(graph.scale)+'.pkl', dir_mask)
+                elevation = read_object('elevation.pkl', dir_data)
+                edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[1] == node[0]])]
+                altitude = np.nanmean(elevation[mask == node[0]])
                 for ed in edgesNode:
-                    targetAltitude = graph.dataset[graph.dataset['id'] == ed[1]]['elevation_mean']
-                    slope = funcSlope(altitude, targetAltitude, (node[1], node[2]), (graph.nodes[ed[1]][1], graph.nodes[ed[1]][2]))
-                    edges[:,2] = slope
+                    index = np.argwhere((edges[:, 0] == node[0]) & (edges[:, 1] == ed[0]))
+                    targetAltitude = np.nanmean(elevation[mask == ed[0]])
+                    if node[0] == ed[0]:
+                        slope = 0
+                    else:
+                        slope = funcSlope(altitude, targetAltitude, (node[1], node[2]), (ed[1], ed[2]))
+                    res[originalShape + newAxis.index('slope'), index] = slope
+
+            edges = np.copy(res)
 
         if 'highway' in newAxis:
-            for node in subNode:
-                edgesNode = graph.edges[graph.edges[0] == node[0]]
-                maskNode = np.argwhere(graph.ids == node[0])
-                maskTarget = np.argwhere(graph.ids in edgesNode[1])
-                geom = unary_union(np.concatenate(graph.oriGeometry[maskNode[:,0]], graph.oriGeometry[maskTarget[:,0]]).ravel())
-                osmnx = ox.graph_from_polygon(geom, network_type='drive')
-                osmnx = osmnx[osmnx['highway'].isin(['motorway', 'primary', 'secondary', 'tertiary'])]
-                osmnx['label'] = 0
-                for i, hw in enumerate(['motorway', 'primary', 'secondary', 'tertiary']):
-                    osmnx.loc[osmnx['highway'] == hw, 'label'] = i +1
-                mask = rasterization(geom, n_pixel_y, n_pixel_x, 'id', Path('.'), 'geo')
-                osmnx = rasterization(osmnx, n_pixel_y, n_pixel_x, 'label', Path('.'), 'highway')
 
-            for ed in edgesNode:
-                edges[:,3:6] = stat(node[0], ed[1], mask, osmnx)
+            dir_data = root / 'csv' / departement / 'data'
+            n_pixel_x = 0.0002694945852326214
+            n_pixel_y = 0.0002694945852352859
+
+            originalShape = edges.shape[0]
+            numNewFet = len(osmnx_variables) - 1
+            res = np.empty((originalShape + numNewFet, edges.shape[1]), dtype=float)
+
+            res[: originalShape] = edges
+            print(res.shape)
+            udepts = np.unique(subNode[:,3]).astype(int)
+
+            for udept in udepts:
+                mask, _, _  = rasterization(regions[regions['departement'] == int2strMaj[udept]], n_pixel_y, n_pixel_x, 'id', Path('log'), int2strMaj[udept])
+                osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
+                nodeDept = subNode[subNode[:,3] == udept]
+                for node in nodeDept:
+                    edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[1] == node[0]])]
+
+                    for ed in edgesNode:
+                        index = np.argwhere((edges[:, 0] == node[0]) & (edges[:, 1] == ed[0]))
+                        val = stat(node[0], ed[1], mask[0], osmnx[0], osmnx_variables[1:])
+                        res[originalShape: originalShape + numNewFet, index] = val
+
+            edges = np.copy(res)
+
+        print(edges)
         return edges

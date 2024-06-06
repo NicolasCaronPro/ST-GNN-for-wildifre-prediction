@@ -263,15 +263,19 @@ def influence_index(raster, mask, dimS, mode, dim=(90,150)):
     res[mask[:,0], mask[:,1]] = (scipy_fft_conv(raster, kernel, mode='same')[mask[:,0], mask[:,1]])
     return res
 
-def stat(c1, c2, clustered, osmnx):
+def stat(c1, c2, clustered, osmnx, bands):
     mask1 = clustered == c1
     mask2 = clustered == c2
 
     clusterMask1 = clustered.copy()
     clusterMask1[~mask1] = 0
+    clusterMask1[mask1] = 1
+    clusterMask1 = clusterMask1.astype(int)
 
     clusterMask2 = clustered.copy()
     clusterMask2[~mask2] = 0
+    clusterMask2[mask2] = 1
+    clusterMask2 = clusterMask2.astype(int)
 
     morpho1 = morphology.dilation(clusterMask1, morphology.disk(10))
     morpho2 = morphology.dilation(clusterMask2, morphology.disk(10))
@@ -280,30 +284,21 @@ def stat(c1, c2, clustered, osmnx):
     box = np.argwhere(mask13 == 1)
 
     if box.shape[0] == 0:
-        return np.nan, np.nan, np.nan, np.nan
+        return np.zeros(len(bands))
  
     indexXmin = np.argwhere(mask13 == 1)[:,0].min()
     indexXmax = np.argwhere(mask13 == 1)[:,0].max()
     indexYmin = np.argwhere(mask13 == 1)[:,1].min()
     indexYmax = np.argwhere(mask13 == 1)[:,1].max()
 
-    #logger.info(indexXmin, indexXmax , indexYmin, indexYmax)
-
     cropOsmnx = osmnx[indexXmin: indexXmax, indexYmin:indexYmax].astype(int)
-    cropMask13 = mask13[indexXmin: indexXmax, indexYmin:indexYmax]
 
-    road = cropOsmnx > 0
-    road = road.astype(int)
+    res = []
 
-    nonnanmask = np.argwhere(~np.isnan(road))
-    density = influence_index(road, nonnanmask).astype(float)
-    
-    mini = np.nanmin(density[cropMask13])
-    max = np.nanmax(density[cropMask13])
-    mean = np.nanmean(density[cropMask13])
-    std = np.nanstd(density[cropMask13])
-
-    return mini, max, mean, std
+    for band in bands:
+        val = (np.argwhere(cropOsmnx == int(band)).shape[0] / cropOsmnx.shape[0]) * 100
+        res.append(val)
+    return np.asarray(res)
 
 def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal = np.nan):
     ori.to_file(dir_output.as_posix() + '/' + outputname+'.geojson', driver="GeoJSON")
@@ -611,23 +606,19 @@ def construct_graph_with_time_series(graph, date : int,
     # Get graph specific spatial
     mask = np.argwhere((np.isin(graph.edges[0], np.unique(x[:,0]))) & (np.isin(graph.edges[1], np.unique(x[:,0]))))
     spatialEdges = np.asarray([graph.edges[0][mask[:,0]], graph.edges[1][mask[:,0]]])
-    #logger.info(x.shape)
     edges = []
     target = []
     src = []
 
     if spatialEdges.shape[1] != 0:
         for i, node in enumerate(x):
-            # Spatial edges
-            if spatialEdges.shape[1] != 0:
-                spatialNodes = x[np.argwhere((x[:,4,-1] == node[4][-1]))][:,:, 0, 0]
-                #spatialNodes = spatialNodes.reshape(-1, spatialNodes.shape[-1])
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[0][0])]
-                for sp in spatial:
-                    src.append(i)
-                    target.append(np.argwhere((x[:,4,-1] == node[4][-1]) & (x[:,0,0] == sp))[0][0])
+            spatialNodes = x[np.argwhere((x[:,4,-1] == node[4][-1]))][:,:, 0, 0]
+            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[0][0])]
+            for sp in spatial:
                 src.append(i)
-                target.append(i)
+                target.append(np.argwhere((x[:,4,-1] == node[4][-1]) & (x[:,0,0] == sp))[0][0])
+            src.append(i)
+            target.append(i)
 
         edges = np.row_stack((src, target)).astype(int)
 
@@ -917,6 +908,7 @@ def func_epoch(model, trainLoader, valLoader, features,
         logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
 
 def train(trainLoader, valLoader, testLoader,
+          scale: int,
           optmize_feature : bool,
           PATIENCE_CNT : int,
           CHECKPOINT: int,
@@ -940,17 +932,18 @@ def train(trainLoader, valLoader, testLoader,
         check_and_create_path(dir_output)
 
         if optmize_feature:
-            newFet = features[0]
+            newFet = [features[0]]
             BEST_VAL_LOSS_FET = math.inf
             patience_cnt_fet = 0
             for fi, fet in enumerate(1, features):
-                testFet = newFet + [fet]
-                dico_model = make_models(len(testFet), 2, 0.03, 'relu')
+                testFet = copy(newFet)
+                testFet.append(fet)
+                dico_model = make_models(len(testFet), 52, 0.03, 'relu')
                 model = dico_model[modelname]
                 optimizer = optim.Adam(model.parameters(), lr=lr)
 
                 logger.info(f'Train {model} with')
-                log_features(testFet, pos_feature, ["min", "mean", "max", "std"])
+                log_features(testFet, scale, pos_feature, ["min", "mean", "max", "std"])
                 for epoch in tqdm(range(epochs)):
                     func_epoch(model, trainLoader, valLoader, testFet, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, False)
 
@@ -984,12 +977,12 @@ def train(trainLoader, valLoader, testLoader,
                         break
             features = newFet
         
-        dico_model = make_models(features, 2, 0.03, 'relu')
+        dico_model = make_models(len(features), 52, 0.03, 'relu')
         model = dico_model[modelname]
         optimizer = optim.Adam(model.parameters(), lr=lr)
 
         logger.info('Train model with')
-        log_features(features, pos_feature, ["min", "mean", "max", "std"])
+        log_features(features, scale, pos_feature, ["min", "mean", "max", "std"])
         for epoch in tqdm(range(epochs)):
             func_epoch(model, trainLoader, valLoader, features, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, True)            
 
@@ -1089,11 +1082,11 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
 
     ################ lightgbm ##################
 
-    #models.append('lightgbm')
+    models.append('lightgbm')
 
     ################ ngboost ###################
 
-    #models.append('ngboost')
+    models.append('ngboost')
 
     ############### SVM ########################
     
@@ -1141,10 +1134,7 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
 
             #################### Base result ####################
             Ytest = testDataset[1]
-            if weight:
-                wei = testDataset[1][:, -3]
-            else:
-                wei = np.ones(Ytest.shape[0])
+            wei = testDataset[1][:, -3]
             Xtest = testDataset[0][:, newFet]
 
             if name == 'xgboost':
@@ -1163,7 +1153,7 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 }
 
             if name == 'ngboost':
-                model = config_ngboost(device, binary)
+                model = config_ngboost(binary)
                 if binary:
                     return
                 fitparams={
@@ -1175,16 +1165,24 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
 
             model.fit(Xtrain[:, newFet].reshape(-1,1), Ytrain, **fitparams)
             ypred = model.predict(Xtest)
-            metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+
+            if ~binary:
+                bestVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                if torch.is_tensor(bestVal):
+                    bestVal = bestVal.detach().cpu().numpy()
+            else:
+                bestVal = my_f1_score(Ytest, ypred, wei)[0]
+
+            """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
                                         graph.scale, oname,
                                         dir_train, wei, None)
             bestVal = []
             for dept in departements:
                 bestVal.append(metDict[dept])
 
-            bestVal = np.mean(bestVal)
+            bestVal = np.mean(bestVal)"""
 
-            logger.info(f'Base MAE {bestVal}')
+            logger.info(f'Base Score {bestVal}')
 
             #################### Explore features ####################
             for fi, fet in enumerate(features[1:]):
@@ -1211,7 +1209,7 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                     }
 
                 if name == 'ngboost':
-                    model = config_ngboost(device, binary)
+                    model = config_ngboost(binary)
                     if binary:
                         return
                     fitparams={
@@ -1224,20 +1222,28 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 model.fit(Xtrain[:, testFet], Ytrain, **fitparams)
                 ypred = model.predict(Xtest)
 
-                metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+                """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
                                         graph.scale, name,
                                         dir_train, wei, None)
                 metVal = []
                 for dept in departements:
                     metVal.append(metDict[dept])
-                metVal = np.mean(metVal)
+                metVal = np.mean(metVal)"""
+
+                if ~binary:
+                    metVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                    if torch.is_tensor(metVal):
+                        metVal = metVal.detach().cpu().numpy()
+                else:
+                    metVal = my_f1_score(Ytest, ypred, wei)[0]
                 
                 logger.info(f'{metVal} vs {bestVal}')
 
-                if metVal < bestVal:
+                if (~binary and metVal < bestVal) or (binary and metVal > bestVal):
                     logger.info('Adding feature')
                     bestVal = metVal
                     newFet.append(fet)
+                    numIncrease = 0
                 else:
                     numIncrease += 1
 
@@ -1269,7 +1275,7 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
             }
 
         if name == 'ngboost':
-            model = config_ngboost(device, binary)
+            model = config_ngboost(binary)
             if binary:
                 return
             fitparams={
@@ -1286,8 +1292,16 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
         save_object(model, oname + '.pkl', dir_output / oname)
 
 def weighted_rmse_loss(input, target, weights = None):
+    if not torch.is_tensor(input):
+        input = torch.tensor(input, dtype=torch.float32)
+    if not torch.is_tensor(target):
+        target = torch.tensor(target, dtype=torch.float32)
+
     if weights is None:
         return torch.sqrt(((input - target) ** 2).mean())
+    if not torch.is_tensor(weights):
+
+        weights = torch.tensor(weights, dtype=torch.float32)
     return torch.sqrt((weights * (input - target) ** 2).sum() / weights.sum())
 
 def add_metrics(methods : list, i : int,
@@ -1589,12 +1603,12 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
 
     return res
 
-def create_pos_feature(graph, shape, features):
+def create_pos_feature(scale, shape, features):
 
     pos_feature = {}
 
     newShape = shape
-    if graph.scale > 0:
+    if scale > 0:
         for var in features:
             pos_feature[var] = newShape
             if var == 'Calendar':

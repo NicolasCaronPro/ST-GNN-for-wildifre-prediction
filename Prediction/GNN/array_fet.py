@@ -19,7 +19,7 @@ geo_variables = ['departement']
 
 # Percentage
 foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18']
-osmnx_variables = ['0', '1', '2', '3', '4']
+osmnx_variables = ['0', '1', '2', '3', '4', '5']
 dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']
 
 # Influence

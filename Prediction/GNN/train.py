@@ -87,6 +87,7 @@ if doPoint:
     look_for_information(dir_target,
                          departements,
                          fp,
+                         regions,
                          maxDate,
                          sinister,
                          Path(nameExp),
@@ -143,7 +144,7 @@ if doDatabase:
 else:
     X = read_object('X_'+prefix+'.pkl', dir_output)
     Y = read_object('Y_'+prefix+'.pkl', dir_output)
-    pos_feature, newshape = create_pos_feature(graphScale, 6, features)
+    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
 
 if len(newFeatures) > 0:
     X = X[:, :pos_feature['Geo'] + 1]
@@ -214,7 +215,7 @@ save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
 prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 if spec != '':
     prefix += '_'+spec
-pos_feature, newshape = create_pos_feature(graphScale, 6, trainFeatures)
+pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
 
 logger.info(X.shape)
@@ -222,10 +223,10 @@ logger.info(X.shape)
 ############################# Training ###########################
 
 # Preprocess
-Xset, Yset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=trainDate, ks=k_days)
+trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate, trainDate=trainDate, trainDepartements=trainDepartements, ks=k_days)
 
 # Features selection
-features_selected = features_selection(doFet, Xset, Yset, dir_output, pos_feature, prefix, False, nbfeatures)
+features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, False, nbfeatures, scale)
 
 # Train
 criterion = weighted_rmse_loss
@@ -263,9 +264,9 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
         logger.info(f'Building loader, loading loader_{str(use_temporal_as_edges)}.pkl')
         last_bool = use_temporal_as_edges
         if not is_2D_model:
-            trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, Xset=Xset, Yset=Yset,
-                                                            trainDate=trainDate,
-                                                            maxDate=maxDate,
+            trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=trainDataset,
+                                                                       val=valDataset,
+                                                                       test=testDataset,
                                                             batch_size=64, device=device,
                                                             use_temporal_as_edges = use_temporal_as_edges,
                                                             ks=k_days)
@@ -274,9 +275,9 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
             save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
         else:
             trainLoader, valLoader, testLoader = train_val_data_loader_2D(graph=graphScale,
-                                                              Xset=Xset, Yset=Yset,
-                                                              trainDate=trainDate,
-                                                              maxDate=maxDate,
+                                                              train=trainDataset,
+                                                             val=valDataset,
+                                                             test=testDataset,
                                                               use_temporal_as_edges=use_temporal_as_edges,
                                                               batch_size=64,
                                                               device=device,
@@ -290,27 +291,26 @@ for model, use_temporal_as_edges, is_2D_model in gnnModels:
             save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
             save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
 
-    optimize_str = 'optimize_features' if optimize_feature else 'no_optimize_features'
-    logger.info(dico_model[model])
     train(trainLoader=trainLoader, valLoader=valLoader,
           testLoader=testLoader,
+          scale=scale,
           optmize_feature = optimize_feature,
         PATIENCE_CNT=PATIENCE_CNT,
         CHECKPOINT=CHECKPOINT,
         epochs=epochs,
         features=features_selected,
         lr=lr,
+        pos_feature=pos_feature,
         criterion=criterion,
-        model=model,
-        dir_output=dir_output / Path('check_'+scaling + '_' + optimize_str + '/' + prefix + '/' + model))
+        modelname=model,
+        dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model))
 
 if doTest:
     trainCode = [name2int[dept] for dept in trainDepartements]
 
-    Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))], Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:, 3], trainCode))])
+    Xtrain, Ytrain = trainDataset
 
-    Xtest, Ytest  = (Xset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] > allDates.index('2018-01-01')))],
-                Yset[(Xset[:,4] >= allDates.index(maxDate)) | ((~np.isin(Xset[:, 3], trainCode)) & (Xset[:,4] < allDates.index(maxDate)) & (Xset[:,4] > allDates.index('2018-01-01')))])
+    Xtest, Ytest  = testDataset
 
     name_dir = nameExp + '/' + sinister + '/' + 'train'
     train_dir = Path(name_dir)

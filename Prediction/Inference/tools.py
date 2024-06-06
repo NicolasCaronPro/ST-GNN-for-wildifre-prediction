@@ -16,6 +16,7 @@ import random
 import geopandas as gpd
 from torch import optim
 from tqdm import tqdm
+from copy import copy
 import torch
 import math
 from xgboost import XGBClassifier, XGBRegressor
@@ -38,7 +39,7 @@ from arborescence import *
 from array_fet import *
 from weigh_predictor import *
 from features_selection import *
-from config import logger, foretint2str, osmnxint2str
+from config import logger, foretint2str, osmnxint2str, make_models
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -715,7 +716,7 @@ def realVspredict(ypred, y, dir_output, name):
     ax.plot(ypred, color='red', label='predict')
     ax.plot(ytrue, color='blue', label='real', alpha=0.5)
     x = np.argwhere( y[:,-2] > 0)
-    #ax.scatter(x, ytrue[x], color='black', label='fire', alpha=0.5)
+    ax.scatter(x, ypred[x], color='black', label='fire', alpha=0.5)
     plt.legend()
     plt.savefig(dir_output/name)
 
@@ -822,12 +823,108 @@ def realVspredict2d(ypred : np.array,
     plt.savefig(dir_output / name)
     plt.close('all')
 
-def train(trainLoader, valLoader, PATIENCE_CNT : int,
+def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, method : str, band : int, dir_output : Path, name : str):
+
+    if method not in ['mean', 'sum', 'max', 'min']:
+        logger.info(f'Methods must be {["mean", "sum", "max", "min"]}, {method} isn t')
+        exit(1)
+    name_mask = departement+'rasterScale'+str(scale)+'.pkl'
+    mask = read_object(name_mask, dir_mask)
+    res = np.full(mask.shape, fill_value=np.nan)
+
+    unodes = np.unique(X[:,0])
+    for node in unodes:
+        index = mask == node
+        if method == 'sum':
+            func = np.nansum
+        elif method == 'mean':
+            func = np.nanmean
+        elif method == 'max':
+            func = np.nanmax
+        elif method == 'min':
+            func = np.nanmin
+        res[index] = func(X[X[:, 0] == node][:,band])
+
+    save_object(res, name, dir_output)
+    return res
+
+def func_epoch(model, trainLoader, valLoader, features,
+               optimizer, dir_output, criterion,
+               CHECKPOINT, PATIENCE_CNT, epoch, save):
+    
+    BEST_VAL_LOSS = math.inf
+    BEST_MODEL_PARAMS = None
+    patience_cnt = 0
+    model.train()
+    for i, data in enumerate(trainLoader, 0):
+
+        inputs, labels, edges = data
+        
+        target = labels[:,-1]
+        weights = labels[:,-3]
+        inputs = inputs[:, features]
+        
+        output = model(inputs, edges)
+        target = torch.masked_select(target, weights.gt(0))
+        weights = torch.masked_select(weights, weights.gt(0))
+
+        target = target.view(output.shape)
+        weights = weights.view(output.shape)
+        loss = criterion(output, target, weights)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    if epoch % CHECKPOINT == 0:
+        logger.info(f'epochs {epoch}, Train loss {loss.item()}')
+        if save:
+            save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
+
+    with torch.no_grad():
+        model.eval()
+        for i, data in enumerate(valLoader, 0):
+            inputs, labels, edges = data
+            inputs = inputs[:, features]
+
+            output = model(inputs, edges)
+            
+            target = labels[:,-1]
+            weights = labels[:,-3]
+
+            target = torch.masked_select(target, weights.gt(0))
+            weights = torch.masked_select(weights, weights.gt(0))
+
+            target = target.view(output.shape)
+            weights = weights.view(output.shape)
+
+            loss = criterion(output, target, weights)
+
+            if loss.item() < BEST_VAL_LOSS:
+                BEST_VAL_LOSS = loss.item()
+                BEST_MODEL_PARAMS = model.state_dict()
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE_CNT:
+                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
+                    if save:
+                        save_object_torch(model.state_dict(), 'last.pt', dir_output)
+                        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
+                    return
+                
+    if epoch % CHECKPOINT == 0:
+        logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+
+def train(trainLoader, valLoader, testLoader,
+          optmize_feature : bool,
+          PATIENCE_CNT : int,
           CHECKPOINT: int,
           lr : float,
           epochs : int,
           criterion,
-          model : torch.nn.Module,
+          pos_feature : dict,
+          modelname : str,
           features : np.array,
           dir_output : Path) -> None:
         """
@@ -842,41 +939,25 @@ def train(trainLoader, valLoader, PATIENCE_CNT : int,
 
         check_and_create_path(dir_output)
 
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-        
-        BEST_VAL_LOSS = math.inf
-        BEST_MODEL_PARAMS = None
-        patience_cnt = 0
-        for epoch in tqdm(range(epochs)):
-            model.train()
-            for i, data in enumerate(trainLoader, 0):
- 
-                inputs, labels, edges = data
-                
-                target = labels[:,-1]
-                weights = labels[:,-3]
-                inputs = inputs[:, features]
-                
-                output = model(inputs, edges)
-                target = torch.masked_select(target, weights.gt(0))
-                weights = torch.masked_select(weights, weights.gt(0))
+        if optmize_feature:
+            newFet = [features[0]]
+            BEST_VAL_LOSS_FET = math.inf
+            patience_cnt_fet = 0
+            for fi, fet in enumerate(1, features):
+                testFet = copy(newFet)
+                testFet.append(fet)
+                dico_model = make_models(len(testFet), 2, 0.03, 'relu')
+                model = dico_model[modelname]
+                optimizer = optim.Adam(model.parameters(), lr=lr)
 
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-                loss = criterion(output, target, weights)
+                logger.info(f'Train {model} with')
+                log_features(testFet, pos_feature, ["min", "mean", "max", "std"])
+                for epoch in tqdm(range(epochs)):
+                    func_epoch(model, trainLoader, valLoader, testFet, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, False)
 
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Train loss {loss.item()}')
-                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
-
-            with torch.no_grad():
-                model.eval()
-                for i, data in enumerate(valLoader, 0):
+                for i, data in enumerate(testLoader, 0):
                     inputs, labels, edges = data
+                    inputs = inputs[:, testFet]
 
                     output = model(inputs, edges)
                     
@@ -888,24 +969,30 @@ def train(trainLoader, valLoader, PATIENCE_CNT : int,
 
                     target = target.view(output.shape)
                     weights = weights.view(output.shape)
-                    
+
                     loss = criterion(output, target, weights)
+                    logger.info(f'Loss obtained of {loss.item()}')
 
-                    if loss.item() < BEST_VAL_LOSS:
-                        BEST_VAL_LOSS = loss.item()
-                        BEST_MODEL_PARAMS = model.state_dict()
-                        patience_cnt = 0
+                    if loss.item() < BEST_VAL_LOSS_FET:
+                        logger.info(f'{loss.item()} < {BEST_VAL_LOSS_FET}, we add the feature')
+                        BEST_VAL_LOSS_FET = loss.item()
+                        newFet.append(fet)
+                        patience_cnt_fet = 0
                     else:
-                        patience_cnt += 1
-                        if patience_cnt >= PATIENCE_CNT:
-                            logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
-                            save_object_torch(model.state_dict(), 'last.pt', dir_output)
-                            save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
-                            return
-                        
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+                        patience_cnt_fet += 1
+                        if patience_cnt_fet >= 30:
+                            logger.info('Loss has not increased for 30 epochs')
+                        break
+            features = newFet
+        
+        dico_model = make_models(features, 2, 0.03, 'relu')
+        model = dico_model[modelname]
+        optimizer = optim.Adam(model.parameters(), lr=lr)
 
+        logger.info('Train model with')
+        log_features(features, pos_feature, ["min", "mean", "max", "std"])
+        for epoch in tqdm(range(epochs)):
+            func_epoch(model, trainLoader, valLoader, features, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, True)            
 
 def config_xgboost(device, binary):
     params = {
@@ -982,27 +1069,32 @@ def config_ngboost(binary):
     else:
         return NGBClassifier(**params)
 
-def train_sklearn_api_model(trainDataset, valDataset,
+def train_sklearn_api_model(trainDataset, valDataset, testDataset,
+            graph, 
           dir_output : Path,
+          dir_train : Path,
           device : str,
           binary : bool,
           features : np.array,
+          pos_feature: dict,
+         optimize_feature : bool,
           scaling: str,
-          weight : bool):
+          weight : bool,
+          departements : list):
     
     models = []
     
     ################# xgboost ##################
 
-    models.append(('xgboost', config_xgboost(device, binary)))
+    models.append('xgboost')
 
     ################ lightgbm ##################
 
-    models.append(('lightgbm', config_lightGBM(device, binary)))
+    #models.append('lightgbm')
 
     ################ ngboost ###################
 
-    models.append(('ngboost', config_ngboost(binary)))
+    #models.append('ngboost')
 
     ############### SVM ########################
     
@@ -1016,7 +1108,7 @@ def train_sklearn_api_model(trainDataset, valDataset,
     Xval = valDataset[0]
     Yval = valDataset[1]
 
-    logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape}')
+    logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Ytest shape {testDataset[1].shape}')
 
     if not binary:
         Yw = Ytrain[:,-3]
@@ -1034,45 +1126,190 @@ def train_sklearn_api_model(trainDataset, valDataset,
     if not weight:
         Yw = np.ones(Ytrain.shape[0])
 
-    for name, model in models:
+    for name in models:
+        oname = name
+        if binary:
+            oname += '_bin'
+        if not weight:
+            oname += '_unweighted'
+        if optimize_feature:
+            oname += '_optimize_feature'
+
+        if optimize_feature:
+            assert len(testDataset) > 0
+            newFet = [features[0]]
+            numIncrease = 0
+
+            #################### Base result ####################
+            Ytest = testDataset[1]
+            wei = testDataset[1][:, -3]
+            Xtest = testDataset[0][:, newFet]
+
+            if name == 'xgboost':
+                model = config_xgboost(device, binary)
+                fitparams={
+                'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
+                'sample_weight' : Yw,
+                'verbose' : False,
+                }
+
+            if name == 'lightgbm':
+                model = config_lightGBM(device, binary)
+                fitparams={
+                'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
+                'sample_weight' : Yw,
+                }
+
+            if name == 'ngboost':
+                model = config_ngboost(device, binary)
+                if binary:
+                    return
+                fitparams={
+                'early_stopping_rounds':15,
+                'sample_weight' : Yw,
+                'X_val':Xval[:, newFet].reshape(-1,1),
+                'Y_val':Yval,
+                }
+
+            model.fit(Xtrain[:, newFet].reshape(-1,1), Ytrain, **fitparams)
+            ypred = model.predict(Xtest)
+
+            if ~binary:
+                bestVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                if torch.is_tensor(bestVal):
+                    bestVal = bestVal.detach().cpu().numpy()
+            else:
+                bestVal = my_f1_score(Ytest, ypred, wei)[0]
+
+            """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+                                        graph.scale, oname,
+                                        dir_train, wei, None)
+            bestVal = []
+            for dept in departements:
+                bestVal.append(metDict[dept])
+
+            bestVal = np.mean(bestVal)"""
+
+            logger.info(f'Base Score {bestVal}')
+
+            #################### Explore features ####################
+            for fi, fet in enumerate(features[1:]):
+                testFet = copy(newFet)
+                testFet.append(fet)
+                logger.info(f'Train {name} with')
+                log_features(testFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+
+                Xtest = testDataset[0][:, testFet]
+
+                if name == 'xgboost':
+                    model = config_xgboost(device, binary)
+                    fitparams={
+                    'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                    'sample_weight' : Yw,
+                    'verbose' : False
+                    }
+
+                if name == 'lightgbm':
+                    model = config_lightGBM(device, binary)
+                    fitparams={
+                    'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                    'sample_weight' : Yw,
+                    }
+
+                if name == 'ngboost':
+                    model = config_ngboost(device, binary)
+                    if binary:
+                        return
+                    fitparams={
+                    'early_stopping_rounds':15,
+                    'sample_weight' : Yw,
+                    'X_val':Xval[:, testFet],
+                    'Y_val':Yval,
+                    }
+
+                model.fit(Xtrain[:, testFet], Ytrain, **fitparams)
+                ypred = model.predict(Xtest)
+
+                """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+                                        graph.scale, name,
+                                        dir_train, wei, None)
+                metVal = []
+                for dept in departements:
+                    metVal.append(metDict[dept])
+                metVal = np.mean(metVal)"""
+
+                if ~binary:
+                    metVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                    if torch.is_tensor(metVal):
+                        metVal = metVal.detach().cpu().numpy()
+                else:
+                    metVal = my_f1_score(Ytest, ypred, wei)[0]
+                
+                logger.info(f'{metVal} vs {bestVal}')
+
+                if (~binary and metVal < bestVal) or (binary and metVal > bestVal):
+                    logger.info('Adding feature')
+                    bestVal = metVal
+                    newFet.append(fet)
+                    numIncrease = 0
+                else:
+                    numIncrease += 1
+
+                if numIncrease > 30:
+                    logger.info('The MAE didn t increase for 30 features, we stop here')
+                    break
+
+            logger.info(f'Optimize feature selection finish, best MAE is {bestVal}')
+            log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+            check_and_create_path(dir_output / oname)
+            save_object(newFet, 'features.pkl', dir_output / oname)
+            features = newFet
+        else:
+            save_object(features, 'features.pkl', dir_output / oname)
 
         if name == 'xgboost':
+            model = config_xgboost(device, binary)
             fitparams={
-            'eval_set':[(Xtrain, Ytrain), (Xval, Yval)],
+            'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
             'sample_weight' : Yw,
             'verbose' : False
             }
 
         if name == 'lightgbm':
+            model = config_lightGBM(device, binary)
             fitparams={
-            'eval_set':[(Xtrain, Ytrain), (Xval, Yval)],
+            'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
             'sample_weight' : Yw,
             }
 
         if name == 'ngboost':
+            model = config_ngboost(device, binary)
             if binary:
                 return
             fitparams={
             'early_stopping_rounds':15,
             'sample_weight' : Yw,
-            'X_val':Xval,
+            'X_val':Xval[:, features],
             'Y_val':Yval,
             }
 
-        if binary:
-            name = name+'_bin'
-        if not weight:
-             name = name+'_unweighted'
+        logger.info(f'Fitting model {oname}')
+        model.fit(Xtrain[:, features], Ytrain, **fitparams)
 
-        logger.info(f'Fitting model {name}')
-        model.fit(Xtrain, Ytrain, **fitparams)
-        check_and_create_path(dir_output / name)
-        outputname = name + '.pkl'
-        save_object(model, outputname, Path(dir_output / name))
-        
+        check_and_create_path(dir_output / oname)
+        save_object(model, oname + '.pkl', dir_output / oname)
+
 def weighted_rmse_loss(input, target, weights = None):
+    if not torch.is_tensor(input):
+        input = torch.tensor(input, dtype=torch.float32)
+    if not torch.is_tensor(target):
+        target = torch.tensor(target, dtype=torch.float32)
+
     if weights is None:
         return torch.sqrt(((input - target) ** 2).mean())
+    if not torch.is_tensor(weights):
+
+        weights = torch.tensor(weights, dtype=torch.float32)
     return torch.sqrt((weights * (input - target) ** 2).sum() / weights.sum())
 
 def add_metrics(methods : list, i : int,
@@ -1158,11 +1395,24 @@ def quantile_prediction_error(ytrue : torch.tensor, ypred : torch.tensor, weight
 
 def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tensor = None):
     bounds = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
-    maxi = torch.max(ypred).detach().cpu().numpy()
-    ytrueNumpy = ytrue.detach().cpu().numpy()
-    ypredNumpy = ypred.detach().cpu().numpy()
+
+    if torch.is_tensor(ypred):
+         ypredNumpy = ypred.detach().cpu().numpy()
+    else:
+         ypredNumpy = ypred
+        
+    if torch.is_tensor(ytrue): 
+        ytrueNumpy = ytrue.detach().cpu().numpy()
+    else:
+        ytrueNumpy = ytrue
+    
+    maxi = np.nanmax(ypredNumpy)
+
     if weights is not None:
-        weightsNumpy = weights.detach().cpu().numpy()
+        if torch.is_tensor(weights):
+            weightsNumpy = weights.detach().cpu().numpy()
+        else:
+            weightsNumpy = weights
     else:
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
@@ -1181,7 +1431,7 @@ def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tens
             prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
 
-    return (bestScore, prec, rec, bestBound)
+    return (bestScore, prec, rec, bestBound, ypredNumpy > bestBound * maxi)
 
 def class_risk(ypred, ytrue, departements : list, isBin : bool,
                scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
@@ -1202,13 +1452,12 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
             predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
         else:
             predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-            if predictor is None:
-                logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-                predictor = Predictor(5)
-                if np.unique(ypred).shape[0] <= 5:
-                    return res
-                predictor.fit(np.unique(ypred[mask]))
-                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
+            predictor = Predictor(5)
+            if np.unique(ypred).shape[0] <= 5:
+                return res
+            predictor.fit(np.unique(ypred[mask]))
+            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
         yclass = predictor.predict(ypred[mask])
         uniqueClass = np.unique(yclass)
@@ -1253,14 +1502,12 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
         else:
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-            if predictor is None:
-                logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-                predictor = Predictor(5)
-                if np.unique(ypred).shape[0] <= 5:
-                    return res
-                predictor.fit(np.unique(ypred[mask]))
-                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
+            predictor = Predictor(5)
+            if np.unique(ypred).shape[0] <= 5:
+                return res
+            predictor.fit(np.unique(ypred[mask]))
+            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
             ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
         
@@ -1297,14 +1544,12 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
         else:
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-            if predictor is None:
-                logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-                predictor = Predictor(5)
-                if np.unique(ypred).shape[0] <= 5:
-                    return res
-                predictor.fit(np.unique(ypred[mask]))
-                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
+            predictor = Predictor(5)
+            if np.unique(ypred).shape[0] <= 5:
+                return res
+            predictor.fit(np.unique(ypred[mask]))
+            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
             ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
         
@@ -1323,7 +1568,10 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
         ytrue = ytrue.detach().cpu().numpy().astype(float)
 
     if weights is not None:
-        weightsNumpy = weights.detach().cpu().numpy()
+        if torch.is_tensor(weights):
+            weightsNumpy = weights.detach().cpu().numpy()
+        else:
+            weightsNumpy = weights
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
 
@@ -1342,36 +1590,33 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
         else:
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-            if predictor is None:
-                logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-                predictor = Predictor(5)
-                if np.unique(ypred).shape[0] <= 5:
-                    return res
-                predictor.fit(np.unique(ypred[mask]))
-                save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
+            predictor = Predictor(5)
+            if np.unique(ypred).shape[0] <= 5:
+                return res
+            predictor.fit(np.unique(ypred[mask]))
+            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
             ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
 
         yweights = weightsNumpy[mask].reshape(-1)
-
         if top is not None:
-            minBound = np.nanmax(ytrue[:,-1]) * (1 - top/100)
-            mask = ytrue[:,-1] > minBound
-            ytrueclass = ytrueclass[mask]
-            ypredclass = ypredclass[mask]
+            minBound = np.nanmax(ytrue[mask,-1]) * (1 - top/100)
+            mask2 = (ytrue[mask,-1] > minBound)[:,0]
+            ytrueclass = ytrueclass[mask2]
+            ypredclass = ypredclass[mask2]
             yweights = None
 
         res[nameDep] = mean_absolute_error(ytrueclass, ypredclass, sample_weight=yweights)
 
     return res
 
-def create_pos_feature(graph, shape, features):
+def create_pos_feature(scale, shape, features):
 
     pos_feature = {}
 
     newShape = shape
-    if graph.scale > 0:
+    if scale > 0:
         for var in features:
             pos_feature[var] = newShape
             if var == 'Calendar':
@@ -1418,6 +1663,8 @@ def create_pos_feature(graph, shape, features):
                 newShape += len(landcover_variables)
             elif var == 'sentinel':
                 newShape += len(sentinel_variables)
+            elif var == 'air':
+                newShape += len(air_variables)
             elif var == "foret":
                 newShape += len(foret_variables)
             elif var == 'dynamicWorld':
@@ -1572,10 +1819,15 @@ def catboost_encoding(pos_feature, Xset, Xtrain, Ytrain, variableType, size):
     Xset = enc.transform(Xset).values
     return Xset
 
-def log_features(fet, pos_feature, methods):
+def log_features(fet, scale, pos_feature, methods):
+    coef = 4 if scale > 0 else 1
     keys = list(pos_feature.keys())
     for fe in fet:
-        f = fe[0]
+        try:
+            f = fe[0]
+        except:
+            fe = [fe, -1]
+            f = fe[0]
         for i, key in enumerate(keys):
             res = pos_feature[keys[i]]
             try:
@@ -1588,38 +1840,38 @@ def log_features(fet, pos_feature, methods):
                     logger.info(f'{keys[i], fe[1], methods[f-res]}')
                 elif keys[i] == 'sentinel':
                     for i, v in enumerate(sentinel_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'foret':
                     for i, v in enumerate(foret_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'highway' :
                     for i, v in enumerate(osmnx_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{osmnxint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'dynamicWorld' :
                     for i, v in enumerate(dynamic_world_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'vigicrues':
                     for i, v in enumerate(vigicrues_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'vigicrues{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'nappes':
                     for i, v in enumerate(nappes_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'landcover':
                     for i, v in enumerate(landcover_variables):
-                        if f >= (i * 4) + res and (i + 1) * 4 + res > f:
-                            meth_index = f - ((i * 4) + res)
+                        if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                            meth_index = f - ((i * coef) + res)
                             logger.info(f'{v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'AutoRegressionReg':
                     logger.info(f'{keys[i], fe[1], auto_regression_variable_reg[f-res]}')
@@ -1633,7 +1885,12 @@ def log_features(fet, pos_feature, methods):
                     logger.info(f'{keys[i], fe[1]}')
                 break
 
-def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures):
+def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures, scale):
+
+    if NbFeatures == 'all':
+        features_selected = np.arange(0, Xset.shape[1])
+        return features_selected
+
     if doFet:
         variables = []
         df = pd.DataFrame(index=np.arange(Xset.shape[0]))
@@ -1657,6 +1914,6 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, N
         else:
                 features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
 
-    log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
-    features_selected = np.unique(features_importance[:,0]).astype(int)
+    log_features(features_importance, scale, pos_feature, ['min', 'mean', 'max', 'std'])
+    features_selected = features_importance[:,0].astype(int)
     return features_selected

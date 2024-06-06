@@ -761,7 +761,6 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
             for node in unodes:
                     if node not in tifFile_high:
                         continue
-
                     mask1 = tifFile == node
                     mask2 = tifFile_high == node
                     if True not in np.unique(mask2):
