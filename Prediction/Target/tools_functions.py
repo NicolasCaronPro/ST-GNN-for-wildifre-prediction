@@ -30,7 +30,10 @@ from sklearn.linear_model import LogisticRegression
 import datetime
 from matplotlib.gridspec import GridSpec
 from sklearn.calibration import calibration_curve
+from sklearn.decomposition import PCA
 from osgeo import gdal, ogr
+import plotly.express as px
+import plotly.io as pio
 
 def haversine(p1, p2, unit = 'kilometer'):
     import math
@@ -153,6 +156,22 @@ def get_dist1_closest_cluster(x, a, dept, ind, locations):
             mindistance = distance
     return mindistance
 
+def show_pcs(pca, size, components, dir_output):
+    labels = {
+    str(i): f"PC {i+1} ({var:.1f}%)"
+    for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+    }
+
+    fig = px.scatter_matrix(
+        components,
+        labels=labels,
+        dimensions=range(size)
+    )
+    fig.update_traces(diagonal_visible=False)
+    #fig.show()
+    pio.write_image(fig, dir_output / "pca.png") 
+
+
 def np_function(image):
     """
     Create a image with each pixel be the distance bewteen the pixel coordinate and the center
@@ -266,6 +285,7 @@ def influence_index(raster, mask, dimS, mode, dim=(90,150)):
         kernel = np.full(dim, 1/(dim[0]*dim[1]), dtype=float)
 
     res = convolve_fft(array=raster, kernel=kernel, normalize_kernel=True, mask=mask)
+    #res = scipy_fft_conv(raster, kernel)
     return res
 
 def laplacien3D(outputShape):
@@ -278,6 +298,16 @@ def laplacien3D(outputShape):
     distances = 1 / distances
     return distances
 
+def find_n_component(thresh, pca):
+    nb_component = 0
+    sumi = 0.0
+    for i in range(pca.explained_variance_ratio_.shape[0]):
+        sumi += pca.explained_variance_ratio_[i]
+        if sumi >= thresh:
+            nb_component = i + 1
+            break
+    return nb_component
+
 def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
     dimX, dimY, dimZ = dimS
     if mode == "laplace":
@@ -285,12 +315,13 @@ def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
         kernel = 1 / kernel 
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
+        #kernel[:, :, dim[2]//2] = 0
 
     if semi:
-        kernel[:,:,(dim[2]//2) + 1:] = 0.0
+        kernel[:,:,:(dim[2]//2)] = 0.0
 
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
-
+    #res = scipy_fft_conv(raster, kernel, mode='same')
     return res
 
 def rasterization(ori : gpd.GeoDataFrame,

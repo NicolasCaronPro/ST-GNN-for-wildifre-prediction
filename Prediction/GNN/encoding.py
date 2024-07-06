@@ -2,7 +2,7 @@ from tools import *
 from config import *
 from array_fet import *
 
-def encode(path_to_target, maxDate, trainDepartements, dir_output):
+def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):
 
     print(f'Create encoder for categorical features using {trainDepartements}, at max {maxDate}')
     stop_calendar = 11
@@ -15,7 +15,7 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
     geo_array = []
     for dep in trainDepartements:
         
-        dir_data = root / 'csv' / dep /  'raster'
+        dir_data = root / 'csv' / dep /  'raster' / resolution
 
         tar = read_object(dep+'Influence.pkl', path_to_target)
         if tar is None:
@@ -46,8 +46,8 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output):
                 break
             ddate = dt.datetime.strptime(date, '%Y-%m-%d')
             calendar[:,:,i, 0] = int(date.split('-')[1]) # month
-            calendar[:,:,i, 1] = ddate.timetuple().tm_yday # dayofweek
-            calendar[:,:,i, 2] = ddate.weekday() # dayofyear
+            calendar[:,:,i, 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
+            calendar[:,:,i, 2] = ddate.weekday() # dayofweek
             calendar[:,:,i, 3] = ddate.weekday() >= 5 # isweekend
             calendar[:,:,i, 4] = pendant_couvrefeux(ddate) # couvrefeux
             calendar[:,:,i, 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement

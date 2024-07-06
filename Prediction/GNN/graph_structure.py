@@ -5,10 +5,11 @@ import geopandas as gpd
 from shapely import unary_union
 import warnings
 from shapely import Point
-
 from models.models import *
 from tools import *
-from dataloader import *
+from torch_geometric.data import Dataset
+from torch.utils.data import DataLoader
+from config import *
 
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -41,7 +42,7 @@ class GraphStructure():
         self.maxDist = maxDist # max dist to link two nodes
         self.numNei = numNei # max connect neighbor a node can have
 
-    def _train_kmeans(self, doRaster: bool, path : Path, sinister : str) -> None:
+    def _train_kmeans(self, doRaster: bool, path : Path, sinister : str, resolution) -> None:
         self.train_kmeans = True
         logger.info('Create node via KMEANS')
         X = list(zip(self.oriLongitude, self.oriLatitues))
@@ -52,44 +53,48 @@ class GraphStructure():
         self.kmeans = KMeans(self.numCluster, random_state=42, n_init=10)
         self.ids = self.kmeans.fit_predict(X)
         if doRaster:
-            self._raster(path=path, sinister=sinister)
+            self._raster(path=path, sinister=sinister, resolution=resolution)
 
     def _predict_node(self, array : list) -> np.array:
         assert self.kmeans is not None
         res = self.kmeans.predict(array)
         return res
-    
+
     def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, sinister):
 
-        dir_bin = root_target / sinister / 'bin'
-        dir_target = root_target / sinister / 'log'
+        dir_bin = root_target / sinister / 'bin' / resStr
+        dir_target = root_target / sinister / 'log' / resStr
+        dir_raster = root_target / sinister / 'raster' / resStr
 
         for dept in np.unique(self.departements):
 
             maskDept = np.argwhere(self.departements == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
             geo['scale'+str(self.scale)] = self.ids[maskDept]
-            check_and_create_path(Path('log'))
             mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'scale'+str(self.scale), Path('log'), 'ori')
             mask = mask[0]
+            outputName = dept+'rasterScale0.pkl'
+            raster = read_object(outputName, dir_raster)[0]
+            logger.info(f'{dept, mask.shape, raster.shape}')
+            mask[np.isnan(raster)] = np.nan
 
-            save_object(mask, str2name[dept]+'rasterScale'+str(self.scale)+'.pkl', path / 'raster' / resStr)
+            save_object(mask, dept+'rasterScale'+str(self.scale)+'.pkl', path / 'raster')
 
             if doBin:
-                outputName = str2name[dept]+'binScale0.pkl'
+                outputName = dept+'binScale0.pkl'
                 bin = read_object(outputName, dir_bin)
                 if bin is None:
                     continue
-                outputName = str2name[dept]+'Influence.pkl'
+                outputName = dept+'Influence.pkl'
                 influence = read_object(outputName, dir_target)
 
-                binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence)
-
-                save_object(binImageScale, str2name[dept]+'binScale'+str(self.scale)+'.pkl', path / 'bin' / resStr)
-                save_object(influenceImageScale, str2name[dept]+'InfluenceScale'+str(self.scale)+'.pkl', path / 'influence' / resStr)
+                binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence, raster)
+                save_object(binImageScale, dept+'binScale'+str(self.scale)+'.pkl', path / 'bin')
+                save_object(influenceImageScale, dept+'InfluenceScale'+str(self.scale)+'.pkl', path / 'influence')
 
     def _raster(self, path : Path,
-                sinister : str) -> None:
+                sinister : str,
+                resolution : str) -> None:
         """"
         Create new raster mask
         """
@@ -100,17 +105,14 @@ class GraphStructure():
         check_and_create_path(path / 'proba')
 
         # 1 pixel = 1 Hexagone (2km) use for 1D process
-        n_pixel_x = 0.02875215641173088
-        n_pixel_y = 0.020721094073767096
 
-        resStr = '2x2'
-        self._raster2(path, n_pixel_y, n_pixel_x, resStr, True, sinister)
+        self._raster2(path, resolutions[resolution]['y'], resolutions[resolution]['x'], resolution, True, sinister)
 
-        # 1 pixel = 1 km, use for 2D process Not suitable for now
+        """# 1 pixel = 1 km, use for 2D process Not suitable for now
         n_pixel_y = 0.009
         n_pixel_x = 0.012
         resStr = '1x1'
-        self._raster2(path, n_pixel_y, n_pixel_x, resStr, False, sinister)
+        self._raster2(path, n_pixel_y, n_pixel_x, resStr, False, sinister)"""
 
     def _read_kmeans(self, path : Path) -> None:
         assert self.scale != 0
@@ -121,36 +123,56 @@ class GraphStructure():
         self.kmeans = pickle.load(open(path / name, 'rb'))
         self.ids = self.kmeans.predict(X)
 
-    def _create_predictor(self, start, end, dir, sinister):
-        dir_influence = root_graph / dir / 'influence' / '2x2'
+    def _create_predictor(self, start, end, dir, sinister, resolution):
+        dir_influence = root_graph / dir / 'influence'
         dir_predictor = root_graph / dir / 'influenceClustering'
+        dir_bin = root_graph / dir / 'bin'
 
         # Scale Shape
         logger.info(f'######### {self.scale} scale ##########')
         for dep in np.unique(self.departements):
-            influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
+            influence = read_object(dep+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
+            binValues = read_object(dep+'binScale'+str(self.scale)+'.pkl', dir_bin)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
-            predictor = Predictor(5)
-            predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            binValues = binValues[:,:,allDates.index(start):allDates.index(end)]
+            values = np.unique(influence[~np.isnan(influence)])
+            if values.shape[0] >= 5:
+                predictor = Predictor(5, name=dep)
+                predictor.fit(np.asarray(values))
+            else:
+                predictor = Predictor(values.shape[0], name=dep)
+                predictor.fit(np.asarray(values))
             predictor.log(logger)
-            save_object(predictor, str2name[dep]+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
+            check_class(influence, binValues)
+            save_object(predictor, dep+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
 
         logger.info('######### Departement Scale ##########')
-        dir_target = root_target / sinister / 'log'
+        dir_target = root_target / sinister / 'log' / resolution
+        dir_bin = root_target / sinister / 'bin' / resolution
         # Departement
         for dep in np.unique(self.departements):
-            influence = read_object(str2name[dep]+'Influence.pkl', dir_target)
+            binValues = read_object(dep+'binScale0.pkl', dir_bin)
+            influence = read_object(dep+'Influence.pkl', dir_target)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
+            binValues = binValues[:,:,allDates.index(start):allDates.index(end)]
             influence = influence.reshape(-1, influence.shape[2])
+            binValues = binValues.reshape(-1, binValues.shape[2])
             influence = np.nansum(influence, axis=0)
-            predictor = Predictor(5)
-            predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            binValues = np.nansum(binValues, axis=0)
+            #influence = influence / np.max(influence)
+            if influence.shape[0] >= 5:
+                predictor = Predictor(5, name=dep)
+                predictor.fit(np.asarray(influence))
+            else:
+                predictor = Predictor(influence.shape[0], name=dep)
+                predictor.fit(np.asarray(influence))
+            check_class(influence, binValues)
             predictor.log(logger)
-            save_object(predictor, str2name[dep]+'PredictorDepartement.pkl', path=dir_predictor)
+            save_object(predictor, dep+'PredictorDepartement.pkl', path=dir_predictor)
         
     def _create_nodes_list(self) -> None:
         """
@@ -168,7 +190,7 @@ class GraphStructure():
 
             valuesDep, counts = np.unique(self.departements[mask[:,0]], return_counts=True)
             ind = np.argmax(counts)
-            self.nodes[id] = np.asarray([id, float(nodeGeometry.x), float(nodeGeometry.y), str2intMaj[valuesDep[ind]], -1])
+            self.nodes[id] = np.asarray([id, float(nodeGeometry.x), float(nodeGeometry.y), name2int[valuesDep[ind]], -1])
 
     def _create_edges_list(self) -> None:
         """
@@ -232,7 +254,7 @@ class GraphStructure():
         def find_dept(x, y, dico):
             for key, value in dico.items():
                 if value.contains(Point(x, y)):
-                    return str2intMaj[key]
+                    return name2int[key]
  
             return np.nan
 
@@ -351,7 +373,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
         
-    def _predict_test_loader(self, X : DataLoader, features : np.array) -> torch.tensor:
+    def _predict_test_loader(self, X : DataLoader, features : np.array, device, isBin : bool) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
@@ -361,11 +383,12 @@ class GraphStructure():
             for i, data in enumerate(X, 0):
                 inputs, labels, edges = data
                 inputs = inputs[:, features]
+
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 edges = edges.to(device)
                 
-                weights = labels[:,-3].to(torch.long)
+                weights = labels[:,-4].to(torch.long)
 
                 output = self.model(inputs, edges)
 
@@ -376,15 +399,19 @@ class GraphStructure():
                     target[:,b] = torch.masked_select(labels[:,b], weights.gt(0))
 
                 #target = labels[weights.gt(0)]
-                
+                #target = target[:, -1]
+
+                if isBin:
+                    output = output[:, 1]
+
                 output = torch.masked_select(output, weights.gt(0))
-                weights = torch.masked_select(weights, weights.gt(0))
+                weights = torch.masked_select(weights, weights.gt(0))  
 
                 pred.append(output)
                 y.append(target)
             
-            pred = torch.cat(pred, 0)
             y = torch.cat(y, 0)
+            pred = torch.cat(pred, 0).view(y.shape[0])
 
             return pred, y
         

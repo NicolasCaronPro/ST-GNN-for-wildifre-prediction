@@ -85,7 +85,7 @@ metrics = {}
 
 ############################# Pipelines ##############################
 
-def process_test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
+def process_test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
@@ -139,23 +139,34 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
     pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
 
-    Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
-    Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
+    Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
+    Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
     if Xtrain is None:
         logger.info(f'Fuck it')
         return
 
+    trainFeatures = read_object(spec+'_trainFeatures.pkl', train_dir)
+    if trainFeatures is None:
+        logger.info('Train Feature not found')
+        exit(1)
+
     # Add varying time features
     if k_days > 0:
-        trainFeatures_ = trainFeatures + varying_time_variables
-        features_ = features + varying_time_variables
+        trainFeatures_ = copy(trainFeatures) + varying_time_variables
+        features_ = copy(features) + varying_time_variables
         pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features_)
         if doDatabase:
             X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
-        trainFeatures_ = trainFeatures
-        features_ =  features
+        trainFeatures_ = copy(trainFeatures)
+        features_ =  copy(features)
+
+    # Remove some bad nodes that goes to wrong departement
+    logger.info(f'Orignal dept {np.unique(X[:, 3]), X.shape}')
+    X = X[np.isin(X[:, 3], [name2int[dep] for dep in testDepartement])]
+    Y = Y[np.isin(Y[:, 3], [name2int[dep] for dep in testDepartement])]
+    logger.info(f'Test dept {np.unique(X[:, 3]), X.shape}')
 
     # Select train features
     train_fet_num = [0,1,2,3,4,5]
@@ -203,14 +214,8 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         prefix += '_'+spec
 
     Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
-
-    # Features selection
-    if nbfeatures != 'all':    
-        features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
-        log_features(features_importance, scale, pos_feature, ['min', 'mean', 'max', 'std'])
-        features_selected = np.unique(features_importance[:,0]).astype(int)
-    else:
-        features_selected = np.arange(0, X.shape[1])
+    logger.info(f'{testname} test {Xset.shape}')
+    logger.info(f'{allDates[int(np.min(X[:,4]))], allDates[int(np.max(Y[:,4]))]}')
 
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
@@ -245,23 +250,23 @@ if sinister == 'firepoint':
     # 69 test
     testDates = find_dates_between('2018-01-01', '2023-01-01')
     testDepartement = ['departement-69-rhone']
-    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
-    
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+
     # 2023 test
     testDates = find_dates_between('2023-01-01', '2023-09-11')
     testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
 if sinister == 'inondation':
     # 69 test
     testDates = find_dates_between('2018-01-01', '2023-09-11')
     testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
-    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
     # 2023 test
     testDates = find_dates_between('2023-01-01', '2023-09-11')
     testDepartement = ['departement-25-doubs']
-    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']

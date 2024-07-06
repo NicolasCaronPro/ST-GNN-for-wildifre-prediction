@@ -1,6 +1,6 @@
 import pickle
 from sklearn.cluster import KMeans
-from graph_structure import GraphStructure
+from graph_structure import *
 from copy import copy
 from features import *
 from features_2D import *
@@ -8,90 +8,74 @@ from weigh_predictor import Predictor
 from config import *
 
 def look_for_information(path : Path, departements : list,
-                         firepoint : pd.DataFrame,
                          regions : gpd.GeoDataFrame, maxDate : str,
                          sinister : str, dir : Path,
-                         minPoint):
+                         ):
 
     points = []
-    all_dep_predictor = Predictor(5)
-    all_maxi_influence = []
     for departement in departements:
         print(departement)
-        maxInfluence = []
         name = departement+'Influence.pkl'
         influence = read_object(name, path)
 
         if influence is None:
             continue
-
-        influence = influence[:,:,allDates.index('2017-06-17'):]
-        print(influence.shape)
-        datesForDepartement = []
-        for di in range(influence.shape[-1]):
-            if di > allDates.index(maxDate):
-                break
-            maxInfluence.append(np.nanmax(influence[:,:,di]))
         
-        all_maxi_influence += maxInfluence
+        if departement == 'departement-69-rhone':
+            start = allDates.index('2018-01-01')
+            md = '2023-01-01' if maxDate > '2023-01-01' else maxDate
+            end = allDates.index(md) 
+            datesForDepartement = find_dates_between('2018-01-01', md)
+        elif departement == 'departement-01-ain':
+            start = allDates.index('2018-01-01')
+            end = allDates.index(maxDate)
+            datesForDepartement = find_dates_between('2018-01-01', maxDate)
+        else:
+            end = allDates.index(maxDate)
+            start = 0
+            datesForDepartement = find_dates_between('2017-06-12', maxDate)
 
-        """predictor = Predictor(5)
-        predictor.fit(np.asarray(influence[~np.isnan(influence)]))
-        save_object(predictor, departement+'PredictorFull.pkl', path=dir / sinister / 'influenceClustering')"""
+        dis = list(np.arange(start, end))
 
-        predictor = Predictor(5)
-        predictor.fit(np.asarray(maxInfluence))
-        save_object(predictor, departement+'Predictor.pkl', path=dir / sinister / 'influenceClustering')
+        if departement != 'departement-69-rhone':
+            logger.info(f"{allDates.index(maxDate), influence.shape[-1]}")
+            dis += list(np.arange(allDates.index(maxDate), influence.shape[-1]))
+        else:
+            logger.info(f"{allDates.index(maxDate), influence.shape[-1]}")
+            dis += list(np.arange(allDates.index(maxDate), allDates.index('2023-01-01')))
+        
+        fp = regions[regions['departement'] == departement]
 
-        clusterInfluence = predictor.predict(np.asarray(maxInfluence))
-        predictor.log()
-        classes = np.unique(clusterInfluence)
-        histogram = np.bincount(clusterInfluence)
-        histogram = histogram.astype(float)
-        #histogram = (histogram * 0.8).astype(int)
-        for c in classes:
-            mask = np.argwhere(clusterInfluence == c)[:,0]
-            if departement == 'departement-01-ain':
-                mask = mask[mask > allDates.index('2018-01-01')]
-            if minPoint == 'full':
-                minValue = mask.shape[0]
-            else:
-                minValue = min(int(minPoint), mask.shape[0])
-            m = np.random.choice(mask, minValue, replace=False).ravel()
-            datesForDepartement += list(m)
-
-        datesForDepartement += list(np.arange(allDates.index(maxDate), influence.shape[-1]))
-        datesForDepartement = np.asarray(datesForDepartement)
-
-        #fp = firepoint[firepoint['departement'] == name2int[departement]].copy(deep=True)
-        fp = regions[regions['departement'] == name2str[departement]]
-        iterables = [datesForDepartement, list(fp.latitude)]
+        iterables = [dis, list(fp.latitude)]
         ps = pd.DataFrame(index=pd.MultiIndex.from_product(iterables, names=('date', 'latitude'))).reset_index()
 
-        iterables = [datesForDepartement, list(fp.longitude)]
+        iterables = [dis, list(fp.longitude)]
         ps2 = pd.DataFrame(index=pd.MultiIndex.from_product(iterables, names=('date', 'longitude'))).reset_index()
         ps['longitude'] = ps2['longitude']
         del ps2
 
-        iterables = [datesForDepartement, list(fp.departement)]
+        iterables = [dis, list(fp.departement)]
         ps2 = pd.DataFrame(index=pd.MultiIndex.from_product(iterables, names=('date', 'departement'))).reset_index()
         ps['departement'] = ps2['departement']
         del ps2
 
+        iterables = [dis, list(fp.scale0)]
+        ps2 = pd.DataFrame(index=pd.MultiIndex.from_product(iterables, names=('date', 'scale0'))).reset_index()
+        ps['scale0'] = ps2['scale0']
+        del ps2
+
         points.append(ps)
 
-    all_dep_predictor.fit(np.asarray(all_maxi_influence))
-    save_object(all_dep_predictor, 'PredictorAll.pkl', path=dir / sinister / 'influenceClustering')
-
     points = pd.concat(points)
-    points['departement'] = points['departement'].apply(lambda x : str2intMaj[x])
+    points.drop_duplicates(inplace=True)
+    points['departement'] = points['departement'].apply(lambda x : name2int[x])
     check_and_create_path(dir/sinister)
-    name = 'points'+str(minPoint)+'.csv'
+    name = 'points.csv'
     points.to_csv(dir / sinister / name, index=False)
 
-def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures):
+def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution):
     graphScale = GraphStructure(scale, geo, maxDist, nmax)
-    graphScale._train_kmeans(doRaster=doRaster, path=dir_output, sinister=sinister)
+    graphScale._train_kmeans(doRaster=doRaster, path=dir_output, sinister=sinister, resolution=resolution)
     graphScale._create_nodes_list()
     graphScale._create_edges_list()
     graphScale._create_temporal_edges_list(allDates, k_days=k_days)
@@ -111,8 +95,12 @@ def construct_database(graphScale : GraphStructure,
                        dir_output : Path,
                        dir_train : Path,
                        prefix : str,
-                       mode : str):
+                       values_per_class : int,
+                       mode : str,
+                       resolution : str,
+                       maxDate : str):
     
+    trainCode = [name2int[d] for d in trainDepartements]
     X_kmeans = list(zip(ps.longitude, ps.latitude))
     ps['scale'+str(scale)] = graphScale._predict_node(X_kmeans)
     name = prefix+'.csv'
@@ -132,16 +120,70 @@ def construct_database(graphScale : GraphStructure,
     subNode = graphScale._assign_latitude_longitude(subNode)
     subNode = graphScale._assign_department(subNode)
 
+    print(np.unique(subNode[:,3]))
+
     graphScale._info_on_graph(subNode, Path('log'))
 
-    if graphScale.scale == 0:
-        X, pos_feature = get_sub_nodes_feature_2(graphScale, subNode, departements, features, sinister, dir_output, dir_train)
+    n = 'Y_full_'+str(scale)+'.pkl'
+    if not (dir_output / n).is_file():
+    #if True:
+        Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output, dir_train, resolution)
+        save_object(Y, 'Y_full_'+str(scale)+'.pkl', dir_output)
     else:
-        X, pos_feature = get_sub_nodes_feature(graphScale, subNode, departements, features, sinister, dir_output, dir_train)
+        Y = read_object('Y_full_'+str(scale)+'.pkl', dir_output)
 
-    Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output, dir_train)
+    n = 'X_full_'+str(scale)+'.pkl'
+    if (dir_output / n).is_file():
+        pos_feature, _ = create_pos_feature(scale, 6, features)
+        X = read_object('X_full_'+str(scale)+'.pkl', dir_output)
+    else:
+        X = None
 
-    subNode[:,-1] = Y[:,-3]
+    if values_per_class != 'full':
+        Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+        Ytest = Y[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
+                ((Y[:,4] > allDates.index('2017-12-31')) & (Y[:,4] < allDates.index('2022-12-31')) & (~np.isin(Y[:,3], trainCode)))]
+        if X is not None:
+            Xtest = X[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
+                ((Y[:,4] > allDates.index('2017-12-31')) & (Y[:,4] < allDates.index('2022-12-31')) & (~np.isin(Y[:,3], trainCode)))]
+
+        values_per_class = int(values_per_class)
+        new_Y = []
+        new_X = []
+        for dept in departements:
+            maskdept = np.argwhere(Ytrain[:, 3] == name2int[dept])
+            if maskdept.shape[0] == 0:
+                continue
+            classs = np.unique(Ytrain[maskdept, -3])
+            new_Y_index = []
+            for cls in classs:
+                Y_class_index = np.where(Ytrain[maskdept, -3] == cls)[0]
+                new_Y_index += list(np.random.choice(Y_class_index, min(Y_class_index.shape[0], values_per_class)))
+            new_Y += list(Y[np.asarray(new_Y_index), :])
+            if X is not None:
+                new_X += list(X[np.asarray(new_Y_index), :])
+
+        new_Y = np.asarray(new_Y)
+        new_Y_neighboor = Y[np.isin(Y[:, 4], new_Y[:, 4])]
+        mask_remove = np.argwhere(~np.isin(new_Y_neighboor, new_Y))[:,0]
+        new_Y_neighboor = new_Y_neighboor[mask_remove]
+        new_Y_neighboor[:, 5] = 0
+
+        if X is not None:
+            new_X_neighboor = X[np.isin(Y[:, 4], new_Y[:, 4])]
+            new_X_neighboor = new_X_neighboor[mask_remove]
+            X = np.concatenate((new_X, new_X_neighboor, Xtest))
+
+        Y = np.concatenate((new_Y, new_Y_neighboor, Ytest))
+
+    if X is None:
+        if graphScale.scale == 0:
+            X, pos_feature = get_sub_nodes_feature_2(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
+        else:
+            X, pos_feature = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
+
+    logger.info(f'{X.shape, Y.shape}')
+    X[:, 5] = Y[:, 5]
 
     return X, Y, pos_feature
 
@@ -152,6 +194,7 @@ def construct_non_point(firepoints, regions, maxDate, sinister, dir):
             ad = find_dates_between('2018-01-01', maxDate)
         else:
             ad = allDates
+            
         reg = regions[regions['departement'] == dept]
         fp = firepoints[firepoints['departement'] == dept]
 

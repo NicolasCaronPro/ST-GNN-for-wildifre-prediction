@@ -6,6 +6,10 @@ foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11',
 sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
 osmnx_variables = ['0', '1', '2', '3', '4', '5']
 dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']
+landcover_variables = [#'landcover',
+                        'highway',
+                       'foret',
+                        ]
 
 def raster2geojson(data, mask, h3, var, encoder):
     if var == 'sentinel':

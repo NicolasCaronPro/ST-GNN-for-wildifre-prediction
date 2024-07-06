@@ -63,7 +63,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)        
+        encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
+        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)   
 
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
@@ -91,25 +92,25 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             X[index, pos_feature['Calendar'] + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dept])], ddate)) else 0 ) \
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dept])], ddate)) else 0) # holidaysBorder
         
-        X[:, pos_feature['Calendar'] : pos_feature['Calendar'] + size_calendar] = \
-                encoder_calendar.transform((X[:, pos_feature['Calendar'] : \
-                        pos_feature['Calendar'] + size_calendar]).reshape(-1, size_calendar)).values.reshape(-1, size_calendar)
-        
-        stop_calendar = 11
+            stop_calendar = 11
+            
+            X[:, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar] = \
+                    encoder_calendar.transform((X[:, pos_feature['Calendar'] : \
+                            pos_feature['Calendar'] + stop_calendar]).reshape(-1, stop_calendar)).values.reshape(-1, stop_calendar)
 
-        for ir in range(stop_calendar, size_calendar):
-            var_ir = calendar_variables[ir]
-            if var_ir == 'mean':
-                X[index, pos_feature['Calendar'] + ir] = np.mean(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
-            elif var_ir == 'max':
-                X[index, pos_feature['Calendar'] + ir] = np.max(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
-            elif var_ir == 'min':
-                X[index, pos_feature['Calendar'] + ir] = np.min(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
-            elif var_ir == 'sum':
-                X[index, pos_feature['Calendar'] + ir] = np.sum(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
-            else:
-                logger.info(f'Unknow operation {var_ir}')
-                exit(1)
+            for ir in range(stop_calendar, size_calendar):
+                var_ir = calendar_variables[ir]
+                if var_ir == 'mean':
+                    X[index, pos_feature['Calendar'] + ir] = np.mean(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                elif var_ir == 'max':
+                    X[index, pos_feature['Calendar'] + ir] = np.max(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                elif var_ir == 'min':
+                    X[index, pos_feature['Calendar'] + ir] = np.min(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                elif var_ir == 'sum':
+                    X[index, pos_feature['Calendar'] + ir] = np.sum(X[index, pos_feature['Calendar'] : pos_feature['Calendar'] + stop_calendar])
+                else:
+                    logger.info(f'Unknow operation {var_ir}')
+                    exit(1)
 
     ### Geo spatial
     logger.info('Geo')
@@ -119,25 +120,26 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info('Meteorological')
     ### Meteo
     for i, var in enumerate(cems_variables):
+        logger.info(var)
         for node in subNode:
-            maskNode = geo[geo['id'] == node[0]].index
+            maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
             if maskNode.shape[0] == 0:
                 continue
             index = np.argwhere((subNode[:,0] == node[0])
-                                & (subNode[:,4] == node[4])
-                                )
+                                & (subNode[:,4] == node[4]))
             
             save_values(geo[var].values, pos_feature[var], index, maskNode)
 
     logger.info('Air Quality')
     for i, var in enumerate(air_variables):
+        logger.info(var)
         for node in subNode:
-            maskNode = geo[geo['id'] == node[0]].index
+            maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
             if maskNode.shape[0] == 0:
                 continue
             index = np.argwhere((subNode[:,0] == node[0])
-                                & (subNode[:,4] == node[4])
-                                )
+                                & (subNode[:,4] == node[4]))
+            
             save_value(geo[var].values, pos_feature['air'] + i, index, maskNode)
 
     logger.info('Population elevation Highway Sentinel')
@@ -167,14 +169,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info('Sentinel Dynamic World')
     coef = 4 if graph.scale > -1 else 1
     for node in subNode:
-        maskNode = geo[geo['id'] == node[0]].index
+        maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
         index = np.argwhere((subNode[:,0] == node[0])
                             & (subNode[:,4] == node[4])
                             )
 
         if 'sentinel' in features:
             for band, var in enumerate(sentinel_variables):
-                save_values(geo[band].values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
+                save_values(geo[var].values, pos_feature['sentinel'] + (sentinel_variables.index(var) * coef) , index, maskNode)
         
         if 'landcover' in features:
             if 'landcover' in landcover_variables:
@@ -192,26 +194,26 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
             maskNode = mask == node[0]
 
-            save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
+            save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
 
     logger.info('AutoRegressionReg')
     if 'AutoRegressionReg' in features:
         for node in subNode:
             index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-            maskNode = mask == node[0]
             
             for band in auto_regression_variable_reg:
+                step = int(band.split('-')[-1])
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4] - step)].index
                 save_value(geo[band].values, pos_feature['AutoRegressionReg'] + auto_regression_variable_reg.index(band), index, maskNode)
-
-        del arrayInfluence
 
     logger.info('AutoRegressionBin')
     if 'AutoRegressionBin' in features:
         for node in subNode:
             index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-            maskNode = mask == node[0]
 
             for band in auto_regression_variable_bin:
+                step = int(band.split('-')[-1])
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4] - step)].index
                 save_value(geo[band].values, pos_feature['AutoRegressionBin'] + auto_regression_variable_bin.index(band), index, maskNode)
 
     logger.info('Vigicrues')
@@ -219,7 +221,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         for band in vigicrues_variables:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = mask == node[0]
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
 
                 save_values(geo[band].values, pos_feature['vigicrues'] + (4 * vigicrues_variables.index(band)), index, maskNode)
 
@@ -228,7 +230,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         for band in nappes_variables:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = mask == node[0]
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
 
                 save_values(geo[band].values, pos_feature['nappes'] + (4 * nappes_variables.index(band)), index, maskNode)
 

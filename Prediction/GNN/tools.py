@@ -23,6 +23,7 @@ from xgboost import XGBClassifier, XGBRegressor
 from lightgbm import LGBMClassifier, LGBMRegressor
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from ngboost import NGBClassifier, NGBRegressor
+from sklearn.decomposition import PCA
 from sklearn.svm import SVR
 import sys
 from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
@@ -39,7 +40,11 @@ from arborescence import *
 from array_fet import *
 from weigh_predictor import *
 from features_selection import *
-from config import logger, foretint2str, osmnxint2str, make_models
+from config import logger, foretint2str, osmnxint2str, make_models, maxDist
+from sklearn.cluster import SpectralClustering
+import scipy.stats
+import plotly.express as px
+import plotly.io as pio
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -99,7 +104,7 @@ name2int = {
     'departement-78-yvelines' : 78
 }
 
-def create_larger_scale_image(input, proba, bin):
+def create_larger_scale_image(input, proba, bin, raster):
     probaImageScale = np.full(proba.shape, np.nan)
     binImageScale = np.full(proba.shape, np.nan)
     
@@ -109,21 +114,36 @@ def create_larger_scale_image(input, proba, bin):
             mask = np.argwhere(input == id)
             ones = np.ones(proba[mask[:,0], mask[:,1], di].shape)
             probaImageScale[mask[:,0], mask[:,1], di] = 1 - np.prod(ones - proba[mask[:,0], mask[:,1], di])
-
-            binImageScale[mask[:,0], mask[:,1], di] = np.sum(bin[mask[:,0], mask[:,1], di])
+            unique_ids_in_mask = np.unique(raster[bin[mask[:,0], mask[:,1], di]])
+            binImageScale[mask[:,0], mask[:,1], di] = np.sum()
 
     return None, binImageScale
 
-def create_larger_scale_bin(input, bin, influence):
+def create_larger_scale_bin(input, bin, influence, raster):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
 
     clusterID = np.unique(input)
     for di in range(bin.shape[-1]):
         for id in clusterID:
-            mask = np.argwhere(input == id)
-            binImageScale[mask[:,0], mask[:,1], di] = np.sum(bin[mask[:,0], mask[:,1], di])
-            influenceImageScale[mask[:,0], mask[:,1], di] = np.sum(influence[mask[:,0], mask[:,1], di])
+            mask = (input == id)
+            if np.any(influence[mask, di] > 0):
+                influence_mask = (influence[:, :, di] > 0) & mask
+                unique_ids_in_mask = np.unique(raster[influence_mask])
+                
+                binval = np.nanmin(influence[:, :, di])
+                influenceval = np.nanmin(influence[:, :, di])
+                
+                for uim in unique_ids_in_mask:
+                    mask3 = (raster == uim)
+                    binval += (np.unique(bin[mask3, di]))[0]
+                    influenceval += (np.unique(influence[mask3, di]))[0]
+                
+                binImageScale[mask, di] = binval
+                influenceImageScale[mask, di] = influenceval
+            else:
+                binImageScale[mask, di] = 0
+                influenceImageScale[mask, di] = 0
 
     return binImageScale, influenceImageScale
 
@@ -139,7 +159,8 @@ def find_dates_between(start, end):
             date += delta
     return res
 
-allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
+allDates = find_dates_between('2017-06-12', '2024-06-29')
+#allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
 
 def save_object(obj, filename: str, path : Path):
     check_and_create_path(path)
@@ -301,6 +322,8 @@ def stat(c1, c2, clustered, osmnx, bands):
     return np.asarray(res)
 
 def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal = np.nan):
+    check_and_create_path(dir_output)
+
     ori.to_file(dir_output.as_posix() + '/' + outputname+'.geojson', driver="GeoJSON")
     
     # paths du geojson d'entree et du raster tif de sortie
@@ -355,6 +378,10 @@ def remove_nan_nodes(nodes : np.array, target : np.array) -> np.array:
     mask = np.unique(np.argwhere(np.isnan(nodes))[:,0])
     if target is None:
         return np.copy(np.delete(nodes, mask, axis=0)), None
+    return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
+
+def remove_none_target(nodes : np.array, target : np.array) -> np.array:
+    mask = np.argwhere(target[:, -1] == -1)[:,0]
     return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
 
 def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
@@ -469,7 +496,7 @@ def construct_graph_set(graph, date, X, Y, ks):
     ks : size of the time series
     """
 
-    maskgraph = np.argwhere((X[:,4] == date) & (Y[:, -3] > 0))
+    maskgraph = np.argwhere((X[:,4] == date) & (Y[:, -4] > 0))
     x = X[maskgraph[:,0]]
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,4] < date) & (X[:,4] >= date - ks)))
@@ -483,7 +510,7 @@ def construct_graph_set(graph, date, X, Y, ks):
         y = Y[maskgraph[:,0]]
         if ks != 0:
             yts = Y[maskts[:,0]]
-            yts[:,-3] = 0
+            yts[:,-4] = 0
             y = np.concatenate((y, yts))
 
     # Graph indexing
@@ -528,7 +555,7 @@ def construct_graph_set(graph, date, X, Y, ks):
 
             # Spatio-temporal edges
             if temporalEdges.shape[1] != 0  and spatialEdges.shape[1] != 0:
-                nodes = x[(np.argwhere((x[:,4] != node[4]) & (x[:,0] != node[0])))]
+                nodes = x[(np.argwhere((x[:,4] != node[4]) & (x[:,0]  != node[0])))]
                 nodes = nodes.reshape(-1, nodes.shape[-1])
                 spatial = spatialEdges[1][(np.isin(spatialEdges[1], nodes[:,0])) & (spatialEdges[0] == node[0])]
                 temporal = temporalEdges[1][(np.isin(temporalEdges[1], nodes[:,4])) & (temporalEdges[0] == node[4])]
@@ -578,7 +605,8 @@ def construct_graph_with_time_series(graph, date : int,
     ks : size of the time series
     """
 
-    maskgraph = np.argwhere((X[:,4] == date) & (X[:, 5] > 0))
+    #maskgraph = np.argwhere((X[:,4] == date) & (X[:, 5] > 0))
+    maskgraph = np.argwhere((X[:,4] == date))
     x = X[maskgraph[:,0]]
 
     if ks != 0:
@@ -593,7 +621,7 @@ def construct_graph_with_time_series(graph, date : int,
         y = Y[maskgraph[:,0]]
         if ks != 0:
             yts = Y[maskts[:,0]]
-            yts[:,-3] = 0
+            yts[:,-4] = 0
             y = np.concatenate((y, yts))
 
     # Graph indexing
@@ -690,7 +718,7 @@ def load_x_from_pickle(x : np.array, shape : tuple,
 
 def order_class(predictor, pred):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
-    cc = predictor.kmeans.cluster_centers_.reshape(-1)
+    cc = predictor.cluster_centers.reshape(-1)
     classes = np.arange(cc.shape[0])
     ind = np.lexsort([cc])
     cc = cc[ind]
@@ -699,120 +727,6 @@ def order_class(predictor, pred):
         mask = np.argwhere(pred == classes[c])
         res[mask] = c
     return res
-
-def realVspredict(ypred, y, dir_output, name):
-    check_and_create_path(dir_output)
-    ytrue = y[:,-1]
-    _, ax = plt.subplots(1, figsize=(20,10))
-    ax.plot(ypred, color='red', label='predict')
-    ax.plot(ytrue, color='blue', label='real', alpha=0.5)
-    x = np.argwhere( y[:,-2] > 0)
-    ax.scatter(x, ypred[x], color='black', label='fire', alpha=0.5)
-    plt.legend()
-    plt.savefig(dir_output/name)
-
-def realVspredict2d(ypred : np.array,
-                    ytrue : np.array,
-                    isBin : np.array,
-                    modelName : str,
-                    scale : int,
-                    dir_output : Path,
-                    dir : Path,
-                    Geo : gpd.GeoDataFrame,
-                    testDepartement : list,
-                    graph):
-
-    dir_predictor = root_graph / dir / 'influenceClustering'
-
-    yclass = np.empty(ypred.shape)
-    for nameDep in testDepartement:
-        mask = np.argwhere(ytrue[:,3] == name2int[nameDep])
-        if mask.shape[0] == 0:
-            continue
-        if not isBin:
-            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-        else:
-            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-        
-        classpred = predictor.predict(ypred[mask].astype(float))
-
-        yclass[mask] = order_class(predictor, classpred).reshape(-1, 1)
-
-    geo = Geo[Geo['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
-
-    x = list(zip(geo.longitude, geo.latitude))
-
-    geo['id'] = graph._predict_node(x)
-
-    def add_value_from_array(date, x, array, index):
-        try:
-            if index is not None:
-                return array[(ytrue[:,4] == date) & (ytrue[:,0] == x)][:,index][0]
-            else:
-                return array[(ytrue[:,4] == date) & (ytrue[:,0] == x)][0]
-        except Exception as e:
-            #logger.info(e)
-            return 0
-    
-    check_and_create_path(dir_output)
-    uniqueDates = np.sort(np.unique(ytrue[:,4])).astype(int)
-    mean = []
-    for date in uniqueDates:
-        try:
-            dfff = geo.copy(deep=True)
-            dfff['date'] = date
-            dfff['gt'] = dfff['id'].apply(lambda x : add_value_from_array(date, x, ytrue, -1))
-            dfff['Fire'] = dfff['id'].apply(lambda x : add_value_from_array(date, x, ytrue, -2))
-            dfff['prediction'] = dfff['id'].apply(lambda x : add_value_from_array(date, x, ypred, None))
-            dfff['class'] = dfff['id'].apply(lambda x : add_value_from_array(date, x, yclass, None))
-            mean.append(dfff)
-
-            fig, ax = plt.subplots(1,2, figsize=(20,10))
-            plt.title(allDates[date] + ' prediction')
-            fp = dfff[dfff['Fire'] > 0].copy(deep=True)
-            fp.geometry = fp['geometry'].apply(lambda x : x.centroid)
-
-            dfff.plot(ax=ax[0], column='prediction', vmin=np.nanmin(ytrue[:,-1]), vmax=np.nanmax(ytrue[:,-1]), cmap='jet')
-            if len(fp) != 0:
-                fp.plot(column='Fire', color='black', ax=ax[0], alpha=0.7, legend=True)
-            ax[0].set_title('Predicted value')
-
-            dfff.plot(ax=ax[1], column='class', vmin=0, vmax=4, cmap='jet', categorical=True)
-            if len(fp) != 0:
-                fp.plot(column='Fire', color='black', ax=ax[1], alpha=0.7, legend=True)
-            ax[1].set_title('Predicted class')
-            fig.suptitle(f'Prediction for {allDates[date + 1]}')
-
-            plt.tight_layout()
-            name = allDates[date]+'.png'
-            plt.savefig(dir_output / name)
-            plt.close('all')
-        except Exception as e:
-            logger.info(e)
-    if len(mean) == 0:
-        return
-    mean = pd.concat(mean).reset_index(drop=True)
-    plt.title('Mean prediction')
-    _, ax = plt.subplots(2,2, figsize=(20,10))
-
-    plt.title('Mean prediction')
-
-    mean.plot(ax=ax[0][0], column='Fire', cmap='jet', categorical=True)
-    ax[0][0].set_title('Number of fire the next day')
-
-    mean.plot(ax=ax[0][1], column='gt', cmap='jet')
-    ax[0][1].set_title('Ground truth value')
-
-    mean.plot(ax=ax[1][0], column='prediction', cmap='jet')
-    ax[1][0].set_title('Predicted value')
-
-    mean.plot(ax=ax[1][1], column='prediction', cmap='jet')
-    ax[1][1].set_title('Predicted class')
-    
-    plt.tight_layout()
-    name = 'Mean.png'
-    plt.savefig(dir_output / name)
-    plt.close('all')
 
 def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, method : str, band : int, dir_output : Path, name : str):
 
@@ -840,19 +754,15 @@ def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, me
     return res
 
 def func_epoch(model, trainLoader, valLoader, features,
-               optimizer, dir_output, criterion,
-               CHECKPOINT, PATIENCE_CNT, epoch, save):
+               optimizer, dir_output, criterion):
     
-    BEST_VAL_LOSS = math.inf
-    BEST_MODEL_PARAMS = None
-    patience_cnt = 0
     model.train()
     for i, data in enumerate(trainLoader, 0):
 
         inputs, labels, edges = data
         
         target = labels[:,-1]
-        weights = labels[:,-3]
+        weights = labels[:,-4]
         inputs = inputs[:, features]
         
         output = model(inputs, edges)
@@ -867,11 +777,6 @@ def func_epoch(model, trainLoader, valLoader, features,
         loss.backward()
         optimizer.step()
 
-    if epoch % CHECKPOINT == 0:
-        logger.info(f'epochs {epoch}, Train loss {loss.item()}')
-        if save:
-            save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
-
     with torch.no_grad():
         model.eval()
         for i, data in enumerate(valLoader, 0):
@@ -881,7 +786,7 @@ def func_epoch(model, trainLoader, valLoader, features,
             output = model(inputs, edges)
             
             target = labels[:,-1]
-            weights = labels[:,-3]
+            weights = labels[:,-4]
 
             target = torch.masked_select(target, weights.gt(0))
             weights = torch.masked_select(weights, weights.gt(0))
@@ -891,21 +796,65 @@ def func_epoch(model, trainLoader, valLoader, features,
 
             loss = criterion(output, target, weights)
 
-            if loss.item() < BEST_VAL_LOSS:
-                BEST_VAL_LOSS = loss.item()
-                BEST_MODEL_PARAMS = model.state_dict()
-                patience_cnt = 0
+    return loss
+
+def func_epoch(model, trainLoader, valLoader, features,
+               optimizer, dir_output, criterion, binary):
+    
+    model.train()
+    for i, data in enumerate(trainLoader, 0):
+
+        inputs, labels, edges = data
+        
+        if not binary:
+            target = labels[:,-1]
+        else:
+            target = (labels[:,-2] > 0).long()
+
+        weights = labels[:,-4]
+        inputs = inputs[:, features]
+        
+        output = model(inputs, edges)
+
+        target = torch.masked_select(target, weights.gt(0))
+        weights = torch.masked_select(weights, weights.gt(0))
+
+        if not binary:
+            target = target.view(output.shape)
+            weights = weights.view(output.shape)
+            loss = criterion(output, target, weights)
+        else:
+            loss = criterion(output, target)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+    with torch.no_grad():
+        model.eval()
+        for i, data in enumerate(valLoader, 0):
+            inputs, labels, edges = data
+            inputs = inputs[:, features]
+
+            output = model(inputs, edges)
+            
+            if not binary:
+                target = labels[:,-1]
             else:
-                patience_cnt += 1
-                if patience_cnt >= PATIENCE_CNT:
-                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
-                    if save:
-                        save_object_torch(model.state_dict(), 'last.pt', dir_output)
-                        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
-                    return
-                
-    if epoch % CHECKPOINT == 0:
-        logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+                target = (labels[:,-2] > 0).long()
+            weights = labels[:,-4]
+
+            target = torch.masked_select(target, weights.gt(0))
+            weights = torch.masked_select(weights, weights.gt(0))
+
+            if not binary:
+                target = target.view(output.shape)
+                weights = weights.view(output.shape)
+                loss = criterion(output, target, weights)
+            else:
+                loss = criterion(output, target)
+
+    return loss
 
 def train(trainLoader, valLoader, testLoader,
           scale: int,
@@ -918,7 +867,8 @@ def train(trainLoader, valLoader, testLoader,
           pos_feature : dict,
           modelname : str,
           features : np.array,
-          dir_output : Path) -> None:
+          dir_output : Path,
+          binary : bool) -> None:
         """
         Train neural network model
         PATIENCE_CNT : early stopping count
@@ -941,11 +891,22 @@ def train(trainLoader, valLoader, testLoader,
                 dico_model = make_models(len(testFet), 52, 0.03, 'relu')
                 model = dico_model[modelname]
                 optimizer = optim.Adam(model.parameters(), lr=lr)
+                BEST_VAL_LOSS = math.inf
+                BEST_MODEL_PARAMS = None
+                patience_cnt = 0
 
                 logger.info(f'Train {model} with')
                 log_features(testFet, scale, pos_feature, ["min", "mean", "max", "std"])
                 for epoch in tqdm(range(epochs)):
-                    func_epoch(model, trainLoader, valLoader, testFet, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, False)
+                    loss = func_epoch(model, trainLoader, valLoader, testFet, optimizer, dir_output, criterion, binary)
+                    if loss.item() < BEST_VAL_LOSS:
+                        BEST_VAL_LOSS = loss.item()
+                        BEST_MODEL_PARAMS = model.state_dict()
+                        patience_cnt = 0
+                    else:
+                        patience_cnt += 1
+                        if patience_cnt >= PATIENCE_CNT:
+                            logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
 
                 for i, data in enumerate(testLoader, 0):
                     inputs, labels, edges = data
@@ -953,16 +914,22 @@ def train(trainLoader, valLoader, testLoader,
 
                     output = model(inputs, edges)
                     
-                    target = labels[:,-1]
-                    weights = labels[:,-3]
+                    if not binary:
+                        target = labels[:,-1]
+                    else:
+                        target = (labels[:,-2] > 0).long()
+
+                    weights = labels[:,-4]
 
                     target = torch.masked_select(target, weights.gt(0))
                     weights = torch.masked_select(weights, weights.gt(0))
 
-                    target = target.view(output.shape)
-                    weights = weights.view(output.shape)
-
-                    loss = criterion(output, target, weights)
+                    if not binary:
+                        target = target.view(output.shape)
+                        weights = weights.view(output.shape)
+                        loss = criterion(output, target, weights)
+                    else:
+                        loss = criterion(output, target)
                     logger.info(f'Loss obtained of {loss.item()}')
 
                     if loss.item() < BEST_VAL_LOSS_FET:
@@ -980,11 +947,33 @@ def train(trainLoader, valLoader, testLoader,
         dico_model = make_models(len(features), 52, 0.03, 'relu')
         model = dico_model[modelname]
         optimizer = optim.Adam(model.parameters(), lr=lr)
+        BEST_VAL_LOSS = math.inf
+        BEST_MODEL_PARAMS = None
+        patience_cnt = 0
 
         logger.info('Train model with')
         log_features(features, scale, pos_feature, ["min", "mean", "max", "std"])
+        save_object(features, 'features.pkl', dir_output)
         for epoch in tqdm(range(epochs)):
-            func_epoch(model, trainLoader, valLoader, features, optimizer, dir_output, criterion, CHECKPOINT, PATIENCE_CNT, epoch, True)            
+            loss = func_epoch(model, trainLoader, valLoader, features, optimizer, dir_output, criterion, binary)
+            if epoch % CHECKPOINT == 0:
+                logger.info(f'epochs {epoch}, Train loss {loss.item()}')
+                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
+            if loss.item() < BEST_VAL_LOSS:
+                BEST_VAL_LOSS = loss.item()
+                BEST_MODEL_PARAMS = model.state_dict()
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE_CNT:
+                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
+                    save_object_torch(model.state_dict(), 'last.pt', dir_output)
+                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
+                    return
+                
+            if epoch % CHECKPOINT == 0:
+                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+
 
 def config_xgboost(device, binary):
     params = {
@@ -1073,138 +1062,95 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
           scaling: str,
           weight : bool,
           departements : list):
-    
-    models = []
-    
-    ################# xgboost ##################
 
-    models.append('xgboost')
+    try:
+        
+        models = []
 
-    ################ lightgbm ##################
+        ################# xgboost ##################
 
-    models.append('lightgbm')
+        models.append('xgboost')
 
-    ################ ngboost ###################
+        ################ lightgbm ##################
 
-    models.append('ngboost')
+        models.append('lightgbm')
 
-    ############### SVM ########################
-    
-    # TO DO
+        ################ ngboost ###################
 
-    ############## fit #########################
+        models.append('ngboost')
 
-    Xtrain = trainDataset[0]
-    Ytrain = trainDataset[1]
+        ############### SVM ########################
 
-    Xval = valDataset[0]
-    Yval = valDataset[1]
+        # TO DO
 
-    logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Ytest shape {testDataset[1].shape}')
+        ############## fit #########################
 
-    if not binary:
-        Yw = Ytrain[:,-3]
-    else:
-        Yw = Ytrain[:,-3]
-        Yw[Ytrain[:,-2] == 0] = 1
+        Xtrain = trainDataset[0]
+        Ytrain = trainDataset[1]
 
-    if not binary:
-        Ytrain = Ytrain[:,-1]
-        Yval = Yval[:,-1]
-    else:
-        Ytrain = Ytrain[:,-2] > 0
-        Yval = Yval[:,-2] > 0
+        Xval = valDataset[0]
+        Yval = valDataset[1]
 
-    if not weight:
-        Yw = np.ones(Ytrain.shape[0])
+        Xtest = testDataset[0]
+        Ytest = testDataset[1]
 
-    for name in models:
-        oname = name
-        if binary:
-            oname += '_bin'
+        Xtrain = Xtrain[Xtrain[:, 5] > 0]
+        Ytrain = Ytrain[Ytrain[:, 5] > 0]
+
+        Xval = Xval[Xval[:, 5] > 0]
+        Yval = Yval[Yval[:, 5] > 0]
+
+        Xtest = Xtest[Xtest[:, 5] > 0]
+        Ytest = Ytest[Ytest[:, 5] > 0]
+
+        logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Xtest shape {Xtest.shape}')
+
+        if not binary:
+            Yw = Ytrain[:,-4]
+        else:
+            Yw = Ytrain[:,-4]
+            Yw[Ytrain[:,-2] == 0] = 1
+
+        if not binary:
+            Ytrain = Ytrain[:,-1]
+            Yval = Yval[:,-1]
+        else:
+            Ytrain = Ytrain[:,-2] > 0
+            Yval = Yval[:,-2] > 0
+
         if not weight:
-            oname += '_unweighted'
-        if optimize_feature:
-            oname += '_optimize_feature'
+            Yw = np.ones(Ytrain.shape[0])
 
-        if optimize_feature:
-            assert len(testDataset) > 0
-            newFet = [features[0]]
-            numIncrease = 0
+        for name in models:
+            oname = name
+            if binary:
+                oname += '_bin'
+            if not weight:
+                oname += '_unweighted'
+            if optimize_feature:
+                oname += '_optimize_feature'
 
-            #################### Base result ####################
-            Ytest = testDataset[1]
-            wei = testDataset[1][:, -3]
-            Xtest = testDataset[0][:, newFet]
+            if optimize_feature:
+                assert len(testDataset) > 0
+                newFet = [features[0]]
+                numIncrease = 0
 
-            if name == 'xgboost':
-                model = config_xgboost(device, binary)
-                fitparams={
-                'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
-                'sample_weight' : Yw,
-                'verbose' : False,
-                }
-
-            if name == 'lightgbm':
-                model = config_lightGBM(device, binary)
-                fitparams={
-                'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
-                'sample_weight' : Yw,
-                }
-
-            if name == 'ngboost':
-                model = config_ngboost(binary)
-                if binary:
-                    return
-                fitparams={
-                'early_stopping_rounds':15,
-                'sample_weight' : Yw,
-                'X_val':Xval[:, newFet].reshape(-1,1),
-                'Y_val':Yval,
-                }
-
-            model.fit(Xtrain[:, newFet].reshape(-1,1), Ytrain, **fitparams)
-            ypred = model.predict(Xtest)
-
-            if ~binary:
-                bestVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
-                if torch.is_tensor(bestVal):
-                    bestVal = bestVal.detach().cpu().numpy()
-            else:
-                bestVal = my_f1_score(Ytest, ypred, wei)[0]
-
-            """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
-                                        graph.scale, oname,
-                                        dir_train, wei, None)
-            bestVal = []
-            for dept in departements:
-                bestVal.append(metDict[dept])
-
-            bestVal = np.mean(bestVal)"""
-
-            logger.info(f'Base Score {bestVal}')
-
-            #################### Explore features ####################
-            for fi, fet in enumerate(features[1:]):
-                testFet = copy(newFet)
-                testFet.append(fet)
-                logger.info(f'Train {name} with')
-                log_features(testFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
-
-                Xtest = testDataset[0][:, testFet]
+                #################### Base result ####################
+                wei = Ytest[:, -4]
+                XtestCopy = Xtest[:, newFet]
 
                 if name == 'xgboost':
                     model = config_xgboost(device, binary)
                     fitparams={
-                    'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                    'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
                     'sample_weight' : Yw,
-                    'verbose' : False
+                    'verbose' : False,
                     }
 
                 if name == 'lightgbm':
                     model = config_lightGBM(device, binary)
                     fitparams={
-                    'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                    'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
                     'sample_weight' : Yw,
                     }
 
@@ -1215,81 +1161,140 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                     fitparams={
                     'early_stopping_rounds':15,
                     'sample_weight' : Yw,
-                    'X_val':Xval[:, testFet],
+                    'X_val':Xval[:, newFet].reshape(-1,1),
                     'Y_val':Yval,
                     }
-
-                model.fit(Xtrain[:, testFet], Ytrain, **fitparams)
-                ypred = model.predict(Xtest)
-
-                """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
-                                        graph.scale, name,
-                                        dir_train, wei, None)
-                metVal = []
-                for dept in departements:
-                    metVal.append(metDict[dept])
-                metVal = np.mean(metVal)"""
+                logger.info(f'Train {name} with')
+                log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+                model.fit(Xtrain[:, newFet].reshape(-1,1), Ytrain, **fitparams)
+                ypred = model.predict(XtestCopy)
 
                 if ~binary:
-                    metVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
-                    if torch.is_tensor(metVal):
-                        metVal = metVal.detach().cpu().numpy()
+                    bestVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                    if torch.is_tensor(bestVal):
+                        bestVal = bestVal.detach().cpu().numpy()
                 else:
-                    metVal = my_f1_score(Ytest, ypred, wei)[0]
-                
-                logger.info(f'{metVal} vs {bestVal}')
+                    bestVal = my_f1_score(Ytest, ypred, wei)[0]
 
-                if (~binary and metVal < bestVal) or (binary and metVal > bestVal):
-                    logger.info('Adding feature')
-                    bestVal = metVal
-                    newFet.append(fet)
-                    numIncrease = 0
-                else:
-                    numIncrease += 1
+                """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+                                            graph.scale, oname,
+                                            dir_train, wei, None)
+                bestVal = []
+                for dept in departements:
+                    bestVal.append(metDict[dept])
 
-                if numIncrease > 30:
-                    logger.info('The MAE didn t increase for 30 features, we stop here')
-                    break
+                bestVal = np.mean(bestVal)"""
 
-            logger.info(f'Optimize feature selection finish, best MAE is {bestVal}')
-            log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+                logger.info(f'Base Score {bestVal}')
+
+                #################### Explore features ####################
+                for fi, fet in enumerate(features[1:]):
+                    testFet = copy(newFet)
+                    testFet.append(fet)
+                    logger.info(f'Train {name} with')
+                    log_features(testFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+                    XtestCopy = Xtest[:, testFet]
+
+                    if name == 'xgboost':
+                        model = config_xgboost(device, binary)
+                        fitparams={
+                        'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                        'sample_weight' : Yw,
+                        'verbose' : False
+                        }
+
+                    if name == 'lightgbm':
+                        model = config_lightGBM(device, binary)
+                        fitparams={
+                        'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
+                        'sample_weight' : Yw,
+                        }
+
+                    if name == 'ngboost':
+                        model = config_ngboost(binary)
+                        if binary:
+                            return
+                        fitparams={
+                        'early_stopping_rounds':15,
+                        'sample_weight' : Yw,
+                        'X_val':Xval[:, testFet],
+                        'Y_val':Yval,
+                        }
+
+                    model.fit(Xtrain[:, testFet], Ytrain, **fitparams)
+                    ypred = model.predict(XtestCopy)
+
+                    """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
+                                            graph.scale, name,
+                                            dir_train, wei, None)
+                    metVal = []
+                    for dept in departements:
+                        metVal.append(metDict[dept])
+                    metVal = np.mean(metVal)"""
+
+                    if ~binary:
+                        metVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
+                        if torch.is_tensor(metVal):
+                            metVal = metVal.detach().cpu().numpy()
+                    else:
+                        metVal = my_f1_score(Ytest, ypred, wei)[0]
+
+                    logger.info(f'{metVal} vs {bestVal}')
+
+                    if (~binary and metVal < bestVal) or (binary and metVal > bestVal):
+                        logger.info('Adding feature')
+                        bestVal = metVal
+                        newFet.append(fet)
+                        numIncrease = 0
+                    else:
+                        numIncrease += 1
+
+                    if numIncrease > 30:
+                        logger.info('The MAE didn t increase for 30 features, we stop here')
+                        break
+
+                logger.info(f'Optimize feature selection finish, best MAE is {bestVal}')
+                log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
+                check_and_create_path(dir_output / oname)
+                save_object(newFet, 'features.pkl', dir_output / oname)
+                features = newFet
+            else:
+                save_object(features, 'features.pkl', dir_output / oname)
+
+            if name == 'xgboost':
+                model = config_xgboost(device, binary)
+                fitparams={
+                'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+
+            if name == 'lightgbm':
+                model = config_lightGBM(device, binary)
+                fitparams={
+                'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
+                'sample_weight' : Yw,
+                }
+
+            if name == 'ngboost':
+                model = config_ngboost(binary)
+                if binary:
+                    return
+                fitparams={
+                'early_stopping_rounds':15,
+                'sample_weight' : Yw,
+                'X_val':Xval[:, features],
+                'Y_val':Yval,
+                }
+
+            logger.info(f'Fitting model {oname}')
+            model.fit(Xtrain[:, features], Ytrain, **fitparams)
+
             check_and_create_path(dir_output / oname)
-            save_object(newFet, 'features.pkl', dir_output / oname)
-            features = newFet
-        else:
-            save_object(features, 'features.pkl', dir_output / oname)
-
-        if name == 'xgboost':
-            model = config_xgboost(device, binary)
-            fitparams={
-            'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
-            'sample_weight' : Yw,
-            'verbose' : False
-            }
-
-        if name == 'lightgbm':
-            model = config_lightGBM(device, binary)
-            fitparams={
-            'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
-            'sample_weight' : Yw,
-            }
-
-        if name == 'ngboost':
-            model = config_ngboost(binary)
-            if binary:
-                return
-            fitparams={
-            'early_stopping_rounds':15,
-            'sample_weight' : Yw,
-            'X_val':Xval[:, features],
-            'Y_val':Yval,
-            }
-
-        logger.info(f'Fitting model {oname}')
-        model.fit(Xtrain[:, features], Ytrain, **fitparams)
-
-        check_and_create_path(dir_output / oname)
-        save_object(model, oname + '.pkl', dir_output / oname)
+            save_object(model, oname + '.pkl', dir_output / oname)
+    
+    except Exception as e:
+        logger.info(f'Error occured with training {e}')
 
 def weighted_rmse_loss(input, target, weights = None):
     if not torch.is_tensor(input):
@@ -1304,6 +1309,45 @@ def weighted_rmse_loss(input, target, weights = None):
         weights = torch.tensor(weights, dtype=torch.float32)
     return torch.sqrt((weights * (input - target) ** 2).sum() / weights.sum())
 
+def log_sum_exp(x):
+    b, _ = torch.max(x, 1)
+    # b.size() = [N, ], unsqueeze() required
+    y = b + torch.log(torch.exp(x - b.unsqueeze(dim=1).expand_as(x)).sum(1))
+    # y.size() = [N, ], no need to squeeze()
+    return y
+
+def class_select(logits, target):
+    # in numpy, this would be logits[:, target].
+    batch_size, num_classes = logits.size()
+    if target.is_cuda:
+        device = target.data.get_device()
+        one_hot_mask = torch.autograd.Variable(torch.arange(0, num_classes)
+                                               .long()
+                                               .repeat(batch_size, 1)
+                                               .cuda(device)
+                                               .eq(target.data.repeat(num_classes, 1).t()))
+    else:
+        one_hot_mask = torch.autograd.Variable(torch.arange(0, num_classes)
+                                               .long()
+                                               .repeat(batch_size, 1)
+                                               .eq(target.data.repeat(num_classes, 1).t()))
+    return logits.masked_select(one_hot_mask)
+
+def weighted_cross_entropy(logits, target, weight=None):
+    assert logits.dim() == 2
+    assert not target.requires_grad
+    target = target.squeeze(1) if target.dim() == 2 else target
+    assert target.dim() == 1
+    loss = log_sum_exp(logits) - class_select(logits, target)
+    loss = loss.view((target.shape[0], 1))
+    if weight is not None:
+        # loss.size() = [N]. Assert weights has the same shape
+        assert list(loss.size()) == list(weight.size())
+        # Weight the loss
+        loss = loss * weight
+        return loss.sum() / weight.sum()
+    return loss.mean()
+
 def add_metrics(methods : list, i : int,
                 ypred : torch.tensor,
                 ytrue : torch.tensor,
@@ -1312,29 +1356,76 @@ def add_metrics(methods : list, i : int,
                 scale : int,
                 model : str,
                 dir : Path) -> dict:
+    
+    datesoftest = np.unique(ytrue[:, 4]).astype(int)
+    years = np.unique([allDates[di].split('-')[0] for di in datesoftest])
+    seasons = generate_season_dict(years)
+
     res = {}
     for name, met, target in methods:
 
         if target == 'proba':
-            mett = met(ypred, ytrue[:,-1], ytrue[:,-3])
+            mett = met(ypred, ytrue[:,-1], ytrue[:,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
 
             res[name] = mett
+
+            for season, datesIndex in seasons.items():
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett = met(ypred[mask], ytrue[mask,-1], ytrue[mask,-4])
+                if torch.is_tensor(mett):
+                    mett = mett.detach().cpu().numpy()
+
+                res[name+'_'+season] = mett
+
         elif target == 'bin':
-            mett = met(ytrue[:,-2] > 0, ypred, ytrue[:,-3])
+
+            mett = met(ytrue, ypred, isBin, ytrue[:,-4])
+
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name] = mett
 
-            mett = met(ytrue[:,-2] > 0, ypred, None)
+            for season, datesIndex in seasons.items():                
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett = met(ytrue[mask, :], ypred[mask], isBin, ytrue[mask,-4])
+                if torch.is_tensor(mett):
+                    mett = mett.detach().cpu().numpy()
+
+                res[name+'_'+season] = mett
+
+            mett = met(ytrue, ypred, isBin, None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
-            res[name+'no_weighted'] = mett
-        
+            
+            res[name+'_unweighted'] = mett
+
+            for season, datesIndex in seasons.items():
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett = met(ytrue[mask], ypred[mask], isBin, None)
+
+                if torch.is_tensor(mett):
+                    mett = mett.detach().cpu().numpy()
+
+                res[name+'_unweighted_'+season] = mett
+                
         elif target == 'class':
-            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-3], top=None)
+            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-4], top=None)
             res[name] = mett
+
+            for season, datesIndex in seasons.items():
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett =  met(ypred[mask], ytrue[mask], testDepartement, isBin, scale, model, dir, weights=ytrue[mask,-4], top=None)
+                res[name+'_'+season] = mett
 
             mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=None, top=10)
             res[name+'top10'] = mett
@@ -1358,9 +1449,9 @@ def poisson_loss(inputs, target, weights = None):
     else:
         return ((torch.exp(inputs) - target*torch.log(inputs) + torch.log(factorial(target))) * weights).sum() / weights.sum()
     
-def quantile_prediction_error(ytrue : torch.tensor, ypred : torch.tensor, weights = None):
+def quantile_prediction_error(Y : torch.tensor, ypred : torch.tensor, isBin : bool, weights = None):
     maxi = torch.max(ypred).detach().cpu().numpy()
-    ytrue = ytrue.detach().cpu().numpy().astype(int)
+    ytrue = Y[:,-2].detach().cpu().numpy().astype(int)
     ypred = ypred.detach().cpu().numpy()
     if maxi < 1.0:
         maxi = 1.0
@@ -1385,7 +1476,11 @@ def quantile_prediction_error(ytrue : torch.tensor, ypred : torch.tensor, weight
 
     return np.mean(error)
 
-def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tensor = None):
+def my_f1_score(Y : torch.tensor, ypred : torch.tensor, isBin : bool, weights : torch.tensor = None):
+    
+    ytrue = Y[:,-2] > 0
+    ytrueReg = Y[:,-1]
+
     bounds = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
 
     if torch.is_tensor(ypred):
@@ -1395,33 +1490,51 @@ def my_f1_score(ytrue : torch.tensor, ypred : torch.tensor, weights : torch.tens
         
     if torch.is_tensor(ytrue): 
         ytrueNumpy = ytrue.detach().cpu().numpy()
+        ytrueRegNumpy = ytrueReg.detach().cpu().numpy()
     else:
         ytrueNumpy = ytrue
+        ytrueRegNumpy = ytrueReg
     
-    maxi = np.nanmax(ypredNumpy)
+    if isBin:
+        maxi = np.nanmax(ypredNumpy)
+    else:
+        maxi = np.nanmax(ytrueRegNumpy)
 
     if weights is not None:
         if torch.is_tensor(weights):
             weightsNumpy = weights.detach().cpu().numpy()
         else:
             weightsNumpy = weights
+        
+        weightsNumpy[np.argwhere(ytrue == 0)[:,0]] = 1
+        
     else:
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
-
-    weightsNumpy = (weightsNumpy * ytrueNumpy) + 1 ## make all non fire point weights at 1 and keep the seasonality of each fire points
 
     bestScore = 0.0
     prec = 0.0
     rec = 0.0
     bestBound = 0.0
     for bound in bounds:
-        yBinPred = (ypredNumpy > bound * maxi).astype(int)
+        if isBin:
+            yBinPred = (ypredNumpy > bound * maxi).astype(int)
+        else:
+            yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
+
         f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
         if f1 > bestScore:
             bestScore = f1
             bestBound =  bound
             prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+    
+    if not isBin:
+        yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
+        f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+        bestScore = f1
+        bestBound =  bound
+        prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+        rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
 
     return (bestScore, prec, rec, bestBound, ypredNumpy > bestBound * maxi)
 
@@ -1445,7 +1558,7 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
         else:
             predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
             logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5)
+            predictor = Predictor(5, name=nameDep+'Binary')
             if np.unique(ypred).shape[0] <= 5:
                 return res
             predictor.fit(np.unique(ypred[mask]))
@@ -1495,7 +1608,7 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
             logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5)
+            predictor = Predictor(5, name=nameDep+'Binary')
             if np.unique(ypred).shape[0] <= 5:
                 return res
             predictor.fit(np.unique(ypred[mask]))
@@ -1537,7 +1650,7 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
             logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5)
+            predictor = Predictor(5, name=nameDep+'Binary')
             if np.unique(ypred).shape[0] <= 5:
                 return res
             predictor.fit(np.unique(ypred[mask]))
@@ -1569,6 +1682,7 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
 
     dir_predictor = root_graph / dir / 'influenceClustering'
 
+
     ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
@@ -1583,7 +1697,7 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
             predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
             logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5)
+            predictor = Predictor(5, name=nameDep+'Binary')
             if np.unique(ypred).shape[0] <= 5:
                 return res
             predictor.fit(np.unique(ypred[mask]))
@@ -1598,7 +1712,8 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
             ytrueclass = ytrueclass[mask2]
             ypredclass = ypredclass[mask2]
             yweights = None
-
+        if ytrueclass.shape[0] == 0:
+            continue
         res[nameDep] = mean_absolute_error(ytrueclass, ypredclass, sample_weight=yweights)
 
     return res
@@ -1877,6 +1992,80 @@ def log_features(fet, scale, pos_feature, methods):
                     logger.info(f'{keys[i], fe[1]}')
                 break
 
+def calculate_feature_range(fet, scale):
+        coef = 4 if scale > 0 else 1
+        if fet == 'Calendar' or fet == 'Calendar_mean':
+            variables = calendar_variables
+            maxi = len(calendar_variables)
+            methods = ['raw']
+        elif fet == 'air' or fet == 'air_mean':
+            variables = air_variables
+            maxi = len(air_variables)
+            methods = ['raw']
+        elif fet == 'sentinel':
+            variables = sentinel_variables
+            maxi = coef * len(sentinel_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'Geo':
+            variables = geo_variables
+            maxi = len(geo_variables)
+            methods = ['raw']
+        elif fet == 'foret':
+            variables = foret_variables
+            maxi = coef * len(foret_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'highway':
+            variables = osmnx_variables
+            maxi = coef * len(osmnx_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'landcover':
+            variables = landcover_variables
+            maxi = coef * len(landcover_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'dynamicWorld':
+            variables = dynamic_world_variables
+            maxi = coef * len(dynamic_world_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'vigicrues':
+            variables = vigicrues_variables
+            maxi = coef * len(vigicrues_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'nappes':
+            variables = nappes_variables
+            maxi = coef * len(nappes_variables)
+            methods = ['mean', 'min', 'max', 'std']
+        elif fet == 'AutoRegressionReg':
+            variables = auto_regression_variable_reg
+            maxi = len(auto_regression_variable_reg)
+            methods = ['raw']
+        elif fet == 'AutoRegressionBin':
+            variables = auto_regression_variable_bin
+            maxi = len(auto_regression_variable_bin)
+            methods = ['raw']
+        elif fet in varying_time_variables:
+            variables = [fet]
+            maxi = 1
+            methods = ['raw']
+        elif fet.find('pca') != -1:
+            variables = [fet]
+            maxi = 1
+            methods = ['raw']
+        else:
+            variables = [fet]
+            maxi = coef
+            methods = ['mean', 'min', 'max', 'std']
+
+        return maxi, methods, variables
+
+def select_train_features(trainFeatures, features, scale, pos_feature):
+    # Select train features
+    train_fet_num = [0,1,2,3,4,5]
+    for fet in features:
+        if fet in trainFeatures:
+            maxi, _, _ = calculate_feature_range(fet, scale)
+            train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+    return train_fet_num
+
 def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures, scale):
 
     if NbFeatures == 'all':
@@ -1909,3 +2098,223 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, N
     log_features(features_importance, scale, pos_feature, ['min', 'mean', 'max', 'std'])
     features_selected = features_importance[:,0].astype(int)
     return features_selected
+
+def shapiro_wilk(ypred, ytrue, dir_output):
+    diff = ytrue - ypred
+    swtest = scipy.stats.shapiro(diff)
+    try:
+        logger.info(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
+        plt.hist(diff)
+        plt.title(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
+        plt.savefig(dir_output / 'shapiro_wilk_test.png')
+        plt.close('all')
+    except Exception as e:
+        logger.info(e)
+
+def select_n_points(X, Y, dir, nbpoints):
+    cls = [0,1,2,3,4]
+    oldWeights = Y[:, 5]
+    X[:, 5] = 0
+    Y[:, 5] = 0
+    udept = np.uniuqe(X[:,3])
+    for dept in udept:
+        mask = np.argwhere(X[:, 3] == dept)
+        dir_predictor = root_graph / dir / 'influenceClustering'
+        predictor = read_object(int2name[dept]+'Predictor.pkl', dir_predictor)
+        classs = predictor.predict(X[mask, -1])
+        for cs in cls:
+            maskc = np.argwhere(classs == cs)
+            choices = np.random.choice(maskc, nbpoints)
+            X[choices, 5] = oldWeights[choices]
+            Y[choices, 5] = oldWeights[choices]
+
+    return X, Y
+
+def check_class(influence, bin):
+    values = influence[~np.isnan(influence)]
+    binValues_ = bin[~np.isnan(influence)]
+    predictor = Predictor(5, name='test')
+    predictor.fit(np.unique(values))
+    classs = order_class(predictor, predictor.predict(values))
+    predictor.log()
+    cls = np.unique(classs)
+    for cl in cls:
+        mask = classs == cl
+        logger.info(f'class {cl}, {np.nanmean(binValues_[mask]), np.nanmean(values[mask])}')
+
+def change_dict_key(d, old_key, new_key, default_value=None):
+    d[new_key] = d.pop(old_key, default_value)
+
+def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int):
+    check_and_create_path(dir_output)
+    logger.info('###################" Calculate break point ####################')
+    res_cluster = {}
+    n_cluster = 5
+    features_selected_2 = []
+
+    # For each feature
+    for fet in features:
+        train_fet_num = []
+        check_and_create_path(dir_output / fet)
+        # Select the numerical values
+        maxi, methods, variales = calculate_feature_range(fet, scale)
+        logger.info(f'{fet}, {variales}, {methods}')
+        train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+        len_met = len(methods)
+        
+        i_var = -1
+        # For each method
+        for i, xs in enumerate(train_fet_num):
+            #if xs not in features_selected:
+            #    continue
+
+            if len_met == len_met:
+                i_met = i % len_met
+            else:
+                i_met = 0
+
+            if i_met % len_met == 0:
+                i_var += 1
+
+            on = fet+'_'+variales[i_var]+'_'+methods[i_met] # Get the right name
+            logger.info(on)
+            res_cluster[xs] = {}
+            res_cluster[xs]['name'] = on
+            res_cluster[xs]['fet'] = fet
+            X_fet = Xset[:, xs] # Select the feature
+            if np.unique(X_fet).shape[0] < n_cluster:
+                continue
+            X_cluster = np.copy(X_fet)
+
+            # Create the cluster model
+            model = Predictor(n_cluster, on)
+            model.fit(X_cluster)
+
+            save_object(model, on+'.pkl', dir_output / fet)
+
+            pred = order_class(model, model.predict(X_cluster)) # Predict and order class to 0 1 2 3 4
+
+            cls = np.unique(pred)
+            if cls.shape[0] != n_cluster:
+                continue
+
+            plt.figure(figsize=(5,5)) # Create figure for ploting
+
+            # For each class calculate the target values
+            for c in cls:
+                mask = np.argwhere(pred == c)[:,0]
+                res_cluster[xs][c] = np.sum(Yset[mask, -2]) / np.sum(Yset[:,-2])
+                plt.scatter(X_fet[mask], Yset[mask,-2], label=c)
+
+            # Calculate Pearson coefficient
+            df = pd.DataFrame(res_cluster, index=[0,1,2,3,4]).reset_index()
+            df.rename({'index': 'class'}, axis=1, inplace=True)
+            df = df[['class', xs]]
+            correlation = df['class'].corr(df[xs])
+            res_cluster[xs]['correlation'] = correlation
+            # Plot
+            plt.ylabel('Sinister')
+            plt.xlabel(fet+'_'+methods[i_met])
+            plt.title(fet+'_'+methods[i_met])
+            on += '.png'
+            plt.legend()
+            plt.savefig(dir_output / fet / on)
+            plt.close('all')
+
+            # If no correlation then pass
+            if abs(correlation) > 0.7:
+                # If negative linearity, inverse class
+                if correlation < 0:
+                    new_class = np.flip(np.arange(n_cluster))
+                    temp = {}
+                    for i, nc in enumerate(new_class):
+                        temp[nc] = res_cluster[xs][i]
+                    temp['correlation'] = res_cluster[xs]['correlation']
+                    temp['name'] = res_cluster[xs]['name']
+                    temp['fet'] = res_cluster[xs]['fet']
+                    res_cluster[xs] = temp
+                
+                # Add in selected features
+                features_selected_2.append(xs)
+        
+    logger.info(len(features_selected_2))
+    save_object(res_cluster, 'break_point_dict.pkl', dir_output)
+    save_object(features_selected_2, 'features.pkl', dir_output)
+
+def est_bissextile(annee):
+    return annee % 4 == 0 and (annee % 100 != 0 or annee % 400 == 0)
+
+def ajuster_jour_annee(date, dayoyyear):
+    if not est_bissextile(date.year) and date > pd.Timestamp(date.year, 2, 28):
+        # Ajuster le jour de l'année pour les années non bissextiles après le 28 février
+        return dayoyyear + 1
+    else:
+        return dayoyyear
+    
+def generate_season_dict(years):
+    res = {}
+
+    dates = {
+    'summer' : ('06-01', '08-31'),
+    'winter' : ('12-01', '02-28'),
+    'autumn' : ('09-01', '11-30'),
+    'spring' : ('03-01', '05-31')
+    }
+    
+    for season in ['winter', 'spring', 'summer', 'autumn']:
+        res[season] = []
+        for year in years:
+            if season == 'winter':
+                y2 = str(int(year) + 1)
+            else:
+                y2 = year
+            datesBetween = find_dates_between(year+'-'+dates[season][0], y2+'-'+dates[season][1])
+            res[season] += [allDates.index(d) for d in datesBetween if d in allDates]
+
+    return res
+
+def show_pcs(pca, size, components, dir_output):
+    labels = {
+    str(i): f"PC {i+1} ({var:.1f}%)"
+    for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+    }
+
+    fig = px.scatter_matrix(
+        components,
+        labels=labels,
+        dimensions=range(size)
+    )
+    fig.update_traces(diagonal_visible=False)
+    #fig.show()
+    pio.write_image(fig, dir_output / "pca.png")
+
+def find_n_component(thresh, pca):
+    nb_component = 0
+    sumi = 0.0
+    for i in range(pca.explained_variance_ratio_.shape[0]):
+        sumi += pca.explained_variance_ratio_[i]
+        if sumi >= thresh:
+            nb_component = i + 1
+            break
+    return nb_component
+
+def train_pca(X, percent, dir_output):
+    pca =  PCA(n_components='mle', svd_solver='full')
+    components = pca.fit_transform(X[:, 6:])
+    check_and_create_path(dir_output / 'pca')
+    show_pcs(pca, 2, components, dir_output / 'pca')
+    print('99 % :',find_n_component(0.99, pca))
+    print('95 % :', find_n_component(0.95, pca))
+    print('90 % :' , find_n_component(0.90, pca))
+    pca_number = find_n_component(percent, pca)
+    save_object(pca, 'pca.pkl', dir_output)
+    pca =  PCA(n_components=pca_number, svd_solver='full')
+    pca.fit(X[:, 6:])
+    return pca, pca_number
+
+def apply_pca(X, pca, pca_number):
+    res = pca.transform(X[:, 6:])
+    new_X = np.empty((X.shape[0], 6 + pca_number))
+    new_X[:, :6] = X[:, :6]
+    new_X[:, 6:] = res
+    return new_X

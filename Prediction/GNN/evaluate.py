@@ -3,6 +3,27 @@ import matplotlib.pyplot as plt
 import argparse
 import matplotlib.colors as mcolors
 
+XKCD_COLORS = {
+    'cloudy blue': '#acc2d9',
+    'dark pastel green': '#56ae57',
+    'dust': '#b2996e',
+    'electric lime': '#a8ff04',
+    'fresh green': '#69d84f',
+    'light eggplant': '#894585',
+    'nasty green': '#70b23f',
+    'really light blue': '#d4ffff',
+    'tea': '#65ab7c',
+    'warm purple': '#952e8f',
+    'yellowish tan': '#fcfc81',
+    'cement': '#a5a391',
+    'dark grass green': '#388004',
+    'dusty teal': '#4c9085',
+    'grey teal': '#5e9b8a',
+    'macaroni and cheese': '#efb435',
+    'pinkish tan': '#d99b82',
+    'spruce': '#0a5f38',
+    'strong blue': '#0c06f7',}
+
 def evaluate_ca(metrics, met):
     df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'departement', met])
     i = 0
@@ -15,13 +36,13 @@ def evaluate_ca(metrics, met):
     return df
 
 def evaluate_f1(metrics, met):
-    df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'f1', 'prec', 'rec'])
+    df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'f1', 'precision', 'recall'])
     i = 0
     for key, value in metrics.items():
         df.loc[i, 'model'] = key
         df.loc[i, 'f1'] = value[met][0]
-        df.loc[i, 'prec'] = value[met][1]
-        df.loc[i, 'rec'] = value[met][2]
+        df.loc[i, 'precision'] = value[met][1]
+        df.loc[i, 'recall'] = value[met][2]
         df.loc[i, 'tresh'] = value[met][3]
         i += 1
     return df.sort_values('f1')
@@ -73,6 +94,7 @@ def plot(df, met, dir_output, out_name, color):
 
     out_name += '.png'
     plt.savefig(dir_output / out_name)
+    plt.close('all')
 
 def plot_variation(df, base_label, met, dir_output, out_name, color):
 
@@ -110,31 +132,70 @@ def plot_variation(df, base_label, met, dir_output, out_name, color):
 
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
-    f1s, f12s, maes, bcas, rmses, maetop10s, crs = [], [], [], [], [], [], []
-
+    f1s, maes, bcas, rmses, maetop10s, crs = [], [], [], [], [], []
     (_, _, base_label, _) = experiments[0]
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
-        dir_test = Path(expe + '/' + sinister +  '/test/' + test_name + '/')
+        dir_test = Path(expe + '/' + sinister + '/' + resolution + '/test/' + test_name + '/')
+        
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
 
         # F1 score
         f1 = evaluate_f1(metrics, 'f1')
         f1['f1'] = f1['f1'].astype(float)
+        f1['precision'] = evaluate_f1(metrics, 'f1')['precision'].astype(float)
+        f1['recall'] = evaluate_f1(metrics, 'f1')['recall'].astype(float)
         f1['expe'] = expe
         f1['index'] = index
         f1['label'] = label
-        f1s.append(f1)
 
         # F1 score
-        f12 = evaluate_f1(metrics, 'f1no_weighted')
-        f12['f1no_weighted'] = f12['f1'].astype(float)
-        f12['expe'] = expe
-        f12['index'] = index
-        f12['label'] = label
-        f12s.append(f12)
+        f1['f1_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['f1']
+
+        f1['f1_winter'] = evaluate_f1(metrics, 'f1_winter')['f1']
+        f1['f1_unweighted_winter'] = evaluate_f1(metrics, 'f1_unweighted_winter')['f1']
+
+        f1['f1_spring'] = evaluate_f1(metrics, 'f1_spring')['f1']
+        f1['f1_unweighted_spring'] = evaluate_f1(metrics, 'f1_unweighted_spring')['f1']
+
+        f1['f1_summer'] = evaluate_f1(metrics, 'f1_summer')['f1']
+        f1['f1_unweighted_summer'] = evaluate_f1(metrics, 'f1_unweighted_summer')['f1']
+
+        f1['f1_autumn'] = evaluate_f1(metrics, 'f1_winter')['f1']
+        f1['f1_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['f1']
+
+        # Precision
+        f1['precision_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['precision']
+
+        f1['precision_winter'] = evaluate_f1(metrics, 'f1_winter')['precision']
+        f1['precision_unweighted_winter'] = evaluate_f1(metrics, 'f1_unweighted_winter')['precision']
+
+        f1['precision_spring'] = evaluate_f1(metrics, 'f1_spring')['precision']
+        f1['precision_unweighted_spring'] = evaluate_f1(metrics, 'f1_unweighted_spring')['precision']
+
+        f1['precision_summer'] = evaluate_f1(metrics, 'f1_summer')['precision']
+        f1['precision_unweighted_summer'] = evaluate_f1(metrics, 'f1_unweighted_summer')['precision']
+
+        f1['precision_autumn'] = evaluate_f1(metrics, 'f1_winter')['precision']
+        f1['precision_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['precision']
+
+        f1['recall_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['f1']
+
+        f1['recall_winter'] = evaluate_f1(metrics, 'f1_winter')['recall']
+        f1['recall_unweighted_winter'] = evaluate_f1(metrics, 'f1_unweighted_winter')['recall']
+
+        f1['recall_spring'] = evaluate_f1(metrics, 'f1_spring')['recall']
+        f1['recall_unweighted_spring'] = evaluate_f1(metrics, 'f1_unweighted_spring')['recall']
+
+        f1['recall_summer'] = evaluate_f1(metrics, 'f1_summer')['recall']
+        f1['recall_unweighted_summer'] = evaluate_f1(metrics, 'f1_unweighted_summer')['recall']
+
+        f1['recall_autumn'] = evaluate_f1(metrics, 'f1_winter')['recall']
+        f1['recall_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['recall']
+
+        f1s.append(f1)
 
         # MAE score
         mae = evaluate_ca(metrics, 'meac')
@@ -143,6 +204,11 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         mae['expe'] = expe
         mae['index'] = index
         mae['label'] = label
+        mae['meac_winter'] = evaluate_ca(metrics, 'meac_winter')['meac_winter']
+        mae['meac_spring'] = evaluate_ca(metrics, 'meac_spring')['meac_spring']
+        mae['meac_summer'] = evaluate_ca(metrics, 'meac_summer')['meac_summer']
+        mae['meac_autumn'] = evaluate_ca(metrics, 'meac_winter')['meac_winter']
+
         maes.append(mae)
 
         # MAE score
@@ -161,6 +227,12 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         bca['expe'] = expe
         bca['label'] = label
         bca['index'] = index
+
+        bca['bca_winter'] = evaluate_ca(metrics, 'bca_winter')['bca_winter']
+        bca['bca_spring'] = evaluate_ca(metrics, 'bca_spring')['bca_spring']
+        bca['bca_summer'] = evaluate_ca(metrics, 'bca_summer')['bca_summer']
+        bca['bca_autumn'] = evaluate_ca(metrics, 'bca_autumn')['bca_autumn']
+
         bcas.append(bca)
 
         # RMSE score
@@ -170,21 +242,15 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         rmse['expe'] = expe
         rmse['label'] = label
         rmse['index'] = index
+        rmse['rmse_winter'] = evaluate_met(metrics, 'rmse_winter')['rmse_winter']
+        rmse['rmse_spring'] = evaluate_met(metrics, 'rmse_spring')['rmse_spring']
+        rmse['rmse_summer'] = evaluate_met(metrics, 'rmse_summer')['rmse_summer']
+        rmse['rmse_autumn'] = evaluate_met(metrics, 'rmse_autumn')['rmse_autumn']
         rmses.append(rmse)
-
-        """# CR score
-        cr = evaluate_cr(metrics, 'class')
-        cr = cr.groupby('model')['class'].mean().reset_index()
-        cr['class'] = cr['cr'].astype(float)
-        cr['expe'] = expe
-        cr['label'] = label
-        cr['index'] = index
-        crs.append(cr)"""
 
     f1s = pd.concat(f1s).reset_index(drop=True)
     maes = pd.concat(maes).reset_index(drop=True)
     bcas = pd.concat(bcas).reset_index(drop=True)
-    f12s = pd.concat(f12s).reset_index(drop=True)
     rmses = pd.concat(rmses).reset_index(drop=True)
     maetop10s = pd.concat(maetop10s).reset_index(drop=True)
     #crs = pd.concat(crs).reset_index(drop=True)
@@ -192,26 +258,85 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     f1s.to_csv(dir_output / 'f1s.csv')
     maes.to_csv(dir_output / 'maes.csv')
     bcas.to_csv(dir_output / 'bcas.csv')
-    f12s.to_csv(dir_output / 'f12s.csv')
     rmses.to_csv(dir_output / 'rmses.csv')
     maetop10.to_csv(dir_output / 'maetop10.csv')
     #crs.to_csv(dir_output / 'crs.csv')
 
-    index_colors = f1s['index'].values
+    index_colors = np.unique(f1s['index'].values)
 
     color = {}
     for i in index_colors:
-        color[i] = random.choice(list(mcolors.XKCD_COLORS.keys()))
+        c = random.choice(list(mcolors.XKCD_COLORS.keys()))
+        print(c)
+        if c.find('yellow') > -1:
+            continue
+        color[i] = c
 
     index_colors = np.unique(index)
 
     plot(f1s, 'f1', dir_output, 'f1', color)
-    plot(f12s, 'f1no_weighted', dir_output, 'f1no_weighted', color)
+    plot(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color)
+    plot(f1s, 'precision', dir_output, 'precision', color)
+    plot(f1s, 'precision_unweighted', dir_output, 'precision_unweighted', color)
+    plot(f1s, 'recall', dir_output, 'recall', color)
+    plot(f1s, 'recall_unweighted', dir_output, 'recall_unweighted', color)
+
     plot(maes, 'meac', dir_output, 'meac', color)
     plot(bcas, 'bca', dir_output, 'bca', color)
     plot(rmses, 'rmse', dir_output, 'rmse', color)
     plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
-    #plot_cr(cr, 'cr', dir_output, 'cr', color)
+
+    plot(f1s, 'f1_winter', dir_output, 'f1_winter', color)
+    plot(f1s, 'f1_unweighted_winter', dir_output, 'f1_unweighted_winter', color)
+
+    plot(f1s, 'precision_winter', dir_output, 'precision_winter', color)
+    plot(f1s, 'precision_unweighted_winter', dir_output, 'precision_unweighted_winter', color)
+
+    plot(f1s, 'recall_winter', dir_output, 'recall_winter', color)
+    plot(f1s, 'recall_unweighted_winter', dir_output, 'recall_unweighted_winter', color)
+
+    plot(maes, 'meac_winter', dir_output, 'meac_winter', color)
+    plot(bcas, 'bca_winter', dir_output, 'bca_winter', color)
+    plot(rmses, 'rmse_winter', dir_output, 'rmse_winter', color)
+
+    plot(f1s, 'f1_summer', dir_output, 'f1_summer', color)
+    plot(f1s, 'f1_unweighted_summer', dir_output, 'f1_unweighted_summer', color)
+
+    plot(f1s, 'precision_summer', dir_output, 'precision_summer', color)
+    plot(f1s, 'precision_unweighted_summer', dir_output, 'precision_unweighted_summer', color)
+
+    plot(f1s, 'recall_summer', dir_output, 'recall_summer', color)
+    plot(f1s, 'recall_unweighted_summer', dir_output, 'recall_unweighted_summer', color)
+
+    plot(maes, 'meac_summer', dir_output, 'meac_summer', color)
+    plot(bcas, 'bca_summer', dir_output, 'bca_summer', color)
+    plot(rmses, 'rmse_summer', dir_output, 'rmse_summer', color)
+
+    plot(f1s, 'f1_spring', dir_output, 'f1_spring', color)
+    plot(f1s, 'f1_unweighted_spring', dir_output, 'f1_unweighted_spring', color)
+
+    plot(f1s, 'precision_spring', dir_output, 'precision_spring', color)
+    plot(f1s, 'precision_unweighted_spring', dir_output, 'precision_unweighted_spring', color)
+
+    plot(f1s, 'recall_spring', dir_output, 'recall_spring', color)
+    plot(f1s, 'recall_unweighted_spring', dir_output, 'recall_unweighted_spring', color)
+
+    plot(maes, 'meac_spring', dir_output, 'meac_spring', color)
+    plot(bcas, 'bca_spring', dir_output, 'bca_spring', color)
+    plot(rmses, 'rmse_spring', dir_output, 'rmse_spring', color)
+
+    plot(f1s, 'f1_autumn', dir_output, 'f1_autumn', color)
+    plot(f1s, 'f1_unweighted_autumn', dir_output, 'f1_unweighted_autumn', color)
+
+    plot(f1s, 'precision_autumn', dir_output, 'precision_autumn', color)
+    plot(f1s, 'precision_unweighted_autumn', dir_output, 'precision_unweighted_autumn', color)
+
+    plot(f1s, 'recall_autumn', dir_output, 'recall_autumn', color)
+    plot(f1s, 'recall_unweighted_autumn', dir_output, 'recall_unweighted_autumn', color)
+
+    plot(maes, 'meac_autumn', dir_output, 'meac_autumn', color)
+    plot(bcas, 'bca_autumn', dir_output, 'bca_autumn', color)
+    plot(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color)
 
     """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
     plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
@@ -228,12 +353,14 @@ if __name__ == "__main__":
     parser.add_argument('-n', '--name', type=str, help='Test name')
     parser.add_argument('-o', '--output', type=str, help='Output directory')
     parser.add_argument('-s', '--sinister', type=str, help='Sinister')
+    parser.add_argument('-r', '--resolution', type=str, help='resolution')
 
     args = parser.parse_args()
 
     test_name = args.name
     sinister = args.sinister
-    dir_output = Path(args.output)
+    resolution = args.resolution
+    dir_output = Path(args.output + '/' + test_name)
 
     # features
     experiments_features = [('exp1', 0, 'All', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
@@ -253,7 +380,7 @@ if __name__ == "__main__":
                    ('exp1', 14, 'noAir', 'full_0_10_100_noAir_10_z-score_Catboost_'+test_name+'_tree'),
                    #('exp1', 15, 'noEle', 'full_0_10_100_noEle_10_z-score_Catboost_'+test_name+'_tree'),
                    ]
-    
+
     # Ks
     experiments_ks = [('exp_ks', 0, '0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                    ('exp_ks', 1, '1', 'full_1_10_100_10_z-score_Catboost_'+test_name+'_tree'),
@@ -267,18 +394,26 @@ if __name__ == "__main__":
 
     # Scale
     experiments_scale = [('ecai', 10, '10', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('ecai', 2, '2', '20_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
+                            ('ecai', 2, '2', '20_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
                              ('ecai', 1, '1', '20_0_1_100_1_z-score_Catboost_'+test_name+'_tree'),
                              ('try_0_scale', 0, '0', '20_0_0_20_0_z-score_Catboost_'+test_name+'_tree'),
                             ]
 
     # Inference
-    experiments_inference = [('inference', 0, '0', 'full_0_10_10_z-score_Catboost_'+test_name+'_tree'),
+    experiments_inference = [#('inference', 5, '5', 'full_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 0, '100_0', '100_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 1, '100_7', '100_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 2, 'full_0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 3, 'full_7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 3, 'full_7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl'),
+                             ('final', 4, 'full_0', 'full_0_10_108_10_z-score_Catboost_'+test_name+'_bp'),
                             ]
 
     # ECAI
-    experiments_ecai = [('ecai', 0, '0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                            ]
+    experiments_ecai = [('ecai', 0, 'ecai', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                        ('inference', 1, 'inference', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                        ('final', 2, 'final', 'full_7_10_73_10_z-score_Catboost_'+test_name+'_tree'),
+                        ]
 
     # exp
     experiments_dl = [('exp1', 0, 'Tree based', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
@@ -286,4 +421,4 @@ if __name__ == "__main__":
                             ]
 
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_scale, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)

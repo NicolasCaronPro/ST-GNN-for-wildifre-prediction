@@ -5,8 +5,6 @@ sys.path.insert(0,'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-p
 from utils import *
 from conv_lstm import ConvLSTM
 
-####################################### Zhang ########################################
-
 class Zhang(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, end_channels, dropout, binary, device, n_sequences):
         super(Zhang, self).__init__()
@@ -77,7 +75,7 @@ class Zhang(torch.nn.Module):
 ########################### ConvLTSM ####################################    
 
 class CONVLSTM(torch.nn.Module):
-    def __init__(self, in_channels, hidden_dim, end_channels, n_sequences, device, act_func, dropout):
+    def __init__(self, in_channels, hidden_dim, end_channels, n_sequences, device, act_func, dropout, binary):
         super(CONVLSTM, self).__init__()
 
         num_layer = len(hidden_dim)
@@ -94,7 +92,8 @@ class CONVLSTM(torch.nn.Module):
         self.conv1 = torch.nn.Conv2d(hidden_dim[-1], 1, kernel_size=(3,3), padding=1, stride=1).to(device)
         
         self.output = OutputLayer(in_channels=hidden_dim[-1] * 25 * 25, end_channels=end_channels,
-                        n_steps=n_sequences, device=device, act_func=act_func)
+                        n_steps=n_sequences, device=device, act_func=act_func,
+                        binary=binary)
 
     def forward(self, X, edge_index):
         # edge Index is used for api facility but it is ignore

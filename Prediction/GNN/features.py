@@ -9,20 +9,21 @@ import itertools
 def get_sub_nodes_ground_truth(graph, subNode: np.array,
                            departements : list,
                            oriNode : np.array, path : Path,
-                           train_dir : Path) -> np.array:
+                           train_dir : Path,
+                           resolution  : str) -> np.array:
 
         assert graph.nodes is not None
         
         logger.info('Ground truth')
 
-        newShape = subNode.shape[1] + 2
+        newShape = subNode.shape[1] + 3
         Y = np.full((subNode.shape[0], newShape), -1, dtype=float)
         Y[:, :subNode.shape[1]] = subNode
         codes = []
             
-        dir_mask = path / 'raster' / '2x2'
-        dir_bin = path / 'bin' / '2x2'
-        dir_proba = path / 'influence' / '2x2'
+        dir_mask = path / 'raster'
+        dir_bin = path / 'bin'
+        dir_proba = path / 'influence'
         dir_predictor = train_dir / 'influenceClustering'
 
         for departement in departements:
@@ -36,15 +37,15 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
 
             if array is None:
-                Y[:, -3] = 0
-                Y[:, -2] = 0
-                Y[:, -1] = 0
+                Y[nodeDepartementMask, -4:] = -1
                 continue
+
+            predictor = read_object(departement+'Predictor'+str(graph.scale)+'.pkl', dir_predictor)
 
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                 maskNode = mask == node[0]
-                if node[4] + 1 >= array.shape[-1]:
+                if node[4] >= array.shape[-1]:
                 #################
                 #               #
                 #               #
@@ -55,24 +56,25 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                 #               #
                 #################
 
-                if array[:, :, int(node[4] + 1)][maskNode].shape[0] != 0:
-                    Y[index, -3] = 1
-
+                if array[:, :, int(node[4])][maskNode].shape[0] != 0:
                     # Influence
-                    values = np.unique(array[maskNode, int(node[4] + 1)])[0]
-                    Y[index, -1] = round(values, 3)
+                    values = np.unique(array[maskNode, int(node[4])])[0]
+                    Y[index, -1] = values
 
                     # Nb events
-                    values = (np.unique(arrayBin[maskNode, int(node[4] + 1)]))[0]
+                    values = (np.unique(arrayBin[maskNode, int(node[4])]))[0]
                     Y[index, -2] = values
 
-            predictor = read_object(departement+'Predictor'+str(graph.scale)+'.pkl', dir_predictor)
-            mask = np.argwhere((Y[:,3] == str2int[departement.split('-')[-1]]) & (Y[:,-3] == 1))[:,0]
-            if mask.shape[0] != 0:
-                influence = Y[mask, -1]
-                Y[mask, -3] = predictor.weight_array(predictor.predict(influence)).reshape(-1)
+                    # Class
+                    Y[index, -3] = predictor.predict(np.asarray(Y[index, -1])).reshape(-1)
 
-        Y[~np.isin(Y[:,3], codes)][:,-3] = 0
+                    # Weights
+                    Y[index, -4] = predictor.weight_array(np.asarray(Y[index, -3], dtype=int)).reshape(-1)
+
+            Y[nodeDepartementMask, -3] = order_class(predictor, Y[nodeDepartementMask, -3]).reshape(-1, 1)
+
+        Y[~np.isin(Y[:,4], codes)][:,-4] = 0
+        Y = Y[Y[:, -4] > 0]
 
         return Y
 
@@ -80,7 +82,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         departements : list,
                         features : list, sinister : str,
                         path : Path,
-                        dir_train : Path) -> np.array:
+                        dir_train : Path,
+                        resolution : str) -> np.array:
     
     assert graph.nodes is not None
 
@@ -92,14 +95,17 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info(pos_feature)
     logger.info(pos_feature_train)
 
+    dir_target = ...
+
     def save_values(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
+
         if graph.scale > 0:
-            X[indexNode, indexVvar] = round(np.nanmean(array[mask]), 3)
-            X[indexNode, indexVvar+1] = round(np.nanmin(array[mask]), 3)
-            X[indexNode, indexVvar+2] = round(np.nanmax(array[mask]), 3)
-            X[indexNode, indexVvar+3] = round(np.nanstd(array[mask]), 3)
+            X[indexNode, indexVvar] = round(np.nanmean(array[mask]), 6)
+            X[indexNode, indexVvar+1] = round(np.nanmin(array[mask]), 6)
+            X[indexNode, indexVvar+2] = round(np.nanmax(array[mask]), 6)
+            X[indexNode, indexVvar+3] = round(np.nanstd(array[mask]), 6)
         else:
             X[indexNode, indexVvar] = np.nanmean(array[mask])
 
@@ -115,10 +121,10 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         if graph.scale > 0:
-            X[indexNode, indexVvar] = round(np.nanmean(encode_values), 3)
-            X[indexNode, indexVvar+1] = round(np.nanmin(encode_values), 3)
-            X[indexNode, indexVvar+2] = round(np.nanmax(encode_values), 3)
-            X[indexNode, indexVvar+3] = round(np.nanstd(encode_values), 3)
+            X[indexNode, indexVvar] = round(np.nanmean(encode_values), 6)
+            X[indexNode, indexVvar+1] = round(np.nanmin(encode_values), 6)
+            X[indexNode, indexVvar+2] = round(np.nanmax(encode_values), 6)
+            X[indexNode, indexVvar+3] = round(np.nanstd(encode_values), 36)
         else:
             X[indexNode, indexVvar] = np.nanmean(encode_values)
 
@@ -140,21 +146,22 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     if 'Geo' in features:
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
-    dir_mask = path / 'raster' / '2x2'
+    dir_mask = path / 'raster'
     logging.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
     for departement in departements:
         logger.info(departement)
 
-        dir_data = root / 'csv' / departement / 'raster'
-        
+        dir_data = root / 'csv' / departement / 'raster' / resolution
+        dir_target = root_target / sinister / 'log' / resolution
+
         name = departement+'rasterScale'+str(graph.scale)+'.pkl'
-        mask = pickle.load(open(dir_mask / name, 'rb'))
+        mask = read_object(name, dir_mask)
+        
         nodeDepartementMask = np.argwhere(subNode[:,3] == str2int[departement.split('-')[-1]])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
         logger.info(nodeDepartement.shape)
         if nodeDepartement.shape[0] == 0:
             continue
-
         logger.info('Calendar')
         if 'Calendar' in features:
             unDate = np.unique(nodeDepartement[:,4]).astype(int)
@@ -164,8 +171,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 index = np.argwhere((subNode[:,4] == unDate))
 
                 X[index, pos_feature['Calendar']] = int(date.split('-')[1]) # month
-                X[index, pos_feature['Calendar'] + 1] = ddate.timetuple().tm_yday # dayofweek
-                X[index, pos_feature['Calendar'] + 2] = ddate.weekday() # dayofyear
+                X[index, pos_feature['Calendar'] + 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
+                X[index, pos_feature['Calendar'] + 2] = ddate.weekday() # dayofweek
                 X[index, pos_feature['Calendar'] + 3] = ddate.weekday() >= 5 # isweekend
                 X[index, pos_feature['Calendar'] + 4] = pendant_couvrefeux(ddate) # couvrefeux
                 X[index, pos_feature['Calendar'] + 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
@@ -307,7 +314,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayDW = read_object('dynamic_world.pkl', dir_data)
 
         coef = 4 if graph.scale > -1 else 1
-        if arraySent is not None or arrayLand is not None:
+        if arraySent is not None or arrayLand is not None or arrayDW is not None:
             for node in nodeDepartement:
                 maskNode = mask == node[0]
                 if True not in np.unique(maskNode):
@@ -334,22 +341,19 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         logger.info('Historical')
         if 'Historical' in features:
-            dir_target = root_target / sinister / 'log'
             name = departement+'pastInfluence.pkl'
             arrayInfluence = read_object(name, dir_target)
             if arrayInfluence is not None:
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     maskNode = mask == node[0]
-                    if node[4] - 1 < 0:
-                        continue
 
-                    save_values(arrayInfluence[:,:, int(node[4])], pos_feature['Historical'], index, maskNode)
+                    save_values(arrayInfluence[:,:, int(node[4] - 1)], pos_feature['Historical'], index, maskNode)
                 del arrayInfluence
 
         logger.info('AutoRegressionReg')
         if 'AutoRegressionReg' in features:
-            dir_target = dir_train / 'influence' / '2x2'
+            dir_target = dir_train / 'influence'
             arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target)
             if arrayInfluence is not None:
                 for node in nodeDepartement:
@@ -357,7 +361,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     maskNode = mask == node[0]
                     if node[4] - 1 < 0:
                         continue
-                    
+
                     for band in auto_regression_variable_reg:
                         step = int(band.split('-')[-1])
                         save_value(arrayInfluence[:,:, int(node[4] - step)], pos_feature['AutoRegressionReg'] + auto_regression_variable_reg.index(band), index, maskNode)
@@ -366,7 +370,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         logger.info('AutoRegressionBin')
         if 'AutoRegressionBin' in features:
-            dir_bin = dir_train / 'bin' / '2x2'
+            dir_bin = dir_train / 'bin'
             arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
             if arrayBin is not None:
                 for node in nodeDepartement:
@@ -387,9 +391,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     maskNode = mask == node[0]
-                    if node[4] - 1 < 0:
+                    if node[4] >= array.shape[-1]:
                         continue
-
                     save_values(array[:,:, int(node[4])], pos_feature['vigicrues'] + (4 * vigicrues_variables.index(var)), index, maskNode)
                 del array
 
@@ -400,9 +403,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
                     maskNode = mask == node[0]
-                    if node[4] - 1 < 0:
-                        continue
-
+                    
                     save_values(array[:,:, int(node[4])], pos_feature['nappes'] + (4 * nappes_variables.index(var)), index, maskNode)
                 del array
 
@@ -797,8 +798,8 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
 
         if 'slope' in newAxis:
             originalShape = edges.shape[0]
-            res = np.empty((originalShape + 1, edges.shape[1]), dtype=float)
-            res[: originalShape] = edges
+            res = np.full((originalShape + 1, edges.shape[1]), fill_value=np.nan)
+            res[:originalShape,:] = edges
 
             for node in subNode:
                 dept = node[3]
@@ -808,8 +809,10 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
 
                 mask = read_object(departement+'rasterScale'+str(graph.scale)+'.pkl', dir_mask)
                 elevation = read_object('elevation.pkl', dir_data)
-                edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[1] == node[0]])]
+
+                edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[0] == node[0]])]
                 altitude = np.nanmean(elevation[mask == node[0]])
+
                 for ed in edgesNode:
                     index = np.argwhere((edges[:, 0] == node[0]) & (edges[:, 1] == ed[0]))
                     targetAltitude = np.nanmean(elevation[mask == ed[0]])
@@ -817,7 +820,7 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
                         slope = 0
                     else:
                         slope = funcSlope(altitude, targetAltitude, (node[1], node[2]), (ed[1], ed[2]))
-                    res[originalShape + newAxis.index('slope'), index] = slope
+                    res[originalShape, index] = slope
 
             edges = np.copy(res)
 
@@ -829,10 +832,9 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
 
             originalShape = edges.shape[0]
             numNewFet = len(osmnx_variables) - 1
-            res = np.empty((originalShape + numNewFet, edges.shape[1]), dtype=float)
+            res = np.full((originalShape + numNewFet, edges.shape[1]), fill_value=np.nan)
 
-            res[: originalShape] = edges
-            print(res.shape)
+            res[:originalShape,:] = edges
             udepts = np.unique(subNode[:,3]).astype(int)
 
             for udept in udepts:
@@ -840,11 +842,11 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
                 osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
                 nodeDept = subNode[subNode[:,3] == udept]
                 for node in nodeDept:
-                    edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[1] == node[0]])]
-
+                    edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[0] == node[0]])]
                     for ed in edgesNode:
                         index = np.argwhere((edges[:, 0] == node[0]) & (edges[:, 1] == ed[0]))
-                        val = stat(node[0], ed[1], mask[0], osmnx[0], osmnx_variables[1:])
+                        val = stat(node[0], ed[0], mask[0], osmnx[0], osmnx_variables[1:])
+                        print(val)
                         res[originalShape: originalShape + numNewFet, index] = val
 
             edges = np.copy(res)

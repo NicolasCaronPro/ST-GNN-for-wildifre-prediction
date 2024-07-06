@@ -95,23 +95,23 @@ features = [
 
 # Train features 
 trainFeatures = [
-            'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+            'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd','prec24h',
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-            #'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             'elevation',
             'population',
             'sentinel',
             'landcover',
             #'vigicrues',
-            #'foret',
+            'foret',
             'highway',
-            #'dynamicWorld',
+            'dynamicWorld',
             'Calendar',
             'Historical',
             'Geo',
-            'air',
+            #'air',
             #'nappes',
             #'AutoRegressionReg',
             #'AutoRegressionBin'
@@ -175,9 +175,11 @@ streamHandler = logging.StreamHandler(stream=sys.stdout)
 streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
 
-k_days = 0 # Size of the time series sequence
+k_days = 3 # Size of the time series sequence
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
+
+FAST = False 
 
 maxDist = {0 : 5,
            1 : 10,
@@ -191,6 +193,11 @@ maxDist = {0 : 5,
         9 : 35,
         10 : 35
         }
+
+resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
+                '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
+                '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
+                '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
 
 shape2D = (25,25)
 
@@ -225,7 +232,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                             heads=6, act_func=act_func,
                                             device=device),
                                             
-                        'ST-GATCONV': STGATCONV(k_days + 1,
+                        'ST-GATCONV': STGATCONV(n_sequences=k_days + 1,
                                                 num_of_layers=3,
                                                 in_channels=in_dim,
                                                 hidden_channels=32,
@@ -236,13 +243,24 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                                 act_func=act_func,
                                                 device=device),
 
-                        'ST-GCNCONV' : STGCNCONV(k_days + 1,
+                        'ST-GCNCONV' : STGCNCONV(n_sequences=k_days + 1,
                                                 num_of_layers=3,
                                                 in_channels=in_dim,
                                                 hidden_channels=64,
                                                 residual_channels=64,
                                                 end_channels=32,
                                                 dropout=dropout,
+                                                act_func=act_func,
+                                                device=device),
+
+                        'DST-GCNCONV' : DSTGCNCONV(n_sequences=k_days + 1,
+                                                num_of_temporal_layers=3,
+                                                num_of_spatial_layers=3,
+                                                in_channels=in_dim,
+                                                residual_channels=64,
+                                                hidden_channels=64,
+                                                end_channels=32,
+                                                dropout=0.03,
                                                 act_func=act_func,
                                                 device=device),
 

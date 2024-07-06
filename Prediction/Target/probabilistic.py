@@ -10,12 +10,14 @@ class Probabilistic():
                  precision_y: float,
                  precision_z :float,
                  learner,
-                 dir_output: Path):
+                 dir_output: Path,
+                 resolution : str):
         
         self.dim = dims
         self.precision = (precision_x, precision_y, precision_z)
         self.learner = learner
         self.dir_output = dir_output
+        self.resolution = resolution
         self.config = {}
 
     def _metrics(self, O : np.array,
@@ -79,7 +81,9 @@ class Probabilistic():
                                 number_of_input : int,
                                 save : bool,
                                 names : list,
-                                doPast : bool):
+                                doPast : bool,
+                                allDates : list,
+                                departement : list):
         if save:
             check_and_create_path(self.dir_output / 'log')
 
@@ -90,21 +94,80 @@ class Probabilistic():
 
             dim = self.dim[band]
 
-            density = np.array(influence_index3D(input[band], np.isnan(input[band]),
+            daily = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                             dimS=self.precision, mode='laplace',
                                                             dim=(dim[0], dim[1], dim[2]), semi=doPast))
-            influence = np.copy(density)
+            
+            years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
+            if departement[band] == 'departement-01-ain' or departement[band] == 'departement-69-rhone':
+                years = years[1:]
+            if departement == 'departement-69-rhone':
+                years = years[:-2]
+            
+            historical = np.zeros((daily.shape))
+            for index, date in enumerate(allDates):
+                vec = date.split('-')
+                month = vec[1]
+                day = vec[2]
+                for y in years:
+                    newd = y+'-'+month+'-'+day
+                    if newd not in allDates:
+                        continue
+                    newindex = allDates.index(newd)
+                    if doPast and newindex > index:
+                        continue
+                    historical[:, :, index] += input[band][:, :, newindex]
+                historical[:, :, index] /= len(years)
 
+            seasonaly = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                          dimS=self.precision, mode='mean',
+                                                           dim=(dim[0], dim[1], dim[2]), semi=doPast))
+            
+            influence = np.full(daily.shape, np.nan)
+
+            #influence = daily + historical + seasonaly
+            #influence = (daily + historical + seasonaly) / 3
+
+            historical[np.isnan(input[band])] = np.nan
+            seasonaly[np.isnan(input[band])] = np.nan
+            daily[np.isnan(input[band])] = np.nan
+            mask = ~np.isnan(input[band])
+            df = pd.DataFrame(index=np.arange(0, historical[mask].shape[0]))
+            df['1'] = historical[mask]
+            df['2'] = seasonaly[mask]
+            df['3'] = daily[mask]
+            df['4'] = input[band][mask]
+            pca =  PCA(n_components='mle', svd_solver='full')
+            components = pca.fit_transform(df.values)
+            check_and_create_path(self.dir_output / 'pca')
+            show_pcs(pca, 2, components, self.dir_output / 'pca')
+            print('99 % :',find_n_component(0.99, pca))
+            print('95 % :', find_n_component(0.95, pca))
+            print('90 % :' , find_n_component(0.90, pca))
+
+            pca =  PCA(n_components=1, svd_solver='full')
+            res = pca.fit_transform(df.values)
+
+            influence[mask] = res[:, 0]
             influence[np.isnan(input[band])] = np.nan
-
-            influence = np.round(influence, 3)
+            
             print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
             if save:
                 if not doPast:
                     outputName = names[band]+'Influence.pkl'
+                    histoname = names[band]+'Historical.pkl'
+                    dailyname = names[band]+'Daily.pkl'
+                    seasoname = names[band]+'Season.pkl'
                 else:
                     outputName = names[band]+'pastInfluence.pkl'
-                save_object(influence, outputName ,self.dir_output / 'log')
+                    histoname = names[band]+'pastHistorical.pkl'
+                    dailyname = names[band]+'pastDaily.pkl'
+                    seasoname = names[band]+'pastSeason.pkl'
+
+                save_object(influence, outputName ,self.dir_output / 'log' / self.resolution)
+                save_object(historical, histoname ,self.dir_output / 'log' / self.resolution)
+                save_object(daily, dailyname ,self.dir_output / 'log' / self.resolution)
+                save_object(seasonaly, seasoname ,self.dir_output / 'log' / self.resolution)
 
     def fit(self):
         X, Y = quantile_prediction_error(self.Y, self.X)

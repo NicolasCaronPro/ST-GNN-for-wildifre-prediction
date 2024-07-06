@@ -13,7 +13,7 @@ landcover_variables = [#'landcover',
                        'foret',
                         ]
 
-calendar_variables = ['month', 'dayofweek', 'dayofyear', 'isweekend', 'couvrefeux', 'confinemenent',
+calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend', 'couvrefeux', 'confinemenent',
                     'ramadan', 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder', 'mean', 'min', 'max', 'sum']
 geo_variables = ['departement']
 
@@ -24,11 +24,11 @@ dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded'
 
 # Influence
 historical_variables = ['pastinfluence']
-auto_regression_variable_reg = ['J-0',
-                                #'J-1', 'J-2', 'J-3', 'J-4', 'J-5', 'J-6', 'J-7'
+auto_regression_variable_reg = ['J-1',
+                                 #'J-2', 'J-3', 'J-4', 'J-5', 'J-6', 'J-7'
                                 ]
-auto_regression_variable_bin = [ 'B-0',
-                                #'B-1', 'B-2', 'B-3', 'B-4', 'B-5', 'B-6', 'B-7'
+auto_regression_variable_bin = ['B-1',
+                                #'B-2', 'B-3', 'B-4', 'B-5', 'B-6', 'B-7'
                                 ]
 
 # Other

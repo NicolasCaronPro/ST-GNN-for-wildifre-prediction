@@ -114,7 +114,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             check_and_create_path(dir_output / 'osmnx') # Create temporal directory (nothign to do with meteo features)
             osmnx, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'osmnx', dir_output / 'osmnx') # Create a raster - > (1, H, W)
             osmnx = osmnx[0] # Get first band - > (H, W)
-            save_object(osmnx, 'osmnx.pkl', dir_output)
+            save_object(osmnx, 'osmnx.pkl', dir_output) 
 
         # Load landcover
         if doLand:

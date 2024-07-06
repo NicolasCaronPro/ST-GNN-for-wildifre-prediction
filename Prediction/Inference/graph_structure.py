@@ -69,6 +69,7 @@ class GraphStructure():
             maskDept = np.argwhere(self.departements == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
             geo['scale'+str(self.scale)] = self.ids[maskDept]
+            check_and_create_path(Path('log'))
             mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'scale'+str(self.scale), Path('log'), 'ori')
             mask = mask[0]
 
@@ -120,21 +121,46 @@ class GraphStructure():
         self.kmeans = pickle.load(open(path / name, 'rb'))
         self.ids = self.kmeans.predict(X)
 
-    def _create_predictor(self, start, end, dir):
+    def _create_predictor(self, start, end, dir, sinister):
         dir_influence = root_graph / dir / 'influence' / '2x2'
         dir_predictor = root_graph / dir / 'influenceClustering'
-  
-        for dep in np.unique(self.departements):
 
+        # Scale Shape
+        print(f'######### {self.scale} scale ##########')
+        for dep in np.unique(self.departements):
             influence = read_object(str2name[dep]+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
-
-            predictor = Predictor(5)
-            predictor.fit(np.asarray(np.unique(influence[~np.isnan(influence)])))
+            values = np.unique(influence[~np.isnan(influence)])
+            if values.shape[0] >= 5:
+                predictor = Predictor(5, name=dep)
+                predictor.fit(np.asarray(values))
+            else:
+                predictor = Predictor(values.shape[0], name=dep)
+                predictor.fit(np.asarray(values))
+            predictor.log(logger)
             save_object(predictor, str2name[dep]+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
 
+        print('######### Departement Scale ##########')
+        dir_target = root_target / sinister / 'log'
+        # Departement
+        for dep in np.unique(self.departements):
+            influence = read_object(str2name[dep]+'Influence.pkl', dir_target)
+            if influence is None:
+                continue
+            influence = influence[:,:,allDates.index(start):allDates.index(end)]
+            influence = influence.reshape(-1, influence.shape[2])
+            influence = np.nansum(influence, axis=0)
+            if influence.shape[0] >= 5:
+                predictor = Predictor(5, name=dep)
+                predictor.fit(np.asarray(influence))
+            else:
+                predictor = Predictor(influence.shape[0], name=dep)
+                predictor.fit(np.asarray(influence))
+            predictor.log(logger)
+            save_object(predictor, str2name[dep]+'PredictorDepartement.pkl', path=dir_predictor)
+        
     def _create_nodes_list(self) -> None:
         """
         Create nodes list in the form (N, 4) where N is the number of Nodes [ID, longitude, latitude, departement of centroid]
@@ -208,7 +234,7 @@ class GraphStructure():
         uniqueDept = np.unique(self.departements)
         dico = {}
         for key in uniqueDept:
-            mask = np.argwhere(self.departements == key)
+            mask = np.argwhere(self.departements.values == key)
             geoDep = unary_union(self.oriGeometry[mask[:,0]])
             dico[key] = geoDep
 
@@ -254,7 +280,6 @@ class GraphStructure():
                                         [nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == target][0][1]],
                                         [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == target][0][2]],
                                     color='black')
-                            pass
                         else:
                             ax.plot([nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == target][0][1]],
                                     [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == target][0][2]], color='black')
@@ -273,7 +298,6 @@ class GraphStructure():
                                          [nodes[nodes[:,0] == id][0][1], nodes[nodes[:,0] == id][0][1]],
                                          [nodes[nodes[:,0] == id][0][2], nodes[nodes[:,0] == id][0][2]],
                                         color='red')
-                                pass
                     nb += 1
                     if nb == time:
                         break
@@ -336,7 +360,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
         
-    def _predict_test_loader(self, X : DataLoader, features : np.array) -> torch.tensor:
+    def _predict_test_loader(self, X : DataLoader, features : np.array, device) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
@@ -401,7 +425,7 @@ class GraphStructure():
 
     def _info_on_graph(self, nodes : np.array, output : Path) -> None:
         """
-        Print informatio on current global graph structure and nodes
+        print informatio on current global graph structure and nodes
         """
         check_and_create_path(output)
         graphIds = np.unique(nodes[:,4])

@@ -84,13 +84,11 @@ metrics = {}
 
 ############################# Pipelines ##############################
 
-def test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase, trainFeatures):
+def process_test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
-
-    prefix = str(k_days)+'_'+str(scale)
-
+    
     if minPoint == 'full':
         prefix_train = str(minPoint)+'_'+str(scaleTrain)
     else:
@@ -98,14 +96,17 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
 
     prefix = str(scale)
 
+    if dummy:
+        prefix_train += '_dummy'
+
     ##################### Construct graph test ##############################
     dir_output = dir_output / testname
     if doGraph:
-        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True)
-        #graphScale._create_predictor('2017-06-12', '2023-09-10', dir_output, sinister)
+        graphScale = construct_graph(scale, maxDist[scale], sinister, geo, nmax, k_days, dir_output, True, False)
         doDatabase = True
     else:
         graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
+
     ########################## Construct database #############################
     if doDatabase:
         pss = pss[pss['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
@@ -135,20 +136,7 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
 
         graphScale._info_on_graph(X, dir_output)
 
-    if len(newFeatures) > 0:
-        logger.info(X.shape)
-        subnode = X[:,:6]
-        XnewFeatures, _ = get_sub_nodes_feature(graphScale, subnode, testDepartement, newFeatures, sinister, dir_output)
-        newX = np.empty((X.shape[0], X.shape[1] + XnewFeatures.shape[1] - 6))
-        newX[:,:X.shape[1]] = X
-        newX[:, X.shape[1]:] = XnewFeatures[:,6:]
-        X = newX
-        features += newFeatures
-        logger.info(X.shape)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
     pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
-
     if do2D:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
@@ -163,12 +151,17 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
     else:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-    try:
-        Xtrain = read_object('X_'+prefix_train+'.pkl', train_dir)
-        Ytrain = read_object('Y_'+prefix_train+'.pkl', train_dir)
-    except Exception as e:
-        logger.info(f'Fuck it : {e}')
+
+    Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
+    Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
+    if Xtrain is None:
+        logger.info(f'Fuck it')
         return
+    
+    trainFeatures = read_object(spec+'_trainFeatures.pkl', train_dir)
+    if trainFeatures is None:
+        logger.info('Train Feature not found')
+        exit(1)
 
     # Select train features
     train_fet_num = [0,1,2,3,4,5]
@@ -207,7 +200,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
 
     pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
     X = X[:, np.asarray(train_fet_num)]
-    
+    Xtrain = Xtrain[:, np.asarray(train_fet_num)]
+    logger.info(pos_feature)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     if spec != '':
@@ -215,17 +209,6 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
         prefix += '_'+spec
 
     Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
-
-    # Features selection
-    if nbfeatures != 'all':    
-        features_importance = read_object('features_importance_tree_'+prefix_train+'.pkl', train_dir)
-        log_features(features_importance, pos_feature, ['min', 'mean', 'max', 'std'])
-        features_selected = np.unique(features_importance[:,0]).astype(int)
-    else:
-        features_selected = np.arange(0, X.shape[1])
-
-    # Make models
-    dico_model = make_models(features_selected.shape[0], 0.03, 'relu')
 
     test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
@@ -243,10 +226,8 @@ def test(testname, testDate, pss, geo, testDepartement, dir_output, features, do
                            scaling,
                            testDepartement,
                            train_dir,
-                           dico_model,
                            pos_feature_2D,
                            shape2D)
-
 
 def dummy_test(dates):
     name = sinister+".csv"
@@ -260,31 +241,36 @@ def dummy_test(dates):
     res['departement'] = res['departement'].apply(lambda x : int2strMaj[x])
     return res
 
-
-# 69 test
-if sinister != 'inondation':
+if sinister == 'firepoint':
+    # 69 test
     testDates = find_dates_between('2018-01-01', '2023-01-01')
     testDepartement = ['departement-69-rhone']
-    test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+    
+    # 2023 test
+    testDates = find_dates_between('2023-01-01', '2023-09-11')
+    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
-testDates = find_dates_between('2023-01-01', '2023-09-11')
-testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+if sinister == 'inondation':
+    # 69 test
+    testDates = find_dates_between('2018-01-01', '2023-09-11')
+    testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
+    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
-# Dummy
-dummyGeo = dummy_test(testDates)
-#test('dummy', None, dummyGeo, geo, testDepartement, dir_output)
-
-# 2023 test
-test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+    # 2023 test
+    testDates = find_dates_between('2023-01-01', '2023-09-11')
+    testDepartement = ['departement-25-doubs']
+    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']
-#test('Ain', testDates, geo, geo, testDepartement, dir_output)
+#test('Ain', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
 # 2023 test Doubs
 testDepartement = ['departement-25-doubs']
-#test('Doubs', testDates, geo, geo, testDepartement, dir_output)
+#test('Doubs', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
 
 # 2023 test Yvelines
 testDepartement = ['departement-78-yvelines']
-#test('Yvelines', testDates, geo, geo, testDepartement, dir_output)
+#test('Yvelines', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)

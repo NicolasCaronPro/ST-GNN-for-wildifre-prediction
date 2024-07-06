@@ -80,13 +80,12 @@ class GenerateDatabase():
 
     def add_spatial(self):
         logger.info('Add spatial')
-        #raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
-        raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
-        #raster_water(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir_sat'])
 
     def add_air_qualite(self):
         assert RASTER == True
@@ -104,8 +103,9 @@ class GenerateDatabase():
         'PM25': '39',
         }
 
-        if not (self.airParams['dir'] / 'air' / 'Air_archive').is_dir():
-            token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MTI4NzA1NjAsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiZTI5YmJjOGItODY2Ny00ODcxLTk5YzUtYjE1NGM4NWJiNTIzIiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.J6axigDBoJY4kmMLbQfUwl-MCudxF5cm43R1WTXtt7Q'
+        #if not (self.airParams['dir'] / 'air' / 'Air_archive').is_dir():
+        if True:
+            token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MjAwNjM0MzUsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiZDc2Mjg1MmYtY2E0OS00ZjMzLWI2MGMtYzYyODlhMjFhNzQ5IiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.UVAF6nozauvu8474lgjzzWr5NoRmRdXrz_BGIIegPQI'
             headers = {
                             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0',
                             'Accept': 'application/json, text/plain, */*',
@@ -120,7 +120,8 @@ class GenerateDatabase():
                 logger.info(f" - polluant : {polluant}")
                 for annee in range(2017, dt.datetime.now().year + 1, 2):
                     logger.info(f"   année : {annee}")
-                    if not (self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
+                    #if not (self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
+                    if True:
                         headers1 = headers.copy()
                         headers1['Content-Type']= 'multipart/form-data; boundary=---------------------------14490471821690778178105310701'
                         headers1['Origin'] ='https://www.geodair.fr'
@@ -155,7 +156,7 @@ class GenerateDatabase():
                                 if cpt == 5:
                                     break
                                 
-        if not (self.airParams['dir'] / 'air' / 'archive' / 'polluants1216.csv').is_file():
+        if True:
 
             polluants_csv = []
             for polluant in polluants:
@@ -418,7 +419,7 @@ class GenerateDatabase():
         rasterise_nappes(self.clusterSum, self.h3tif, df, self.h3tif.shape, self.dates, self.dir_raster, 'niveau_nappe_eau')
         rasterise_nappes(self.clusterSum, self.h3tif, df, self.h3tif.shape, self.dates, self.dir_raster, 'profondeur_nappe')
 
-    def process(self, start, stop):
+    def process(self, start, stop, resolution):
         logger.info(self.departement)
         
         if self.computeMeteoStat:
@@ -437,19 +438,24 @@ class GenerateDatabase():
         edate = stop
         self.dates = find_dates_between(sdate, edate)
 
+        resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
+                '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
+                '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
+                '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
+
         #n_pixel_x = 0.016133099692723363
         #n_pixel_y = 0.016133099692723363
 
-        n_pixel_x = 0.02875215641173088
-        n_pixel_y = 0.020721094073767096
+        n_pixel_x = resolutions[resolution]['x']
+        n_pixel_y = resolutions[resolution]['y']
 
         self.resLon = n_pixel_x
         self.resLat = n_pixel_y
         self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')
         logger.info(f'Low scale {self.h3tif.shape}')
 
-        n_pixel_x = 0.0002694945852326214
-        n_pixel_y = 0.0002694945852352859
+        n_pixel_x = resolutions['0.03x0.03']['x']
+        n_pixel_y = resolutions['0.03x0.03']['y']
 
         self.resLon_high = n_pixel_x
         self.resLat_high = n_pixel_y
@@ -471,17 +477,18 @@ class GenerateDatabase():
         if self.addVigicrue:
             self.compute_hauteur_riviere()
 
-def launch(departement, computeMeteoStat, computeTemporal, addSpatial, 
+def launch(departement, resolution, computeMeteoStat, computeTemporal, addSpatial, 
            addAir, addBouchon, addVigicrue, addNappes):
 
     dir_data = root / departement / 'data'
     dir_meteostat = dir_data / 'meteostat'
-    dir_raster = root / departement / 'raster'
+    dir_raster = root / departement / 'raster' / resolution
     check_and_create_path(dir_raster)
 
     start = '2017-06-12'
-    stop = dt.datetime.now().date().strftime('%Y-%m-%d')
-
+    #stop = dt.datetime.now().date().strftime('%Y-%m-%d')
+    stop = '2024-06-29'
+    
     meteostatParams = {'start' : '2016-01-01',
                     'end' : stop,
                     'dir' : dir_meteostat}
@@ -528,7 +535,7 @@ def launch(departement, computeMeteoStat, computeTemporal, addSpatial,
                     region, h3,
                     dir_raster)
 
-    database.process(start, stop)
+    database.process(start, stop, resolution)
 
 if __name__ == '__main__':
     RASTER = True
@@ -544,6 +551,7 @@ if __name__ == '__main__':
     parser.add_argument('-a', '--air', type=str, help='Air')
     parser.add_argument('-v', '--vigicrues', type=str, help='Vigicrues')
     parser.add_argument('-n', '--nappes', type=str, help='Nappes')
+    parser.add_argument('-r', '--resolution', type=str, help='Resolution')
 
     args = parser.parse_args()
 
@@ -555,15 +563,16 @@ if __name__ == '__main__':
     addBouchon = False
     addNappes = args.nappes == 'True'
     addVigicrue = args.vigicrues == "True"
+    resolution = args.resolution
 
     ################## Ain ######################
-    launch('departement-01-ain', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-01-ain', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## DOUBS ######################
-    launch('departement-25-doubs', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-25-doubs', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## YVELINES ######################
-    launch('departement-78-yvelines', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-78-yvelines', resolution,  computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## Rhone ######################
-    launch('departement-69-rhone', computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-69-rhone', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)

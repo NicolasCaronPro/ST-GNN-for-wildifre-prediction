@@ -362,7 +362,8 @@ def rasterise_meteo_data(h3, maskh3, cems, sh, dates, dir_output):
                 rasterVar = resize(rasterVar, sh[0], sh[1], 1)
 
             spatioTemporalRaster[:,:, i] = rasterVar
-
+        if var == 'daily_severity_rating':
+            var = 'dailySeverityRating'
         outputName = var+'raw.pkl'
         f = open(dir_output / outputName,"wb")
         pickle.dump(spatioTemporalRaster, f)
@@ -452,7 +453,6 @@ def rasterise_air_qualite(h3, maskh3, air, sh, dates, dir_output):
         outputName = var+'raw.pkl'
         f = open(dir_output / outputName,"wb")
         pickle.dump(spatioTemporalRaster, f)
-
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -692,15 +692,15 @@ def raster_sat(base, dir_reg, dir_output, dates):
         for band in range(sentinel.shape[0]):
             values = resize_no_dim(sentinel[band], base.shape[0], base.shape[1])
             values[np.isnan(values)] = np.nanmean(values)
-            if i + 9 > res.shape[3]:
-                lmin = i-7
+            if i + 1 > res.shape[3]:
+                lmin = i - 14 
                 lmax = res.shape[3]
             elif i == 0:
                 lmin = 0
-                lmax = i + 10
+                lmax = i + 1
             else:
-                lmin = i-7
-                lmax = i + 10
+                lmin = i - 14
+                lmax = i + 1
 
             k = lmax - lmin
             res[band,:,:, lmin:lmax] = np.repeat(values[:,:, np.newaxis], k, axis=2)
@@ -733,11 +733,14 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
     'spring' : ('03-01', '05-31')
     }
 
-    years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023']
+    years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
 
     for year in years:
+        print(year)
         for seas, item in season.items():
-
+            print(seas)
+            if year == '2024' and (seas == 'winter' or seas == 'autumn'):
+                continue
             name = seas+'_'+year+'.tif'
             dynamicWorld, _, _ = read_tif(dir_sat / name)
             dynamicWorld = dynamicWorld[0]
@@ -759,20 +762,22 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
                 index_max = -1
 
             for node in unodes:
-                    if node not in tifFile_high:
-                        continue
-                    mask1 = tifFile == node
-                    mask2 = tifFile_high == node
-                    if True not in np.unique(mask2):
-                        continue
-                    for band in bands:
-                        res[band, mask1, index_min:index_max] = (np.argwhere(dynamicWorld[mask2] == band).shape[0] / dynamicWorld[mask2].shape[0]) * 100
-                        res3[band, mask1] = np.nanmean(dynamicWorld_2[band, mask2])
-
+                if node not in tifFile_high:
+                    continue
+                mask1 = tifFile == node
+                mask2 = tifFile_high == node
+                if True not in np.unique(mask2):
+                    continue
+                for band in bands:
+                    res[band, mask1, index_min:index_max] = (np.argwhere(dynamicWorld[mask2] == band).shape[0] / dynamicWorld[mask2].shape[0]) * 100
+                    res3[band, mask1] = np.nanmean(dynamicWorld_2[band, mask2])
+                try:
                     if res[:, mask1, index_min:index_max].shape[1] == 1:
                         res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max])
                     else:
                         res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max][:,0])
+                except:
+                    continue
 
     res[:, np.isnan(tifFile)] = np.nan
     res2[np.isnan(tifFile)] = np.nan
