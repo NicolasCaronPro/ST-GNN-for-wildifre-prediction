@@ -721,7 +721,13 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
                            testDepartement,
                            train_dir,
                            sinister,
-                           resolution):
+                           resolution,
+                           doKmeans):
+    
+    if doKmeans:
+        prefix = prefix_train + 'kmean_test'
+    else:
+        prefix = prefix_train
     
     if Xset.shape[0] == 0:
         logger.info(f'{testname} is empty, skip')
@@ -749,7 +755,8 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
     for name, isBin in models:
         y = Yset[Yset[:,-4] > 0]
         YTensor = torch.tensor(y, dtype=torch.float32, device=device)
-        n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        #n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        n = name
         model_dir = train_dir / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
         
         logger.info('#########################')
@@ -765,21 +772,12 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
 
         features_selected = read_object('features.pkl', model_dir)
 
-        pred = graphScale.predict_model_api_sklearn(Xset[:, features_selected], isBin)
+        pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
-        predTensor = torch.tensor(pred, dtype=torch.float32, device=device)
+        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset[:, features_selected], isBin)
 
-        metrics[name] = add_metrics(methods, i, predTensor, YTensor, testDepartement, isBin, scale, name, train_dir)
-
-        if isBin:
-            y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
-
-        realVspredict(pred, y, -1,
-                      dir_output / n, 'raw')
-        
-        dir_predictor = root_graph / train_dir / 'influenceClustering'
-
-        predclass = np.empty(pred.shape[0])
+        if doKmeans:
+            pred[:, 0] = apply_kmeans_class_on_target(Xset, pred, train_dir / 'varOnValue' / prefix_train, False).reshape(-1)
 
         for nameDep in departements:
             mask = np.argwhere(y[:, 3] == name2int[nameDep])
@@ -788,23 +786,34 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
             if not isBin:
                 predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             else:
+                create_binary_predictor(pred, name, nameDep, dir_predictor)
                 predictor = read_object(nameDep+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
 
-            predclass[mask[:,0]] = order_class(predictor, predictor.predict(pred[mask[:, 0]]))
+            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 1]))
 
-        realVspredict(predclass, y, -3,
+        metrics[name] = add_metrics(methods, i, pred, YTensor, testDepartement, isBin, scale, name, train_dir)
+
+        if isBin:
+            y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
+
+        realVspredict(pred[:, 0], y, -1,
+                      dir_output / n, 'raw')
+        
+        dir_predictor = root_graph / train_dir / 'influenceClustering'
+        
+        realVspredict(pred[:, 1], y, -3,
                       dir_output / n, 'class')
 
-        sinister_distribution_in_class(predclass, y, dir_output / n)
+        sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
 
         res = np.empty((pred.shape[0], y.shape[1] + 4))
         res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred
-        res[:,y.shape[1] + 1] = predclass
+        res[:,y.shape[1]] = pred[:, 0]
+        res[:,y.shape[1] + 1] = pred[:, 1]
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, name+'_'+prefix+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
             start = '2018-01-01'
@@ -850,7 +859,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            dir_output,
                            device,
                            k_days,
-                           Rewrite, 
+                           Rewrite,
                            encoding,
                            scaling,
                            testDepartement,
@@ -879,7 +888,8 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
 
     #################################### GNN ###################################################
     for mddel, use_temporal_as_edges, isBin, is_2D_model  in models:
-        n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        #n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        n = mddel
         model_dir = train_dir / Path('check_'+scaling+'/' + prefix_train + '/' + mddel +  '/')
         logger.info('#########################')
         logger.info(f'       {mddel}          ')
@@ -943,7 +953,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
-            start = '2018-01-01'
+            start = '2022-06-01'
             stop = '2022-09-30'
         else:
             start = '2023-06-01'
@@ -1012,7 +1022,8 @@ def test_simple_model(graphScale, Xset, Yset,
             res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
             res[:,y.shape[1]+2] = np.sqrt(((pred - Yset[:,-1]) ** 2))
 
-            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            save_object(res, name+'_pred.pkl', dir_output)
 
             logger.info('#########################')
             logger.info(f'      perf_Y_bin         ')
@@ -1029,7 +1040,8 @@ def test_simple_model(graphScale, Xset, Yset,
             res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
             res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-            save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            save_object(res, name+'_pred.pkl', dir_output)
 
         logger.info('#########################')
         logger.info(f'      perf_X         ')
@@ -1063,7 +1075,8 @@ def test_break_points_model(Xset, Yset,
                            sinister,
                            resolution):
     
-    n = 'break_point'+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+    #n = 'break_point'+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+    n = 'break_point'
     name = 'break_point'
     dir_break_point = train_dir / 'varOnValue' / prefix_train
     features_selected = read_object('features.pkl', dir_break_point)
@@ -1116,9 +1129,10 @@ def test_break_points_model(Xset, Yset,
     res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred[:,1] - y[:,-1]) ** 2))
     res[:,y.shape[1]+2] = np.sqrt(((pred[:,1] - y[:,-1]) ** 2))
 
-    save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+    save_object(res, name+'_pred.pkl', dir_output / n)
 
-    if testname == '69':
+    """if testname == '69':
         start = '2018-01-01'
         stop = '2022-09-30'
     else:
@@ -1129,7 +1143,7 @@ def test_break_points_model(Xset, Yset,
         susectibility_map(dept, sinister,
                     train_dir, dir_output, k_days,
                     False, scale, name, res, n,
-                    start, stop, resolution)
+                    start, stop, resolution)"""
 
     shapiro_wilk(pred[:,1], y[:,-1], dir_output / n)
 
@@ -1145,7 +1159,8 @@ def test_break_points_model(Xset, Yset,
         testDepartement,
         graphScale)"""
 
-    save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+    save_object(res, name+'_pred.pkl', dir_output)
     outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_bp.pkl'
     save_object(metrics, outname, dir_output)
 

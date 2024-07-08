@@ -5,7 +5,7 @@ import geopandas as gpd
 from shapely import unary_union
 import warnings
 from shapely import Point
-from models.models import *
+from forecasting_models.models import *
 from tools import *
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader

@@ -29,6 +29,9 @@ parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
+parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
+parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-kmeansTest', '--kmeansTest', type=str, help='Apply kmeans on test set')
 
 args = parser.parse_args()
 
@@ -52,6 +55,9 @@ scale = int(args.scale)
 spec = args.spec
 resolution = args.resolution
 doPCA = args.pca == 'True'
+doKMEANS = args.KMEANS == 'True'
+doTestKMEANS = args.KMEANS == 'True'
+ncluster = int(args.ncluster)
 
 ######################### Incorporate new features ##########################
 
@@ -74,8 +80,6 @@ if values_per_class == 'full':
     prefix = str(values_per_class)+'_'+str(scale)
 else:
     prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if doPCA:
-    prefix += '_pca'
 
 if dummy:
     prefix += '_dummy'
@@ -190,6 +194,7 @@ else:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
 
+
 prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 
@@ -230,14 +235,34 @@ trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, ma
 features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, True, nbfeatures, scale)
 
 if doPCA:
+    prefix += '_pca'
+    prefix_train += '_pca'
     Xtrain = trainDataset[0]
-    pca, components = train_pca(Xtrain, 0.95, dir_output / prefix)
-    trainDataset[0] = apply_pca(trainDataset[0], pca, components)
-    valDataset[0] = apply_pca(valDataset[0], pca, components)
-    testDataset[0] = apply_pca(testDataset[0], pca, components)
+    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
+    trainDataset = (apply_pca(trainDataset[0], pca, components, features_selected), trainDataset[1])
+    valDataset = (apply_pca(valDataset[0], pca, components, features_selected), valDataset[1])
+    testDataset = (apply_pca(testDataset[0], pca, components, features_selected), testDataset[1])
     features_selected = np.arange(6, components + 6)
-    trainFeatures = ['pca_'+str(i) for i in range(components)] 
+    trainFeatures = ['pca_'+str(i) for i in range(components)]
     pos_feature, _ = create_pos_feature(0, 6, trainFeatures)
+    kmeansFeatures = trainFeatures
+
+if doKMEANS:
+    prefix += '_kmeans_'+str(ncluster)
+    prefix_train += '_kmeans_'+str(ncluster)
+    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
+    Ytrain = trainDataset[1]
+    Yval = valDataset[1]
+    Ytest = testDataset[1]
+
+    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
+    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
+    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
+
+    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
+    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
+    
+    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
 
 logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
 logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
@@ -252,62 +277,9 @@ if doTrain:
     train_sklearn_api_model(trainDataset=trainDataset,
                             valDataset=valDataset,
                             testDataset=testDataset,
-                            pos_feature=pos_feature,
-                            graph=graphScale,
-                            dir_output=dir_output / name,
-                            dir_train = dir_output,
-                            device='cpu',
-                            binary=False,
-                            scaling=scaling,
-                            features=features_selected,
-                            optimize_feature=optimize_feature,
-                            departements=departements,
-                            weight=True)
-
-    train_sklearn_api_model(trainDataset=trainDataset,
-                            valDataset=valDataset,
-                            testDataset=testDataset,
-                            graph=graphScale,
-                            pos_feature=pos_feature,
-                            dir_train = dir_output,
                             dir_output=dir_output / name,
                             device='cpu',
-                            binary=True,
-                            scaling=scaling,
-                            optimize_feature=optimize_feature,
-                            features=features_selected,
-                            departements=departements,
-                            weight=True)
-
-    train_sklearn_api_model(trainDataset=trainDataset,
-                            valDataset=valDataset,
-                            testDataset=testDataset,
-                            graph=graphScale,
-                            pos_feature=pos_feature,
-                            dir_train = dir_output,
-                            dir_output=dir_output / name,
-                            device='cpu',
-                            binary=True,
-                            scaling=scaling,
-                            optimize_feature=optimize_feature,
-                            features=features_selected,
-                            departements=departements,
-                            weight=False)
-
-    train_sklearn_api_model(trainDataset=trainDataset,
-                            valDataset=valDataset,
-                            testDataset=testDataset,
-                            graph=graphScale,
-                            pos_feature=pos_feature,
-                            dir_train = dir_output,
-                            dir_output=dir_output / name,
-                            device='cpu',
-                            binary=False,
-                            scaling=scaling,
-                            optimize_feature=optimize_feature,
-                            features=features_selected,
-                            departements=departements,
-                            weight=False)
+                            features=features_selected)
 
 if doTest:
     logger.info('############################# TEST ###############################')
@@ -349,14 +321,14 @@ if doTest:
         ('xgboost', False),
         #('xgboost_optimize_feature', False),
         ('lightgbm', False),
-        ('ngboost', False),
+        #('ngboost', False),
         ('xgboost_bin', True),
         ('lightgbm_bin', True),
         ('xgboost_bin_unweighted', True),
         ('lightgbm_bin_unweighted', True),
         ('xgboost_unweighted', False),
         ('lightgbm_unweighted', False),
-        ('ngboost_unweighted', False),
+        #('ngboost_unweighted', False),
         #('ngboost_bin', True)
         ]
     
@@ -377,7 +349,7 @@ if doTest:
                            prefix,
                            dummy,
                            models,
-                           dir_output / '69',
+                           dir_output / '69' / prefix,
                            device,
                            k_days,
                            encoding,
@@ -385,7 +357,8 @@ if doTest:
                            testDepartement,
                            train_dir,
                            sinister,
-                           resolution)
+                           resolution,
+                           doTestKMEANS)
 
         # 2023 test
         testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
@@ -403,7 +376,7 @@ if doTest:
                            prefix,
                            dummy,
                            models,
-                           dir_output / '2023',
+                           dir_output / '2023' / prefix,
                            device,
                            k_days,
                            encoding,
@@ -411,7 +384,8 @@ if doTest:
                            testDepartement,
                            train_dir,
                            sinister,
-                           resolution)
+                           resolution,
+                           doTestKMEANS)
          
     if sinister == 'inondation':
         # 69 test
@@ -425,7 +399,7 @@ if doTest:
                            prefix,
                            dummy,
                            models,
-                           dir_output / '69',
+                           dir_output / '69' / prefix,
                            device,
                            k_days,
                            encoding,
@@ -433,7 +407,8 @@ if doTest:
                            testDepartement,
                            train_dir,
                            sinister,
-                           resolution)
+                           resolution,
+                           doTestKMEANS)
         # 2023 test
         testDepartement = ['departement-25-doubs']
         Xset = Xtest[(Xtest[:, 3] == 25)]
@@ -445,7 +420,7 @@ if doTest:
                            prefix,
                            dummy,
                            models,
-                           dir_output / '2023',
+                           dir_output / '2023' / prefix,
                            device,
                            k_days,
                            encoding,
@@ -453,4 +428,5 @@ if doTest:
                            testDepartement,
                            train_dir,
                            sinister,
-                           resolution)
+                           resolution,
+                           doTestKMEANS)

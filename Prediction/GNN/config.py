@@ -2,8 +2,8 @@ from pathlib import Path
 import vacances_scolaires_france
 import jours_feries_france
 import datetime as dt
-from models.models import *
-from models.models_2D import *
+from forecasting_models.models import *
+from forecasting_models.models_2D import *
 import logging
 
 # Setting see for reproductible results
@@ -117,6 +117,32 @@ trainFeatures = [
             #'AutoRegressionBin'
             ]
 
+kmeansFeatures = [
+            #'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd',
+            'prec24h',
+            #'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+            #'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+            #'temp16', 'dwpt16', 'rhum16',
+             'prcp16', # 'wdir16', 'wspd16',
+             'prec24h16',
+            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+            #'elevation',
+            #'population',
+            #'sentinel',
+            #'landcover',
+            #'vigicrues',
+            #'foret',
+            #'highway',
+            #'dynamicWorld',
+            #'Calendar',
+            #'Historical',
+            #'Geo',
+            #'air',
+            #'nappes',
+            #'AutoRegressionReg',
+            #'AutoRegressionBin'
+            ]
+
 def get_academic_zone(name, date):
         dict_zones = {
             'Aix-Marseille': ('B', 'B'),
@@ -175,7 +201,7 @@ streamHandler = logging.StreamHandler(stream=sys.stdout)
 streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
 
-k_days = 3 # Size of the time series sequence
+k_days = 0 # Size of the time series sequence
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
 

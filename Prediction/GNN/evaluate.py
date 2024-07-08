@@ -137,7 +137,7 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
-        dir_test = Path(expe + '/' + sinister + '/' + resolution + '/test/' + test_name + '/')
+        dir_test = Path(expe + '/' + sinister + '/' + resolution + '/test/' + test_name + '/' + label + '/')
         
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
@@ -166,6 +166,9 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1['f1_autumn'] = evaluate_f1(metrics, 'f1_winter')['f1']
         f1['f1_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['f1']
 
+        f1['f1_top_5_cluster'] = evaluate_f1(metrics, 'f1_top_5_cluster')['f1']
+        f1['f1_top_5_cluster_unweighted'] = evaluate_f1(metrics, 'f1_top_5_cluster_unweighted')['f1']
+
         # Precision
         f1['precision_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['precision']
 
@@ -181,6 +184,10 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1['precision_autumn'] = evaluate_f1(metrics, 'f1_winter')['precision']
         f1['precision_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['precision']
 
+        f1['precision_top_5_cluster'] = evaluate_f1(metrics, 'f1_top_5_cluster')['precision']
+        f1['precision_top_5_cluster_unweighted'] = evaluate_f1(metrics, 'f1_top_5_cluster')['precision']
+
+        # Recall
         f1['recall_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['f1']
 
         f1['recall_winter'] = evaluate_f1(metrics, 'f1_winter')['recall']
@@ -195,6 +202,9 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1['recall_autumn'] = evaluate_f1(metrics, 'f1_winter')['recall']
         f1['recall_unweighted_autumn'] = evaluate_f1(metrics, 'f1_unweighted_autumn')['recall']
 
+        f1['recall_top_5_cluster'] = evaluate_f1(metrics, 'f1_top_5_cluster')['recall']
+        f1['recall_top_5_cluster_unweighted'] = evaluate_f1(metrics, 'f1_top_5_cluster')['recall']
+
         f1s.append(f1)
 
         # MAE score
@@ -208,10 +218,11 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         mae['meac_spring'] = evaluate_ca(metrics, 'meac_spring')['meac_spring']
         mae['meac_summer'] = evaluate_ca(metrics, 'meac_summer')['meac_summer']
         mae['meac_autumn'] = evaluate_ca(metrics, 'meac_winter')['meac_winter']
+        mae['meac_top_5_cluster'] = evaluate_ca(metrics, 'meac_top_5_cluster')['meac_top_5_cluster']
+        mae['meac_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'meac_top_5_cluster_unweighted')['meac_top_5_cluster_unweighted']
 
         maes.append(mae)
 
-        # MAE score
         maetop10 = evaluate_ca(metrics, 'meactop10')
         maetop10 = maetop10.groupby('model')['meactop10'].mean().reset_index()
         maetop10['meactop10'] = maetop10['meactop10'].astype(float)
@@ -227,11 +238,12 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         bca['expe'] = expe
         bca['label'] = label
         bca['index'] = index
-
         bca['bca_winter'] = evaluate_ca(metrics, 'bca_winter')['bca_winter']
         bca['bca_spring'] = evaluate_ca(metrics, 'bca_spring')['bca_spring']
         bca['bca_summer'] = evaluate_ca(metrics, 'bca_summer')['bca_summer']
         bca['bca_autumn'] = evaluate_ca(metrics, 'bca_autumn')['bca_autumn']
+        bca['bca_top_5_cluster'] = evaluate_ca(metrics, 'bca_top_5_cluster')['bca_top_5_cluster']
+        bca['bca_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'bca_top_5_cluster_unweighted')['bca_top_5_cluster_unweighted']
 
         bcas.append(bca)
 
@@ -246,6 +258,9 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         rmse['rmse_spring'] = evaluate_met(metrics, 'rmse_spring')['rmse_spring']
         rmse['rmse_summer'] = evaluate_met(metrics, 'rmse_summer')['rmse_summer']
         rmse['rmse_autumn'] = evaluate_met(metrics, 'rmse_autumn')['rmse_autumn']
+        rmse['rmse_top_5_cluster'] = evaluate_met(metrics, 'rmse_top_5_cluster')['rmse_top_5_cluster']
+        #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
+        
         rmses.append(rmse)
 
     f1s = pd.concat(f1s).reset_index(drop=True)
@@ -276,14 +291,27 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
     plot(f1s, 'f1', dir_output, 'f1', color)
     plot(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color)
+    plot(f1s, 'f1_top_5_cluster', dir_output, 'f1_top_5_cluster', color)
+    plot(f1s, 'f1_top_5_cluster_unweighted', dir_output, 'f1_top_5_cluster_unweighted', color)
+
     plot(f1s, 'precision', dir_output, 'precision', color)
     plot(f1s, 'precision_unweighted', dir_output, 'precision_unweighted', color)
+    plot(f1s, 'precision_top_5_cluster', dir_output, 'precision_top_5_cluster', color)
+    plot(f1s, 'precision_top_5_cluster_unweighted', dir_output, 'precision_top_5_cluster_unweighted', color)
+
     plot(f1s, 'recall', dir_output, 'recall', color)
     plot(f1s, 'recall_unweighted', dir_output, 'recall_unweighted', color)
+    plot(f1s, 'recall_top_5_cluster', dir_output, 'recall_top_5_cluster', color)
+    plot(f1s, 'recall_top_5_cluster_unweighted', dir_output, 'recall_top_5_cluster_unweighted', color)
 
     plot(maes, 'meac', dir_output, 'meac', color)
     plot(bcas, 'bca', dir_output, 'bca', color)
     plot(rmses, 'rmse', dir_output, 'rmse', color)
+    plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
+
+    plot(maes, 'meac_top_5_cluster', dir_output, 'meac_top_5_cluster', color)
+    plot(bcas, 'bca_top_5_cluster', dir_output, 'bca_top_5_cluster', color)
+    plot(rmses, 'rmse_top_5_cluster', dir_output, 'rmse_top_5_cluster', color)
     plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
 
     plot(f1s, 'f1_winter', dir_output, 'f1_winter', color)
@@ -400,13 +428,11 @@ if __name__ == "__main__":
                             ]
 
     # Inference
-    experiments_inference = [#('inference', 5, '5', 'full_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 0, '100_0', '100_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 1, '100_7', '100_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 2, 'full_0', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 3, 'full_7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 3, 'full_7', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl'),
-                             ('final', 4, 'full_0', 'full_0_10_108_10_z-score_Catboost_'+test_name+'_bp'),
+    experiments_inference = [
+                             ('final', 0, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 1, 'full_0_10_100_pca', 'full_0_10_100_pca_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 2, 'full_0_10_100_pca_kmeans_10', 'full_0_10_100_pca_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 3, 'full_0_10_100_kmeans_10', 'full_0_10_100_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
                             ]
 
     # ECAI

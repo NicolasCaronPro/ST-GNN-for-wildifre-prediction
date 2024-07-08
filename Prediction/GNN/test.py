@@ -2,7 +2,7 @@ from graph_structure import *
 from features import *
 from dataloader import *
 from construct import *
-from models.loss import *
+from forecasting_models.loss import *
 import argparse
 
 ########################### Input Arg ######################################

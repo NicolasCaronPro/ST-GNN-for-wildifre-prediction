@@ -45,6 +45,7 @@ from sklearn.cluster import SpectralClustering
 import scipy.stats
 import plotly.express as px
 import plotly.io as pio
+from forecasting_models.sklearn_api_model import *
 random.seed(42)
 
 # Dictionnaire de gestion des départements
@@ -131,19 +132,18 @@ def create_larger_scale_bin(input, bin, influence, raster):
                 influence_mask = (influence[:, :, di] > 0) & mask
                 unique_ids_in_mask = np.unique(raster[influence_mask])
                 
-                binval = np.nanmin(influence[:, :, di])
+                binval = 0
                 influenceval = np.nanmin(influence[:, :, di])
                 
                 for uim in unique_ids_in_mask:
                     mask3 = (raster == uim)
                     binval += (np.unique(bin[mask3, di]))[0]
                     influenceval += (np.unique(influence[mask3, di]))[0]
-                
                 binImageScale[mask, di] = binval
                 influenceImageScale[mask, di] = influenceval
             else:
                 binImageScale[mask, di] = 0
-                influenceImageScale[mask, di] = 0
+                influenceImageScale[mask, di] = np.nanmin(influence[:, :, di])
 
     return binImageScale, influenceImageScale
 
@@ -975,7 +975,7 @@ def train(trainLoader, valLoader, testLoader,
                 logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
 
 
-def config_xgboost(device, binary):
+def config_xgboost(device, classifier, objective):
     params = {
         'verbosity':0,
         'early_stopping_rounds':15,
@@ -988,26 +988,36 @@ def config_xgboost(device, binary):
         'colsample_bylevel': 0.6,
         'reg_lambda' : 1.7,
         'reg_alpha' : 0.7,
-        #'gamma' : 2.5, 
         'n_estimators' : 10000,
         'random_state': 42,
         'tree_method':'hist',
         }
-        
     
+    param_grid = {
+        'learning_rate': [0.01, 0.1],
+        'max_depth': [6, 8, 10],
+        'subsample': [0.5, 0.7, 0.9],
+        'colsample_bytree': [0.7, 0.8, 1.0],
+        'colsample_bylevel' : [0.7, 0.8, 1.0],
+        'min_child_weight' : [1.0,5,10],
+        'reg_lambda' : [1.0, 1.5, 3.5, 10.2],
+        'reg_alpha' : [0.1,0.5,0.7,0.9],
+        'random_state' : [42]
+    }
+
     if device == 'cuda':
         params['device']='cuda'
 
-    if not binary:
+    if not classifier:
         return XGBRegressor(**params,
-                            objective = 'reg:squarederror'
-                            )
+                            objective = objective
+                            ), param_grid
     else:
         return XGBClassifier(**params,
-                            objective = 'binary:logistic'
-                            )
+                            objective = objective
+                            ), param_grid
 
-def config_lightGBM(device, binary):
+def config_lightGBM(device, classifier, objective):
     params = {'verbosity':-1,
         #'num_leaves':64,
         'learning_rate':0.01,
@@ -1023,17 +1033,30 @@ def config_lightGBM(device, binary):
         'random_state':42
         }
 
+    param_grid = {
+    'learning_rate': [0.01, 0.05, 0.1],
+    'early_stopping_rounds': [15],
+    'bagging_fraction': [0.6, 0.7, 0.8],
+    'colsample_bytree': [0.5, 0.6, 0.7],
+    'max_depth': [3, 4, 5],
+    'num_leaves': [16, 32, 64],
+    'reg_lambda': [0.5, 1.0, 1.5],
+    'reg_alpha': [0.1, 0.2, 0.3],
+    'num_iterations': [10000],
+    'random_state': [42]
+    }
+
     if device == 'cuda':
         params['device'] = "gpu"
 
-    if not binary:
-        params['objective'] = 'root_mean_squared_error',
-        return LGBMRegressor(**params)
+    if not classifier:
+        params['objective'] = objective
+        return LGBMRegressor(**params), param_grid
     else:
-        params['objective'] = 'binary',
-        return LGBMClassifier(**params)
+        params['objective'] = objective
+        return LGBMClassifier(**params), param_grid
 
-def config_ngboost(binary):
+def config_ngboost(classifier, objective):
     params  = {
         'natural_gradient':True,
         'n_estimators':1000,
@@ -1045,46 +1068,28 @@ def config_ngboost(binary):
         'tol':1e-4,
     }
 
-    if not binary:
-        return NGBRegressor(**params)
+    param_grid = {
+    'natural_gradient': [True, False],
+    'n_estimators': [500, 1000, 1500],
+    'learning_rate': [0.01, 0.05, 0.1],
+    'minibatch_frac': [0.6, 0.7, 0.8],
+    'col_sample': [0.5, 0.6, 0.7],
+    'verbose': [False],
+    'verbose_eval': [50, 100, 200],
+    'tol': [1e-3, 1e-4, 1e-5],
+    'random_state': [42]
+    }
+
+    if not classifier:
+        return NGBRegressor(**params), param_grid
     else:
-        return NGBClassifier(**params)
+        return NGBClassifier(**params), param_grid
 
 def train_sklearn_api_model(trainDataset, valDataset, testDataset,
-            graph, 
           dir_output : Path,
-          dir_train : Path,
           device : str,
-          binary : bool,
-          features : np.array,
-          pos_feature: dict,
-         optimize_feature : bool,
-          scaling: str,
-          weight : bool,
-          departements : list):
-
-    try:
-        
-        models = []
-
-        ################# xgboost ##################
-
-        models.append('xgboost')
-
-        ################ lightgbm ##################
-
-        models.append('lightgbm')
-
-        ################ ngboost ###################
-
-        models.append('ngboost')
-
-        ############### SVM ########################
-
-        # TO DO
-
-        ############## fit #########################
-
+          features : np.array):
+            
         Xtrain = trainDataset[0]
         Ytrain = trainDataset[1]
 
@@ -1105,196 +1110,170 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
 
         logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Xtest shape {Xtest.shape}')
 
-        if not binary:
-            Yw = Ytrain[:,-4]
-        else:
-            Yw = Ytrain[:,-4]
-            Yw[Ytrain[:,-2] == 0] = 1
+        models = []
 
-        if not binary:
-            Ytrain = Ytrain[:,-1]
-            Yval = Yval[:,-1]
-        else:
-            Ytrain = Ytrain[:,-2] > 0
-            Yval = Yval[:,-2] > 0
+        ########################## Easy model ######################
+        ################# xgboost ##################
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
 
-        if not weight:
-            Yw = np.ones(Ytrain.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        models.append(('xgboost', Model(model, False, 'rmse', 'xgboost'), fitparams, False, 'skip', grid))
 
-        for name in models:
-            oname = name
-            if binary:
-                oname += '_bin'
-            if not weight:
-                oname += '_unweighted'
-            if optimize_feature:
-                oname += '_optimize_feature'
+        model, grid = config_xgboost(device, False, 'reg:squaredlogerror')
+        models.append(('rmsle', Model(model, False, 'rmsle', 'xgboost'), fitparams, False, 'skip', grid))
+        
+        # xgboost 2
+        Yw = np.ones(Ytrain.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        models.append(('xgboost_unweighted', Model(model, False, 'rmse', 'xgboost_unweighted'), fitparams, False, 'skip', grid))
 
-            if optimize_feature:
-                assert len(testDataset) > 0
-                newFet = [features[0]]
-                numIncrease = 0
-
-                #################### Base result ####################
-                wei = Ytest[:, -4]
-                XtestCopy = Xtest[:, newFet]
-
-                if name == 'xgboost':
-                    model = config_xgboost(device, binary)
-                    fitparams={
-                    'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
-                    'sample_weight' : Yw,
-                    'verbose' : False,
-                    }
-
-                if name == 'lightgbm':
-                    model = config_lightGBM(device, binary)
-                    fitparams={
-                    'eval_set':[(Xtrain[:, newFet].reshape(-1,1), Ytrain), (Xval[:, newFet].reshape(-1,1), Yval)],
-                    'sample_weight' : Yw,
-                    }
-
-                if name == 'ngboost':
-                    model = config_ngboost(binary)
-                    if binary:
-                        return
-                    fitparams={
-                    'early_stopping_rounds':15,
-                    'sample_weight' : Yw,
-                    'X_val':Xval[:, newFet].reshape(-1,1),
-                    'Y_val':Yval,
-                    }
-                logger.info(f'Train {name} with')
-                log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
-                model.fit(Xtrain[:, newFet].reshape(-1,1), Ytrain, **fitparams)
-                ypred = model.predict(XtestCopy)
-
-                if ~binary:
-                    bestVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
-                    if torch.is_tensor(bestVal):
-                        bestVal = bestVal.detach().cpu().numpy()
-                else:
-                    bestVal = my_f1_score(Ytest, ypred, wei)[0]
-
-                """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
-                                            graph.scale, oname,
-                                            dir_train, wei, None)
-                bestVal = []
-                for dept in departements:
-                    bestVal.append(metDict[dept])
-
-                bestVal = np.mean(bestVal)"""
-
-                logger.info(f'Base Score {bestVal}')
-
-                #################### Explore features ####################
-                for fi, fet in enumerate(features[1:]):
-                    testFet = copy(newFet)
-                    testFet.append(fet)
-                    logger.info(f'Train {name} with')
-                    log_features(testFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
-                    XtestCopy = Xtest[:, testFet]
-
-                    if name == 'xgboost':
-                        model = config_xgboost(device, binary)
-                        fitparams={
-                        'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
-                        'sample_weight' : Yw,
-                        'verbose' : False
-                        }
-
-                    if name == 'lightgbm':
-                        model = config_lightGBM(device, binary)
-                        fitparams={
-                        'eval_set':[(Xtrain[:, testFet], Ytrain), (Xval[:, testFet], Yval)],
-                        'sample_weight' : Yw,
-                        }
-
-                    if name == 'ngboost':
-                        model = config_ngboost(binary)
-                        if binary:
-                            return
-                        fitparams={
-                        'early_stopping_rounds':15,
-                        'sample_weight' : Yw,
-                        'X_val':Xval[:, testFet],
-                        'Y_val':Yval,
-                        }
-
-                    model.fit(Xtrain[:, testFet], Ytrain, **fitparams)
-                    ypred = model.predict(XtestCopy)
-
-                    """metDict = mean_absolute_error_class(ypred, Ytest, departements, binary,
-                                            graph.scale, name,
-                                            dir_train, wei, None)
-                    metVal = []
-                    for dept in departements:
-                        metVal.append(metDict[dept])
-                    metVal = np.mean(metVal)"""
-
-                    if ~binary:
-                        metVal = weighted_rmse_loss(ypred, Ytest[:,-1], wei)
-                        if torch.is_tensor(metVal):
-                            metVal = metVal.detach().cpu().numpy()
-                    else:
-                        metVal = my_f1_score(Ytest, ypred, wei)[0]
-
-                    logger.info(f'{metVal} vs {bestVal}')
-
-                    if (~binary and metVal < bestVal) or (binary and metVal > bestVal):
-                        logger.info('Adding feature')
-                        bestVal = metVal
-                        newFet.append(fet)
-                        numIncrease = 0
-                    else:
-                        numIncrease += 1
-
-                    if numIncrease > 30:
-                        logger.info('The MAE didn t increase for 30 features, we stop here')
-                        break
-
-                logger.info(f'Optimize feature selection finish, best MAE is {bestVal}')
-                log_features(newFet, graph.scale, pos_feature, ["min", "mean", "max", "std"])
-                check_and_create_path(dir_output / oname)
-                save_object(newFet, 'features.pkl', dir_output / oname)
-                features = newFet
-            else:
-                save_object(features, 'features.pkl', dir_output / oname)
-
-            if name == 'xgboost':
-                model = config_xgboost(device, binary)
-                fitparams={
-                'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
+        # xgboost 3
+        Yw = Ytrain[:,-4]
+        Yw[Ytrain[:,-2] == 0] = 1
+        Y_train = Ytrain[:,-2] > 0
+        Y_val = Yval[:,-2] > 0
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_train)],
                 'sample_weight' : Yw,
                 'verbose' : False
                 }
 
-            if name == 'lightgbm':
-                model = config_lightGBM(device, binary)
-                fitparams={
-                'eval_set':[(Xtrain[:, features], Ytrain), (Xval[:, features], Yval)],
+        model, grid = config_xgboost(device, True, 'reg:logistic')
+        models.append(('xgboost_binary', Model(model, True, 'logloss', 'xgboost_binary'), fitparams, False, 'skip', grid))
+
+        # xgboost 4
+        Yw = np.ones(Y_train.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_train)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        model, grid = config_xgboost(device, True, 'reg:logistic')
+        models.append(('xgboost_binary_unweighted', Model(model, False, 'rmse', 'xgboost_binary_unweighted'), fitparams, False, 'skip', grid))
+
+        ################ lightgbm ##################
+        
+        # lightgbm 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
                 'sample_weight' : Yw,
                 }
+        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
+        models.append(('lightgbm', Model(model, False, 'rmse', 'lightgbm'), fitparams, False, 'skip', grid))
 
-            if name == 'ngboost':
-                model = config_ngboost(binary)
-                if binary:
-                    return
-                fitparams={
+        # lightgbm 2
+        Yw = np.ones(Ytrain.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
+        models.append(('lightgbm_unweighted', Model(model, False, 'rmse', 'lightgbm_unweighted'), fitparams, False, 'skip', grid))
+
+        # lightgbm 3
+        Yw = Ytrain[:,-4]
+        Yw[Ytrain[:,-2] == 0] = 1
+        Y_train = Ytrain[:,-2] > 0
+        Y_val = Yval[:,-2] > 0
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, True, 'binary')
+        models.append(('lightgbm_binary', Model(model, True, 'logloss', 'lightgbm_binary'), fitparams, False, 'skip', grid))
+
+        # lightgbm 4
+        Yw = np.ones(Y_train.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, True, 'binary')
+        models.append(('lightgbm_binary_unweighted', Model(model, False, 'logloss', 'lightgbm_binary_unweighted'), fitparams, False, 'skip', grid))
+
+        ################ ngboost ###################
+        
+        # ngboost 1
+        Yw = Ytrain[:,-4]
+        fitparams={
                 'early_stopping_rounds':15,
                 'sample_weight' : Yw,
                 'X_val':Xval[:, features],
-                'Y_val':Yval,
+                'Y_val':Y_val,
                 }
+        model, grid = config_ngboost(device, False)
+        models.append(('ngboost', Model(model, False, 'rmse', 'ngboost'), fitparams, False, 'skip', grid))
 
-            logger.info(f'Fitting model {oname}')
-            model.fit(Xtrain[:, features], Ytrain, **fitparams)
+        # ngboost 2
+        Yw = np.ones(Y_train.shape[0])
+        fitparams={
+                'early_stopping_rounds':15,
+                'sample_weight' : Yw,
+                'X_val':Xval[:, features],
+                'Y_val':Y_val,
+                }
+        model, grid = config_ngboost(device, False)
+        models.append(('ngboost_unweighted', Model(model, False, 'rmse', 'ngboost_unweighted'), fitparams, False, 'skip', grid))
 
-            check_and_create_path(dir_output / oname)
-            save_object(model, oname + '.pkl', dir_output / oname)
-    
-    except Exception as e:
-        logger.info(f'Error occured with training {e}')
+        ############################ Grid Search model ##################################
+
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        models.append(('xgboost_grid_search', Model(model, False, 'rmse', 'xgboost'), fitparams, False, 'grid', grid))
+
+        ############################# Features Model #######################################
+
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        models.append(('xgboost_features', Model(model, False, 'rmse', 'xgboost'), fitparams, True, 'skip', grid))
+
+        ############## fit #########################
+
+        for name, model, fitparams, evaluate_individual_features, parameter_optimization_method, grid in models:
+            save_object(features, 'features.pkl', dir_output / name)
+
+            logger.info(f'Fitting model {name}')
+            model.fit(X=Xtrain[:, features], y=Ytrain, X_test=Xtest, y_test=Ytest, evaluate_individual_features=evaluate_individual_features, optimization=parameter_optimization_method, param_grid=grid, fitparams=fitparams)
+
+            check_and_create_path(dir_output / name)
+            save_object(model, name + '.pkl', dir_output / name)
 
 def weighted_rmse_loss(input, target, weights = None):
     if not torch.is_tensor(input):
@@ -1348,18 +1327,32 @@ def weighted_cross_entropy(logits, target, weight=None):
         return loss.sum() / weight.sum()
     return loss.mean()
 
+def np_groupby(x, index):
+    return np.split(x, np.where(np.diff(x[:,index]))[0]+1)
+
 def add_metrics(methods : list, i : int,
                 ypred : torch.tensor,
                 ytrue : torch.tensor,
                 testDepartement : list,
                 isBin : bool,
                 scale : int,
-                model : str,
+                model : Model,
                 dir : Path) -> dict:
     
     datesoftest = np.unique(ytrue[:, 4]).astype(int)
     years = np.unique([allDates[di].split('-')[0] for di in datesoftest])
     seasons = generate_season_dict(years)
+
+    top = 5
+    uids = np.unique(ytrue[:, 0])
+    ysum = np.empty((uids.shape[0], 2))
+    ysum[:, 0] = uids
+    for id in uids:
+        ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = torch.sum(ytrue[torch.argwhere(ytrue[:, 0] == id)[:, 0], -2])
+    
+    ind = np.lexsort([ysum[:,1]])
+    ymax = np.flip(ysum[ind, 0])[:top]
+    mask_top = np.argwhere(np.isin(ytrue[:, 0], ymax))[:, 0]
 
     res = {}
     for name, met, target in methods:
@@ -1380,6 +1373,11 @@ def add_metrics(methods : list, i : int,
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_'+season] = mett
+
+            mett = met(ypred[mask_top], ytrue[mask_top,-1], ytrue[mask_top,-4])
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster'] = mett
 
         elif target == 'bin':
 
@@ -1415,24 +1413,51 @@ def add_metrics(methods : list, i : int,
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_unweighted_'+season] = mett
-                
+
+            mett = met(ytrue[mask_top], ypred[mask_top], isBin, None)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
+
+            mett = met(ytrue[mask_top], ypred[mask_top], isBin, ytrue[mask_top,-4])
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster'] = mett
+
         elif target == 'class':
-            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=ytrue[:,-4], top=None)
+            mett = met(ypred, ytrue, testDepartement, dir, weights=ytrue[:,-4], top=None)
             res[name] = mett
 
             for season, datesIndex in seasons.items():
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett =  met(ypred[mask], ytrue[mask], testDepartement, isBin, scale, model, dir, weights=ytrue[mask,-4], top=None)
+                mett = met(ypred[mask], ytrue[mask], testDepartement, dir, weights=ytrue[mask,-4], top=None)
                 res[name+'_'+season] = mett
 
-            mett = met(ypred, ytrue, testDepartement, isBin, scale, model, dir, weights=None, top=10)
+            mett = met(ypred, ytrue, testDepartement, dir, weights=None, top=10)
             res[name+'top10'] = mett
+
+            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, dir, weights=ytrue[mask_top,-4], top=None)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster'] = mett
+
+            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, isBin, scale, model, dir, weights=None, top=None)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
         logger.info(name)
 
     return res
+
+def create_binary_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int):
+    predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+    logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
+    predictor = Predictor(5, name=nameDep+'Binary')
+    predictor.fit(np.unique(ypred[mask]))
+    save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
 def standard_deviation(inputs, target, weights = None):
     return torch.std(inputs)
@@ -1538,8 +1563,7 @@ def my_f1_score(Y : torch.tensor, ypred : torch.tensor, isBin : bool, weights : 
 
     return (bestScore, prec, rec, bestBound, ypredNumpy > bestBound * maxi)
 
-def class_risk(ypred, ytrue, departements : list, isBin : bool,
-               scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
+def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1553,18 +1577,8 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
         mask = np.argwhere(ydep == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
-        if not isBin:
-            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-        else:
-            predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5, name=nameDep+'Binary')
-            if np.unique(ypred).shape[0] <= 5:
-                return res
-            predictor.fit(np.unique(ypred[mask]))
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-
-        yclass = predictor.predict(ypred[mask])
+            
+        yclass = ypred[mask, 1]
         uniqueClass = np.unique(yclass)
         res[nameDep] = {}
         for c in uniqueClass:
@@ -1577,11 +1591,10 @@ def class_risk(ypred, ytrue, departements : list, isBin : bool,
             meanP = round(np.mean(classPred), 3)
             meanT = round(np.mean(classTrue), 3)
             error = round(np.mean(error))
-            res[nameDep][c] = (predictor.get_centroid(c)[0], meanP, meanT, error, meanF)
+            res[nameDep][c] = (meanP, meanT, error, meanF)
     return res
 
-def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                   scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
+def class_accuracy(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1592,38 +1605,19 @@ def class_accuracy(ypred, ytrue, departements : list, isBin : bool,
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
 
-    dir_predictor = root_graph / dir / 'influenceClustering'
-    
-    ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
-        mask = np.argwhere(ydep == name2int[nameDep])
+        mask = np.argwhere(ytrue[:, 3] == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
-        if not isBin:
-            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ypredclass = predictor.predict(ypred[mask])
-            ytrueclass = predictor.predict(ytrue[mask, -1])
-        else:
-            predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5, name=nameDep+'Binary')
-            if np.unique(ypred).shape[0] <= 5:
-                return res
-            predictor.fit(np.unique(ypred[mask]))
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
-            ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
-        
         yweights = weightsNumpy[mask].reshape(-1)
 
-        res[nameDep] = accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
+        res[nameDep] = accuracy_score(ytrue[mask, -4], ypred[mask, -1], sample_weight=yweights)
             
     return res
 
-def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
-                            scale : int, modelName: str, dir : Path, weights = None, top=None) -> dict:
+def balanced_class_accuracy(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1634,39 +1628,21 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, isBin : bool,
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
 
-    dir_predictor = root_graph / dir / 'influenceClustering'
-    
-    ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
-        mask = np.argwhere(ydep == name2int[nameDep])
+        mask = np.argwhere(ytrue[:, 3] == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
-        if not isBin:
-            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ypredclass = predictor.predict(ypred[mask])
-            ytrueclass = predictor.predict(ytrue[mask, -1])
-        else:
-            predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5, name=nameDep+'Binary')
-            if np.unique(ypred).shape[0] <= 5:
-                return res
-            predictor.fit(np.unique(ypred[mask]))
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
-            ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
-        
         yweights = weightsNumpy[mask].reshape(-1)
 
-        res[nameDep] = balanced_accuracy_score(ytrueclass, ypredclass, sample_weight=yweights)
-
+        res[nameDep] = balanced_accuracy_score(ytrue[mask, -4], ypred[mask, -1], sample_weight=yweights)
+            
     return res
 
-def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
-                              scale : int, modelName: str,
+def mean_absolute_error_class(ypred, ytrue, departements : list,
                               dir : Path, weights = None, top : int = None) -> dict:
+    
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1680,38 +1656,25 @@ def mean_absolute_error_class(ypred, ytrue, departements : list, isBin : bool,
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
 
-    dir_predictor = root_graph / dir / 'influenceClustering'
-
-
     ydep = ytrue[:,3]
     res = {}
     for nameDep in departements:
         mask = np.argwhere(ydep == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
-        if not isBin:
-            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ypredclass = predictor.predict(ypred[mask])
-            ytrueclass = predictor.predict(ytrue[mask, -1])
-        else:
-            predictor1 = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            ytrueclass = order_class(predictor1, predictor1.predict(ytrue[mask, -1]))
-            logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-            predictor = Predictor(5, name=nameDep+'Binary')
-            if np.unique(ypred).shape[0] <= 5:
-                return res
-            predictor.fit(np.unique(ypred[mask]))
-            save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-
-            ypredclass = order_class(predictor, predictor.predict(ypred[mask]))
 
         yweights = weightsNumpy[mask].reshape(-1)
+
         if top is not None:
             minBound = np.nanmax(ytrue[mask,-1]) * (1 - top/100)
             mask2 = (ytrue[mask,-1] > minBound)[:,0]
             ytrueclass = ytrueclass[mask2]
             ypredclass = ypredclass[mask2]
             yweights = None
+        else:
+            ytrueclass = ytrue[mask, -4]
+            ypredclass = ypred[mask, -1]
+
         if ytrueclass.shape[0] == 0:
             continue
         res[nameDep] = mean_absolute_error(ytrueclass, ypredclass, sample_weight=yweights)
@@ -2145,11 +2108,10 @@ def check_class(influence, bin):
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
-def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int):
+def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int, n_clusters : int):
     check_and_create_path(dir_output)
     logger.info('###################" Calculate break point ####################')
     res_cluster = {}
-    n_cluster = 5
     features_selected_2 = []
 
     # For each feature
@@ -2177,17 +2139,16 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
                 i_var += 1
 
             on = fet+'_'+variales[i_var]+'_'+methods[i_met] # Get the right name
-            logger.info(on)
             res_cluster[xs] = {}
             res_cluster[xs]['name'] = on
             res_cluster[xs]['fet'] = fet
             X_fet = Xset[:, xs] # Select the feature
-            if np.unique(X_fet).shape[0] < n_cluster:
+            if np.unique(X_fet).shape[0] < n_clusters:
                 continue
             X_cluster = np.copy(X_fet)
 
             # Create the cluster model
-            model = Predictor(n_cluster, on)
+            model = Predictor(n_clusters, on)
             model.fit(X_cluster)
 
             save_object(model, on+'.pkl', dir_output / fet)
@@ -2195,7 +2156,7 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
             pred = order_class(model, model.predict(X_cluster)) # Predict and order class to 0 1 2 3 4
 
             cls = np.unique(pred)
-            if cls.shape[0] != n_cluster:
+            if cls.shape[0] != n_clusters:
                 continue
 
             plt.figure(figsize=(5,5)) # Create figure for ploting
@@ -2203,11 +2164,13 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
             # For each class calculate the target values
             for c in cls:
                 mask = np.argwhere(pred == c)[:,0]
-                res_cluster[xs][c] = np.sum(Yset[mask, -2]) / np.sum(Yset[:,-2])
+                res_cluster[xs][c] = np.mean(Yset[mask, -2])
                 plt.scatter(X_fet[mask], Yset[mask,-2], label=c)
+            
+            logger.info(on)
 
             # Calculate Pearson coefficient
-            df = pd.DataFrame(res_cluster, index=[0,1,2,3,4]).reset_index()
+            df = pd.DataFrame(res_cluster, index=np.arange(n_clusters)).reset_index()
             df.rename({'index': 'class'}, axis=1, inplace=True)
             df = df[['class', xs]]
             correlation = df['class'].corr(df[xs])
@@ -2225,7 +2188,7 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
             if abs(correlation) > 0.7:
                 # If negative linearity, inverse class
                 if correlation < 0:
-                    new_class = np.flip(np.arange(n_cluster))
+                    new_class = np.flip(np.arange(n_clusters))
                     temp = {}
                     for i, nc in enumerate(new_class):
                         temp[nc] = res_cluster[xs][i]
@@ -2240,6 +2203,28 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
     logger.info(len(features_selected_2))
     save_object(res_cluster, 'break_point_dict.pkl', dir_output)
     save_object(features_selected_2, 'features.pkl', dir_output)
+
+def apply_kmeans_class_on_target(Xset : np.array, Yset : np.array, dir_output : Path, change_class : bool):
+    dir_break_point = dir_output
+    features_selected = read_object('features.pkl', dir_break_point)
+    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
+
+    for fet in features_selected:
+        if 'name' not in dico_correlation[fet].keys():
+            continue
+        on = dico_correlation[fet]['name']+'.pkl'
+        predictor = read_object(on, dir_break_point / dico_correlation[fet]['fet'])
+        predclass = order_class(predictor, predictor.predict(Xset[:, fet]))
+        cls = np.unique(predclass)
+        for c in cls:
+            if dico_correlation[fet][int(c)] < 0.01:
+                mask = np.argwhere(predclass == c)
+                logger.info(f'We change {mask.shape} value to class {np.unique(Yset[Yset[:, -1] == np.nanmin(Yset[:, -1])][:, -3])[0]}')
+                Yset[mask, -1] = np.nanmin(Yset[:, -1])
+                if change_class:
+                    Yset[mask, -3] = np.unique(Yset[Yset[:, -1] == np.nanmin(Yset[:, -1])][:, -3])[0]
+
+    return Yset
 
 def est_bissextile(annee):
     return annee % 4 == 0 and (annee % 100 != 0 or annee % 400 == 0)
@@ -2298,9 +2283,9 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
-def train_pca(X, percent, dir_output):
+def train_pca(X, percent, dir_output, features_selected):
     pca =  PCA(n_components='mle', svd_solver='full')
-    components = pca.fit_transform(X[:, 6:])
+    components = pca.fit_transform(X[:, features_selected])
     check_and_create_path(dir_output / 'pca')
     show_pcs(pca, 2, components, dir_output / 'pca')
     print('99 % :',find_n_component(0.99, pca))
@@ -2309,11 +2294,11 @@ def train_pca(X, percent, dir_output):
     pca_number = find_n_component(percent, pca)
     save_object(pca, 'pca.pkl', dir_output)
     pca =  PCA(n_components=pca_number, svd_solver='full')
-    pca.fit(X[:, 6:])
+    pca.fit(X[:, features_selected])
     return pca, pca_number
 
-def apply_pca(X, pca, pca_number):
-    res = pca.transform(X[:, 6:])
+def apply_pca(X, pca, pca_number, features_selected):
+    res = pca.transform(X[:, features_selected])
     new_X = np.empty((X.shape[0], 6 + pca_number))
     new_X[:, :6] = X[:, :6]
     new_X[:, 6:] = res

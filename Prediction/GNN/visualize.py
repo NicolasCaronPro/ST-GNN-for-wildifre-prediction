@@ -4,6 +4,7 @@ def realVspredict(ypred, y, band, dir_output, on):
     check_and_create_path(dir_output)
     ytrue = y[:,band]
     dept = np.unique(y[:, 3])
+
     for d in dept:
         mask = np.argwhere(y[:,3] == d)
         ids = np.unique(y[mask, 0])
@@ -15,9 +16,33 @@ def realVspredict(ypred, y, band, dir_output, on):
             ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
             x = np.argwhere(y[mask2,-2] > 0)[:,0]
             ax[i].scatter(x, ypred[mask2][x], color='black', label='fire', alpha=0.5)
-        plt.legend()
+        #plt.legend()
         outn = str(d) + '_' + on + '.png'
         plt.savefig(dir_output / outn)
+
+    uids = np.unique(y[:, 0])
+    ysum = np.empty((uids.shape[0], 2))
+    ysum[:, 0] = uids
+    for id in uids:
+        ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, 0] == id)[:, 0], -2])
+
+    ind = np.lexsort([ysum[:,1]])
+    ymax = np.flip(ysum[ind, 0])[:5]
+    _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50,25))
+    for i, idtop in enumerate(ymax):
+        mask = np.argwhere(y[:,0] == idtop)
+        dept = np.unique(y[mask, 3])[0]
+        ids = np.unique(y[mask, 0])
+        ax[i].plot(ypred[mask], color='red', label='predict')
+        ax[i].plot(ytrue[mask], color='blue', label='real', alpha=0.5)
+        ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
+        x = np.argwhere(y[mask,-2] > 0)[:,0]
+        ax[i].scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
+        ax[i].set_title(str(dept)+'_'+str(idtop))
+
+    plt.tight_layout()
+    outn =  'top_5' + on + '.png'
+    plt.savefig(dir_output / outn)
 
 def sinister_distribution_in_class(ypredclass, y, dir_output):
     check_and_create_path(dir_output)

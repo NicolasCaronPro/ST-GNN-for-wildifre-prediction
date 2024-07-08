@@ -29,6 +29,7 @@ parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
+parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 
 args = parser.parse_args()
 
@@ -52,6 +53,7 @@ scale = int(args.scale)
 spec = args.spec
 doPCA = args.pca == 'True'
 resolution = args.resolution
+ncluster = int(args.ncluster)
 
 ######################### Incorporate new features ##########################
 
@@ -70,8 +72,6 @@ if values_per_class == 'full':
     prefix = str(values_per_class)+'_'+str(scale)
 else:
     prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if doPCA:
-    prefix += '_pca'
 
 if dummy:
     prefix += '_dummy'
@@ -208,20 +208,37 @@ trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, ma
                                                    ks=k_days, dir_output=dir_output, prefix=prefix)
 
 if doPCA:
+    prefix += '_pca'
     Xtrain = trainDataset[0]
-    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix)
-    trainDataset = (apply_pca(trainDataset[0], pca, components), trainDataset[1])
-    valDataset = (apply_pca(valDataset[0], pca, components), valDataset[1])
-    testDataset = (apply_pca(testDataset[0], pca, components), testDataset[1])
+    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, train_fet_num)
+    trainDataset = (apply_pca(trainDataset[0], pca, components), trainDataset[1], train_fet_num)
+    valDataset = (apply_pca(valDataset[0], pca, components), valDataset[1], train_fet_num)
+    testDataset = (apply_pca(testDataset[0], pca, components), testDataset[1], train_fet_num)
     features_selected = np.arange(6, components + 6)
     trainFeatures = ['pca_'+str(i) for i in range(components)]
     pos_feature, _ = create_pos_feature(0, 6, trainFeatures)
+    kmeansFeatures = trainFeatures
+else:
+    features_selected = np.arange(6, X.shape[1])
 
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(trainFeatures))
-prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(trainFeatures))
+prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(features_selected))+'_'+str(ncluster)
+prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(features_selected))+'_'+str(ncluster)
 
 if doTrain:
-    train_break_point(trainDataset[0], trainDataset[1], trainFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale)
+    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
+
+    Ytrain = trainDataset[1]
+    Yval = valDataset[1]
+    Ytest = testDataset[1]
+
+    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
+    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
+    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
+
+    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
+    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
+
+    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
 
 logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
 logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
