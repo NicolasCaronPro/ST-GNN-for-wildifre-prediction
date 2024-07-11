@@ -184,10 +184,8 @@ def construct_database(graphScale : GraphStructure,
         X, Y = remove_nan_nodes(X, Y)
         X, Y = remove_none_target(X, Y)
         X = np.unique(X, axis=0)
-        Y = new_Y
         Y = np.unique(Y, axis=0)
         Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
-        logger.info(f'{new_Y.shape, Ytrain[Ytrain[:, 5] > 0].shape, Ytrain.shape}')
 
     if X is None:
         if graphScale.scale == 0:
