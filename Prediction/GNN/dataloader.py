@@ -1,7 +1,7 @@
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
-from visualize import *
+from train import *
 
 #########################################################################################################
 #                                                                                                       #
@@ -99,7 +99,6 @@ class InplaceGraphDataset(Dataset):
 
     def __getitem__(self, index) -> tuple:
         x = self.X[index]
-        #x = self.X[index]
         y = self.Y[index]
 
         edges = self.edges[index]
@@ -162,7 +161,7 @@ class ReadGraphDataset_2D(Dataset):
 
 def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
                trainDate : str, trainDepartements : list, ks : int, dir_output : Path,
-               prefix : str):
+               prefix : str, pos_feature : dict):
     """
     Preprocess the input features:
         X : input features
@@ -217,8 +216,16 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
         ValueError('Unknow')
         exit(1)
 
+    if 'AutoRegressionReg' in trainFeatures:
+        autoregressiveBand = pos_feature['AutoRegressionReg']
+    else:
+        autoregressiveBand = - 1
+
     # Scale Features
     for featureband in range(6, Xset.shape[1]):
+        if featureband == autoregressiveBand:
+            logger.info(f'Avoid scale for Autoregressive feature')
+            continue
         Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
     
     Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))],
@@ -307,7 +314,6 @@ def create_dataset(graph,
                     device,
                     ks : int):
     """
-    
     """
 
     Xtrain, Ytrain = train
@@ -396,8 +402,8 @@ def train_val_data_loader(graph,
                                 device, ks)
 
     trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
+    valLoader = DataLoader(valDataset, 1, False, collate_fn=graph_collate_fn)
+    testLoader = DataLoader(testDataset, 1, False, collate_fn=graph_collate_fn)
     return trainLoader, valLoader, testLoader
 
 
@@ -707,27 +713,20 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
 
     return loader
 
-def test_sklearn_api_model(graphScale, Xset, Yset,
+def test_sklearn_api_model(graphScale,
+                           Xset, Yset,
                            methods,
                            testname,
                            prefix_train,
-                           dummy,
                            models,
                            dir_output,
                            device,
-                           k_days,
                            encoding,
                            scaling,
                            testDepartement,
                            train_dir,
-                           sinister,
-                           resolution,
-                           doKmeans):
+                           pos_feature):
     
-    if doKmeans:
-        prefix = prefix_train + 'kmean_test'
-    else:
-        prefix = prefix_train
     
     if Xset.shape[0] == 0:
         logger.info(f'{testname} is empty, skip')
@@ -741,21 +740,18 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
     logger.info(f'       GT              ')
     logger.info('#########################')
 
-    pred = Yset[Yset[:,-4] > 0][:, -1]
     y = Yset[Yset[:,-4] > 0]
     Xset = Xset[Yset[:, -4] > 0]
-    YTensor = torch.tensor(y, dtype=torch.float32, device=device)
-    predTensor = torch.tensor(pred, dtype=torch.float32, device=device)
-
-    metrics['GT'] = add_metrics(methods, 0, predTensor, YTensor, testDepartement, False, scale, 'gt', train_dir)
+    pred = np.empty((Yset[Yset[:,-4] > 0].shape[0], 2))
+    pred[:, 0] = Yset[Yset[:,-4] > 0][:, -1]
+    pred[:, 1] = Yset[Yset[:,-4] > 0][:, -3]
+    metrics['GT'] = add_metrics(methods, 0, pred, y, testDepartement, False, scale, 'gt', train_dir)
     i = 1
 
     #################################### Traditionnal ##################################################
 
-    for name, isBin in models:
+    for name, isBin, autoRegression in models:
         y = Yset[Yset[:,-4] > 0]
-        YTensor = torch.tensor(y, dtype=torch.float32, device=device)
-        #n = name+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
         n = name
         model_dir = train_dir / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
         
@@ -774,11 +770,9 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
 
         pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
-        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset[:, features_selected], isBin)
+        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset, features_selected, isBin, autoRegression, pos_feature)
 
-        if doKmeans:
-            pred[:, 0] = apply_kmeans_class_on_target(Xset, pred, train_dir / 'varOnValue' / prefix_train, False).reshape(-1)
-
+        dir_predictor = root_graph / train_dir / 'influenceClustering'
         for nameDep in departements:
             mask = np.argwhere(y[:, 3] == name2int[nameDep])
             if mask.shape[0] == 0:
@@ -786,21 +780,19 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
             if not isBin:
                 predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             else:
-                create_binary_predictor(pred, name, nameDep, dir_predictor)
+                create_binary_predictor(pred, name, nameDep, dir_predictor, scale)
                 predictor = read_object(nameDep+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
 
-            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 1]))
+            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 0]))
 
-        metrics[name] = add_metrics(methods, i, pred, YTensor, testDepartement, isBin, scale, name, train_dir)
+        metrics[name] = add_metrics(methods, i, pred, y, testDepartement, isBin, scale, name, train_dir)
 
         if isBin:
             y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
 
         realVspredict(pred[:, 0], y, -1,
                       dir_output / n, 'raw')
-        
-        dir_predictor = root_graph / train_dir / 'influenceClustering'
-        
+                
         realVspredict(pred[:, 1], y, -3,
                       dir_output / n, 'class')
 
@@ -810,10 +802,10 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
         res[:, :y.shape[1]] = y
         res[:,y.shape[1]] = pred[:, 0]
         res[:,y.shape[1] + 1] = pred[:, 1]
-        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
-        res[:,y.shape[1]+3] = np.sqrt(((pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
+        res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
             start = '2018-01-01'
@@ -828,7 +820,7 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
                         isBin, scale, name, res, n,
                         start, stop, resolution)"""
 
-        shapiro_wilk(pred, y[:,-1], dir_output / n)
+        shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
 
         """
         realVspredict2d(pred,
@@ -841,7 +833,11 @@ def test_sklearn_api_model(graphScale, Xset, Yset,
             geo,
             testDepartement,
             graphScale)"""
-
+        try:
+            pred[:, 0] = apply_kmeans_class_on_target(Xset, pred, train_dir / 'varOnValue' / prefix_train, False).reshape(-1)
+            metrics[name+'_kmeans_preprocessing'] = add_metrics(methods, i, pred, y, testDepartement, isBin, scale, name, train_dir)
+        except:
+            pass
         i += 1
 
     ########################################## Save metrics ################################ 
@@ -877,13 +873,12 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
     logger.info(f'       GT              ')
     logger.info('#########################')
 
-    pred = Yset[Yset[:,-4] > 0][:, -1]
     y = Yset[Yset[:,-4] > 0]
-    YTensor = torch.tensor(y, dtype=torch.float32, device=device)
-    predTensor = torch.tensor(pred, dtype=torch.float32, device=device)
-
-    metrics['GT'] = add_metrics(methods, 0, predTensor, YTensor, testDepartement, False, scale, 'gt', train_dir)
-
+    Xset = Xset[Yset[:, -4] > 0]
+    pred = np.empty((Yset[Yset[:,-4] > 0].shape[0], 2))
+    pred[:, 0] = Yset[Yset[:,-4] > 0][:, -1]
+    pred[:, 1] = Yset[Yset[:,-4] > 0][:, -3]
+    metrics['GT'] = add_metrics(methods, 0, pred, y, testDepartement, False, scale, 'gt', train_dir)
     i = 1
 
     #################################### GNN ###################################################
@@ -914,19 +909,11 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         features_selected = read_object('features.pkl', model_dir)
 
         predTensor, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device, isBin=isBin)
-
-        metrics[mddel] = add_metrics(methods, i, predTensor, YTensor, testDepartement, isBin, scale, mddel, train_dir)
-
-        pred = predTensor.detach().cpu().numpy()
         y = YTensor.detach().cpu().numpy()
 
-        realVspredict(pred, y, -1,
-                      dir_output / n, 'raw')
-        
         dir_predictor = root_graph / train_dir / 'influenceClustering'
-
-        predclass = np.empty(pred.shape[0])
-
+        pred = np.empty((predTensor.shape[0], 2))
+        pred[:, 0] = predTensor.detach().cpu().numpy()
         for nameDep in departements:
             mask = np.argwhere(y[:, 3] == name2int[nameDep])
             if mask.shape[0] == 0:
@@ -934,21 +921,28 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
             if not isBin:
                 predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
             else:
+                create_binary_predictor(pred, mddel, nameDep, dir_predictor, scale)
                 predictor = read_object(nameDep+'Predictor'+mddel+str(scale)+'.pkl', dir_predictor)
 
-            predclass[mask[:,0]] = order_class(predictor, predictor.predict(pred[mask[:, 0]]))
+            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 0]))
 
-        realVspredict(predclass, y, -3,
+        metrics[mddel] = add_metrics(methods, i, pred, y, testDepartement, isBin, scale, mddel, train_dir)
+
+
+        realVspredict(pred[:, 0], y, -1,
+                      dir_output / n, 'raw')
+        
+        realVspredict(pred[:, 1], y, -3,
                       dir_output / n, 'class')
         
-        sinister_distribution_in_class(predclass, y, dir_output / n)
+        sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
 
         res = np.empty((pred.shape[0], y.shape[1] + 4))
         res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred
-        res[:,y.shape[1] + 1] = predclass
-        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
-        res[:,y.shape[1]+3] = np.sqrt(((pred - y[:,-1]) ** 2))
+        res[:,y.shape[1]] = pred[:,0]
+        res[:,y.shape[1] + 1] = pred[:, 1]
+        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
+        res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
         save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
@@ -965,7 +959,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                         isBin, scale, mddel, res, n,
                         start, stop, resolution)
 
-        shapiro_wilk(pred, y[:,-1], dir_output / n)
+        shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
 
         """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
         realVspredict2d(pred,

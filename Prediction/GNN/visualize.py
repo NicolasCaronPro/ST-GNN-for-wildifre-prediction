@@ -60,12 +60,12 @@ def sinister_distribution_in_class(ypredclass, y, dir_output):
             nbsinisteriny.append(-1)
             meansinisteriny.append(-1)
             
-        nbsinisteriny.append(np.nansum(y[mask, -2]))
+        nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
         meansinisteriny.append(np.nanmean(y[mask, -2]))
 
         mask = np.argwhere(ypredclass == cls)[:, 0]
 
-        nbsinisterinpred.append(np.nansum(y[mask, -2]))
+        nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
         meansinisterinpred.append(np.nanmean(y[mask, -2]))
 
 

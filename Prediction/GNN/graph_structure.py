@@ -373,13 +373,14 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
         
-    def _predict_test_loader(self, X : DataLoader, features : np.array, device, isBin : bool) -> torch.tensor:
+    def _predict_test_loader(self, X : DataLoader, features : np.array, device, isBin : bool, autoRegression : bool, pos_feature : dict) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
+
         with torch.no_grad():
             pred = []
             y = []
-         
+
             for i, data in enumerate(X, 0):
                 inputs, labels, edges = data
                 inputs = inputs[:, features]
@@ -387,7 +388,7 @@ class GraphStructure():
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 edges = edges.to(device)
-                
+
                 weights = labels[:,-4].to(torch.long)
 
                 output = self.model(inputs, edges)
@@ -415,13 +416,40 @@ class GraphStructure():
 
             return pred, y
         
-    def predict_model_api_sklearn(self, X : np.array, isBin : bool) -> np.array:
+    def predict_model_api_sklearn(self, X : np.array,
+                                  features : np.array, isBin : bool,
+                                  autoRegression : bool, pos_feature : dict) -> np.array:
         assert self.model is not None
-        if not isBin:
-            return self.model.predict(X)
+        if not autoRegression:
+            if not isBin:
+                return self.model.predict(X[:, features])
+            else:
+                return self.model.predict_proba(X[:, features])[:,1]
         else:
-             return self.model.predict_proba(X)[:,1]
-        
+            pred = np.empty(X.shape[0])
+            uid = np.unique(X[:, 0])
+            for id in uid:
+                udate = np.unique(X[:, 4])
+                for d in udate:
+                    mask = np.argwhere((X[:, 0] == id) & (X[:, 4] == d))[:,0]
+                    if mask.shape[0] == 0:
+                        continue
+                    if not isBin:
+                        preddd = self.model.predict(X[mask, features].reshape(-1,features.shape[0]))
+                    else:
+                        preddd = self.model.predict_proba(X[mask, features].reshape(-1, features.shape[0]))[:,1]
+                    
+                    pred[mask] = preddd
+                    maskNext = np.argwhere((X[:, 0] == id) & (X[:, 4] == d + 1))
+                    if maskNext.shape[0] == 0:
+                        continue
+                    else:
+                        if not isBin:
+                            X[maskNext, pos_feature['AutoRegressionReg']] = preddd
+                        else:
+                            X[maskNext, pos_feature['AutoRegressionBin']] = preddd
+            return pred
+
     def _predict_perference_with_Y(self, Y : np.array, isBin : bool) -> np.array:
         res = np.empty(Y.shape[0])
         res[0] = 0

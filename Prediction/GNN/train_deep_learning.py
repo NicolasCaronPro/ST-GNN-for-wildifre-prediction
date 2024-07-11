@@ -13,8 +13,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-p', '--point', type=str, help='Construct points')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of points')
+parser.add_argument('-p', '--point', type=str, help='Construct n point')
+parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
 parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
 parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
@@ -23,11 +23,11 @@ parser.add_argument('-f', '--featuresSelection', type=str, help='Do features sel
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
-parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
-parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
+parser.add_argument('-of', '--optimizeFeature', type=str, help='Number de Features')
+parser.add_argument('-r', '--resolution', type=str, help='Resolution')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
@@ -38,31 +38,33 @@ args = parser.parse_args()
 nameExp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
-doEncoder = args.encoder == "True"
+doEncoder = args.encoder == 'True'
 doPoint = args.point == "True"
 doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
-optimize_feature = args.optimizeFeature == "True"
 doTest = args.doTest == "True"
 doTrain = args.doTrain == "True"
-nbfeatures = int(args.NbFeatures)
+optimize_feature = args.optimizeFeature == "True"
 sinister = args.sinister
 values_per_class = args.nbpoint
+nbfeatures = int(args.NbFeatures) if args.NbFeatures != 'all' else args.NbFeatures 
 scale = int(args.scale)
 spec = args.spec
-resolution = args.resolution
 doPCA = args.pca == 'True'
+resolution = args.resolution
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
 
-############################# GLOBAL VARIABLES #############################
+######################### Incorporate new features ##########################
 
-dir_target = root_target / sinister / 'log' / resolution
+newFeatures = []
+
+dir_target = root_target / sinister / 'log'
 
 geo = gpd.read_file('regions/regions.geojson')
-geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
+geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
 
 name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
@@ -74,6 +76,8 @@ if values_per_class == 'full':
     prefix = str(values_per_class)+'_'+str(scale)
 else:
     prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+if doPCA:
+    prefix += '_pca'
 
 if dummy:
     prefix += '_dummy'
@@ -87,12 +91,13 @@ if doPoint:
 
     check_and_create_path(dir_output)
 
+    regions = gpd.read_file('regions/regions.geojson')
     fp = pd.read_csv('sinister/'+sinister+'.csv')
 
-    construct_non_point(fp, geo, maxDate, sinister, Path(nameExp))
+    construct_non_point(fp, regions, maxDate, sinister, Path(nameExp))
     look_for_information(dir_target,
                          departements,
-                         geo,
+                         regions,
                          maxDate,
                          sinister,
                          Path(nameExp))
@@ -100,7 +105,7 @@ if doPoint:
 ######################### Encoding ######################################
 
 if doEncoder:
-    encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder', resolution)
+    encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder')
 
 ########################## Do Graph ######################################
 
@@ -129,8 +134,8 @@ if doDatabase:
     if not dummy:
         name = 'points.csv'
         ps = pd.read_csv(Path(nameExp) / sinister / name)
-        logger.info(f'{ps.date.min(), allDates[ps.date.min()]}')
-        logger.info(f'{ps.date.max(), allDates[ps.date.max()]}')
+        logger.info(ps.date.min())
+        logger.info(ps.date.max())
         depts = [name2int[dept] for dept in departements]
         logger.info(ps.departement.unique())
         ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
@@ -162,24 +167,23 @@ if doDatabase:
     
     save_object(X, 'X_'+prefix+'.pkl', dir_output)
     save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
+
 else:
     X = read_object('X_'+prefix+'.pkl', dir_output)
     Y = read_object('Y_'+prefix+'.pkl', dir_output)
     pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
 
-if newFeatures != []:
-    X2, pos_feature_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
-    for fet in newFeatures:
-        maxi, _, _ = calculate_feature_range(fet, scale)
-        X[:, pos_feature[fet]: pos_feature[fet] + maxi] = X2[:, pos_feature_[fet]: pos_feature_[fet] + maxi]
-
-realVspredict(Y[:, -1], Y, -1,
-                    dir_output / prefix, 'raw')
-
-realVspredict(Y[:, -3], Y, -3,
-                    dir_output / prefix, 'class')
-
-sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
+if len(newFeatures) > 0:
+    X = X[:, :pos_feature['Geo'] + 1]
+    subnode = X[:,:6]
+    XnewFeatures, _ = get_sub_nodes_feature(graphScale, subnode, trainDepartements, newFeatures, dir_output)
+    newX = np.empty((X.shape[0], X.shape[1] + XnewFeatures.shape[1] - 6))
+    newX[:,:X.shape[1]] = X
+    newX[:, X.shape[1]:] = XnewFeatures[:,6:]
+    X = newX
+    features += newFeatures
+    logger.info(X.shape)
+    save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
 if do2D:
     subnode = X[:,:6]
@@ -188,57 +192,47 @@ if do2D:
                                                  X,
                                                  scaling,
                                                  pos_feature,
-                                                 departements,
+                                                 trainDepartements,
                                                  features,
                                                  sinister,
                                                  dir_output,
                                                  prefix)
+    
 else:
     subnode = X[:,:6]
     pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
 
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-
-# Add varying time features
-if k_days > 0:
-    trainFeatures += varying_time_variables
-    features += varying_time_variables
-    pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
-    if doDatabase:
-        X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
 ############################# Training ###########################
+
 trainCode = [name2int[dept] for dept in trainDepartements]
 
-# Select train features
+Xtrain, Ytrain = (X[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))],
+                      Y[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))])
+
+save_object(Xtrain, 'Xtrain_'+prefix+'.pkl', dir_output)
+save_object(Ytrain, 'Ytrain_'+prefix+'.pkl', dir_output)
+
 train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
 
-save_object(features, spec+'_features.pkl', dir_output)
-save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)
-
+save_object(features, spec+'_features.pkl', dir_output)        
+save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)        
+prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 if spec != '':
     prefix += '_'+spec
-logger.info(pos_feature)
 pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
-logger.info(pos_feature)
-logger.info(np.max(X[:,4]))
-logger.info(np.unique(X[:,0]))
-logger.info(np.nanmax(X))
-logger.info(np.unravel_index(np.nanargmax(X), X.shape))
+
+logger.info(X.shape)
 
 # Preprocess
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
                                                    ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature)
 
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, True, nbfeatures, scale)
+features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, False, nbfeatures, scale)
 
 if doPCA:
     prefix += '_pca'
-    prefix_train += '_pca'
     Xtrain = trainDataset[0]
     pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
     trainDataset = (apply_pca(trainDataset[0], pca, components, features_selected), trainDataset[1])
@@ -251,7 +245,6 @@ if doPCA:
 
 if doKMEANS:
     prefix += '_kmeans_'+str(ncluster)
-    prefix_train += '_kmeans_'+str(ncluster)
     train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
     Ytrain = trainDataset[1]
     Yval = valDataset[1]
@@ -269,29 +262,108 @@ if doKMEANS:
 logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
 logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
 
-# Features selection
+# Train
+epochs = 10000
+lr = 0.01
+PATIENCE_CNT = 200
+CHECKPOINT = 100
 
-######################## Baseline ##############################
-name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
-trainCode = [name2int[dept] for dept in trainDepartements]
+gnnModels = [
+        #('GAT', False, False),
+        ('DST-GCNCONV', False, False, False),
+        ('ST-GATTCN', False, False, False),
+        ('ST-GATCONV', False, False, False),
+        ('ST-GCNCONV', False, False, False),
+        ('ATGN', False, False, False),
+        ('ST-GATLTSM', False, False, False),
+        ('LTSM', False, False, False),
+        #('DST-GCNCONV_bin', False, True, False),
+        #('ST-GATTCN_bin', False, True, False),
+        #('ST-GATCONV_bin', False, True, False),
+        #('ST-GCNCONV_bin', False, True, False),
+        #('ATGN_bin', False, True, False),
+        #('ST-GATLTSM_bin', False, True, False),
+        #('Zhang', False, True)
+        #('ConvLSTM', False, True)
+        ]
+
+trainLoader = None
+valLoader = None
+last_bool = None
 
 if doTrain:
-    train_sklearn_api_model(trainDataset=trainDataset,
-                            valDataset=valDataset,
-                            testDataset=testDataset,
-                            dir_output=dir_output / name,
-                            device='cpu',
-                            features=features_selected,
-                            autoRegression=autoRegression)
+    for model, use_temporal_as_edges, isBin, is_2D_model in gnnModels:
+        if not isBin:
+            criterion = weighted_rmse_loss
+        else:
+            criterion = weighted_cross_entropy
+            criterion = torch.nn.CrossEntropyLoss(reduction='mean')
+
+        logger.info(f'Fitting model {model}')
+        logger.info('Try loading loader')
+        if not is_2D_model:
+            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        else:
+            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+
+        if trainLoader is None or Rewrite:
+            logger.info(f'Building loader, loading loader_{str(use_temporal_as_edges)}.pkl')
+            last_bool = use_temporal_as_edges
+            if not is_2D_model:
+                trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=trainDataset,
+                                                                        val=valDataset,
+                                                                        test=testDataset,
+                                                                batch_size=64, device=device,
+                                                                use_temporal_as_edges = use_temporal_as_edges,
+                                                                ks=k_days)
+            
+                save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+                save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+            else:
+                trainLoader, valLoader, testLoader = train_val_data_loader_2D(graph=graphScale,
+                                                                train=trainDataset,
+                                                                val=valDataset,
+                                                                test=testDataset,
+                                                                use_temporal_as_edges=use_temporal_as_edges,
+                                                                batch_size=64,
+                                                                device=device,
+                                                                scaling=scaling,
+                                                                pos_feature=pos_feature,
+                                                                pos_feature_2D=pos_feature_2D,
+                                                                ks=k_days,
+                                                                shape=(shape2D[0], shape2D[1], newShape2D),
+                                                                path=dir_output / '2D' / prefix / 'data')
+
+                save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+                save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+
+        train(trainLoader=trainLoader, valLoader=valLoader,
+            testLoader=testLoader,
+            scale=scale,
+            optmize_feature = optimize_feature,
+            PATIENCE_CNT=PATIENCE_CNT,
+            CHECKPOINT=CHECKPOINT,
+            epochs=epochs,
+            features=features_selected,
+            lr=lr,
+            pos_feature=pos_feature,
+            criterion=criterion,
+            modelname=model,
+            dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model),
+            binary=isBin,
+            autoRegression=autoRegression)
 
 if doTest:
-    logger.info('############################# TEST ###############################')
 
-    Xtrain = trainDataset[0]
-    Ytrain = trainDataset[1]
+    dico_model = make_models(len(features_selected), 52, 0.03, 'relu')
 
-    Xtest = testDataset[0]
-    Ytest = testDataset[1]
+    trainCode = [name2int[dept] for dept in trainDepartements]
+
+    Xtrain, Ytrain = trainDataset
+
+    Xtest, Ytest  = testDataset
 
     name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
     train_dir = Path(name_dir)
@@ -320,103 +392,75 @@ if doTest:
             ('meac', meac, 'class'),
             ]
 
-    models = [
-        ('xgboost', False, autoRegression),
-        #('xgboost_rmlse', False, autoRegression),
-        #('xgboost_optimize_feature', autoRegression),
-        #('lightgbm', False, autoRegression),
-        #('ngboost', False, autoRegression),
-        ('xgboost_binary', True, False),
-        #('lightgbm_binary', True, False),
-        #('xgboost_binary_unweighted', True, False),
-        #('lightgbm_binary_unweighted', True, False),
-        #('xgboost_unweighted', False, autoRegression),
-        #('lightgbm_unweighted', False, autoRegression),
-        #('xgboost_grid_search', False, autoRegression), 
-        #('ngboost_unweighted', autoRegression),
-        #('ngboost_bin', autoRegression)
-        ]
+    gnnModels = [
+        #('GAT', False, False),
+        ('DST-GCNCONV', False, False, False, False),
+        ('ST-GATTCN', False, False, False, False),
+        ('ST-GATCONV', False, False, False, False),
+        ('ST-GCNCONV', False, False, False, False),
+        ('ATGN', False, False, False, False),
+        ('ST-GATLTSM', False, False, False, False),
+        ('LTSM', False, False, False, False),
+        #('DST-GCNCONV_bin', False, True, False),
+        #('ST-GATTCN_bin', False, True, False),
+        #('ST-GATCONV_bin', False, True, False),
+        #('ST-GCNCONV_bin', False, True, False),
+        #('ATGN_bin', False, True, False),
+        #('ST-GATLTSM_bin', False, True, False),
+        #('Zhang', False, True)
+        #('ConvLSTM', False, True)
+    ]
+
+    # 69 test
+    testDepartement = ['departement-69-rhone']
+    Xset = Xtest[(Xtest[:, 3] == 69)]
+    Yset = Ytest[(Xtest[:, 3] == 69)]
+
+    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+                           methods,
+                           '69',
+                           pos_feature,
+                           prefix,
+                           prefix,
+                           dummy,
+                           gnnModels,
+                           dir_output / '69' / prefix,
+                           device,
+                           k_days,
+                           Rewrite, 
+                           encoding,
+                           scaling,
+                           testDepartement,
+                           train_dir,
+                           dico_model,
+                           pos_feature_2D,
+                           shape2D,
+                           sinister,
+                           resolution)
     
-    if sinister == 'firepoint':
-        # 69 test
-        testDepartement = ['departement-69-rhone']
-        Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        save_object(Xset, 'X69'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y69'+prefix+'.pkl', dir_output)
-        logger.info(f'69 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-        logger.info(f'{np.nanmax(Xset[:, 6:]), np.nanmin(Xset[:, 6:])}')
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           models,
-                           dir_output / '69' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
-
-        # 2023 test
-        testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 69)]
-        Yset = Ytest[(Xtest[:, 3] != 69)]
-        save_object(Xset, 'X2023'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y2023'+prefix+'.pkl', dir_output)
-        logger.info(f'2023 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-        logger.info(f'{np.nanmax(Xset[:, 6:]), np.nanmin(Xset[:, 6:])}')
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
+    # 2023 test
+    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+    Xset = Xtest[(Xtest[:, 3] != 69)]
+    Yset = Ytest[(Xtest[:, 3] != 69)]
+    
+    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
                            '2023',
+                           pos_feature,
                            prefix,
-                           models,
+                           prefix,
+                           dummy,
+                           gnnModels,
                            dir_output / '2023' / prefix,
                            device,
+                           k_days,
+                           Rewrite, 
                            encoding,
                            scaling,
                            testDepartement,
                            train_dir,
-                           pos_feature)
-         
-    if sinister == 'inondation':
-        # 69 test
-        testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 25)]
-        Yset = Ytest[(Xtest[:, 3] != 25)]
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           models,
-                           dir_output / '69' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
-        
-        # 2023 test
-        testDepartement = ['departement-25-doubs']
-        Xset = Xtest[(Xtest[:, 3] == 25)]
-        Yset = Ytest[(Xtest[:, 3] == 25)]
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '2023',
-                           prefix,
-                           models,
-                           dir_output / '2023' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
+                           dico_model,
+                           pos_feature_2D,
+                           shape2D,
+                           sinister,
+                           resolution)

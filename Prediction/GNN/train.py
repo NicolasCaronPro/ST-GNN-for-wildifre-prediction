@@ -1,464 +1,534 @@
-from dataloader import *
-from graph_structure import *
-import geopandas as gpd
-from construct import *
-from config import *
-import argparse
-from encoding import encode
+from visualize import *
 
-########################### Input Arg ######################################
+#################################### TREES ########################################
 
-parser = argparse.ArgumentParser(
-    prog='Train',
-    description='Create graph and database according to config.py and tained model',
-)
-parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
-parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
-parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-p', '--point', type=str, help='Construct n point')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
-parser.add_argument('-d', '--database', type=str, help='Do database')
-parser.add_argument('-g', '--graph', type=str, help='Construct graph')
-parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
-parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
-parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
-parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-sp', '--spec', type=str, help='spec')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
-parser.add_argument('-test', '--doTest', type=str, help='Launch test')
-parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
-parser.add_argument('-of', '--optimizeFeature', type=str, help='Number de Features')
-parser.add_argument('-r', '--resolution', type=str, help='Resolution')
-parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
-parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
-parser.add_argument('-kmeansTest', '--kmeansTest', type=str, help='Apply kmeans on test set')
 
-args = parser.parse_args()
-
-# Input config
-nameExp = args.name
-maxDate = args.maxDate
-trainDate = args.trainDate
-doEncoder = args.encoder == 'True'
-doPoint = args.point == "True"
-doGraph = args.graph == "True"
-doDatabase = args.database == "True"
-do2D = args.database2D == "True"
-doFet = args.featuresSelection == "True"
-doTest = args.doTest == "True"
-doTrain = args.doTrain == "True"
-optimize_feature = args.optimizeFeature == "True"
-sinister = args.sinister
-values_per_class = args.nbpoint
-nbfeatures = int(args.NbFeatures) if args.NbFeatures != 'all' else args.NbFeatures 
-scale = int(args.scale)
-spec = args.spec
-doPCA = args.pca == 'True'
-resolution = args.resolution
-doKMEANS = args.KMEANS == 'True'
-doTestKMEANS = args.KMEANS == 'True'
-ncluster = int(args.ncluster)
-
-######################### Incorporate new features ##########################
-
-newFeatures = []
-
-dir_target = root_target / sinister / 'log'
-
-geo = gpd.read_file('regions/regions.geojson')
-geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
-
-name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
-dir_output = Path(name_dir)
-check_and_create_path(dir_output)
-
-minDate = '2017-06-12' # Starting point
-
-if values_per_class == 'full':
-    prefix = str(values_per_class)+'_'+str(scale)
-else:
-    prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if doPCA:
-    prefix += '_pca'
-
-if dummy:
-    prefix += '_dummy'
-
-########################### Create points ################################
-if doPoint:
-
-    check_and_create_path(dir_output)
-
-    regions = gpd.read_file('regions/regions.geojson')
-    fp = pd.read_csv('sinister/'+sinister+'.csv')
-
-    construct_non_point(fp, regions, maxDate, sinister, Path(nameExp))
-    look_for_information(dir_target,
-                         departements,
-                         regions,
-                         maxDate,
-                         sinister,
-                         Path(nameExp))
-
-######################### Encoding ######################################
-
-if doEncoder:
-    encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder')
-
-########################## Do Graph ######################################
-
-if doGraph:
-    logger.info('#################################')
-    logger.info('#      Construct   Graph        #')
-    logger.info('#################################')
-    graphScale = construct_graph(scale,
-                                 maxDist[scale],
-                                 sinister,
-                                 geo, nmax, k_days,
-                                 dir_output,
-                                 True,
-                                 False,
-                                 resolution)
-    graphScale._create_predictor(minDate, maxDate, dir_output, sinister, resolution)
-else:
-    graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
-
-########################## Do Database ####################################
-
-if doDatabase:
-    logger.info('#####################################')
-    logger.info('#      Construct   Database         #')
-    logger.info('#####################################')
-    if not dummy:
-        name = 'points'+str(values_per_class)+'.csv'
-        ps = pd.read_csv(Path(nameExp) / sinister / name)
-        logger.info(ps.date.min())
-        logger.info(ps.date.max())
-        depts = [name2int[dept] for dept in departements]
-        logger.info(ps.departement.unique())
-        ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-        logger.info(ps.departement.unique())
-        #ps['date'] = ps['date'] - 1
-        ps = ps[ps['date'] > 0]
-        logger.info(ps[ps['departement'] == 1].date.min())
-    else:
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path(nameExp) / sinister / name)
-        name = 'non'+sinister+'csv'
-        nfp = pd.read_csv(Path(nameExp) / sinister / name)
-        ps = pd.concat((fp, nfp)).reset_index(drop=True)
-        ps = ps.copy(deep=True)
-        ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
-        ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
-
-    X, Y, pos_feature = construct_database(graphScale,
-                                           ps, scale, k_days,
-                                           departements,
-                                            features, sinister,
-                                           dir_output,
-                                           dir_output,
-                                           prefix,
-                                           values_per_class,
-                                           'train',
-                                           resolution,
-                                           trainDate)
-    
-    save_object(X, 'X_'+prefix+'.pkl', dir_output)
-    save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
-
-else:
-    X = read_object('X_'+prefix+'.pkl', dir_output)
-    Y = read_object('Y_'+prefix+'.pkl', dir_output)
-    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
-
-if len(newFeatures) > 0:
-    X = X[:, :pos_feature['Geo'] + 1]
-    subnode = X[:,:6]
-    XnewFeatures, _ = get_sub_nodes_feature(graphScale, subnode, trainDepartements, newFeatures, dir_output)
-    newX = np.empty((X.shape[0], X.shape[1] + XnewFeatures.shape[1] - 6))
-    newX[:,:X.shape[1]] = X
-    newX[:, X.shape[1]:] = XnewFeatures[:,6:]
-    X = newX
-    features += newFeatures
-    logger.info(X.shape)
-    save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
-if do2D:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
-                                                 subnode.shape[1],
-                                                 X,
-                                                 scaling,
-                                                 pos_feature,
-                                                 trainDepartements,
-                                                 features,
-                                                 sinister,
-                                                 dir_output,
-                                                 prefix)
-    
-else:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-
-############################# Training ###########################
-
-trainCode = [name2int[dept] for dept in trainDepartements]
-
-Xtrain, Ytrain = (X[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))],
-                      Y[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))])
-
-save_object(Xtrain, 'Xtrain_'+prefix+'.pkl', dir_output)
-save_object(Ytrain, 'Ytrain_'+prefix+'.pkl', dir_output)
-
-train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
-
-save_object(features, spec+'_features.pkl', dir_output)        
-save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)        
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if spec != '':
-    prefix += '_'+spec
-pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
-X = X[:, np.asarray(train_fet_num)]
-
-logger.info(X.shape)
-
-# Preprocess
-trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, trainDepartements=trainDepartements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix)
-
-# Features selection
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, False, nbfeatures, scale)
-
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-
-if doPCA:
-    prefix += '_pca'
-    prefix_train += '_pca'
-    Xtrain = trainDataset[0]
-    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
-    trainDataset = (apply_pca(trainDataset[0], pca, components, features_selected), trainDataset[1])
-    valDataset = (apply_pca(valDataset[0], pca, components, features_selected), valDataset[1])
-    testDataset = (apply_pca(testDataset[0], pca, components, features_selected), testDataset[1])
-    features_selected = np.arange(6, components + 6)
-    trainFeatures = ['pca_'+str(i) for i in range(components)]
-    pos_feature, _ = create_pos_feature(0, 6, trainFeatures)
-    kmeansFeatures = trainFeatures
-
-if doKMEANS:
-    prefix += '_kmeans_'+str(ncluster)
-    prefix_train += '_kmeans_'+str(ncluster)
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
-    Ytrain = trainDataset[1]
-    Yval = valDataset[1]
-    Ytest = testDataset[1]
-
-    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
-    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
-    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
-
-    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
-    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
-    
-    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
-
-# Train
-epochs = 10000
-lr = 0.01
-PATIENCE_CNT = 200
-CHECKPOINT = 100
-
-gnnModels = [
-        #('GAT', False, False),
-        #('DST-GCNCONV', False, False, False),
-        #('ST-GATTCN', False, False, False),
-        #('ST-GATCONV', False, False, False),
-        #('ST-GCNCONV', False, False, False),
-        #('ATGN', False, False, False),
-        #('ST-GATLTSM', False, False, False),
-        ('DST-GCNCONV_bin', False, True, False),
-        ('ST-GATTCN_bin', False, True, False),
-        ('ST-GATCONV_bin', False, True, False),
-        ('ST-GCNCONV_bin', False, True, False),
-        ('ATGN_bin', False, True, False),
-        ('ST-GATLTSM_bin', False, True, False),
-        #('Zhang', False, True)
-        #('ConvLSTM', False, True)
-        ]
-
-trainLoader = None
-valLoader = None
-last_bool = None
-
-if doTrain:
-    for model, use_temporal_as_edges, isBin, is_2D_model in gnnModels:
-        if not isBin:
-            criterion = weighted_rmse_loss
-        else:
-            criterion = weighted_cross_entropy
-            criterion = torch.nn.CrossEntropyLoss(reduction='mean')
-
-        logger.info(f'Fitting model {model}')
-        logger.info('Try loading loader')
-        if not is_2D_model:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-        else:
-            trainLoader = read_object('trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-            valLoader = read_object('valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-
-        if trainLoader is None or Rewrite:
-            logger.info(f'Building loader, loading loader_{str(use_temporal_as_edges)}.pkl')
-            last_bool = use_temporal_as_edges
-            if not is_2D_model:
-                trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=trainDataset,
-                                                                        val=valDataset,
-                                                                        test=testDataset,
-                                                                batch_size=64, device=device,
-                                                                use_temporal_as_edges = use_temporal_as_edges,
-                                                                ks=k_days)
+def train_sklearn_api_model(trainDataset, valDataset, testDataset,
+          dir_output : Path,
+          device : str,
+          features : np.array,
+          autoRegression : bool):
             
-                save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
-                save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
+        Xtrain = trainDataset[0]
+        Ytrain = trainDataset[1]
+
+        Xval = valDataset[0]
+        Yval = valDataset[1]
+
+        Xtest = testDataset[0]
+        Ytest = testDataset[1]
+
+        Xtrain = Xtrain[Xtrain[:, 5] > 0]
+        Ytrain = Ytrain[Ytrain[:, 5] > 0]
+
+        Xval = Xval[Xval[:, 5] > 0]
+        Yval = Yval[Yval[:, 5] > 0]
+
+        Xtest = Xtest[Xtest[:, 5] > 0]
+        Ytest = Ytest[Ytest[:, 5] > 0]
+
+        logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Xtest shape {Xtest.shape}')
+
+        ########################## Easy model ######################
+        ################# xgboost ##################
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        Y_test = Ytest[:, -1]
+        W_test = Ytest[:, -4]
+        fitparams={
+                #'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                #'sample_weight' : Yw,
+                #'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
+            'xgboost', Model(model, 'rmse', 'xgboost'), fitparams, False, 'skip', grid, dir_output)
+
+        model, grid = config_xgboost(device, False, 'reg:squaredlogerror')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
+        #    'xgboost_rmlse', Model(model, 'rmsle', 'xgboost_rmlse'), fitparams, False, 'skip', grid, dir_output)
+        
+        # xgboost 2
+        Yw = np.ones(Ytrain.shape[0])
+        W_test = np.ones(Ytest.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
+        #    'xgboost_features', Model(model, 'rmse', 'xgboost_features'), fitparams, True, 'skip', grid, dir_output)
+
+        # xgboost 3
+        Yw = Ytrain[:,-4]
+        Yw[Ytrain[:,-2] == 0] = 1
+        W_test = Ytest[:,-4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_train = Ytrain[:,-2] > 0
+        Y_val = Yval[:,-2] > 0
+        Y_test = Ytest[:, -2] > 0
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+
+        model, grid = config_xgboost(device, True, 'reg:logistic')
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
+            'xgboost_binary', Model(model, 'log_loss', 'xgboost_binary'), fitparams, False, 'skip', grid, dir_output)
+
+        # xgboost 4
+        Yw = np.ones(Y_train.shape[0])
+        W_test = np.ones(Ytest.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        model, grid = config_xgboost(device, True, 'reg:logistic')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_binary_unweighted',
+        #    Model(model, 'rmse', 'xgboost_binary_unweighted'), fitparams, False, 'skip', grid, dir_output)
+
+        ################ lightgbm ##################
+        
+        # lightgbm 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        W_test = Ytest[:,-4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_test = Ytest[:, -1]
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm', Model(model, 'rmse', 'lightgbm'), fitparams, False, 'skip', grid, dir_output)
+
+        # lightgbm 2
+        Yw = np.ones(Ytrain.shape[0])
+        W_test = np.ones(Ytest.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_unweighted', Model(model, 'rmse', 'lightgbm_unweighted'),
+        #   fitparams, False, 'skip', grid, dir_output)
+
+        # lightgbm 3
+        Yw = Ytrain[:,-4]
+        Yw[Ytrain[:,-2] == 0] = 1
+        W_test = Ytest[:, -4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_train = Ytrain[:,-2] > 0
+        Y_val = Yval[:,-2] > 0
+        Y_test = Ytest[:, -2] > 0 
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, True, 'binary')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_binary', Model(model, 'log_loss', 'lightgbm_binary'),
+        #    fitparams, False, 'skip', grid, dir_output)
+
+        # lightgbm 4
+        Yw = np.ones(Y_train.shape[0])
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                }
+        model, grid = config_lightGBM(device, True, 'binary')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_binary_unweighted', Model(model, 'log_loss', 'lightgbm_binary_unweighted'),
+        #    fitparams, False, 'skip', grid, dir_output)
+
+        ################ ngboost ###################
+        
+        # ngboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        W_test = Ytest[:,-4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_test = Ytest[:, -1]
+        fitparams={
+                'early_stopping_rounds':15,
+                'sample_weight' : Yw,
+                'X_val':Xval[:, features],
+                'Y_val':Y_val,
+                }
+        model, grid = config_ngboost( False)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'ngboost', Model(model, 'rmse', 'ngboost'),
+        #    fitparams, False, 'skip', grid, dir_output)
+
+        # ngboost 2
+        Yw = np.ones(Y_train.shape[0])
+        W_test = np.ones(Ytest.shape[0])
+        fitparams={
+                'early_stopping_rounds':15,
+                'sample_weight' : Yw,
+                'X_val':Xval[:, features],
+                'Y_val':Y_val,
+                }
+        model, grid = config_ngboost(False)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'ngboost_unweighted', Model(model, 'rmse', 'ngboost_unweighted'),
+        #    fitparams, False, 'skip', grid, dir_output)
+
+        ############################ Grid Search model ##################################
+
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        W_test = Ytest[:,-4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_test = Ytest[:, -1]
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_grid_search', Model(model, 'rmse', 'xgboost_grid_search'),
+        #    fitparams, False, 'grid', grid, dir_output)
+
+        ############################# Features Model #######################################
+
+        # xgboost 1
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-1]
+        Y_val = Yval[:,-1]
+        W_test = Ytest[:,-4]
+        W_test[Ytest[:,-2] == 0] = 1
+        Y_test = Ytest[:, -1]
+        fitparams={
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+        
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_features', Model(model, 'rmse', 'xgboost'),
+        #    fitparams, True, 'skip', grid, dir_output)
+    
+def fit(Xtrain, y, Xtest, Ytest, Wtest, features,
+        name, model, fitparams, evaluate_individual_features,
+        parameter_optimization_method, grid, dir_output):
+    
+    save_object(features, 'features.pkl', dir_output / name)
+
+    logger.info(f'Fitting model {name}')
+    model.fit(X=Xtrain[:, features], y=y,
+              X_test=Xtest[:, features], y_test=Ytest, w_test=Wtest,
+                evaluate_individual_features=evaluate_individual_features,
+                optimization=parameter_optimization_method,
+                param_grid=grid, fit_params=fitparams)
+
+    check_and_create_path(dir_output / name)
+    save_object(model, name + '.pkl', dir_output / name)
+
+    """pred = model.predict(Xtest)
+    
+    realVspredict(pred, Ytest.reshape(-1,1), -1,
+                      dir_output / name, 'raw')"""
+
+    logger.info(f'Model score {model.score(Xtest, Ytest, Wtest)}')
+
+def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int, n_clusters : int):
+    check_and_create_path(dir_output)
+    logger.info('###################" Calculate break point ####################')
+    res_cluster = {}
+    features_selected_2 = []
+
+    # For each feature
+    for fet in features:
+        train_fet_num = []
+        check_and_create_path(dir_output / fet)
+        # Select the numerical values
+        maxi, methods, variales = calculate_feature_range(fet, scale)
+        logger.info(f'{fet}, {variales}, {methods}')
+        train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+        len_met = len(methods)
+        
+        i_var = -1
+        # For each method
+        for i, xs in enumerate(train_fet_num):
+            #if xs not in features_selected:
+            #    continue
+
+            if len_met == len_met:
+                i_met = i % len_met
             else:
-                trainLoader, valLoader, testLoader = train_val_data_loader_2D(graph=graphScale,
-                                                                train=trainDataset,
-                                                                val=valDataset,
-                                                                test=testDataset,
-                                                                use_temporal_as_edges=use_temporal_as_edges,
-                                                                batch_size=64,
-                                                                device=device,
-                                                                scaling=scaling,
-                                                                pos_feature=pos_feature,
-                                                                pos_feature_2D=pos_feature_2D,
-                                                                ks=k_days,
-                                                                shape=(shape2D[0], shape2D[1], newShape2D),
-                                                                path=dir_output / '2D' / prefix / 'data')
+                i_met = 0
 
-                save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
-                save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+            if i_met % len_met == 0:
+                i_var += 1
 
-        train(trainLoader=trainLoader, valLoader=valLoader,
-            testLoader=testLoader,
-            scale=scale,
-            optmize_feature = optimize_feature,
-            PATIENCE_CNT=PATIENCE_CNT,
-            CHECKPOINT=CHECKPOINT,
-            epochs=epochs,
-            features=features_selected,
-            lr=lr,
-            pos_feature=pos_feature,
-            criterion=criterion,
-            modelname=model,
-            dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model),
-            binary=isBin)
+            on = fet+'_'+variales[i_var]+'_'+methods[i_met] # Get the right name
+            res_cluster[xs] = {}
+            res_cluster[xs]['name'] = on
+            res_cluster[xs]['fet'] = fet
+            X_fet = Xset[:, xs] # Select the feature
+            if np.unique(X_fet).shape[0] < n_clusters:
+                continue
+            X_cluster = np.copy(X_fet)
 
-if doTest:
+            # Create the cluster model
+            model = Predictor(n_clusters, on)
+            model.fit(X_cluster)
 
-    dico_model = make_models(len(features_selected), 52, 0.03, 'relu')
+            save_object(model, on+'.pkl', dir_output / fet)
 
-    trainCode = [name2int[dept] for dept in trainDepartements]
+            pred = order_class(model, model.predict(X_cluster)) # Predict and order class to 0 1 2 3 4
 
-    Xtrain, Ytrain = trainDataset
+            cls = np.unique(pred)
+            if cls.shape[0] != n_clusters:
+                continue
 
-    Xtest, Ytest  = testDataset
+            plt.figure(figsize=(5,5)) # Create figure for ploting
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
-    train_dir = Path(name_dir)
+            # For each class calculate the target values
+            for c in cls:
+                mask = np.argwhere(pred == c)[:,0]
+                res_cluster[xs][c] = np.mean(Yset[mask, -2])
+                plt.scatter(X_fet[mask], Yset[mask,-2], label=c)
+            
+            logger.info(on)
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
-    dir_output = Path(name_dir)
+            # Calculate Pearson coefficient
+            df = pd.DataFrame(res_cluster, index=np.arange(n_clusters)).reset_index()
+            df.rename({'index': 'class'}, axis=1, inplace=True)
+            df = df[['class', xs]]
+            correlation = df['class'].corr(df[xs])
+            res_cluster[xs]['correlation'] = correlation
+            # Plot
+            plt.ylabel('Sinister')
+            plt.xlabel(fet+'_'+methods[i_met])
+            plt.title(fet+'_'+methods[i_met])
+            on += '.png'
+            plt.legend()
+            plt.savefig(dir_output / fet / on)
+            plt.close('all')
 
-    rmse = weighted_rmse_loss
-    std = standard_deviation
-    cal = quantile_prediction_error
-    f1 = my_f1_score
-    ca = class_accuracy
-    bca = balanced_class_accuracy
-    ck = class_risk
-    po = poisson_loss
-    meac = mean_absolute_error_class
+            # If no correlation then pass
+            if abs(correlation) > 0.7:
+                # If negative linearity, inverse class
+                if correlation < 0:
+                    new_class = np.flip(np.arange(n_clusters))
+                    temp = {}
+                    for i, nc in enumerate(new_class):
+                        temp[nc] = res_cluster[xs][i]
+                    temp['correlation'] = res_cluster[xs]['correlation']
+                    temp['name'] = res_cluster[xs]['name']
+                    temp['fet'] = res_cluster[xs]['fet']
+                    res_cluster[xs] = temp
+                
+                # Add in selected features
+                features_selected_2.append(xs)
+        
+    logger.info(len(features_selected_2))
+    save_object(res_cluster, 'break_point_dict.pkl', dir_output)
+    save_object(features_selected_2, 'features.pkl', dir_output)
 
-    methods = [('rmse', rmse, 'proba'),
-            ('std', std, 'proba'),
-            ('cal', cal, 'bin'),
-            ('f1', f1, 'bin'),
-            ('class', ck, 'class'),
-            ('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('meac', meac, 'class'),
-            ]
+################################ DEEP LEARNING #########################################
 
-    gnnModels = [
-        #('GAT', False, False, False),
-        ('DST-GCNCONV', False, False, False),
-        ('ST-GATTCN', False, False, False),
-        ('ST-GATCONV', False, False, False),
-        ('ATGN', False, False, False),
-        ('ST-GATLTSM', False, False, False),
-        ('ST-GCNCONV', False, False, False),
-        ('DST-GCNCONV_bin', False, False, False),
-        ('ST-GATTCN_bin', False, False, False),
-        ('ST-GATCONV_bin', False, False, False),
-        ('ATGN_bin', False, False, False),
-        ('ST-GATLTSM_bin', False, False, False),
-        ('ST-GCNCONV_bin', False, False, False),
-        #('Zhang', False, False, True),
-    ]
+def launch_loader(model, loader, type,
+                  features, binary,
+                  criterion, optimizer,
+                  autoRegression,
+                  pos_feature):
 
-    # 69 test
-    testDepartement = ['departement-69-rhone']
-    Xset = Xtest[(Xtest[:, 3] == 69)]
-    Yset = Ytest[(Xtest[:, 3] == 69)]
+    if type == 'train':
+        model.train()
+    else:
+        model.eval()
+        prev_input = torch.Tensor([], device=device)
 
-    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
-                           methods,
-                           '69',
-                           pos_feature,
-                           prefix,
-                           prefix,
-                           dummy,
-                           gnnModels,
-                           dir_output / '69',
-                           device,
-                           k_days,
-                           Rewrite, 
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           dico_model,
-                           pos_feature_2D,
-                           shape2D,
-                           sinister,
-                           resolution)
+    for i, data in enumerate(loader, 0):
+
+        inputs, labels, edges = data
+        
+        if not binary:
+            target = labels[:,-1]
+        else:
+            target = (labels[:,-2] > 0).long()
+
+        weights = labels[:,-4]
+
+        if autoRegression and type != 'train':
+            inode = inputs[:, 0]
+            idate = inputs[:, 4]
+            if inode in prev_input[:, 0] and idate - 1 in prev_input[:, 4]:
+                mask = torch.argwhere((prev_input[:, 0] == inode) & (prev_input[:, 4] == idate - 1))
+                inputs[:, pos_feature['AutoRegressionReg']] = prev_input[mask, pos_feature['AutoRegressionReg']]
+            else:
+                inputs[:, pos_feature['AutoRegressionReg']] = 0
+
+        inputs = inputs[:, features]
+        output = model(inputs, edges)
+
+        if autoRegression and type != 'train':
+            inputs[:, pos_feature['AutoRegressionReg']] = output
+            prev_input = torch.cat((prev_input, inputs))
+
+        target = torch.masked_select(target, weights.gt(0))
+        weights = torch.masked_select(weights, weights.gt(0))
+
+        if not binary:
+            target = target.view(output.shape)
+            weights = weights.view(output.shape)
+            loss = criterion(output, target, weights)
+        else:
+            loss = criterion(output, target)
+
+        if type == 'train':
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    return loss
+
+def func_epoch(model, trainLoader, valLoader, features,
+               optimizer, criterion, binary,
+                autoRegression,
+                pos_feature):
     
-    # 2023 test
-    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-    Xset = Xtest[(Xtest[:, 3] != 69)]
-    Yset = Ytest[(Xtest[:, 3] != 69)]
-    
-    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
-                           methods,
-                           '2023',
-                           pos_feature,
-                           prefix,
-                           prefix,
-                           dummy,
-                           gnnModels,
-                           dir_output / '2023',
-                           device,
-                           k_days,
-                           Rewrite, 
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           dico_model,
-                           pos_feature_2D,
-                           shape2D,
-                           sinister,
-                           resolution)
+    launch_loader(model, trainLoader, 'train', features, binary, criterion, optimizer,  autoRegression,
+                  pos_feature)
+
+    with torch.no_grad():
+        loss = launch_loader(model, valLoader, 'val', features, binary, criterion, optimizer,  autoRegression,
+                  pos_feature)
+
+    return loss.items()
+
+def compute_optimisation_features(modelname, lr, scale, pos_feature, trainLoader, valLoader, testLoader, criterion, binary, epochs, PATIENCE_CNT,
+                                autoRegression):
+    newFet = [features[0]]
+    BEST_VAL_LOSS_FET = math.inf
+    patience_cnt_fet = 0
+    for fi, fet in enumerate(1, features):
+        testFet = copy(newFet)
+        testFet.append(fet)
+        dico_model = make_models(len(testFet), 52, 0.03, 'relu')
+        model = dico_model[modelname]
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        BEST_VAL_LOSS = math.inf
+        BEST_MODEL_PARAMS = None
+        patience_cnt = 0
+        logger.info(f'Train {model} with')
+        log_features(testFet, scale, pos_feature, ["min", "mean", "max", "std"])
+        for epoch in tqdm(range(epochs)):
+            loss = func_epoch(model, trainLoader, valLoader, testFet, optimizer, criterion, binary,  autoRegression,
+                  pos_feature)
+            if loss.item() < BEST_VAL_LOSS:
+                BEST_VAL_LOSS = loss.item()
+                BEST_MODEL_PARAMS = model.state_dict()
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE_CNT:
+                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
+            
+            with torch.no_grad():
+                loss = launch_loader(model, testLoader, 'test', features, binary, criterion, optimizer,  autoRegression,
+                  pos_feature)
+
+            if loss.item() < BEST_VAL_LOSS_FET:
+                logger.info(f'{loss.item()} < {BEST_VAL_LOSS_FET}, we add the feature')
+                BEST_VAL_LOSS_FET = loss.item()
+                newFet.append(fet)
+                patience_cnt_fet = 0
+            else:
+                patience_cnt_fet += 1
+                if patience_cnt_fet >= 30:
+                    logger.info('Loss has not increased for 30 epochs')
+                break
+    return newFet
+
+def train(trainLoader, valLoader, testLoader,
+          scale: int,
+          optmize_feature : bool,
+          PATIENCE_CNT : int,
+          CHECKPOINT: int,
+          lr : float,
+          epochs : int,
+          criterion,
+          pos_feature : dict,
+          modelname : str,
+          features : np.array,
+          dir_output : Path,
+          binary : bool,
+          autoRegression : bool) -> None:
+        """
+        Train neural network model
+        PATIENCE_CNT : early stopping count
+        CHECKPOINT : logger.info last train/val loss
+        lr : learning rate
+        epochs : number of epochs for training
+        criterion : loss function
+        """
+        assert trainLoader is not None and valLoader is not None
+
+        check_and_create_path(dir_output)
+
+        if optmize_feature:
+            features = compute_optimisation_features(modelname, lr, scale, pos_feature, trainLoader, valLoader, testLoader, criterion, binary, epochs, PATIENCE_CNT, autoRegression)
+            
+        dico_model = make_models(len(features), 52, 0.03, 'relu')
+        model = dico_model[modelname]
+        optimizer = optim.Adam(model.parameters(), lr=lr)
+        BEST_VAL_LOSS = math.inf
+        BEST_MODEL_PARAMS = None
+        patience_cnt = 0
+
+        logger.info('Train model with')
+        log_features(features, scale, pos_feature, ["min", "mean", "max", "std"])
+        save_object(features, 'features.pkl', dir_output)
+        for epoch in tqdm(range(epochs)):
+            loss = func_epoch(model, trainLoader, valLoader, features, optimizer, criterion, binary)
+            if epoch % CHECKPOINT == 0:
+                logger.info(f'epochs {epoch}, Train loss {loss.item()}')
+                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
+            if loss.item() < BEST_VAL_LOSS:
+                BEST_VAL_LOSS = loss.item()
+                BEST_MODEL_PARAMS = model.state_dict()
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE_CNT:
+                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
+                    save_object_torch(model.state_dict(), 'last.pt', dir_output)
+                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
+                    return
+                
+            if epoch % CHECKPOINT == 0:
+                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+
+#############################  PCA ###################################
+
+def train_pca(X, percent, dir_output, features_selected):
+    pca =  PCA(n_components='mle', svd_solver='full')
+    components = pca.fit_transform(X[:, features_selected])
+    check_and_create_path(dir_output / 'pca')
+    show_pcs(pca, 2, components, dir_output / 'pca')
+    print('99 % :',find_n_component(0.99, pca))
+    print('95 % :', find_n_component(0.95, pca))
+    print('90 % :' , find_n_component(0.90, pca))
+    pca_number = find_n_component(percent, pca)
+    save_object(pca, 'pca.pkl', dir_output)
+    pca =  PCA(n_components=pca_number, svd_solver='full')
+    pca.fit(X[:, features_selected])
+    return pca, pca_number
+
+def apply_pca(X, pca, pca_number, features_selected):
+    res = pca.transform(X[:, features_selected])
+    new_X = np.empty((X.shape[0], 6 + pca_number))
+    new_X[:, :6] = X[:, :6]
+    new_X[:, 6:] = res
+    return new_X

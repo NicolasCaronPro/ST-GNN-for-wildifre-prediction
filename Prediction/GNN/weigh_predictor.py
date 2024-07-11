@@ -46,9 +46,10 @@ class Predictor():
         return pred
     
     def weight(self, c : int):
-        valueOfClass = self.histogram[c]
-        valueOfMinClass = self.histogram[self.highNumberClass][:,0][0]
-        return valueOfMinClass / valueOfClass
+        #valueOfClass = self.histogram[c]
+        #valueOfMinClass = self.histogram[self.highNumberClass][:,0][0]
+        #return valueOfMinClass / valueOfClass
+        return c + 1
     
     def weight_array(self, array : np.array):
         lis = [self.weight(c) for c in array]

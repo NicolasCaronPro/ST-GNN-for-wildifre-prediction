@@ -44,6 +44,7 @@ def evaluate_f1(metrics, met):
         df.loc[i, 'precision'] = value[met][1]
         df.loc[i, 'recall'] = value[met][2]
         df.loc[i, 'tresh'] = value[met][3]
+        #df.loc[i, 'value'] = value[met][4]
         i += 1
     return df.sort_values('f1')
 
@@ -79,7 +80,7 @@ def plot(df, met, dir_output, out_name, color):
     labels = []
     scatters_unique = []
 
-    fig = plt.figure(figsize=(15, 5))
+    fig = plt.figure(figsize=(15, 10))
     for i, m in enumerate(mets):
         sc = plt.scatter(m, model[i], c=color[index[i]], alpha=0.8)
         scatters.append(sc)
@@ -430,9 +431,18 @@ if __name__ == "__main__":
     # Inference
     experiments_inference = [
                              ('final', 0, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 1, 'full_0_10_100_pca', 'full_0_10_100_pca_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 2, 'full_0_10_100_pca_kmeans_10', 'full_0_10_100_pca_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 3, 'full_0_10_100_kmeans_10', 'full_0_10_100_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 2, 'full_0_15_100', 'full_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 3, '1000_0_15_100', '1000_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 3, 'full_0_10_3_Simple', 'full_0_10_3_Simple_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 1, 'full_0_10_100_noHistorical', 'full_0_10_100_noHistorical_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 2, '200_0_10_100', '200_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 3, '100_0_5_100', '100_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 1, 'full_0_10_100_pca', 'full_0_10_100_pca_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 2, 'full_0_10_100_pca_kmeans_10', 'full_0_10_100_pca_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 3, 'full_0_10_100_kmeans_10', 'full_0_10_100_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 4, '500_0_10_100_TempFetForKMEANS', '500_0_10_100_TempFetForKMEANS_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 4, 'full_7_10_100_10', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl'),
+                             
                             ]
 
     # ECAI

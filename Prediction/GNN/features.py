@@ -312,6 +312,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         if 'dynamicWorld' in features:
             arrayDW = read_object('dynamic_world.pkl', dir_data)
+        else:
+            arrayDW = None
 
         coef = 4 if graph.scale > -1 else 1
         if arraySent is not None or arrayLand is not None or arrayDW is not None:

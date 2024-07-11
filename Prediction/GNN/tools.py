@@ -133,7 +133,7 @@ def create_larger_scale_bin(input, bin, influence, raster):
                 unique_ids_in_mask = np.unique(raster[influence_mask])
                 
                 binval = 0
-                influenceval = np.nanmin(influence[:, :, di])
+                influenceval = 0
                 
                 for uim in unique_ids_in_mask:
                     mask3 = (raster == uim)
@@ -143,7 +143,7 @@ def create_larger_scale_bin(input, bin, influence, raster):
                 influenceImageScale[mask, di] = influenceval
             else:
                 binImageScale[mask, di] = 0
-                influenceImageScale[mask, di] = np.nanmin(influence[:, :, di])
+                influenceImageScale[mask, di] = 0
 
     return binImageScale, influenceImageScale
 
@@ -753,528 +753,6 @@ def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, me
     save_object(res, name, dir_output)
     return res
 
-def func_epoch(model, trainLoader, valLoader, features,
-               optimizer, dir_output, criterion):
-    
-    model.train()
-    for i, data in enumerate(trainLoader, 0):
-
-        inputs, labels, edges = data
-        
-        target = labels[:,-1]
-        weights = labels[:,-4]
-        inputs = inputs[:, features]
-        
-        output = model(inputs, edges)
-        target = torch.masked_select(target, weights.gt(0))
-        weights = torch.masked_select(weights, weights.gt(0))
-
-        target = target.view(output.shape)
-        weights = weights.view(output.shape)
-        loss = criterion(output, target, weights)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        model.eval()
-        for i, data in enumerate(valLoader, 0):
-            inputs, labels, edges = data
-            inputs = inputs[:, features]
-
-            output = model(inputs, edges)
-            
-            target = labels[:,-1]
-            weights = labels[:,-4]
-
-            target = torch.masked_select(target, weights.gt(0))
-            weights = torch.masked_select(weights, weights.gt(0))
-
-            target = target.view(output.shape)
-            weights = weights.view(output.shape)
-
-            loss = criterion(output, target, weights)
-
-    return loss
-
-def func_epoch(model, trainLoader, valLoader, features,
-               optimizer, dir_output, criterion, binary):
-    
-    model.train()
-    for i, data in enumerate(trainLoader, 0):
-
-        inputs, labels, edges = data
-        
-        if not binary:
-            target = labels[:,-1]
-        else:
-            target = (labels[:,-2] > 0).long()
-
-        weights = labels[:,-4]
-        inputs = inputs[:, features]
-        
-        output = model(inputs, edges)
-
-        target = torch.masked_select(target, weights.gt(0))
-        weights = torch.masked_select(weights, weights.gt(0))
-
-        if not binary:
-            target = target.view(output.shape)
-            weights = weights.view(output.shape)
-            loss = criterion(output, target, weights)
-        else:
-            loss = criterion(output, target)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-    with torch.no_grad():
-        model.eval()
-        for i, data in enumerate(valLoader, 0):
-            inputs, labels, edges = data
-            inputs = inputs[:, features]
-
-            output = model(inputs, edges)
-            
-            if not binary:
-                target = labels[:,-1]
-            else:
-                target = (labels[:,-2] > 0).long()
-            weights = labels[:,-4]
-
-            target = torch.masked_select(target, weights.gt(0))
-            weights = torch.masked_select(weights, weights.gt(0))
-
-            if not binary:
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-                loss = criterion(output, target, weights)
-            else:
-                loss = criterion(output, target)
-
-    return loss
-
-def train(trainLoader, valLoader, testLoader,
-          scale: int,
-          optmize_feature : bool,
-          PATIENCE_CNT : int,
-          CHECKPOINT: int,
-          lr : float,
-          epochs : int,
-          criterion,
-          pos_feature : dict,
-          modelname : str,
-          features : np.array,
-          dir_output : Path,
-          binary : bool) -> None:
-        """
-        Train neural network model
-        PATIENCE_CNT : early stopping count
-        CHECKPOINT : logger.info last train/val loss
-        lr : learning rate
-        epochs : number of epochs for training
-        criterion : loss function
-        """
-        assert trainLoader is not None and valLoader is not None
-
-        check_and_create_path(dir_output)
-
-        if optmize_feature:
-            newFet = [features[0]]
-            BEST_VAL_LOSS_FET = math.inf
-            patience_cnt_fet = 0
-            for fi, fet in enumerate(1, features):
-                testFet = copy(newFet)
-                testFet.append(fet)
-                dico_model = make_models(len(testFet), 52, 0.03, 'relu')
-                model = dico_model[modelname]
-                optimizer = optim.Adam(model.parameters(), lr=lr)
-                BEST_VAL_LOSS = math.inf
-                BEST_MODEL_PARAMS = None
-                patience_cnt = 0
-
-                logger.info(f'Train {model} with')
-                log_features(testFet, scale, pos_feature, ["min", "mean", "max", "std"])
-                for epoch in tqdm(range(epochs)):
-                    loss = func_epoch(model, trainLoader, valLoader, testFet, optimizer, dir_output, criterion, binary)
-                    if loss.item() < BEST_VAL_LOSS:
-                        BEST_VAL_LOSS = loss.item()
-                        BEST_MODEL_PARAMS = model.state_dict()
-                        patience_cnt = 0
-                    else:
-                        patience_cnt += 1
-                        if patience_cnt >= PATIENCE_CNT:
-                            logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
-
-                for i, data in enumerate(testLoader, 0):
-                    inputs, labels, edges = data
-                    inputs = inputs[:, testFet]
-
-                    output = model(inputs, edges)
-                    
-                    if not binary:
-                        target = labels[:,-1]
-                    else:
-                        target = (labels[:,-2] > 0).long()
-
-                    weights = labels[:,-4]
-
-                    target = torch.masked_select(target, weights.gt(0))
-                    weights = torch.masked_select(weights, weights.gt(0))
-
-                    if not binary:
-                        target = target.view(output.shape)
-                        weights = weights.view(output.shape)
-                        loss = criterion(output, target, weights)
-                    else:
-                        loss = criterion(output, target)
-                    logger.info(f'Loss obtained of {loss.item()}')
-
-                    if loss.item() < BEST_VAL_LOSS_FET:
-                        logger.info(f'{loss.item()} < {BEST_VAL_LOSS_FET}, we add the feature')
-                        BEST_VAL_LOSS_FET = loss.item()
-                        newFet.append(fet)
-                        patience_cnt_fet = 0
-                    else:
-                        patience_cnt_fet += 1
-                        if patience_cnt_fet >= 30:
-                            logger.info('Loss has not increased for 30 epochs')
-                        break
-            features = newFet
-        
-        dico_model = make_models(len(features), 52, 0.03, 'relu')
-        model = dico_model[modelname]
-        optimizer = optim.Adam(model.parameters(), lr=lr)
-        BEST_VAL_LOSS = math.inf
-        BEST_MODEL_PARAMS = None
-        patience_cnt = 0
-
-        logger.info('Train model with')
-        log_features(features, scale, pos_feature, ["min", "mean", "max", "std"])
-        save_object(features, 'features.pkl', dir_output)
-        for epoch in tqdm(range(epochs)):
-            loss = func_epoch(model, trainLoader, valLoader, features, optimizer, dir_output, criterion, binary)
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Train loss {loss.item()}')
-                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
-            if loss.item() < BEST_VAL_LOSS:
-                BEST_VAL_LOSS = loss.item()
-                BEST_MODEL_PARAMS = model.state_dict()
-                patience_cnt = 0
-            else:
-                patience_cnt += 1
-                if patience_cnt >= PATIENCE_CNT:
-                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
-                    save_object_torch(model.state_dict(), 'last.pt', dir_output)
-                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
-                    return
-                
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-
-
-def config_xgboost(device, classifier, objective):
-    params = {
-        'verbosity':0,
-        'early_stopping_rounds':15,
-        'learning_rate' :0.01,
-        'min_child_weight' : 1.0,
-        'max_depth' : 6,
-        'max_delta_step' : 1.0,
-        'subsample' : 0.5,
-        'colsample_bytree' : 0.7,
-        'colsample_bylevel': 0.6,
-        'reg_lambda' : 1.7,
-        'reg_alpha' : 0.7,
-        'n_estimators' : 10000,
-        'random_state': 42,
-        'tree_method':'hist',
-        }
-    
-    param_grid = {
-        'learning_rate': [0.01, 0.1],
-        'max_depth': [6, 8, 10],
-        'subsample': [0.5, 0.7, 0.9],
-        'colsample_bytree': [0.7, 0.8, 1.0],
-        'colsample_bylevel' : [0.7, 0.8, 1.0],
-        'min_child_weight' : [1.0,5,10],
-        'reg_lambda' : [1.0, 1.5, 3.5, 10.2],
-        'reg_alpha' : [0.1,0.5,0.7,0.9],
-        'random_state' : [42]
-    }
-
-    if device == 'cuda':
-        params['device']='cuda'
-
-    if not classifier:
-        return XGBRegressor(**params,
-                            objective = objective
-                            ), param_grid
-    else:
-        return XGBClassifier(**params,
-                            objective = objective
-                            ), param_grid
-
-def config_lightGBM(device, classifier, objective):
-    params = {'verbosity':-1,
-        #'num_leaves':64,
-        'learning_rate':0.01,
-        'early_stopping_rounds': 15,
-        'bagging_fraction':0.7,
-        'colsample_bytree':0.6,
-        'max_depth' : 4,
-        'num_leaves' : 2**4,
-        'reg_lambda' : 1,
-        'reg_alpha' : 0.27,
-        #'gamma' : 2.5,
-        'num_iterations' :10000,
-        'random_state':42
-        }
-
-    param_grid = {
-    'learning_rate': [0.01, 0.05, 0.1],
-    'early_stopping_rounds': [15],
-    'bagging_fraction': [0.6, 0.7, 0.8],
-    'colsample_bytree': [0.5, 0.6, 0.7],
-    'max_depth': [3, 4, 5],
-    'num_leaves': [16, 32, 64],
-    'reg_lambda': [0.5, 1.0, 1.5],
-    'reg_alpha': [0.1, 0.2, 0.3],
-    'num_iterations': [10000],
-    'random_state': [42]
-    }
-
-    if device == 'cuda':
-        params['device'] = "gpu"
-
-    if not classifier:
-        params['objective'] = objective
-        return LGBMRegressor(**params), param_grid
-    else:
-        params['objective'] = objective
-        return LGBMClassifier(**params), param_grid
-
-def config_ngboost(classifier, objective):
-    params  = {
-        'natural_gradient':True,
-        'n_estimators':1000,
-        'learning_rate':0.01,
-        'minibatch_frac':0.7,
-        'col_sample':0.6,
-        'verbose':False,
-        'verbose_eval':100,
-        'tol':1e-4,
-    }
-
-    param_grid = {
-    'natural_gradient': [True, False],
-    'n_estimators': [500, 1000, 1500],
-    'learning_rate': [0.01, 0.05, 0.1],
-    'minibatch_frac': [0.6, 0.7, 0.8],
-    'col_sample': [0.5, 0.6, 0.7],
-    'verbose': [False],
-    'verbose_eval': [50, 100, 200],
-    'tol': [1e-3, 1e-4, 1e-5],
-    'random_state': [42]
-    }
-
-    if not classifier:
-        return NGBRegressor(**params), param_grid
-    else:
-        return NGBClassifier(**params), param_grid
-
-def train_sklearn_api_model(trainDataset, valDataset, testDataset,
-          dir_output : Path,
-          device : str,
-          features : np.array):
-            
-        Xtrain = trainDataset[0]
-        Ytrain = trainDataset[1]
-
-        Xval = valDataset[0]
-        Yval = valDataset[1]
-
-        Xtest = testDataset[0]
-        Ytest = testDataset[1]
-
-        Xtrain = Xtrain[Xtrain[:, 5] > 0]
-        Ytrain = Ytrain[Ytrain[:, 5] > 0]
-
-        Xval = Xval[Xval[:, 5] > 0]
-        Yval = Yval[Yval[:, 5] > 0]
-
-        Xtest = Xtest[Xtest[:, 5] > 0]
-        Ytest = Ytest[Ytest[:, 5] > 0]
-
-        logger.info(f'Xtrain shape : {Xtrain.shape}, Xval shape : {Xval.shape}, Xtest shape {testDataset[0].shape}, Ytrain shape {Ytrain.shape}, Yval shape : {Yval.shape},  Xtest shape {Xtest.shape}')
-
-        models = []
-
-        ########################## Easy model ######################
-        ################# xgboost ##################
-        # xgboost 1
-        Yw = Ytrain[:,-4]
-        Y_train = Ytrain[:,-1]
-        Y_val = Yval[:,-1]
-
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-        
-        model, grid = config_xgboost(device, False, 'reg:squarederror')
-        models.append(('xgboost', Model(model, False, 'rmse', 'xgboost'), fitparams, False, 'skip', grid))
-
-        model, grid = config_xgboost(device, False, 'reg:squaredlogerror')
-        models.append(('rmsle', Model(model, False, 'rmsle', 'xgboost'), fitparams, False, 'skip', grid))
-        
-        # xgboost 2
-        Yw = np.ones(Ytrain.shape[0])
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-        model, grid = config_xgboost(device, False, 'reg:squarederror')
-        models.append(('xgboost_unweighted', Model(model, False, 'rmse', 'xgboost_unweighted'), fitparams, False, 'skip', grid))
-
-        # xgboost 3
-        Yw = Ytrain[:,-4]
-        Yw[Ytrain[:,-2] == 0] = 1
-        Y_train = Ytrain[:,-2] > 0
-        Y_val = Yval[:,-2] > 0
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_train)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-
-        model, grid = config_xgboost(device, True, 'reg:logistic')
-        models.append(('xgboost_binary', Model(model, True, 'logloss', 'xgboost_binary'), fitparams, False, 'skip', grid))
-
-        # xgboost 4
-        Yw = np.ones(Y_train.shape[0])
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_train)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-        model, grid = config_xgboost(device, True, 'reg:logistic')
-        models.append(('xgboost_binary_unweighted', Model(model, False, 'rmse', 'xgboost_binary_unweighted'), fitparams, False, 'skip', grid))
-
-        ################ lightgbm ##################
-        
-        # lightgbm 1
-        Yw = Ytrain[:,-4]
-        Y_train = Ytrain[:,-1]
-        Y_val = Yval[:,-1]
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                }
-        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
-        models.append(('lightgbm', Model(model, False, 'rmse', 'lightgbm'), fitparams, False, 'skip', grid))
-
-        # lightgbm 2
-        Yw = np.ones(Ytrain.shape[0])
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                }
-        model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
-        models.append(('lightgbm_unweighted', Model(model, False, 'rmse', 'lightgbm_unweighted'), fitparams, False, 'skip', grid))
-
-        # lightgbm 3
-        Yw = Ytrain[:,-4]
-        Yw[Ytrain[:,-2] == 0] = 1
-        Y_train = Ytrain[:,-2] > 0
-        Y_val = Yval[:,-2] > 0
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                }
-        model, grid = config_lightGBM(device, True, 'binary')
-        models.append(('lightgbm_binary', Model(model, True, 'logloss', 'lightgbm_binary'), fitparams, False, 'skip', grid))
-
-        # lightgbm 4
-        Yw = np.ones(Y_train.shape[0])
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                }
-        model, grid = config_lightGBM(device, True, 'binary')
-        models.append(('lightgbm_binary_unweighted', Model(model, False, 'logloss', 'lightgbm_binary_unweighted'), fitparams, False, 'skip', grid))
-
-        ################ ngboost ###################
-        
-        # ngboost 1
-        Yw = Ytrain[:,-4]
-        fitparams={
-                'early_stopping_rounds':15,
-                'sample_weight' : Yw,
-                'X_val':Xval[:, features],
-                'Y_val':Y_val,
-                }
-        model, grid = config_ngboost(device, False)
-        models.append(('ngboost', Model(model, False, 'rmse', 'ngboost'), fitparams, False, 'skip', grid))
-
-        # ngboost 2
-        Yw = np.ones(Y_train.shape[0])
-        fitparams={
-                'early_stopping_rounds':15,
-                'sample_weight' : Yw,
-                'X_val':Xval[:, features],
-                'Y_val':Y_val,
-                }
-        model, grid = config_ngboost(device, False)
-        models.append(('ngboost_unweighted', Model(model, False, 'rmse', 'ngboost_unweighted'), fitparams, False, 'skip', grid))
-
-        ############################ Grid Search model ##################################
-
-        # xgboost 1
-        Yw = Ytrain[:,-4]
-        Y_train = Ytrain[:,-1]
-        Y_val = Yval[:,-1]
-
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-        
-        model, grid = config_xgboost(device, False, 'reg:squarederror')
-        models.append(('xgboost_grid_search', Model(model, False, 'rmse', 'xgboost'), fitparams, False, 'grid', grid))
-
-        ############################# Features Model #######################################
-
-        # xgboost 1
-        Yw = Ytrain[:,-4]
-        Y_train = Ytrain[:,-1]
-        Y_val = Yval[:,-1]
-
-        fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                'sample_weight' : Yw,
-                'verbose' : False
-                }
-        
-        model, grid = config_xgboost(device, False, 'reg:squarederror')
-        models.append(('xgboost_features', Model(model, False, 'rmse', 'xgboost'), fitparams, True, 'skip', grid))
-
-        ############## fit #########################
-
-        for name, model, fitparams, evaluate_individual_features, parameter_optimization_method, grid in models:
-            save_object(features, 'features.pkl', dir_output / name)
-
-            logger.info(f'Fitting model {name}')
-            model.fit(X=Xtrain[:, features], y=Ytrain, X_test=Xtest, y_test=Ytest, evaluate_individual_features=evaluate_individual_features, optimization=parameter_optimization_method, param_grid=grid, fitparams=fitparams)
-
-            check_and_create_path(dir_output / name)
-            save_object(model, name + '.pkl', dir_output / name)
-
 def weighted_rmse_loss(input, target, weights = None):
     if not torch.is_tensor(input):
         input = torch.tensor(input, dtype=torch.float32)
@@ -1284,11 +762,20 @@ def weighted_rmse_loss(input, target, weights = None):
     if weights is None:
         return torch.sqrt(((input - target) ** 2).mean())
     if not torch.is_tensor(weights):
-
         weights = torch.tensor(weights, dtype=torch.float32)
+
     return torch.sqrt((weights * (input - target) ** 2).sum() / weights.sum())
 
 def log_sum_exp(x):
+    if not torch.is_tensor(input):
+        input = torch.tensor(input, dtype=torch.float32)
+    if not torch.is_tensor(target):
+        target = torch.tensor(target, dtype=torch.float32)
+
+    if weights is None:
+        return torch.sqrt(((input - target) ** 2).mean())
+    if not torch.is_tensor(weights):
+        weights = torch.tensor(weights, dtype=torch.float32)
     b, _ = torch.max(x, 1)
     # b.size() = [N, ], unsqueeze() required
     y = b + torch.log(torch.exp(x - b.unsqueeze(dim=1).expand_as(x)).sum(1))
@@ -1348,7 +835,7 @@ def add_metrics(methods : list, i : int,
     ysum = np.empty((uids.shape[0], 2))
     ysum[:, 0] = uids
     for id in uids:
-        ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = torch.sum(ytrue[torch.argwhere(ytrue[:, 0] == id)[:, 0], -2])
+        ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(ytrue[np.argwhere(ytrue[:, 0] == id)[:, 0], -2])
     
     ind = np.lexsort([ysum[:,1]])
     ymax = np.flip(ysum[ind, 0])[:top]
@@ -1358,7 +845,7 @@ def add_metrics(methods : list, i : int,
     for name, met, target in methods:
 
         if target == 'proba':
-            mett = met(ypred, ytrue[:,-1], ytrue[:,-4])
+            mett = met(ypred[:,0], ytrue[:,-1], ytrue[:,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
 
@@ -1368,20 +855,20 @@ def add_metrics(methods : list, i : int,
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ypred[mask], ytrue[mask,-1], ytrue[mask,-4])
+                mett = met(ypred[mask, 0], ytrue[mask,-1], ytrue[mask,-4])
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_'+season] = mett
 
-            mett = met(ypred[mask_top], ytrue[mask_top,-1], ytrue[mask_top,-4])
+            mett = met(ypred[mask_top, 0], ytrue[mask_top,-1], ytrue[mask_top,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
         elif target == 'bin':
 
-            mett = met(ytrue, ypred, isBin, ytrue[:,-4])
+            mett = met(ytrue, ypred[:,0], isBin, ytrue[:,-4])
 
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
@@ -1391,13 +878,13 @@ def add_metrics(methods : list, i : int,
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ytrue[mask, :], ypred[mask], isBin, ytrue[mask,-4])
+                mett = met(ytrue[mask, :], ypred[mask,0], isBin, ytrue[mask,-4])
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_'+season] = mett
 
-            mett = met(ytrue, ypred, isBin, None)
+            mett = met(ytrue, ypred[:,0], isBin, None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             
@@ -1407,19 +894,19 @@ def add_metrics(methods : list, i : int,
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ytrue[mask], ypred[mask], isBin, None)
+                mett = met(ytrue[mask], ypred[mask, 0], isBin, None)
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_unweighted_'+season] = mett
 
-            mett = met(ytrue[mask_top], ypred[mask_top], isBin, None)
+            mett = met(ytrue[mask_top], ypred[mask_top, 0], isBin, None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-            mett = met(ytrue[mask_top], ypred[mask_top], isBin, ytrue[mask_top,-4])
+            mett = met(ytrue[mask_top], ypred[mask_top, 0], isBin, ytrue[mask_top,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
@@ -1443,7 +930,7 @@ def add_metrics(methods : list, i : int,
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
-            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, isBin, scale, model, dir, weights=None, top=None)
+            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, dir, weights=None, top=None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
@@ -1456,28 +943,39 @@ def create_binary_predictor(ypred : np.array, modelName : str, nameDep : str, di
     predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
     logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
     predictor = Predictor(5, name=nameDep+'Binary')
-    predictor.fit(np.unique(ypred[mask]))
+    predictor.fit(np.unique(ypred[:,0]))
     save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
 
 def standard_deviation(inputs, target, weights = None):
-    return torch.std(inputs)
+    return np.std(inputs)
 
 def log_factorial(x):
   return torch.lgamma(x + 1)
 
 def factorial(x):
-  return torch.exp(log_factorial(x))
+    if not torch.is_tensor(x):
+        input = torch.tensor(x, dtype=torch.float32)
+    return torch.exp(log_factorial(x))
 
-def poisson_loss(inputs, target, weights = None):
+def poisson_loss(input, target, weights = None):
+    if not torch.is_tensor(input):
+        input = torch.tensor(input, dtype=torch.float32)
+    if not torch.is_tensor(target):
+        target = torch.tensor(target, dtype=torch.float32)
+
     if weights is None:
-        return torch.exp(inputs) - target*torch.log(inputs) + torch.log(factorial(target))
+        return torch.sqrt(((input - target) ** 2).mean())
+    if not torch.is_tensor(weights):
+        weights = torch.tensor(weights, dtype=torch.float32)
+    if weights is None:
+        return torch.exp(input) - target*torch.log(input) + torch.log(factorial(target))
     else:
-        return ((torch.exp(inputs) - target*torch.log(inputs) + torch.log(factorial(target))) * weights).sum() / weights.sum()
+        return ((torch.exp(input) - target*torch.log(input) + torch.log(factorial(target))) * weights).sum() / weights.sum()
     
-def quantile_prediction_error(Y : torch.tensor, ypred : torch.tensor, isBin : bool, weights = None):
-    maxi = torch.max(ypred).detach().cpu().numpy()
-    ytrue = Y[:,-2].detach().cpu().numpy().astype(int)
-    ypred = ypred.detach().cpu().numpy()
+def quantile_prediction_error(Y : np.array, ypred : np.array, isBin : bool, weights = None):
+    maxi = np.max(ypred)
+    ytrue = Y[:,-2]
+
     if maxi < 1.0:
         maxi = 1.0
     quantiles = [(0.0,0.2),
@@ -1501,67 +999,87 @@ def quantile_prediction_error(Y : torch.tensor, ypred : torch.tensor, isBin : bo
 
     return np.mean(error)
 
-def my_f1_score(Y : torch.tensor, ypred : torch.tensor, isBin : bool, weights : torch.tensor = None):
+def my_f1_score(Y : np.array, ypred : np.array, isBin : bool, weights : np.array = None):
     
     ytrue = Y[:,-2] > 0
     ytrueReg = Y[:,-1]
 
     bounds = [0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9]
 
-    if torch.is_tensor(ypred):
-         ypredNumpy = ypred.detach().cpu().numpy()
-    else:
-         ypredNumpy = ypred
-        
-    if torch.is_tensor(ytrue): 
-        ytrueNumpy = ytrue.detach().cpu().numpy()
-        ytrueRegNumpy = ytrueReg.detach().cpu().numpy()
-    else:
-        ytrueNumpy = ytrue
-        ytrueRegNumpy = ytrueReg
-    
-    if isBin:
-        maxi = np.nanmax(ypredNumpy)
-    else:
-        maxi = np.nanmax(ytrueRegNumpy)
+    bestScores = []
+    precs = []
+    recs = []
+    bestBounds = []
+    values = []
 
-    if weights is not None:
-        if torch.is_tensor(weights):
-            weightsNumpy = weights.detach().cpu().numpy()
+    ydep = np.unique(Y[:, 3])
+
+    for d in ydep:
+        mask = np.argwhere(Y[:, 3] == d)[:, 0]
+        if torch.is_tensor(ypred):
+            ypredNumpy = ypred.detach().cpu().numpy()[mask]
         else:
-            weightsNumpy = weights
+            ypredNumpy = ypred[mask]
+            
+        if torch.is_tensor(ytrue): 
+            ytrueNumpy = ytrue.detach().cpu().numpy()[mask]
+            ytrueRegNumpy = ytrueReg.detach().cpu().numpy()[mask]
+        else:
+            ytrueNumpy = ytrue[mask]
+            ytrueRegNumpy = ytrueReg[mask]
         
-        weightsNumpy[np.argwhere(ytrue == 0)[:,0]] = 1
-        
-    else:
-        weightsNumpy = np.ones(ytrueNumpy.shape[0])
-
-    bestScore = 0.0
-    prec = 0.0
-    rec = 0.0
-    bestBound = 0.0
-    for bound in bounds:
         if isBin:
-            yBinPred = (ypredNumpy > bound * maxi).astype(int)
+            maxi = 1.0
         else:
-            yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
+            maxi = np.nanmax(ytrueRegNumpy)
 
-        f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        if f1 > bestScore:
+        if weights is not None:
+            if torch.is_tensor(weights):
+                weightsNumpy = weights.detach().cpu().numpy()[mask]
+            else:
+                weightsNumpy = weights[mask]
+            weightsNumpy[np.argwhere(ytrue[mask] == 0)[:,0]] = 1
+        else:
+            weightsNumpy = np.ones(ytrueNumpy.shape[0])
+
+        bestScore = 0.0
+        prec = 0.0
+        rec = 0.0
+        bestBound = 0.0
+
+        for bound in bounds:
+            if isBin:
+                yBinPred = (ypredNumpy > bound * maxi).astype(int)
+            else:
+                yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
+
+            f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+            if f1 > bestScore:
+                bestScore = f1
+                bestBound =  bound
+                prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+                rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+
+        if not isBin:
+            yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
+            f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             bestScore = f1
-            bestBound =  bound
             prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-    
-    if not isBin:
-        yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
-        f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        bestScore = f1
-        bestBound =  bound
-        prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
 
-    return (bestScore, prec, rec, bestBound, ypredNumpy > bestBound * maxi)
+        bestScores.append(bestScore)
+        precs.append(prec)
+        recs.append(rec)
+        bestBounds.append(bestBound)
+        values.append(bestBound * maxi)
+
+    bestScore = np.mean(bestScore)
+    prec = np.mean(precs)
+    rec = np.mean(recs)
+    bestBound = np.mean(bestBounds)
+    value = np.mean(values)
+
+    return (bestScore, prec, rec, bestBound, value)
 
 def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
@@ -1570,7 +1088,6 @@ def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, to
         ytrue = ytrue.detach().cpu().numpy().astype(float)
     
     ydep = ytrue[:,3]
-    dir_predictor = root_graph / dir / 'influenceClustering'
 
     res = {}
     for nameDep in departements:
@@ -1582,11 +1099,11 @@ def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, to
         uniqueClass = np.unique(yclass)
         res[nameDep] = {}
         for c in uniqueClass:
-            classIndex = np.argwhere(yclass == c)
-            classPred = ypred[mask][classIndex]
-            classTrue = ytrue[:,-1][mask][classIndex]
+            classIndex = np.argwhere(yclass == c)[:,0]
+            classPred = ypred[classIndex, 1]
+            classTrue = ytrue[classIndex,-3]
             error = abs(classPred - classTrue)
-            classBin = ytrue[:,-2][mask][classIndex] > 0
+            classBin = ytrue[classIndex,-2] > 0
             meanF = round(np.mean(classBin), 3)
             meanP = round(np.mean(classPred), 3)
             meanT = round(np.mean(classTrue), 3)
@@ -1601,7 +1118,10 @@ def class_accuracy(ypred, ytrue, departements : list, dir : Path, weights = None
         ytrue = ytrue.detach().cpu().numpy().astype(float)
 
     if weights is not None:
-        weightsNumpy = weights.detach().cpu().numpy()
+        if torch.is_tensor(weights):
+            weightsNumpy = weights.detach().cpu().numpy()
+        else:
+            weightsNumpy = weights
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
 
@@ -1612,8 +1132,7 @@ def class_accuracy(ypred, ytrue, departements : list, dir : Path, weights = None
             continue
 
         yweights = weightsNumpy[mask].reshape(-1)
-
-        res[nameDep] = accuracy_score(ytrue[mask, -4], ypred[mask, -1], sample_weight=yweights)
+        res[nameDep] = accuracy_score(ytrue[mask, -3], ypred[mask, -1], sample_weight=yweights)
             
     return res
 
@@ -1624,9 +1143,13 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, dir : Path, weigh
         ytrue = ytrue.detach().cpu().numpy().astype(float)
 
     if weights is not None:
-        weightsNumpy = weights.detach().cpu().numpy()
+        if torch.is_tensor(weights):
+            weightsNumpy = weights.detach().cpu().numpy()
+        else:
+            weightsNumpy = weights
     else:
         weightsNumpy = np.ones(ytrue.shape[0])
+
 
     res = {}
     for nameDep in departements:
@@ -1636,7 +1159,7 @@ def balanced_class_accuracy(ypred, ytrue, departements : list, dir : Path, weigh
 
         yweights = weightsNumpy[mask].reshape(-1)
 
-        res[nameDep] = balanced_accuracy_score(ytrue[mask, -4], ypred[mask, -1], sample_weight=yweights)
+        res[nameDep] = balanced_accuracy_score(ytrue[mask, -3], ypred[mask, -1], sample_weight=yweights)
             
     return res
 
@@ -1667,12 +1190,12 @@ def mean_absolute_error_class(ypred, ytrue, departements : list,
 
         if top is not None:
             minBound = np.nanmax(ytrue[mask,-1]) * (1 - top/100)
-            mask2 = (ytrue[mask,-1] > minBound)[:,0]
-            ytrueclass = ytrueclass[mask2]
-            ypredclass = ypredclass[mask2]
+            mask2 = (ytrue[mask,-1] > minBound)
+            ytrueclass = ytrue[mask, -3][mask2]
+            ypredclass = ypred[mask, -1][mask2]
             yweights = None
         else:
-            ytrueclass = ytrue[mask, -4]
+            ytrueclass = ytrue[mask, -3]
             ypredclass = ypred[mask, -1]
 
         if ytrueclass.shape[0] == 0:
@@ -2058,7 +1581,7 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, N
         else:
                 features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
 
-    log_features(features_importance, scale, pos_feature, ['min', 'mean', 'max', 'std'])
+    log_features(features_importance, scale, pos_feature, ['mean', 'min', 'max', 'std'])
     features_selected = features_importance[:,0].astype(int)
     return features_selected
 
@@ -2107,102 +1630,6 @@ def check_class(influence, bin):
 
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
-
-def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int, n_clusters : int):
-    check_and_create_path(dir_output)
-    logger.info('###################" Calculate break point ####################')
-    res_cluster = {}
-    features_selected_2 = []
-
-    # For each feature
-    for fet in features:
-        train_fet_num = []
-        check_and_create_path(dir_output / fet)
-        # Select the numerical values
-        maxi, methods, variales = calculate_feature_range(fet, scale)
-        logger.info(f'{fet}, {variales}, {methods}')
-        train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
-        len_met = len(methods)
-        
-        i_var = -1
-        # For each method
-        for i, xs in enumerate(train_fet_num):
-            #if xs not in features_selected:
-            #    continue
-
-            if len_met == len_met:
-                i_met = i % len_met
-            else:
-                i_met = 0
-
-            if i_met % len_met == 0:
-                i_var += 1
-
-            on = fet+'_'+variales[i_var]+'_'+methods[i_met] # Get the right name
-            res_cluster[xs] = {}
-            res_cluster[xs]['name'] = on
-            res_cluster[xs]['fet'] = fet
-            X_fet = Xset[:, xs] # Select the feature
-            if np.unique(X_fet).shape[0] < n_clusters:
-                continue
-            X_cluster = np.copy(X_fet)
-
-            # Create the cluster model
-            model = Predictor(n_clusters, on)
-            model.fit(X_cluster)
-
-            save_object(model, on+'.pkl', dir_output / fet)
-
-            pred = order_class(model, model.predict(X_cluster)) # Predict and order class to 0 1 2 3 4
-
-            cls = np.unique(pred)
-            if cls.shape[0] != n_clusters:
-                continue
-
-            plt.figure(figsize=(5,5)) # Create figure for ploting
-
-            # For each class calculate the target values
-            for c in cls:
-                mask = np.argwhere(pred == c)[:,0]
-                res_cluster[xs][c] = np.mean(Yset[mask, -2])
-                plt.scatter(X_fet[mask], Yset[mask,-2], label=c)
-            
-            logger.info(on)
-
-            # Calculate Pearson coefficient
-            df = pd.DataFrame(res_cluster, index=np.arange(n_clusters)).reset_index()
-            df.rename({'index': 'class'}, axis=1, inplace=True)
-            df = df[['class', xs]]
-            correlation = df['class'].corr(df[xs])
-            res_cluster[xs]['correlation'] = correlation
-            # Plot
-            plt.ylabel('Sinister')
-            plt.xlabel(fet+'_'+methods[i_met])
-            plt.title(fet+'_'+methods[i_met])
-            on += '.png'
-            plt.legend()
-            plt.savefig(dir_output / fet / on)
-            plt.close('all')
-
-            # If no correlation then pass
-            if abs(correlation) > 0.7:
-                # If negative linearity, inverse class
-                if correlation < 0:
-                    new_class = np.flip(np.arange(n_clusters))
-                    temp = {}
-                    for i, nc in enumerate(new_class):
-                        temp[nc] = res_cluster[xs][i]
-                    temp['correlation'] = res_cluster[xs]['correlation']
-                    temp['name'] = res_cluster[xs]['name']
-                    temp['fet'] = res_cluster[xs]['fet']
-                    res_cluster[xs] = temp
-                
-                # Add in selected features
-                features_selected_2.append(xs)
-        
-    logger.info(len(features_selected_2))
-    save_object(res_cluster, 'break_point_dict.pkl', dir_output)
-    save_object(features_selected_2, 'features.pkl', dir_output)
 
 def apply_kmeans_class_on_target(Xset : np.array, Yset : np.array, dir_output : Path, change_class : bool):
     dir_break_point = dir_output
@@ -2282,24 +1709,3 @@ def find_n_component(thresh, pca):
             nb_component = i + 1
             break
     return nb_component
-
-def train_pca(X, percent, dir_output, features_selected):
-    pca =  PCA(n_components='mle', svd_solver='full')
-    components = pca.fit_transform(X[:, features_selected])
-    check_and_create_path(dir_output / 'pca')
-    show_pcs(pca, 2, components, dir_output / 'pca')
-    print('99 % :',find_n_component(0.99, pca))
-    print('95 % :', find_n_component(0.95, pca))
-    print('90 % :' , find_n_component(0.90, pca))
-    pca_number = find_n_component(percent, pca)
-    save_object(pca, 'pca.pkl', dir_output)
-    pca =  PCA(n_components=pca_number, svd_solver='full')
-    pca.fit(X[:, features_selected])
-    return pca, pca_number
-
-def apply_pca(X, pca, pca_number, features_selected):
-    res = pca.transform(X[:, features_selected])
-    new_X = np.empty((X.shape[0], 6 + pca_number))
-    new_X[:, :6] = X[:, :6]
-    new_X[:, 6:] = res
-    return new_X

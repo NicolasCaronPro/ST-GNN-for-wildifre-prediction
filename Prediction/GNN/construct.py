@@ -146,6 +146,8 @@ def construct_database(graphScale : GraphStructure,
         if X is not None:
             Xtest = X[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
                 ((Y[:,4] > allDates.index('2017-12-31')) & (Y[:,4] < allDates.index('2022-12-31')) & (~np.isin(Y[:,3], trainCode)))]
+    
+            Xtrain = X[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
 
         values_per_class = int(values_per_class)
         new_Y = []
@@ -157,30 +159,47 @@ def construct_database(graphScale : GraphStructure,
             classs = np.unique(Ytrain[maskdept, -3])
             new_Y_index = []
             for cls in classs:
-                Y_class_index = np.where(Ytrain[maskdept, -3] == cls)[0]
-                new_Y_index += list(np.random.choice(Y_class_index, min(Y_class_index.shape[0], values_per_class)))
-            new_Y += list(Y[np.asarray(new_Y_index), :])
+                Y_class_index = np.argwhere(Ytrain[maskdept, -3] == cls)[:, 0]
+                choices = np.random.choice(Y_class_index, min(Y_class_index.shape[0], values_per_class), replace=False)
+                new_Y_index += list(choices)
+            new_Y += list(Ytrain[maskdept][new_Y_index])
             if X is not None:
-                new_X += list(X[np.asarray(new_Y_index), :])
+                new_X += list(Xtrain[maskdept][new_Y_index])
 
-        new_Y = np.asarray(new_Y)
-        new_Y_neighboor = Y[np.isin(Y[:, 4], new_Y[:, 4])]
-        mask_remove = np.argwhere(~np.isin(new_Y_neighboor, new_Y))[:,0]
-        new_Y_neighboor = new_Y_neighboor[mask_remove]
+        new_Y = np.asarray(new_Y).reshape(-1, Ytrain.shape[-1])
+        mask_days = np.zeros(Ytrain.shape[0], dtype=bool)
+        for k in range(k_days + 1):
+            mask_days = mask_days | np.isin(Ytrain[:, 4], new_Y[:, 4] - k)
+        new_Y_neighboor = Ytrain[mask_days]
         new_Y_neighboor[:, 5] = 0
 
         if X is not None:
-            new_X_neighboor = X[np.isin(Y[:, 4], new_Y[:, 4])]
-            new_X_neighboor = new_X_neighboor[mask_remove]
-            X = np.concatenate((new_X, new_X_neighboor, Xtest))
+            new_X = np.asarray(new_X).reshape(-1, Xtrain.shape[-1])
+            new_X_neighboor = Xtrain[mask_days]
+            new_X_neighboor[:, 5] = 0
+            X = np.concatenate((new_X, new_X_neighboor, Xtest), casting='no')
+            X[:, pos_feature['vigicrues']: pos_feature['vigicrues'] + 4] = -1
 
-        Y = np.concatenate((new_Y, new_Y_neighboor, Ytest))
+        Y = np.concatenate((new_Y, new_Y_neighboor, Ytest), casting='no')
+        X, Y = remove_nan_nodes(X, Y)
+        X, Y = remove_none_target(X, Y)
+        X = np.unique(X, axis=0)
+        Y = new_Y
+        Y = np.unique(Y, axis=0)
+        Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+        logger.info(f'{new_Y.shape, Ytrain[Ytrain[:, 5] > 0].shape, Ytrain.shape}')
 
     if X is None:
         if graphScale.scale == 0:
             X, pos_feature = get_sub_nodes_feature_2(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
         else:
             X, pos_feature = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
+
+    ind = np.lexsort([Y[:, 4], Y[:, 0]])
+    Y = Y[ind]
+    if X is not None:
+        ind = np.lexsort([X[:, 4], X[:, 0]])
+        X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
     X[:, 5] = Y[:, 5]

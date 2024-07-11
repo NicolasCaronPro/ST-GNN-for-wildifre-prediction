@@ -46,13 +46,16 @@ def get_sub_nodes_feature_2D(graph, shape: int,
     doGeo = 'Geo' in features
     doHistorical = 'Historical' in features
     doAir = 'air' in features
+    doDW = 'dynamicWorld' in features
+    doNappes = 'nappes' in features
+    doVigi = 'vigicrues' in features
+    doHighway = 'highway' in features
 
     dir_encoder = root_graph / path / 'Encoder'
 
     if doLand:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-
-    if doForet:
+        encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
         encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
 
     if doCalendar:
@@ -114,7 +117,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             check_and_create_path(dir_output / 'osmnx') # Create temporal directory (nothign to do with meteo features)
             osmnx, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'osmnx', dir_output / 'osmnx') # Create a raster - > (1, H, W)
             osmnx = osmnx[0] # Get first band - > (H, W)
-            save_object(osmnx, 'osmnx.pkl', dir_output) 
+            save_object(osmnx, 'osmnx.pkl', dir_output)
 
         # Load landcover
         if doLand:
@@ -227,11 +230,9 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             # Add landcover
             if doLand:
                 raster_landcover_2(spatioTemporalRaster, node[0], mask, landcover, pos_feature['landcover'], encoder_landcover)
-            ############################################################################################################################
-            
-            # Add foret
-            if doForet:
                 raster_foret(spatioTemporalRaster, mask, node[0], foret, pos_feature['foret'], encoder_foret)
+                raster_osmnx(spatioTemporalRaster, mask, node[0], osmnx, pos_feature['highway'], encoder_osmnx)
+            ############################################################################################################################
 
             # Add elevation
             if doEle:
@@ -240,11 +241,22 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             # Add population
             if doPop:
                 raster_population(spatioTemporalRaster, mask, node[0], population, n_pixel_x, n_pixel_y, pos_feature['population'])
-        
-            # Add highwat
-            if doHighway:
-                raster_osmnx(spatioTemporalRaster, mask, node[0], osmnx, pos_feature['highway'])
 
+            if doForet:
+                pass
+
+            if doDW:
+                pass
+
+            if doHighway:
+                pass
+
+            if doNappes:
+                pass
+
+            if doVigi:
+                pass
+        
             # Save ouptut file
             save_object(spatioTemporalRaster, str(int(node[0]))+'_'+str(indD)+'.pkl', dir_output / prefix / 'data')
 
