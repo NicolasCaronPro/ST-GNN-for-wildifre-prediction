@@ -1,11 +1,8 @@
 import pickle
 from sklearn.cluster import KMeans
-from graph_structure import *
 from copy import copy
-from features import *
-from features_2D import *
 from weigh_predictor import Predictor
-from config import *
+from encoding import *
 
 def look_for_information(path : Path, departements : list,
                          regions : gpd.GeoDataFrame, maxDate : str,
@@ -249,3 +246,186 @@ def construct_non_point(firepoints, regions, maxDate, sinister, dir):
 
     name = sinister+'.csv'
     firepoints.to_csv(dir / sinister / name, index=False)
+
+def init(args):
+    
+    global trainFeatures
+    global features
+
+    ######################### Input config #############################
+    nameExp = args.name
+    maxDate = args.maxDate
+    trainDate = args.trainDate
+    doEncoder = args.encoder == "True"
+    doPoint = args.point == "True"
+    doGraph = args.graph == "True"
+    doDatabase = args.database == "True"
+    do2D = args.database2D == "True"
+    doFet = args.featuresSelection == "True"
+    optimize_feature = args.optimizeFeature == "True"
+    doTest = args.doTest == "True"
+    doTrain = args.doTrain == "True"
+    nbfeatures = int(args.NbFeatures)
+    sinister = args.sinister
+    values_per_class = args.nbpoint
+    scale = int(args.scale)
+    spec = args.spec
+    resolution = args.resolution
+    doPCA = args.pca == 'True'
+    doKMEANS = args.KMEANS == 'True'
+    ncluster = int(args.ncluster)
+
+    ######################## CONFIG ################################
+
+    dir_target = root_target / sinister / 'log' / resolution
+
+    geo = gpd.read_file('regions/regions.geojson')
+    geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
+
+    name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+    dir_output = Path(name_dir)
+    check_and_create_path(dir_output)
+
+    minDate = '2017-06-12' # Starting point
+
+    if values_per_class == 'full':
+        prefix = str(values_per_class)+'_'+str(scale)
+    else:
+        prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+
+    if dummy:
+        prefix += '_dummy'
+
+    autoRegression = 'AutoRegressionReg' in trainFeatures
+    if spec == '' and autoRegression:
+        spec = 'AutoRegressionReg'
+
+    ########################### Create points ################################
+    if doPoint:
+
+        check_and_create_path(dir_output)
+
+        fp = pd.read_csv('sinister/'+sinister+'.csv')
+
+        construct_non_point(fp, geo, maxDate, sinister, Path(nameExp))
+        look_for_information(dir_target,
+                            departements,
+                            geo,
+                            maxDate,
+                            sinister,
+                            Path(nameExp))
+
+    ######################### Encoding ######################################
+
+    if doEncoder:
+        encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder', resolution)
+
+    ########################## Do Graph ######################################
+
+    if doGraph:
+        logger.info('#################################')
+        logger.info('#      Construct   Graph        #')
+        logger.info('#################################')
+        graphScale = construct_graph(scale,
+                                    maxDist[scale],
+                                    sinister,
+                                    geo, nmax, k_days,
+                                    dir_output,
+                                    True,
+                                    False,
+                                    resolution)
+        graphScale._create_predictor(minDate, maxDate, dir_output, sinister, resolution)
+    else:
+        graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
+
+    graphScale._plot(graphScale.nodes, dir_output=dir_output)
+
+    ########################## Do Database ####################################
+
+    if doDatabase:
+        logger.info('#####################################')
+        logger.info('#      Construct   Database         #')
+        logger.info('#####################################')
+        if not dummy:
+            name = 'points.csv'
+            ps = pd.read_csv(Path(nameExp) / sinister / name)
+            logger.info(f'{ps.date.min(), allDates[ps.date.min()]}')
+            logger.info(f'{ps.date.max(), allDates[ps.date.max()]}')
+            depts = [name2int[dept] for dept in departements]
+            logger.info(ps.departement.unique())
+            ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
+            logger.info(ps.departement.unique())
+            #ps['date'] = ps['date'] - 1
+            ps = ps[ps['date'] > 0]
+            logger.info(ps[ps['departement'] == 1].date.min())
+        else:
+            name = sinister+'.csv'
+            fp = pd.read_csv(Path(nameExp) / sinister / name)
+            name = 'non'+sinister+'csv'
+            nfp = pd.read_csv(Path(nameExp) / sinister / name)
+            ps = pd.concat((fp, nfp)).reset_index(drop=True)
+            ps = ps.copy(deep=True)
+            ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
+            ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
+
+        X, Y, pos_feature = construct_database(graphScale,
+                                            ps, scale, k_days,
+                                            departements,
+                                            features, sinister,
+                                            dir_output,
+                                            dir_output,
+                                            prefix,
+                                            values_per_class,
+                                            'train',
+                                            resolution,
+                                            trainDate)
+        
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
+        save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
+    else:
+        X = read_object('X_'+prefix+'.pkl', dir_output)
+        Y = read_object('Y_'+prefix+'.pkl', dir_output)
+        pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
+
+    if newFeatures != []:
+        X2, pos_feature_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
+        for fet in newFeatures:
+            maxi, _, _ = calculate_feature_range(fet, scale)
+            X[:, pos_feature[fet]: pos_feature[fet] + maxi] = X2[:, pos_feature_[fet]: pos_feature_[fet] + maxi]
+
+    if do2D:
+        subnode = X[:,:6]
+        pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
+                                                    subnode.shape[1],
+                                                    X,
+                                                    scaling,
+                                                    pos_feature,
+                                                    trainDepartements,
+                                                    features,
+                                                    sinister,
+                                                    dir_output,
+                                                    prefix)
+    else:
+        subnode = X[:,:6]
+        pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
+
+    prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+    prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+
+    # Add varying time features
+    if k_days > 0:
+        name = 'X_'+prefix+'.pkl'
+        if (dir_output / name).is_file():
+            X = read_object('X_'+prefix+'.pkl', dir_output)
+        else:
+            for k in range(1, k_days + 1):
+                new_fet = [v+'_'+str(k) for v in varying_time_variables]
+                logger.info(new_fet)
+                trainFeatures += new_fet
+                features += new_fet
+                pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
+                if doDatabase:
+                    X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k)
+            save_object(X, 'X_'+prefix+'.pkl', dir_output)
+
+    return X, Y, graphScale, prefix, prefix_train, pos_feature

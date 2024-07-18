@@ -40,7 +40,7 @@ from arborescence import *
 from array_fet import *
 from weigh_predictor import *
 from features_selection import *
-from config import logger, foretint2str, osmnxint2str, make_models, maxDist
+from config import *
 from sklearn.cluster import SpectralClustering
 import scipy.stats
 import plotly.express as px
@@ -381,8 +381,27 @@ def remove_nan_nodes(nodes : np.array, target : np.array) -> np.array:
     return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
 
 def remove_none_target(nodes : np.array, target : np.array) -> np.array:
-    mask = np.argwhere(target[:, -1] == -1)[:,0]
+    mask = np.argwhere((target[:, -1] == -1) | (np.isnan(target[:, -1])))[:,0]
     return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
+
+def remove_bad_period(X : np.array, Y : np.array, period2ignore : dict, departements: list):
+    for dept in departements:
+        period = period2ignore[name2int[dept]]['interventions']
+        if period == []:
+            continue
+        for per in period:
+            logger.info(f'{dept} -> Remove period {per}')
+            ds = per[0].strftime('%Y-%m-%d')
+            de = per[1].strftime('%Y-%m-%d')
+            if ds not in allDates:
+                continue
+            if de not in allDates:
+                de = allDates[-1]
+            arg = np.argwhere(~((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(ds)) & (X[:, 4] <= allDates.index(de))))[:, 0]
+            X = X[arg, :]
+            Y = Y[arg, :]
+    logger.info(f'{np.unique(X[:, 3])}')
+    return X, Y
 
 def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
 
@@ -730,8 +749,8 @@ def order_class(predictor, pred):
 
 def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, method : str, band : int, dir_output : Path, name : str):
 
-    if method not in ['mean', 'sum', 'max', 'min']:
-        logger.info(f'Methods must be {["mean", "sum", "max", "min"]}, {method} isn t')
+    if method not in METHODS:
+        logger.info(f'Methods must be {METHODS}, {method} isn t')
         exit(1)
     name_mask = departement+'rasterScale'+str(scale)+'.pkl'
     mask = read_object(name_mask, dir_mask)
@@ -1210,6 +1229,7 @@ def create_pos_feature(scale, shape, features):
 
     newShape = shape
     if scale > 0:
+        coef = len(METHODS)
         for var in features:
             pos_feature[var] = newShape
             if var == 'Calendar':
@@ -1217,36 +1237,38 @@ def create_pos_feature(scale, shape, features):
             elif var == 'air':
                 newShape += len(air_variables)
             elif var == 'landcover':
-                newShape += 4 * len(landcover_variables)
+                newShape += coef * len(landcover_variables)
             elif var == 'sentinel':
-                newShape += 4 * len(sentinel_variables)
+                newShape += coef * len(sentinel_variables)
             elif var == "foret":
-                newShape += 4 * len(foret_variables)
+                newShape += coef * len(foret_variables)
             elif var == 'dynamicWorld':
-                newShape += 4 * len(dynamic_world_variables)
+                newShape += coef * len(dynamic_world_variables)
             elif var == 'highway':
-                newShape += 4 * len(osmnx_variables)
+                newShape += coef * len(osmnx_variables)
             elif var == 'Geo':
                 newShape += len(geo_variables)
             elif var == 'vigicrues':
-                newShape += 4 * len(vigicrues_variables)
+                newShape += coef * len(vigicrues_variables)
             elif var == 'nappes':
-                newShape += 4 * len(nappes_variables)
+                newShape += coef * len(nappes_variables)
             elif var == 'Historical':
-                newShape += 4 * len(historical_variables)
+                newShape += coef * len(historical_variables)
             elif var == 'AutoRegressionReg':
                 newShape += len(auto_regression_variable_reg)
             elif var == 'AutoRegressionBin':
                 newShape += len(auto_regression_variable_bin)
-            elif var in varying_time_variables:
-                if var == 'Calendar_mean':
+            elif True in [tv in var for tv in varying_time_variables]:
+                if 'Calendar_mean' in var:
                     newShape += len(calendar_variables)
-                elif var == 'air_mean':
+                elif 'air_mean' in var:
                     newShape += len(air_variables)
                 else:
                     newShape += 1
+            elif var == 'temporal_prediction' or var == 'spatial_prediction':
+                newShape += 1
             else:
-                newShape += 4
+                newShape += coef
     else:
         for var in features:
             pos_feature[var] = newShape
@@ -1413,7 +1435,7 @@ def catboost_encoding(pos_feature, Xset, Xtrain, Ytrain, variableType, size):
     return Xset
 
 def log_features(fet, scale, pos_feature, methods):
-    coef = 4 if scale > 0 else 1
+    coef = len(methods) if scale > 0 else 1
     keys = list(pos_feature.keys())
     for fe in fet:
         try:
@@ -1430,56 +1452,129 @@ def log_features(fet, scale, pos_feature, methods):
             if next is None or (f >= res and f < next and next is not None):
                 if keys[i] in cems_variables or keys[i] == 'elevation' or \
                 keys[i] == 'population' or keys[i] == 'Historical':
-                    logger.info(f'{keys[i], fe[1], methods[f-res]}')
+                    logger.info(f'{fe[0], keys[i], fe[1], methods[f-res]}')
                 elif keys[i] == 'sentinel':
                     for i, v in enumerate(sentinel_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'foret':
                     for i, v in enumerate(foret_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{foretint2str[v], fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], foretint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'highway' :
                     for i, v in enumerate(osmnx_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{osmnxint2str[v], fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], osmnxint2str[v], fe[1], methods[meth_index]}')
                 elif keys[i] == 'dynamicWorld' :
                     for i, v in enumerate(dynamic_world_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'vigicrues':
                     for i, v in enumerate(vigicrues_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'vigicrues{v, fe[1], methods[meth_index]}')
+                            logger.info(f'vigicrues{fe[0], v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'nappes':
                     for i, v in enumerate(nappes_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'landcover':
                     for i, v in enumerate(landcover_variables):
                         if f >= (i * coef) + res and (i + 1) * coef + res > f:
                             meth_index = f - ((i * coef) + res)
-                            logger.info(f'{v, fe[1], methods[meth_index]}')
+                            logger.info(f'{fe[0], v, fe[1], methods[meth_index]}')
                 elif keys[i] == 'AutoRegressionReg':
-                    logger.info(f'{keys[i], fe[1], auto_regression_variable_reg[f-res]}')
+                    logger.info(f'{fe[0], keys[i], fe[1], auto_regression_variable_reg[f-res]}')
                 elif keys[i] == 'AutoRegressionBin':
-                    logger.info(f'{keys[i], fe[1], auto_regression_variable_bin[f-res]}')
+                    logger.info(f'{fe[0], keys[i], fe[1], auto_regression_variable_bin[f-res]}')
                 elif keys[i] == 'Calendar' or keys[i] == 'Calendar_mean':
-                    logger.info(f'{keys[i]}, {fe[1]}, {calendar_variables[f-res]}')
+                    logger.info(f'{fe[0], keys[i]}, {fe[1]}, {calendar_variables[f-res]}')
                 elif keys[i] == 'air' or keys[i] == 'air_mean':
-                    logger.info(f'{keys[i], fe[1], air_variables[f-res]}')
+                    logger.info(f'{fe[0], keys[i], fe[1], air_variables[f-res]}')
                 else:
-                    logger.info(f'{keys[i], fe[1]}')
+                    logger.info(f'{fe[0], keys[i], fe[1]}')
                 break
 
+def create_feature_map(features : np.array, pos_feature : dict, dir_output : Path, methods : list, scale : int):
+    logger.info(pos_feature)
+    with open(dir_output / 'feature_map.text', 'w') as file:
+        coef = len(methods) if scale > 0 else 1
+        keys = list(pos_feature.keys())
+        for f in features:
+            for i, _ in enumerate(keys):
+                res = pos_feature[keys[i]]
+                try:
+                    next = pos_feature[keys[i + 1]]
+                except Exception as e:
+                        next =  None
+                if next is None or (f >= res and f < next and next is not None):
+                    if keys[i] in cems_variables or keys[i] == 'elevation' or \
+                    keys[i] == 'population' or keys[i] == 'Historical':
+                        met = methods[f-res]
+                        file.write(keys[i] + '_' + met + ' q')
+                    elif keys[i] == 'sentinel':
+                        for i, v in enumerate(sentinel_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(v + '_' + met + ' q')
+                    elif keys[i] == 'foret':
+                        for i, v in enumerate(foret_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(foretint2str[v] + '_' + met+ ' q')
+                    elif keys[i] == 'highway' :
+                        for i, v in enumerate(osmnx_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(osmnxint2str[v] + '_' + met+ ' q')
+                    elif keys[i] == 'dynamicWorld' :
+                        for i, v in enumerate(dynamic_world_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(v + '_' + met + ' q')
+                    elif keys[i] == 'vigicrues':
+                        for i, v in enumerate(vigicrues_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(v + '_' + met + ' q')
+                    elif keys[i] == 'nappes':
+                        for i, v in enumerate(nappes_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(v + '_' + met + ' q')
+                    elif keys[i] == 'landcover':
+                        for i, v in enumerate(landcover_variables):
+                            if f >= (i * coef) + res and (i + 1) * coef + res > f:
+                                meth_index = f - ((i * coef) + res)
+                                met = methods[meth_index]
+                                file.write(v + '_' + met + ' q')
+                    elif keys[i] == 'AutoRegressionReg':
+                            file.write(auto_regression_variable_reg[f-res] + ' q')
+                    elif keys[i] == 'AutoRegressionBin':
+                            file.write(auto_regression_variable_bin[f-res] + ' q')
+                    elif keys[i] == 'Calendar' or keys[i] == 'Calendar_mean':
+                            file.write(calendar_variables[f-res] + ' q')
+                    elif keys[i] == 'air' or keys[i] == 'air_mean':
+                            file.write(air_variables[f-res] + ' q')
+                    else:
+                        file.write(keys[i])
+                    file.write('\n')
+                    break
+        file.close()
+
 def calculate_feature_range(fet, scale):
-        coef = 4 if scale > 0 else 1
+        coef = len(METHODS) if scale > 0 else 1
         if fet == 'Calendar' or fet == 'Calendar_mean':
             variables = calendar_variables
             maxi = len(calendar_variables)
@@ -1491,7 +1586,7 @@ def calculate_feature_range(fet, scale):
         elif fet == 'sentinel':
             variables = sentinel_variables
             maxi = coef * len(sentinel_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'Geo':
             variables = geo_variables
             maxi = len(geo_variables)
@@ -1499,27 +1594,27 @@ def calculate_feature_range(fet, scale):
         elif fet == 'foret':
             variables = foret_variables
             maxi = coef * len(foret_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'highway':
             variables = osmnx_variables
             maxi = coef * len(osmnx_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'landcover':
             variables = landcover_variables
             maxi = coef * len(landcover_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'dynamicWorld':
             variables = dynamic_world_variables
             maxi = coef * len(dynamic_world_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'vigicrues':
             variables = vigicrues_variables
             maxi = coef * len(vigicrues_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'nappes':
             variables = nappes_variables
             maxi = coef * len(nappes_variables)
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
         elif fet == 'AutoRegressionReg':
             variables = auto_regression_variable_reg
             maxi = len(auto_regression_variable_reg)
@@ -1536,10 +1631,14 @@ def calculate_feature_range(fet, scale):
             variables = [fet]
             maxi = 1
             methods = ['raw']
+        elif fet == 'temporal_prediction' or fet == 'spatial_prediction':
+            variables = [fet]
+            maxi = 1
+            methods = ['raw']
         else:
             variables = [fet]
             maxi = coef
-            methods = ['mean', 'min', 'max', 'std']
+            methods = METHODS
 
         return maxi, methods, variables
 
@@ -1552,7 +1651,7 @@ def select_train_features(trainFeatures, features, scale, pos_feature):
             train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
     return train_fet_num
 
-def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, NbFeatures, scale):
+def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, NbFeatures, scale):
 
     if NbFeatures == 'all':
         features_selected = np.arange(0, Xset.shape[1])
@@ -1571,17 +1670,12 @@ def features_selection(doFet, Xset, Yset, dir_output, pos_feature, spec, tree, N
         features_importance = get_features(df, variables, target='target', num_feats=NbFeatures)
         features_importance = np.asarray(features_importance)
 
-        if tree:
-                save_object(features_importance, 'features_importance_tree_'+spec+'.pkl', dir_output)
-        else:
-                save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
+        save_object(features_importance, 'features_importance_'+spec+'.pkl', dir_output)
+        
     else:
-        if tree:
-                features_importance = read_object('features_importance_tree_'+spec+'.pkl', dir_output)
-        else:
-                features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
+        features_importance = read_object('features_importance_'+spec+'.pkl', dir_output)
 
-    log_features(features_importance, scale, pos_feature, ['mean', 'min', 'max', 'std'])
+    log_features(features_importance, scale, pos_feature, METHODS)
     features_selected = features_importance[:,0].astype(int)
     return features_selected
 
@@ -1709,3 +1803,51 @@ def find_n_component(thresh, pca):
             nb_component = i + 1
             break
     return nb_component
+
+def target_by_day(Y: np.array, days : int, method : str):
+    res = np.empty((Y.shape[0], Y.shape[1]))
+
+    res[:, :-3] = Y[:, :-3]
+
+    unode = np.unique(Y[:, 0])
+    for node in unode:
+        udate = np.unique(Y[Y[:, 0] == node, 4])
+        for date in udate:
+            mask = np.argwhere((Y[:, 4] == date) & (Y[:, 0] == node))[:, 0]
+            mask2 = np.argwhere((Y[:, 4] >= date) & (Y[:, 4] < date + days) & (Y[:, 0] == node))[:, 0]
+            if method == 'mean':
+                res[mask, -1] = np.mean(Y[mask2, -1])
+            elif method == 'max':
+                res[mask, -1] = np.max(Y[mask2, -1])
+            else:
+                raise ValueError(f'Unknow method {method}')
+            
+            res[mask, -3] = np.max(Y[mask2, -3])
+            res[mask, -2] = np.sum(Y[mask2, -2])
+
+    return res
+
+def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, pos_feature : dict):
+    logger.info(pos_feature)
+    res = np.full((X.shape[0], X.shape[1] + 2), fill_value=0.0)
+    res[:, :X.shape[1]] = X
+
+    # Add spatial
+    res[:, pos_feature['spatial_prediction']] = Y_localized[:, -1]
+
+    # Add temporal
+    unodes = np.unique(res[:, 0])
+    udates = np.unique(res[:, 4])
+
+    for node in unodes:
+        lon = np.unique(res[res[:, 0] == node][:, 1])[0]
+        lat = np.unique(res[res[:, 0] == node][:, 2])[0]
+        temporal_node_pred = graph_temporal._predict_node([[lon, lat]])
+        for date in udates:
+            mask = np.argwhere((res[:, 0] == node) & (res[:, 4] == date))[:, 0]
+            mask_temporal = np.argwhere((Y_daily[:, 0] == temporal_node_pred) & (Y_daily[:, 4] == date))[:, 0]
+            if mask.shape[0] == 0 or mask_temporal.shape[0] == 0:
+                continue
+            
+            res[mask, pos_feature['temporal_prediction']] = Y_daily[mask_temporal, -1][0]
+    return res

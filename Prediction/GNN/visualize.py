@@ -8,15 +8,23 @@ def realVspredict(ypred, y, band, dir_output, on):
     for d in dept:
         mask = np.argwhere(y[:,3] == d)
         ids = np.unique(y[mask, 0])
-        _, ax = plt.subplots(ids.shape[0], figsize=(50,50))
-        for i, id in enumerate(ids):
-            mask2 = np.argwhere(y[:, 0] == id)
-            ax[i].plot(ypred[mask2], color='red', label='predict')
-            ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
-            ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
-            x = np.argwhere(y[mask2,-2] > 0)[:,0]
-            ax[i].scatter(x, ypred[mask2][x], color='black', label='fire', alpha=0.5)
-        #plt.legend()
+        if ids.shape[0] == 1:
+            _, ax = plt.subplots(ids.shape[0], figsize=(15,5))
+            ax.plot(ypred[mask], color='red', label='predict')
+            ax.plot(ytrue[mask], color='blue', label='real', alpha=0.5)
+            x = np.argwhere(y[mask,-2] > 0)[:,0]
+            ax[i].scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
+            ax.set_ylim(ymin=0, ymax=np.nanmax(ypred[mask]))
+        else:
+            _, ax = plt.subplots(ids.shape[0], figsize=(50,50))
+            for i, id in enumerate(ids):
+                mask2 = np.argwhere(y[:, 0] == id)
+                ax[i].plot(ypred[mask2], color='red', label='predict')
+                ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
+                x = np.argwhere(y[mask2,-2] > 0)[:,0]
+                ax[i].scatter(x, ypred[mask2][x], color='black', label='fire', alpha=0.5)
+                ax[i].set_ylim(ymin=0, ymax=np.nanmax(ypred[mask]))
+        plt.legend()
         outn = str(d) + '_' + on + '.png'
         plt.savefig(dir_output / outn)
 

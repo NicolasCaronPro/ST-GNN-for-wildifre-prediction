@@ -1,10 +1,10 @@
 from pathlib import Path
 from shapely import unary_union
-from tools import *
 from arborescence import *
 from weigh_predictor import Predictor
-from config import *
 import itertools
+from config import *
+from tools import *
 
 def get_sub_nodes_ground_truth(graph, subNode: np.array,
                            departements : list,
@@ -101,13 +101,25 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         if False not in np.unique(np.isnan(array[mask])):
             return
 
+        values = array[mask].reshape(-1,1)
         if graph.scale > 0:
-            X[indexNode, indexVvar] = round(np.nanmean(array[mask]), 6)
-            X[indexNode, indexVvar+1] = round(np.nanmin(array[mask]), 6)
-            X[indexNode, indexVvar+2] = round(np.nanmax(array[mask]), 6)
-            X[indexNode, indexVvar+3] = round(np.nanstd(array[mask]), 6)
+            for imet, metstr in enumerate(METHODS):
+                if metstr == 'mean':
+                    X[indexNode, indexVvar+imet] = round(np.nanmean(values), 3)
+                elif metstr == 'min':
+                    X[indexNode, indexVvar+imet] = round(np.nanmin(values), 3)
+                elif metstr == 'max':
+                    X[indexNode, indexVvar+imet] = round(np.nanmax(values), 3)
+                elif metstr == 'std':
+                    X[indexNode, indexVvar+imet] = round(np.nanstd(values), 3)
+                elif metstr == 'sum':
+                    X[indexNode, indexVvar+imet] = round(np.nansum(values), 3)
+                elif metstr == 'grad':
+                    X[indexNode, indexVvar+imet] = round(np.gradient(values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
         else:
-            X[indexNode, indexVvar] = np.nanmean(array[mask])
+            X[indexNode, indexVvar] = np.nanmean(values)
 
     def save_value(array, indexVvar, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
@@ -121,10 +133,21 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         if graph.scale > 0:
-            X[indexNode, indexVvar] = round(np.nanmean(encode_values), 6)
-            X[indexNode, indexVvar+1] = round(np.nanmin(encode_values), 6)
-            X[indexNode, indexVvar+2] = round(np.nanmax(encode_values), 6)
-            X[indexNode, indexVvar+3] = round(np.nanstd(encode_values), 36)
+            for imet, metstr in enumerate(METHODS):
+                if metstr == 'mean':
+                    X[indexNode, indexVvar+imet] = round(np.nanmean(encode_values), 3)
+                elif metstr == 'min':
+                    X[indexNode, indexVvar+imet] = round(np.nanmin(encode_values), 3)
+                elif metstr == 'max':
+                    X[indexNode, indexVvar+imet] = round(np.nanmax(encode_values), 3)
+                elif metstr == 'std':
+                    X[indexNode, indexVvar+imet] = round(np.nanstd(encode_values), 3)
+                elif metstr == 'sum':
+                    X[indexNode, indexVvar+imet] = round(np.nansum(encode_values), 3)
+                elif metstr == 'grad':
+                    X[indexNode, indexVvar+imet] = round(np.gradient(encode_values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
         else:
             X[indexNode, indexVvar] = np.nanmean(encode_values)
 
@@ -291,17 +314,17 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
                 if 'highway' in features:
                     for band in osmnx_variables:
-                        save_values(arrayOS[int(band), :, :], pos_feature['highway'] + (osmnx_variables.index(band) * 4), index, maskNode)
+                        save_values(arrayOS[int(band), :, :], pos_feature['highway'] + (osmnx_variables.index(band) * len(METHODS)), index, maskNode)
 
                 if 'foret' in features:
                     for band in foret_variables:
-                        save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * 4), index, maskNode)
+                        save_values(arrayForet[int(band), :, :], pos_feature['foret'] + (foret_variables.index(band) * len(METHODS)), index, maskNode)
 
                 if 'landcover' in features:
                     if 'foret' in landcover_variables:
-                        save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * 4), index, maskNode, encoder_foret)
+                        save_value_with_encoding(arrayForetLandcover, pos_feature['landcover'] + (landcover_variables.index('foret') * len(METHODS)), index, maskNode, encoder_foret)
                     if 'highway' in landcover_variables:
-                        save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * 4), index, maskNode, encoder_osmnx)
+                        save_value_with_encoding(arrayOSLand, pos_feature['landcover'] + (landcover_variables.index('highway') * len(METHODS)), index, maskNode, encoder_osmnx)
 
         logger.info('Sentinel Dynamic World')
         ### Sentinel
@@ -315,7 +338,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         else:
             arrayDW = None
 
-        coef = 4 if graph.scale > -1 else 1
+        coef = len(METHODS) if graph.scale > -1 else 1
         if arraySent is not None or arrayLand is not None or arrayDW is not None:
             for node in nodeDepartement:
                 maskNode = mask == node[0]
@@ -329,11 +352,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 
                 if 'landcover' in features:
                     if 'landcover' in landcover_variables:
-                        save_value_with_encoding(arrayLand[:,:], pos_feature['landcover'] + (landcover_variables.index('landcover') * 4), index, maskNode, encoder_landcover)
+                        save_value_with_encoding(arrayLand[:,:], pos_feature['landcover'] + (landcover_variables.index('landcover') * len(METHODS)), index, maskNode, encoder_landcover)
 
                 if 'dynamicWorld' in features:
                     for band, var in enumerate(dynamic_world_variables):
-                        save_values(arrayDW[band, :, :, int(node[4])], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(var) * 4), index, maskNode)
+                        save_values(arrayDW[band, :, :, int(node[4])], pos_feature['dynamicWorld'] + (dynamic_world_variables.index(var) * len(METHODS)), index, maskNode)
 
         del arrayPop
         del arrayEl
@@ -753,7 +776,7 @@ def add_varying_time_features(X : np.array, features : list, newShape : int, pos
         vec = feat.split('_')
         name = vec[0]
         methods = vec[1:]
-        index_feat = pos_feature[feat]
+        index_feat = pos_feature[feat+'_'+str(ks)]
         index_feat_X = pos_feature[name]
         for met in methods:
             if met == "mean":

@@ -2,7 +2,6 @@ from dataloader import *
 from config import *
 import geopandas as gpd
 import argparse
-from encoding import encode
 
 ########################### Input Arg ######################################
 
@@ -82,132 +81,9 @@ autoRegression = 'AutoRegressionReg' in trainFeatures
 if spec == '' and autoRegression:
     spec = 'AutoRegressionReg'
 
-########################### Create points ################################
-if doPoint:
+####################### INIT ################################
 
-    check_and_create_path(dir_output)
-
-    fp = pd.read_csv('sinister/'+sinister+'.csv')
-
-    construct_non_point(fp, geo, maxDate, sinister, Path(nameExp))
-    look_for_information(dir_target,
-                         departements,
-                         geo,
-                         maxDate,
-                         sinister,
-                         Path(nameExp))
-
-######################### Encoding ######################################
-
-if doEncoder:
-    encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder', resolution)
-
-########################## Do Graph ######################################
-
-if doGraph:
-    logger.info('#################################')
-    logger.info('#      Construct   Graph        #')
-    logger.info('#################################')
-    graphScale = construct_graph(scale,
-                                 maxDist[scale],
-                                 sinister,
-                                 geo, nmax, k_days,
-                                 dir_output,
-                                 True,
-                                 False,
-                                 resolution)
-    graphScale._create_predictor(minDate, maxDate, dir_output, sinister, resolution)
-else:
-    graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
-
-########################## Do Database ####################################
-
-if doDatabase:
-    logger.info('#####################################')
-    logger.info('#      Construct   Database         #')
-    logger.info('#####################################')
-    if not dummy:
-        name = 'points.csv'
-        ps = pd.read_csv(Path(nameExp) / sinister / name)
-        logger.info(f'{ps.date.min(), allDates[ps.date.min()]}')
-        logger.info(f'{ps.date.max(), allDates[ps.date.max()]}')
-        depts = [name2int[dept] for dept in departements]
-        logger.info(ps.departement.unique())
-        ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-        logger.info(ps.departement.unique())
-        #ps['date'] = ps['date'] - 1
-        ps = ps[ps['date'] > 0]
-        logger.info(ps[ps['departement'] == 1].date.min())
-    else:
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path(nameExp) / sinister / name)
-        name = 'non'+sinister+'csv'
-        nfp = pd.read_csv(Path(nameExp) / sinister / name)
-        ps = pd.concat((fp, nfp)).reset_index(drop=True)
-        ps = ps.copy(deep=True)
-        ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
-        ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
-
-    X, Y, pos_feature = construct_database(graphScale,
-                                           ps, scale, k_days,
-                                           departements,
-                                            features, sinister,
-                                           dir_output,
-                                           dir_output,
-                                           prefix,
-                                           values_per_class,
-                                           'train',
-                                           resolution,
-                                           trainDate)
-    
-    save_object(X, 'X_'+prefix+'.pkl', dir_output)
-    save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
-else:
-    X = read_object('X_'+prefix+'.pkl', dir_output)
-    Y = read_object('Y_'+prefix+'.pkl', dir_output)
-    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
-
-if newFeatures != []:
-    X2, pos_feature_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
-    for fet in newFeatures:
-        maxi, _, _ = calculate_feature_range(fet, scale)
-        X[:, pos_feature[fet]: pos_feature[fet] + maxi] = X2[:, pos_feature_[fet]: pos_feature_[fet] + maxi]
-
-realVspredict(Y[:, -1], Y, -1,
-                    dir_output / prefix, 'raw')
-
-realVspredict(Y[:, -3], Y, -3,
-                    dir_output / prefix, 'class')
-
-sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
-
-if do2D:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
-                                                 subnode.shape[1],
-                                                 X,
-                                                 scaling,
-                                                 pos_feature,
-                                                 departements,
-                                                 features,
-                                                 sinister,
-                                                 dir_output,
-                                                 prefix)
-else:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-
-# Add varying time features
-if k_days > 0:
-    trainFeatures += varying_time_variables
-    features += varying_time_variables
-    pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
-    if doDatabase:
-        X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
+X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
 
 ############################# Training ###########################
 trainCode = [name2int[dept] for dept in trainDepartements]
@@ -220,6 +96,11 @@ save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)
 
 if spec != '':
     prefix += '_'+spec
+
+if days_in_futur > 1:
+    prefix += '_'+str(days_in_futur)
+    prefix += '_'+futur_met
+
 logger.info(pos_feature)
 pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
@@ -232,9 +113,18 @@ logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 # Preprocess
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature)
+                                                   departements = departements,
+                                                   ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature,
+                                                   days_in_futur=days_in_futur,
+                                                   futur_met=futur_met)
 
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, True, nbfeatures, scale)
+realVspredict(testDataset[1][:, -1], testDataset[1], -1, dir_output / prefix, 'raw')
+
+realVspredict(testDataset[1][:, -3], testDataset[1], -3, dir_output / prefix, 'class')
+
+sinister_distribution_in_class(testDataset[1][:, -3], testDataset[1], dir_output / prefix)
+
+features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, nbfeatures, scale)
 
 if doPCA:
     prefix += '_pca'
@@ -280,9 +170,11 @@ if doTrain:
                             valDataset=valDataset,
                             testDataset=testDataset,
                             dir_output=dir_output / name,
-                            device='cpu',
+                            device='cuda',
                             features=features_selected,
-                            autoRegression=autoRegression)
+                            autoRegression=autoRegression,
+                            scale=scale,
+                            pos_feature=pos_feature)
 
 if doTest:
     logger.info('############################# TEST ###############################')
@@ -322,6 +214,9 @@ if doTest:
 
     models = [
         ('xgboost', False, autoRegression),
+        ('xgboost_features', False, autoRegression),
+        ('xgboost_features_binary', True, autoRegression),
+        ('xgboost_nb_fire', False, autoRegression),
         #('xgboost_rmlse', False, autoRegression),
         #('xgboost_optimize_feature', autoRegression),
         #('lightgbm', False, autoRegression),
@@ -332,91 +227,32 @@ if doTest:
         #('lightgbm_binary_unweighted', True, False),
         #('xgboost_unweighted', False, autoRegression),
         #('lightgbm_unweighted', False, autoRegression),
-        #('xgboost_grid_search', False, autoRegression), 
+        ('xgboost_grid_search', False, autoRegression), 
         #('ngboost_unweighted', autoRegression),
         #('ngboost_bin', autoRegression)
         ]
-    
-    if sinister == 'firepoint':
-        # 69 test
-        testDepartement = ['departement-69-rhone']
-        Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        save_object(Xset, 'X69'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y69'+prefix+'.pkl', dir_output)
-        logger.info(f'69 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-        logger.info(f'{np.nanmax(Xset[:, 6:]), np.nanmin(Xset[:, 6:])}')
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           models,
-                           dir_output / '69' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
-
-        # 2023 test
-        testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 69)]
-        Yset = Ytest[(Xtest[:, 3] != 69)]
-        save_object(Xset, 'X2023'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y2023'+prefix+'.pkl', dir_output)
-        logger.info(f'2023 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-        logger.info(f'{np.nanmax(Xset[:, 6:]), np.nanmin(Xset[:, 6:])}')
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '2023',
-                           prefix,
-                           models,
-                           dir_output / '2023' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
-         
-    if sinister == 'inondation':
-        # 69 test
-        testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 25)]
-        Yset = Ytest[(Xtest[:, 3] != 25)]
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           models,
-                           dir_output / '69' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
         
-        # 2023 test
-        testDepartement = ['departement-25-doubs']
-        Xset = Xtest[(Xtest[:, 3] == 25)]
-        Yset = Ytest[(Xtest[:, 3] == 25)]
+    for dept in departements:
+        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
+        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
+
+        if Xset.shape[0] == 0:
+            continue
+
+        save_object(Xset, 'X'+'_'+dept+'_'+prefix+'.pkl', dir_output)
+        save_object(Xset, 'Y_'+dept+'_'+prefix+'.pkl', dir_output)
+
+        logger.info(f'{dept} test : {Xset.shape}, {allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
 
         test_sklearn_api_model(graphScale, Xset, Yset,
-                           methods,
-                           '2023',
-                           prefix,
-                           models,
-                           dir_output / '2023' / prefix,
-                           device,
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           train_dir,
-                           pos_feature)
+                        methods,
+                        dept,
+                        prefix,
+                        models,
+                        dir_output / dept / prefix,
+                        device,
+                        encoding,
+                        scaling,
+                        [dept],
+                        train_dir,
+                        pos_feature)

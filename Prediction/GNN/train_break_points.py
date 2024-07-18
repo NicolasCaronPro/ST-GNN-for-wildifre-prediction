@@ -76,117 +76,9 @@ else:
 if dummy:
     prefix += '_dummy'
 
+############################ INIT ################################
 
-########################### Create points ################################
-if doPoint:
-
-    check_and_create_path(dir_output)
-
-    regions = gpd.read_file('regions/regions.geojson')
-    fp = pd.read_csv('sinister/'+sinister+'.csv')
-
-    construct_non_point(fp, regions, maxDate, sinister, Path(nameExp))
-    look_for_information(dir_target,
-                         departements,
-                         regions,
-                         maxDate,
-                         sinister,
-                         Path(nameExp))
-
-######################### Encoding ######################################
-
-if doEncoder:
-    encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder')
-
-########################## Do Graph ######################################
-
-if doGraph:
-    logger.info('#################################')
-    logger.info('#      Construct   Graph        #')
-    logger.info('#################################')
-    graphScale = construct_graph(scale,
-                                 maxDist[scale],
-                                 sinister,
-                                 geo, nmax, k_days,
-                                 dir_output,
-                                 True,
-                                 False,
-                                 resolution)
-    graphScale._create_predictor(minDate, maxDate, dir_output, sinister, resolution)
-else:
-    graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
-
-########################## Do Database ####################################
-
-if doDatabase:
-    logger.info('#####################################')
-    logger.info('#      Construct   Database         #')
-    logger.info('#####################################')
-    if not dummy:
-        name = 'points.csv'
-        ps = pd.read_csv(Path(nameExp) / sinister / name)
-        logger.info(ps.date.min())
-        logger.info(ps.date.max())
-        depts = [name2int[dept] for dept in departements]
-        logger.info(ps.departement.unique())
-        ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-        logger.info(ps.departement.unique())
-        #ps['date'] = ps['date'] - 1
-        ps = ps[ps['date'] > 0]
-        logger.info(ps[ps['departement'] == 1].date.min())
-    else:
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path(nameExp) / sinister / name)
-        name = 'non'+sinister+'csv'
-        nfp = pd.read_csv(Path(nameExp) / sinister / name)
-        ps = pd.concat((fp, nfp)).reset_index(drop=True)
-        ps = ps.copy(deep=True)
-        ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
-        ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
-
-    X, Y, pos_feature = construct_database(graphScale,
-                                           ps, scale, k_days,
-                                           departements,
-                                            features, sinister,
-                                           dir_output,
-                                           dir_output,
-                                           prefix,
-                                           values_per_class,
-                                           'train',
-                                           resolution,
-                                           trainDate)
-    
-    save_object(X, 'X_'+prefix+'.pkl', dir_output)
-    save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
-else:
-    X = read_object('X_'+prefix+'.pkl', dir_output)
-    Y = read_object('Y_'+prefix+'.pkl', dir_output)
-    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
-
-if do2D:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
-                                                 subnode.shape[1],
-                                                 X,
-                                                 scaling,
-                                                 pos_feature,
-                                                 departements,
-                                                 features,
-                                                 sinister,
-                                                 dir_output,
-                                                 prefix)
-else:
-    subnode = X[:,:6]
-    pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
-
-# Add varying time features
-if k_days > 0:
-    trainFeatures += varying_time_variables
-    features += varying_time_variables
-    pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
-    if True:
-        X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
+X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
 
 ############################# Training ###########################
 trainCode = [name2int[dept] for dept in trainDepartements]
@@ -202,10 +94,17 @@ pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
 logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 
+if days_in_futur > 1:
+    prefix += '_'+str(days_in_futur)
+    prefix += '_'+futur_met
+
 # Preprocess
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix)
+                                                   departements = departements,
+                                                   ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature,
+                                                   days_in_futur=days_in_futur,
+                                                   futur_met=futur_met)
 
 if doPCA:
     prefix += '_pca'
@@ -270,91 +169,35 @@ if doTest:
 
     methods = [('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
-            ('cal', cal, 'bin'),
+            #('cal', cal, 'bin'),
             ('f1', f1, 'bin'),
-            ('class', ck, 'class'),
-            ('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('meac', meac, 'class'),
+            #('class', ck, 'class'),
+            #('poisson', po, 'proba'),
+            #('ca', ca, 'class'),
+            #('bca', bca, 'class'),
+            #('meac', meac, 'class'),
             ]
     
-    if sinister == 'firepoint':
-        # 69 test
-        testDepartement = ['departement-69-rhone']
-        Xset = Xtest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        Yset = Ytest[(Xtest[:, 3] == 69) & (Xtest[:,4] >= allDates.index('2018-01-01')) & (Xtest[:,4] < allDates.index('2023-01-01'))]
-        save_object(Xset, 'X69'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y69'+prefix+'.pkl', dir_output)
-        logger.info(f'69 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-        
-        test_break_points_model(Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           dir_output / '69',
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           scale,
-                           train_dir,
-                           sinister,
-                           resolution)
+    for dept in departements:
+        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
+        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
 
-        # 2023 test
-        testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 69)]
-        Yset = Ytest[(Xtest[:, 3] != 69)]
-        save_object(Xset, 'X2023'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y2023'+prefix+'.pkl', dir_output)
-        logger.info(f'2023 test {Xset.shape}')
-        logger.info(f'{allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
+        if Xset.shape[0] == 0:
+            continue
+
+        save_object(Xset, 'X'+'_'+dept+'_'+prefix+'.pkl', dir_output)
+        save_object(Xset, 'Y_'+dept+'_'+prefix+'.pkl', dir_output)
+
+        logger.info(f'{dept} test : {Xset.shape}, {allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
 
         test_break_points_model(Xset, Yset,
                            methods,
-                           '2023',
-                           prefix,
-                           dir_output / '2023',
+                           dept,
+                           prefix_train,
+                           dir_output / dept / prefix,
                            encoding,
                            scaling,
-                           testDepartement,
-                           scale,
-                           train_dir,
-                           sinister,
-                           resolution)
-         
-    if sinister == 'inondation':
-        # 69 test
-        testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
-        Xset = Xtest[(Xtest[:, 3] != 25)]
-        Yset = Ytest[(Xtest[:, 3] != 25)]
-
-        test_break_points_model(Xset, Yset,
-                           methods,
-                           '69',
-                           prefix,
-                           dir_output / '69',
-                           encoding,
-                           scaling,
-                           testDepartement,
-                           scale,
-                           train_dir,
-                           sinister,
-                           resolution)
-        # 2023 test
-        testDepartement = ['departement-25-doubs']
-        Xset = Xtest[(Xtest[:, 3] == 25)]
-        Yset = Ytest[(Xtest[:, 3] == 25)]
-
-        test_break_points_model(Xset, Yset,
-                           methods,
-                           '2023',
-                           prefix,
-                           dir_output / '2023',
-                           encoding,
-                           scaling,
-                           testDepartement,
+                           [dept],
                            scale,
                            train_dir,
                            sinister,

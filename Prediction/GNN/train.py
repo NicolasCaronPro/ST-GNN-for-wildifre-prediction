@@ -1,4 +1,5 @@
 from visualize import *
+from sklearn.linear_model import LinearRegression
 
 #################################### TREES ########################################
 
@@ -7,6 +8,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
           dir_output : Path,
           device : str,
           features : np.array,
+          scale : int,
+          pos_feature : dict,
           autoRegression : bool):
             
         Xtrain = trainDataset[0]
@@ -31,39 +34,63 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
 
         ########################## Easy model ######################
         ################# xgboost ##################
-        # xgboost 1
+        # xgboost regression
         Yw = Ytrain[:,-4]
         Y_train = Ytrain[:,-1]
         Y_val = Yval[:,-1]
         Y_test = Ytest[:, -1]
         W_test = Ytest[:, -4]
         fitparams={
-                #'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
-                #'sample_weight' : Yw,
-                #'verbose' : False
+                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
                 }
         
         model, grid = config_xgboost(device, False, 'reg:squarederror')
-        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
-            'xgboost', Model(model, 'rmse', 'xgboost'), fitparams, False, 'skip', grid, dir_output)
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature,
+            'xgboost', Model(model, 'rmse', 'xgboost'), fitparams, 'skip', grid, dir_output)
 
         model, grid = config_xgboost(device, False, 'reg:squaredlogerror')
         #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
-        #    'xgboost_rmlse', Model(model, 'rmsle', 'xgboost_rmlse'), fitparams, False, 'skip', grid, dir_output)
+        #    'xgboost_rmlse', Model(model, 'rmsle', 'xgboost_rmlse'), fitparams, 'skip', grid, dir_output)
         
-        # xgboost 2
-        Yw = np.ones(Ytrain.shape[0])
-        W_test = np.ones(Ytest.shape[0])
+        model, grid = config_xgboost(device, False, 'reg:squarederror')
+
+        relavant_features = find_relevant_features(model=Model(model, 'rmse', 'noName'),
+                                                   features=features,
+                                                   X=Xtrain, y=Y_train, w=Yw, X_val=Xval, y_val=Y_val, w_val=None,
+                                                   X_test=Xtest, y_test=Y_test, w_test=W_test)
+
+        log_features(relavant_features, scale=scale, pos_feature=pos_feature, methods=METHODS)
+
+        save_object(relavant_features, 'relevent_features.pkl', dir_output)
+
+        fitparams={
+                'eval_set':[(Xtrain[:, relavant_features], Y_train), (Xval[:, relavant_features], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, relavant_features, scale, pos_feature,
+            'xgboost_features', Model(model, 'rmse', 'xgboost_features'), fitparams, 'skip', grid, dir_output)
+        
+        Yw = Ytrain[:,-4]
+        Y_train = Ytrain[:,-2]
+        Y_val = Yval[:,-2]
+        Y_test = Ytest[:, -2]
+        W_test = Ytest[:, -4]
+        logger.info(np.unique(Y_train))
         fitparams={
                 'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
                 'sample_weight' : Yw,
                 'verbose' : False
                 }
+        
         model, grid = config_xgboost(device, False, 'reg:squarederror')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
-        #    'xgboost_features', Model(model, 'rmse', 'xgboost_features'), fitparams, True, 'skip', grid, dir_output)
-
-        # xgboost 3
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature,
+            'xgboost_nb_fire', Model(model, 'rmse', 'xgboost_nb_fire'), fitparams, 'skip', grid, dir_output)
+        
+        # xgboost Binary
         Yw = Ytrain[:,-4]
         Yw[Ytrain[:,-2] == 0] = 1
         W_test = Ytest[:,-4]
@@ -78,8 +105,28 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 }
 
         model, grid = config_xgboost(device, True, 'reg:logistic')
-        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features,
-            'xgboost_binary', Model(model, 'log_loss', 'xgboost_binary'), fitparams, False, 'skip', grid, dir_output)
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature,
+            'xgboost_binary', Model(model, 'log_loss', 'xgboost_binary'), fitparams, 'skip', grid, dir_output)
+        
+        model, grid = config_xgboost(device, True, 'reg:logistic')
+
+        relavant_features_binary = find_relevant_features(model=Model(model, 'log_loss', 'noName'),
+                                                   features=features,
+                                                   X=Xtrain, y=Y_train, w=Yw, X_val=Xval, y_val=Y_val, w_val=None,
+                                                   X_test=Xtest, y_test=Y_test, w_test=W_test)
+
+        log_features(relavant_features_binary, scale=scale, pos_feature=pos_feature, methods=METHODS)
+
+        save_object(relavant_features_binary, 'relevent_features_binary.pkl', dir_output)
+
+        fitparams={
+                'eval_set':[(Xtrain[:, relavant_features_binary], Y_train), (Xval[:, relavant_features_binary], Y_val)],
+                'sample_weight' : Yw,
+                'verbose' : False
+                }
+
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, relavant_features_binary, scale, pos_feature,
+            'xgboost_features_binary', Model(model, 'log_loss', 'xgboost_features_binary'), fitparams, 'skip', grid, dir_output)
 
         # xgboost 4
         Yw = np.ones(Y_train.shape[0])
@@ -90,8 +137,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'verbose' : False
                 }
         model, grid = config_xgboost(device, True, 'reg:logistic')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_binary_unweighted',
-        #    Model(model, 'rmse', 'xgboost_binary_unweighted'), fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_binary_unweighted', scale, pos_feature,
+        #    Model(model, 'rmse', 'xgboost_binary_unweighted'), fitparams, 'skip', grid, dir_output)
 
         ################ lightgbm ##################
         
@@ -107,7 +154,7 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'sample_weight' : Yw,
                 }
         model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm', Model(model, 'rmse', 'lightgbm'), fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm', scale, pos_feature, Model(model, 'rmse', 'lightgbm'), fitparams, 'skip', grid, dir_output)
 
         # lightgbm 2
         Yw = np.ones(Ytrain.shape[0])
@@ -117,8 +164,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'sample_weight' : Yw,
                 }
         model, grid = config_lightGBM(device, False, 'root_mean_squared_error')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_unweighted', Model(model, 'rmse', 'lightgbm_unweighted'),
-        #   fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature, 'lightgbm_unweighted', Model(model, 'rmse', 'lightgbm_unweighted'),
+        #   fitparams, 'skip', grid, dir_output)
 
         # lightgbm 3
         Yw = Ytrain[:,-4]
@@ -133,8 +180,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'sample_weight' : Yw,
                 }
         model, grid = config_lightGBM(device, True, 'binary')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_binary', Model(model, 'log_loss', 'lightgbm_binary'),
-        #    fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature, 'lightgbm_binary', Model(model, 'log_loss', 'lightgbm_binary'),
+        #    fitparams, 'skip', grid, dir_output)
 
         # lightgbm 4
         Yw = np.ones(Y_train.shape[0])
@@ -143,8 +190,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'sample_weight' : Yw,
                 }
         model, grid = config_lightGBM(device, True, 'binary')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'lightgbm_binary_unweighted', Model(model, 'log_loss', 'lightgbm_binary_unweighted'),
-        #    fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature, 'lightgbm_binary_unweighted', Model(model, 'log_loss', 'lightgbm_binary_unweighted'),
+        #    fitparams, 'skip', grid, dir_output)
 
         ################ ngboost ###################
         
@@ -162,8 +209,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'Y_val':Y_val,
                 }
         model, grid = config_ngboost( False)
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'ngboost', Model(model, 'rmse', 'ngboost'),
-        #    fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature, 'ngboost', Model(model, 'rmse', 'ngboost'),
+        #    fitparams, 'skip', grid, dir_output)
 
         # ngboost 2
         Yw = np.ones(Y_train.shape[0])
@@ -175,8 +222,8 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
                 'Y_val':Y_val,
                 }
         model, grid = config_ngboost(False)
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'ngboost_unweighted', Model(model, 'rmse', 'ngboost_unweighted'),
-        #    fitparams, False, 'skip', grid, dir_output)
+        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, scale, pos_feature, 'ngboost_unweighted', Model(model, 'rmse', 'ngboost_unweighted'),
+        #    fitparams, 'skip', grid, dir_output)
 
         ############################ Grid Search model ##################################
 
@@ -188,56 +235,54 @@ def train_sklearn_api_model(trainDataset, valDataset, testDataset,
         W_test[Ytest[:,-2] == 0] = 1
         Y_test = Ytest[:, -1]
         fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'eval_set':[(Xtrain[:, relavant_features], Y_train), (Xval[:, relavant_features], Y_val)],
                 'sample_weight' : Yw,
                 'verbose' : False
                 }
-        
+
         model, grid = config_xgboost(device, False, 'reg:squarederror')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_grid_search', Model(model, 'rmse', 'xgboost_grid_search'),
-        #    fitparams, False, 'grid', grid, dir_output)
-
-        ############################# Features Model #######################################
-
-        # xgboost 1
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, relavant_features, scale, pos_feature, 'xgboost_grid_search', Model(model, 'rmse', 'xgboost_grid_search'),
+            fitparams, 'grid', grid, dir_output)
+        
+        # xgboost 2
         Yw = Ytrain[:,-4]
-        Y_train = Ytrain[:,-1]
-        Y_val = Yval[:,-1]
+        Yw[Ytrain[:,-2] == 0] = 1
         W_test = Ytest[:,-4]
         W_test[Ytest[:,-2] == 0] = 1
-        Y_test = Ytest[:, -1]
+        Y_train = Ytrain[:,-2] > 0
+        Y_val = Yval[:,-2] > 0
+        Y_test = Ytest[:, -2] > 0
         fitparams={
-                'eval_set':[(Xtrain[:, features], Y_train), (Xval[:, features], Y_val)],
+                'eval_set':[(Xtrain[:, relavant_features_binary], Y_train), (Xval[:, relavant_features_binary], Y_val)],
                 'sample_weight' : Yw,
                 'verbose' : False
                 }
-        
-        model, grid = config_xgboost(device, False, 'reg:squarederror')
-        #fit(Xtrain, Y_train, Xtest, Y_test, W_test, features, 'xgboost_features', Model(model, 'rmse', 'xgboost'),
-        #    fitparams, True, 'skip', grid, dir_output)
+
+        model, grid = config_xgboost(device, False, 'reg:logistic')
+        fit(Xtrain, Y_train, Xtest, Y_test, W_test, relavant_features_binary, scale, pos_feature, 'xgboost_binary_grid_search', Model(model, 'log_loss', 'xgboost_binary_grid_search'),
+            fitparams, 'grid', grid, dir_output)
     
-def fit(Xtrain, y, Xtest, Ytest, Wtest, features,
-        name, model, fitparams, evaluate_individual_features,
+def fit(Xtrain, y, Xtest, Ytest, Wtest, features, scale, pos_feature,
+        name, model, fitparams,
         parameter_optimization_method, grid, dir_output):
     
     save_object(features, 'features.pkl', dir_output / name)
-
     logger.info(f'Fitting model {name}')
     model.fit(X=Xtrain[:, features], y=y,
-              X_test=Xtest[:, features], y_test=Ytest, w_test=Wtest,
-                evaluate_individual_features=evaluate_individual_features,
                 optimization=parameter_optimization_method,
                 param_grid=grid, fit_params=fitparams)
 
     check_and_create_path(dir_output / name)
     save_object(model, name + '.pkl', dir_output / name)
 
+    create_feature_map(features=features, pos_feature=pos_feature, dir_output=dir_output/name, methods=METHODS, scale=scale)
+
     """pred = model.predict(Xtest)
     
     realVspredict(pred, Ytest.reshape(-1,1), -1,
                       dir_output / name, 'raw')"""
 
-    logger.info(f'Model score {model.score(Xtest, Ytest, Wtest)}')
+    logger.info(f'Model score {model.score(Xtest[:, features], Ytest, Wtest)}')
 
 def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_output : Path, pos_feature : dict, scale : int, n_clusters : int):
     check_and_create_path(dir_output)
@@ -347,7 +392,7 @@ def launch_loader(model, loader, type,
         model.train()
     else:
         model.eval()
-        prev_input = torch.Tensor([], device=device)
+        prev_input = torch.empty((0, 5))
 
     for i, data in enumerate(loader, 0):
 
@@ -405,7 +450,7 @@ def func_epoch(model, trainLoader, valLoader, features,
         loss = launch_loader(model, valLoader, 'val', features, binary, criterion, optimizer,  autoRegression,
                   pos_feature)
 
-    return loss.items()
+    return loss
 
 def compute_optimisation_features(modelname, lr, scale, pos_feature, trainLoader, valLoader, testLoader, criterion, binary, epochs, PATIENCE_CNT,
                                 autoRegression):
@@ -422,7 +467,7 @@ def compute_optimisation_features(modelname, lr, scale, pos_feature, trainLoader
         BEST_MODEL_PARAMS = None
         patience_cnt = 0
         logger.info(f'Train {model} with')
-        log_features(testFet, scale, pos_feature, ["min", "mean", "max", "std"])
+        log_features(testFet, scale, pos_feature, METHODS)
         for epoch in tqdm(range(epochs)):
             loss = func_epoch(model, trainLoader, valLoader, testFet, optimizer, criterion, binary,  autoRegression,
                   pos_feature)
@@ -434,7 +479,7 @@ def compute_optimisation_features(modelname, lr, scale, pos_feature, trainLoader
                 patience_cnt += 1
                 if patience_cnt >= PATIENCE_CNT:
                     logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
-            
+
             with torch.no_grad():
                 loss = launch_loader(model, testLoader, 'test', features, binary, criterion, optimizer,  autoRegression,
                   pos_feature)
@@ -491,10 +536,7 @@ def train(trainLoader, valLoader, testLoader,
         log_features(features, scale, pos_feature, ["min", "mean", "max", "std"])
         save_object(features, 'features.pkl', dir_output)
         for epoch in tqdm(range(epochs)):
-            loss = func_epoch(model, trainLoader, valLoader, features, optimizer, criterion, binary)
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Train loss {loss.item()}')
-                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
+            loss = func_epoch(model, trainLoader, valLoader, features, optimizer, criterion, binary, autoRegression, pos_feature)
             if loss.item() < BEST_VAL_LOSS:
                 BEST_VAL_LOSS = loss.item()
                 BEST_MODEL_PARAMS = model.state_dict()
@@ -506,10 +548,11 @@ def train(trainLoader, valLoader, testLoader,
                     save_object_torch(model.state_dict(), 'last.pt', dir_output)
                     save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
                     return
-                
             if epoch % CHECKPOINT == 0:
+                logger.info(f'epochs {epoch}, Val loss {loss.item()}')
                 logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-
+                save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
+            
 #############################  PCA ###################################
 
 def train_pca(X, percent, dir_output, features_selected):
@@ -532,3 +575,49 @@ def apply_pca(X, pca, pca_number, features_selected):
     new_X[:, :6] = X[:, :6]
     new_X[:, 6:] = res
     return new_X
+
+
+############################### LOGISTIC #############################
+
+def train_logistic(Y : np.array, dir_output : Path):
+    udept = np.unique(Y[:, 3])
+
+    for idept in udept:
+        mask = np.argwhere(Y[:, 3] == idept)
+
+        xtrain = Y[mask, -1]
+        ytrain = Y[mask, -2]
+        wtrain = Y[mask, -3]
+
+        logistic = logistic()
+        model = Model(logistic, 'log_loss', 'logistic_'+str(idept))
+        model.fit(xtrain, ytrain, wtrain)
+        save_object(model, 'logistic_regression_'+int2name[idept], dir_output)
+
+########################### LINEAR ####################################
+
+def train_linear(train_dataset, test_dataset, features, scale, pos_feature, dir_output):
+
+    xtrain = train_dataset[0]
+    ytrain = train_dataset[1][:,-1]
+
+    xtest = test_dataset[0]
+    ytest = test_dataset[1][:, -1]
+
+    linear = LinearRegression()
+    model = Model(linear, 'rmse', 'linear')
+    
+    fit(xtrain, ytrain, xtest, ytest, None, features, scale, pos_feature, 'linear', model, {}, 'skip', None, dir_output)
+
+def train_mean(train_dataset, test_dataset, features, scale, pos_feature, dir_output):
+    
+    xtrain = train_dataset[0]
+    ytrain = train_dataset[1][:, -1]
+
+    xtest = test_dataset[0]
+    ytest = test_dataset[1][:, -1]
+
+    model = MeanFeaturesModel()
+    model = Model(model, 'rmse', 'mean')
+    
+    fit(xtrain, ytrain, xtest, ytest, None, features, scale, pos_feature, 'mean', model, {}, 'skip', None, dir_output)

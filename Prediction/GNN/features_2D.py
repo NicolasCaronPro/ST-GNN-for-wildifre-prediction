@@ -1,5 +1,5 @@
 from raster_utils import *
-from config import *
+from features import *
 
 def find_spatial_date(x, firepoint):
     return firepoint[firepoint['h3'] != x].sample(1)['date'].values[0]

@@ -6,10 +6,9 @@ from shapely import unary_union
 import warnings
 from shapely import Point
 from forecasting_models.models import *
-from tools import *
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
-from config import *
+from features_2D import *
 
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -271,7 +270,7 @@ class GraphStructure():
             nodes[maskNode[:,0],1:3] = self.nodes[np.argwhere(self.nodes[:,0] == uN)[:,0]][0][1:3]
         return nodes
 
-    def _plot(self, nodes : np.array, time=0) -> None:
+    def _plot(self, nodes : np.array, time=0, dir_output = None) -> None:
         """
         Plotting
         """
@@ -333,9 +332,14 @@ class GraphStructure():
         else:
             node_x = nodes[:,1]
             node_y = nodes[:,2]
+            for i, n in enumerate(nodes):
+                ax.annotate(str(n[0]), (n[1] + 0.001, n[2] + 0.001))
             ax.scatter(x=node_x, y=node_y, s=60)
             ax.set_xlabel('Longitude')
             ax.set_ylabel('Latitude')
+        if dir_output is not None:
+            name = 'graph_'+str(self.scale)+'.png'
+            plt.savefig(dir_output / name)
 
     def _set_model(self, model) -> None:
         """
@@ -474,13 +478,10 @@ class GraphStructure():
         logger.info informatio on current global graph structure and nodes
         """
         check_and_create_path(output)
-        graphIds = np.unique(nodes[:,4])
+        graphIds = np.unique(nodes[:,3])
 
-        size = []
         for graphid in graphIds:
-            size.append(nodes[nodes[:,4] == graphid].shape[0])
-
-        logger.info(f'size : {np.unique(size)}')
+            logger.info(f'size : {graphid, self.nodes[self.nodes[:,3] == graphid].shape[0]}')
 
         logger.info('**************************************************')
         if self.nodes is None:
@@ -498,7 +499,6 @@ class GraphStructure():
         if nodes is not None:
             logger.info(f'We found {np.unique(nodes[:,4]).shape[0]} different graphs in the training set for {nodes.shape[0]} nodes')
 
-        logger.info(f'Mean number of nodes in sub graph : {np.mean(size)}')
+        """logger.info(f'Mean number of nodes in sub graph : {np.mean(size)}')
         logger.info(f'Max number of nodes in subgraph {np.max(size)}')
-        logger.info(f'Minimum number of nodes in subgraph {np.min(size)}')
-        logger.info(f'Quantile at 0.05 {np.quantile(size, 0.005)}, at 0.5 {np.quantile(size, 0.5)} and at 0.95 {np.quantile(size, 0.95)}')
+        logger.info(f'Minimum number of nodes in subgraph {np.min(size)}')"""

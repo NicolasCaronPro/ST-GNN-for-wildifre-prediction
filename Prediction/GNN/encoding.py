@@ -1,5 +1,4 @@
-from tools import *
-from config import *
+from graph_structure import *
 from array_fet import *
 
 def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):

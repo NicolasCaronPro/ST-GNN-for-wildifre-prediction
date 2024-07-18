@@ -160,8 +160,8 @@ class ReadGraphDataset_2D(Dataset):
 #########################################################################################################
 
 def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
-               trainDate : str, trainDepartements : list, ks : int, dir_output : Path,
-               prefix : str, pos_feature : dict):
+               trainDate : str, trainDepartements : list, departements : list, ks : int, dir_output : Path,
+               prefix : str, pos_feature : dict, days_in_futur : int, futur_met :str):
     """
     Preprocess the input features:
         X : input features
@@ -176,6 +176,7 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     # Remove nodes where the is a feature at nan
     Xset, Yset = remove_nan_nodes(X, Y)
     Xset, Yset = remove_none_target(Xset, Yset)
+    Xset, Yset = remove_bad_period(Xset, Yset, PERIODES_A_IGNORER, departements)
 
     print(f'We found nan at {np.unique(np.argwhere(np.isnan(X))[:,1])}')
 
@@ -193,6 +194,11 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     #dateTrain, dateVal = train_test_split(dateUseForLossCalculation, test_size=test_size, random_state=42)
     #dateTrain = dateUseForLossCalculation[: int(dateUseForLossCalculation.shape[0] * (1 - test_size))]
     #dateVal = dateUseForLossCalculation[int(dateUseForLossCalculation.shape[0] * (1 - test_size)):]
+
+    if days_in_futur > 1:
+        logger.info(f'{futur_met} target by {days_in_futur} days in futur')
+        Yset = target_by_day(Yset, days_in_futur, futur_met)
+        logger.info(f'Done')
 
     trainCode = [name2int[dept] for dept in trainDepartements]
 
@@ -212,8 +218,10 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
         scaler = standart_scaler
     elif scaling == "robust":
         scaler = robust_scaler
+    elif scaling == 'none':
+        scaling = None
     else:
-        ValueError('Unknow')
+        raise ValueError('Unknow')
         exit(1)
 
     if 'AutoRegressionReg' in trainFeatures:
@@ -221,12 +229,13 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     else:
         autoregressiveBand = - 1
 
-    # Scale Features
-    for featureband in range(6, Xset.shape[1]):
-        if featureband == autoregressiveBand:
-            logger.info(f'Avoid scale for Autoregressive feature')
-            continue
-        Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
+    if scaling is not None:
+        # Scale Features
+        for featureband in range(6, Xset.shape[1]):
+            if featureband == autoregressiveBand:
+                logger.info(f'Avoid scale for Autoregressive feature')
+                continue
+            Xset[:,featureband] = scaler(Xset[:,featureband], Xtrain[:, featureband], concat=False)
     
     Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))],
                       Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))])
@@ -234,11 +243,9 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     Xval, Yval = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))],
                     Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))])
 
-    Xtest, Ytest = (Xset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |
-                         ((Xset[:,4] > allDates.index('2017-12-31')) & (Xset[:,4] < allDates.index('2022-12-31')) & (~np.isin(Xset[:,3], trainCode)))],
-                    Yset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |
-                         ((Xset[:,4] > allDates.index('2017-12-31')) & (Xset[:,4] < allDates.index('2022-12-31')) & (~np.isin(Xset[:,3], trainCode)))])
-
+    Xtest, Ytest = (Xset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))],
+                    Yset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))])
+    
     logger.info(f'Size of the train set {Xtrain.shape[0]}, size of the val set {Xval.shape[0]}, size of the test set {Xtest.shape[0]}')
     logger.info(f'Unique train dates set {np.unique(Xtrain[:,4]).shape[0]}, val dates {np.unique(Xval[:,4]).shape[0]}, test dates {np.unique(Xtest[:,4]).shape[0]}')
 
@@ -402,8 +409,8 @@ def train_val_data_loader(graph,
                                 device, ks)
 
     trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(valDataset, 1, False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(testDataset, 1, False, collate_fn=graph_collate_fn)
+    valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
+    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
     return trainLoader, valLoader, testLoader
 
 
@@ -767,10 +774,11 @@ def test_sklearn_api_model(graphScale,
         graphScale._set_model(model)
 
         features_selected = read_object('features.pkl', model_dir)
-
+        logger.info(f'{features_selected}')
         pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
         pred[:, 0] = graphScale.predict_model_api_sklearn(Xset, features_selected, isBin, autoRegression, pos_feature)
+        logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
         dir_predictor = root_graph / train_dir / 'influenceClustering'
         for nameDep in departements:
@@ -795,6 +803,9 @@ def test_sklearn_api_model(graphScale,
                 
         realVspredict(pred[:, 1], y, -3,
                       dir_output / n, 'class')
+        
+        realVspredict(pred[:, 0], y, -2,
+                      dir_output / n, 'nbfire')
 
         sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
 
@@ -882,7 +893,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
     i = 1
 
     #################################### GNN ###################################################
-    for mddel, use_temporal_as_edges, isBin, is_2D_model  in models:
+    for mddel, use_temporal_as_edges, isBin, is_2D_model, autoRegression in models:
         #n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
         n = mddel
         model_dir = train_dir / Path('check_'+scaling+'/' + prefix_train + '/' + mddel +  '/')
@@ -908,7 +919,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
 
         features_selected = read_object('features.pkl', model_dir)
 
-        predTensor, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device, isBin=isBin)
+        predTensor, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device, isBin=isBin, autoRegression=autoRegression, pos_feature=pos_feature)
         y = YTensor.detach().cpu().numpy()
 
         dir_predictor = root_graph / train_dir / 'influenceClustering'
@@ -953,11 +964,11 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
             start = '2023-06-01'
             stop = '2023-09-30'
         
-        for dept in testDepartement:
+        """for dept in testDepartement:
             susectibility_map(dept, sinister,
                         train_dir, dir_output, k_days,
                         isBin, scale, mddel, res, n,
-                        start, stop, resolution)
+                        start, stop, resolution)"""
 
         shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
 
@@ -1104,10 +1115,7 @@ def test_break_points_model(Xset, Yset,
     logger.info(f'{leni, len(features_selected)}')
     pred /= leni
     y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
-    YTensor = torch.tensor(y, dtype=torch.float32, device=device)
-
-    predTensor = torch.tensor(pred, dtype=torch.float32, device=device)
-    metrics['break_point'] = add_metrics(methods, 0, predTensor[:,1], YTensor, testDepartement, True, scale, name, train_dir)
+    metrics['break_point'] = add_metrics(methods, 0, pred, y, testDepartement, True, scale, name, train_dir)
     
     realVspredict(pred[:, 1], y, -1,
                       dir_output / n, 'raw')
@@ -1158,6 +1166,165 @@ def test_break_points_model(Xset, Yset,
     outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_bp.pkl'
     save_object(metrics, outname, dir_output)
 
+def test_fusion_prediction(models,
+                           args1,
+                           args2,
+                           XsetDaily,
+                           XsetLocalized,
+                           Xset,
+                           Yset,
+                           dir_output,
+                           graphScale,
+                        testDepartement,
+                        testname,
+                        methods,
+                        prefix_train,
+                        pos_feature,):
+    
+    scale = graphScale.scale
+
+    y = Yset[Yset[:,-4] > 0]
+    
+    dir_predictor = root_graph / args2['train_dir'] / 'influenceClustering'
+
+    metrics = {}
+
+    # Graphs
+
+    graph1 = read_object(args1['graph'], args1['dir_train'])
+    graph2 = read_object(args1['graph'], args1['dir_train'])
+
+    # Models
+    n1 = args1['model_name']+'.pkl'
+    n2 = args2['model_name']+'.pkl'
+    model1 = read_object(n1, args1['dir_model'] /  args1['model_name'])
+    model2 = read_object(n2, args2['dir_model'] / args2['model_name'])
+
+    # Prediction,
+    if args1['model_type'] == 'traditionnal':
+        feature_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
+        graph1._set_model(model1)
+        pred1 = np.empty((XsetDaily.shape[0], y.shape[1]))
+        pred1[:, :6] = XsetDaily[:, :6]
+        pred1[:, -1] = graph1.predict_model_api_sklearn(XsetDaily, feature_selected,  args1['isBin'], args1['autoRegression'], args1['pos_feature'])
+    else:
+        test_loader = read_object('test_loader.pkl', args1['train_dir'])
+        feature_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
+
+        graph1._load_model_from_path(args1['train_dir'] / 'best.pt', args1['model_name']+'.pkl', device)
+
+        predTensor, YTensor = graph1._predict_test_loader(test_loader, feature_selected, device=device, isBin= args1['isBin'],
+                                                          autoRegression=args1['autoRegression'], pos_feature=args1['pos_feature'])
+
+        pred1 = np.copy(y)
+        pred1[:, -1] = predTensor.detach().cpu().numpy()
+
+    if args2['model_type'] == 'traditionnal':
+        feature_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
+        graph2._set_model(model2)
+        pred2 = graph2.predict_model_api_sklearn(XsetLocalized, feature_selected,  args1['isBin'], args2['autoRegression'], args2['pos_feature'])
+    else:
+        test_loader = read_object('test_loader.pkl', args2['dir_model'])
+        feature_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
+
+        graph2._load_model_from_path(args2['train_dir'] / 'best.pt', args2['model_name'], device)
+
+        predTensor, YTensor = graph2._predict_test_loader(test_loader, feature_selected, device=device, isBin= args1['isBin'],
+                                                          autoRegression=args2['autoRegression'], pos_feature=args2['pos_feature'])
+        y = YTensor.detach().cpu().numpy()
+        pred2 = predTensor.detach().cpu().numpy()
+    # Fusion
+    Xset = add_temporal_spatial_prediction(Xset[:, :-2], pred2.reshape(-1,1), pred1, graph1, pos_feature=pos_feature)
+    i = 0
+    for name, isBin, autoRegression in models:
+        y = Yset[Yset[:,-4] > 0]
+        n = name
+        model_dir = args2['train_dir'] / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
+        
+        logger.info('#########################')
+        logger.info(f'      {name}            ')
+        logger.info('#########################')
+    
+        model = read_object(name+'.pkl', model_dir)
+
+        if model is None:
+            continue
+
+        graphScale._set_model(model)
+
+        features_selected = read_object('features.pkl', model_dir)
+        logger.info(f'{features_selected}')
+
+        pred = np.empty((Xset[:, features_selected].shape[0], 2))
+
+        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset, features_selected, isBin, autoRegression, pos_feature)
+        logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
+
+        for nameDep in departements:
+            mask = np.argwhere(y[:, 3] == name2int[nameDep])
+            if mask.shape[0] == 0:
+                continue
+            if not isBin:
+                predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
+            else:
+                create_binary_predictor(pred, name, nameDep, dir_predictor, scale)
+                predictor = read_object(nameDep+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
+
+            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 0]))
+
+        metrics[name] = add_metrics(methods, i, pred, y, testDepartement, isBin, scale, name, None)
+
+        if isBin:
+            y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
+
+        realVspredict(pred[:, 0], y, -1,
+                      dir_output / n, 'raw')
+                
+        realVspredict(pred[:, 1], y, -3,
+                      dir_output / n, 'class')
+
+        sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
+
+        res = np.empty((pred.shape[0], y.shape[1] + 4))
+        res[:, :y.shape[1]] = y
+        res[:,y.shape[1]] = pred[:, 0]
+        res[:,y.shape[1] + 1] = pred[:, 1]
+        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
+        res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
+
+        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+
+        if testname == '69':
+            start = '2018-01-01'
+            stop = '2022-09-30'
+        else:
+            start = '2023-06-01'
+            stop = '2023-09-30'
+        
+        """for dept in testDepartement:
+            susectibility_map(dept, sinister,
+                        train_dir, dir_output, k_days,
+                        isBin, scale, name, res, n,
+                        start, stop, resolution)"""
+
+        shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
+
+        """
+        realVspredict2d(pred,
+            y,
+            isBin,
+            name,
+            scale,
+            dir_output / n,
+            train_dir,
+            geo,
+            testDepartement,
+            graphScale)"""
+
+        i += 1
+    save_object(res, name+'_pred.pkl', dir_output)
+    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_fusion.pkl'
+    save_object(metrics, outname, dir_output)
 
 #########################################################################################################
 #                                                                                                       #
