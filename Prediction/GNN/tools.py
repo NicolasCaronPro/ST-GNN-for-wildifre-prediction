@@ -627,9 +627,9 @@ def construct_graph_with_time_series(graph, date : int,
     #maskgraph = np.argwhere((X[:,4] == date) & (X[:, 5] > 0))
     maskgraph = np.argwhere((X[:,4] == date))
     x = X[maskgraph[:,0]]
-
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,4] < date) & (X[:,4] >= date - ks)))
+        
         if maskts.shape[0] == 0:
             return None, None, None
     
@@ -657,18 +657,17 @@ def construct_graph_with_time_series(graph, date : int,
     target = []
     src = []
 
-    if spatialEdges.shape[1] != 0:
-        for i, node in enumerate(x):
-            spatialNodes = x[np.argwhere((x[:,4,-1] == node[4][-1]))][:,:, 0, 0]
+    for i, node in enumerate(x):
+        spatialNodes = x[np.argwhere((x[:,4,-1] == node[4][-1]))][:,:, 0, 0]
+        if spatialEdges.shape[1] != 0:
             spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[0][0])]
             for sp in spatial:
                 src.append(i)
                 target.append(np.argwhere((x[:,4,-1] == node[4][-1]) & (x[:,0,0] == sp))[0][0])
-            src.append(i)
-            target.append(i)
+        src.append(i)
+        target.append(i)
 
-        edges = np.row_stack((src, target)).astype(int)
-
+    edges = np.row_stack((src, target)).astype(int)
     if Y is not None:
         return x, y, edges
     return x, edges
@@ -840,7 +839,7 @@ def add_metrics(methods : list, i : int,
                 ypred : torch.tensor,
                 ytrue : torch.tensor,
                 testDepartement : list,
-                isBin : bool,
+                target : str,
                 scale : int,
                 model : Model,
                 dir : Path) -> dict:
@@ -861,10 +860,16 @@ def add_metrics(methods : list, i : int,
     mask_top = np.argwhere(np.isin(ytrue[:, 0], ymax))[:, 0]
 
     res = {}
-    for name, met, target in methods:
+    for name, met, met_type in methods:
 
-        if target == 'proba':
-            mett = met(ypred[:,0], ytrue[:,-1], ytrue[:,-4])
+        if met_type == 'proba':
+            band = -1
+            if target == 'nbsinister' or target == 'binary':
+                band = -2
+                if target == 'binary':
+                    ytrue[:,band] = (ytrue[:,band] > 0).astype(int)
+           
+            mett = met(ypred[:,0], ytrue[:,band], ytrue[:,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
 
@@ -874,36 +879,36 @@ def add_metrics(methods : list, i : int,
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ypred[mask, 0], ytrue[mask,-1], ytrue[mask,-4])
+                mett = met(ypred[mask, 0], ytrue[mask,band], ytrue[mask,-4])
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_'+season] = mett
 
-            mett = met(ypred[mask_top, 0], ytrue[mask_top,-1], ytrue[mask_top,-4])
+            mett = met(ypred[mask_top, 0], ytrue[mask_top,band], ytrue[mask_top,-4])
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
-        elif target == 'bin':
+        elif met_type == 'bin':
 
-            mett = met(ytrue, ypred[:,0], isBin, ytrue[:,-4])
+            mett = met(ytrue, ypred[:,0], target, ytrue[:,-4])
 
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name] = mett
 
-            for season, datesIndex in seasons.items():                
+            for season, datesIndex in seasons.items():
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ytrue[mask, :], ypred[mask,0], isBin, ytrue[mask,-4])
+                mett = met(ytrue[:, :], ypred[:,0], target, ytrue[:,-4], mask)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_'+season] = mett
 
-            mett = met(ytrue, ypred[:,0], isBin, None)
+            mett = met(ytrue, ypred[:,0], target, None, None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             
@@ -913,24 +918,24 @@ def add_metrics(methods : list, i : int,
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ytrue[mask], ypred[mask, 0], isBin, None)
+                mett = met(ytrue[:], ypred[:, 0], target, None, mask)
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
 
                 res[name+'_unweighted_'+season] = mett
 
-            mett = met(ytrue[mask_top], ypred[mask_top, 0], isBin, None)
+            mett = met(ytrue[:], ypred[:, 0], target, None, mask_top)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-            mett = met(ytrue[mask_top], ypred[mask_top, 0], isBin, ytrue[mask_top,-4])
+            mett = met(ytrue[:], ypred[:, 0], target, ytrue[:,-4], mask_top)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
-        elif target == 'class':
+        elif met_type == 'class':
             mett = met(ypred, ytrue, testDepartement, dir, weights=ytrue[:,-4], top=None)
             res[name] = mett
 
@@ -954,16 +959,19 @@ def add_metrics(methods : list, i : int,
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-        logger.info(name)
+        logger.info(f'{name, res[name]}')
 
     return res
 
-def create_binary_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int):
+def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int, isBin : bool):
     predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
     logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-    predictor = Predictor(5, name=nameDep+'Binary')
+    predictor = Predictor(5, name=nameDep+'Binary', binary=isBin)
     predictor.fit(np.unique(ypred[:,0]))
     save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+
+def my_mean_absolute_error(input, target, weights = None):
+    return mean_absolute_error(y_true=target, y_pred=input, sample_weight=weights)
 
 def standard_deviation(inputs, target, weights = None):
     return np.std(inputs)
@@ -991,12 +999,21 @@ def poisson_loss(input, target, weights = None):
     else:
         return ((torch.exp(input) - target*torch.log(input) + torch.log(factorial(target))) * weights).sum() / weights.sum()
     
-def quantile_prediction_error(Y : np.array, ypred : np.array, isBin : bool, weights = None):
-    maxi = np.max(ypred)
-    ytrue = Y[:,-2]
+def quantile_prediction_error(Y : np.array, ypred : np.array, target : str, weights = None, mask : np.array = None):
 
-    if maxi < 1.0:
-        maxi = 1.0
+    if mask is None:
+        mask = np.arange(ypred.shape[0])
+
+    if target == 'binary':
+        maxi = 1 
+    elif target == 'nbsinister':
+        maxi = np.max(Y[:, -2])
+    else :
+        maxi = np.max(Y[:, -1])
+
+    ytrue = Y[mask,-2]
+    ypred = ypred[mask]
+
     quantiles = [(0.0,0.2),
                  (0.2,0.4),
                  (0.4,0.6),
@@ -1011,14 +1028,16 @@ def quantile_prediction_error(Y : np.array, ypred : np.array, isBin : bool, weig
         if pred_quantile.shape[0] != 0:
             pred_quantile = np.mean(pred_quantile)
             number_of_fire = np.mean(nf)
-            #logger.info((minB, maxB), pred_quantile, number_of_fire)
-            error.append(abs(((minB + maxB) / 2) - number_of_fire))
+            error.append(abs((((minB * maxi) + (maxB * maxi)) / 2) - number_of_fire))
     if len(error) == 0:
         return math.inf
 
     return np.mean(error)
 
-def my_f1_score(Y : np.array, ypred : np.array, isBin : bool, weights : np.array = None):
+def my_f1_score(Y : np.array, ypred : np.array, target : str, weights : np.array = None, mask : np.array = None):
+
+    if mask is None:
+        mask = np.arange(ypred.shape[0])
     
     ytrue = Y[:,-2] > 0
     ytrueReg = Y[:,-1]
@@ -1034,30 +1053,26 @@ def my_f1_score(Y : np.array, ypred : np.array, isBin : bool, weights : np.array
     ydep = np.unique(Y[:, 3])
 
     for d in ydep:
-        mask = np.argwhere(Y[:, 3] == d)[:, 0]
-        if torch.is_tensor(ypred):
-            ypredNumpy = ypred.detach().cpu().numpy()[mask]
-        else:
-            ypredNumpy = ypred[mask]
-            
-        if torch.is_tensor(ytrue): 
-            ytrueNumpy = ytrue.detach().cpu().numpy()[mask]
-            ytrueRegNumpy = ytrueReg.detach().cpu().numpy()[mask]
-        else:
-            ytrueNumpy = ytrue[mask]
-            ytrueRegNumpy = ytrueReg[mask]
-        
-        if isBin:
+
+        mask_dep = np.argwhere(Y[:, 3] == d)[:, 0]
+
+        if target == 'binary':
+            maxi = 1.0
+        elif target == 'nbsinister':
             maxi = 1.0
         else:
-            maxi = np.nanmax(ytrueRegNumpy)
+            maxi = np.nanmax(ytrueReg[mask_dep])
+
+        mask_dep = np.intersect1d(mask_dep, mask)
+        if mask_dep.shape[0] == 0:
+            continue
+        ypredNumpy = ypred[mask_dep]
+        ytrueNumpy = ytrue[mask_dep]
+        ytrueRegNumpy = ytrueReg[mask_dep]
 
         if weights is not None:
-            if torch.is_tensor(weights):
-                weightsNumpy = weights.detach().cpu().numpy()[mask]
-            else:
-                weightsNumpy = weights[mask]
-            weightsNumpy[np.argwhere(ytrue[mask] == 0)[:,0]] = 1
+            weightsNumpy = weights[mask_dep]
+            weightsNumpy[np.argwhere(ytrue[mask_dep] == 0)[:,0]] = 1
         else:
             weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
@@ -1067,7 +1082,7 @@ def my_f1_score(Y : np.array, ypred : np.array, isBin : bool, weights : np.array
         bestBound = 0.0
 
         for bound in bounds:
-            if isBin:
+            if target == 'binary' or target == 'nbsinister':
                 yBinPred = (ypredNumpy > bound * maxi).astype(int)
             else:
                 yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
@@ -1078,8 +1093,7 @@ def my_f1_score(Y : np.array, ypred : np.array, isBin : bool, weights : np.array
                 bestBound =  bound
                 prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
                 rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-
-        if not isBin:
+        if target != 'binary' and target != 'nbsinister':
             yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
             f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             bestScore = f1
@@ -1827,13 +1841,21 @@ def target_by_day(Y: np.array, days : int, method : str):
 
     return res
 
-def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, pos_feature : dict):
+def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, pos_feature : dict, target_name : str):
     logger.info(pos_feature)
     res = np.full((X.shape[0], X.shape[1] + 2), fill_value=0.0)
     res[:, :X.shape[1]] = X
 
+    if target_name == 'nbsinister' or target_name == 'binary':
+        band = -2
+    else:
+        band = -1
+
+
     # Add spatial
-    res[:, pos_feature['spatial_prediction']] = Y_localized[:, -1]
+    res[:, pos_feature['spatial_prediction']] = Y_localized[:, band]
+    if target_name == 'binary':
+        res[:, pos_feature['spatial_prediction']] = (res[:, pos_feature['spatial_prediction']] > 0).astype(int)
 
     # Add temporal
     unodes = np.unique(res[:, 0])
@@ -1849,5 +1871,7 @@ def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_dail
             if mask.shape[0] == 0 or mask_temporal.shape[0] == 0:
                 continue
             
-            res[mask, pos_feature['temporal_prediction']] = Y_daily[mask_temporal, -1][0]
+            res[mask, pos_feature['temporal_prediction']] = Y_daily[mask_temporal, band][0]
+            if target_name == 'binary':
+                res[:, pos_feature['temporal_prediction']] = (res[:, pos_feature['temporal_prediction']] > 0).astype(int)
     return res

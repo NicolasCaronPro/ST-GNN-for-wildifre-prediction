@@ -27,6 +27,8 @@ parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Number de Features')
+parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
+parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
@@ -56,6 +58,8 @@ doPCA = args.pca == 'True'
 resolution = args.resolution
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
+doGridSearch = args.GridSearch
+doBayesSearch = args.BayesSearch
 
 ######################### Incorporate new features ##########################
 
@@ -88,7 +92,7 @@ if spec == '' and autoRegression:
 
 ############################ INIT ##############################
 
-X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
+X, Y, graphScale, prefix, prefix_train, pos_feature, pos_feature_2D = init(args, add_time_varying_features=False)
 
 ############################# Training ###########################
 
@@ -102,25 +106,38 @@ save_object(Ytrain, 'Ytrain_'+prefix+'.pkl', dir_output)
 
 train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
 
+save_object(features, spec+'_features.pkl', dir_output)
+save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)
+
+if spec != '':
+    prefix += '_'+spec
+
 if days_in_futur > 1:
     prefix += '_'+str(days_in_futur)
     prefix += '_'+futur_met
 
-save_object(features, spec+'_features.pkl', dir_output)        
-save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)        
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if spec != '':
-    prefix += '_'+spec
+logger.info(pos_feature)
 pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
-
-logger.info(X.shape)
+logger.info(pos_feature)
+logger.info(np.max(X[:,4]))
+logger.info(np.unique(X[:,0]))
+logger.info(np.nanmax(X))
+logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 
 # Preprocess
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, departements=departements, trainDepartements=trainDepartements,
+                                                   trainDate=trainDate, trainDepartements=trainDepartements,
+                                                   departements = departements,
                                                    ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature,
-                                                   futur_met=futur_met, days_in_futur=days_in_futur)
+                                                   days_in_futur=days_in_futur,
+                                                   futur_met=futur_met)
+
+realVspredict(testDataset[1][:, -1], testDataset[1], -1, dir_output / prefix, 'raw')
+
+realVspredict(testDataset[1][:, -3], testDataset[1], -3, dir_output / prefix, 'class')
+
+sinister_distribution_in_class(testDataset[1][:, -3], testDataset[1], dir_output / prefix)
 
 features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, nbfeatures, scale)
 
@@ -162,22 +179,32 @@ PATIENCE_CNT = 200
 CHECKPOINT = 100
 
 gnnModels = [
-        ('GAT', False, False, False, autoRegression),
-        #('DST-GCNCONV', False, False, False, autoRegression),
-        #('ST-GATTCN', False, False, False, autoRegression),
-        #('ST-GATCONV', False, False, False, autoRegression),
-        #('ST-GCNCONV', False, False, False, autoRegression),
-        #('ATGN', False, False, False, autoRegression),
-        #('ST-GATLTSM', False, False, False, autoRegression),
-        ('LTSM', False, False, False, autoRegression),
-        #('DST-GCNCONV_bin', False, True, False, autoRegression),
-        #('ST-GATTCN_bin', False, True, False, autoRegression),
-        #('ST-GATCONV_bin', False, True, False, autoRegression),
-        #('ST-GCNCONV_bin', False, True, False, autoRegression),
-        #('ATGN_bin', False, True, False, autoRegression),
-        #('ST-GATLTSM_bin', False, True, False, autoRegression),
-        #('Zhang', False, True, autoRegression)
-        #('ConvLSTM', False, True, autoRegression)
+        ('GAT_risk', False, 'risk', False, autoRegression),
+        #('DST-GCNCONV_risk', 'risk', False, False, autoRegression),
+        #('ST-GATTCN_risk', 'risk', False, False, autoRegression),
+        #('ST-GATCONV_risk', 'risk', False, False, autoRegression),
+        #('ST-GCNCONV_risk', 'risk', False, False, autoRegression),
+        #('ATGN_risk', False, 'risk', False, autoRegression),
+        #('ST-GATLTSM_risk', 'risk', False, False, autoRegression),
+        ('LTSM_risk', False, 'risk', False, autoRegression),
+
+        #('GAT_nbsinister', False, 'nbsinister', False, autoRegression),
+        #('DST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GATTCN_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GATCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ATGN_nbsinister', False, 'nbsinister', False, autoRegression),
+        #('ST-GATLTSM_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('LTSM_nbsinister', False, 'nbsinister', False, autoRegression),
+
+        #('DST-GCNCONV_bin', False, 'binary', False, autoRegression),
+        #('ST-GATTCN_bin', False, 'binary', False, autoRegression),
+        #('ST-GATCONV_bin', False, 'binary', False, autoRegression),
+        #('ST-GCNCONV_bin', False, 'binary', False, autoRegression),
+        #('ATGN_bin', False, 'binary', False, autoRegression),
+        #('ST-GATLTSM_bin', False, 'binary', False, autoRegression),
+        #('Zhang', False, 'binary', autoRegression)
+        #('ConvLSTM', False, 'binary', autoRegression)
         ]
 
 trainLoader = None
@@ -185,8 +212,8 @@ valLoader = None
 last_bool = None
 
 if doTrain:
-    for model, use_temporal_as_edges, isBin, is_2D_model, autoRegression in gnnModels:
-        if not isBin:
+    for model, use_temporal_as_edges, target_name, is_2D_model, autoRegression in gnnModels:
+        if target_name != 'binary':
             criterion = weighted_rmse_loss
         else:
             criterion = weighted_cross_entropy
@@ -245,7 +272,7 @@ if doTrain:
             criterion=criterion,
             modelname=model,
             dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model),
-            binary=isBin,
+            target_name=target_name,
             autoRegression=autoRegression)
 
 if doTest:
@@ -264,6 +291,7 @@ if doTest:
     name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
+    mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
     std = standard_deviation
     cal = quantile_prediction_error
@@ -274,7 +302,9 @@ if doTest:
     po = poisson_loss
     meac = mean_absolute_error_class
 
-    methods = [('rmse', rmse, 'proba'),
+    methods = [
+            ('mae', mae, 'proba'),
+            ('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
             ('cal', cal, 'bin'),
             ('f1', f1, 'bin'),
@@ -282,26 +312,36 @@ if doTest:
             ('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
-            ('meac', meac, 'class'),
+            ('maec', meac, 'class'),
             ]
 
     gnnModels = [
-        ('GAT', False, False, False, autoRegression),
-        #('DST-GCNCONV', False, False, False, False),
-        #('ST-GATTCN', False, False, False, False),
-        #('ST-GATCONV', False, False, False, False),
-        #('ST-GCNCONV', False, False, False, False),
-        #('ATGN', False, False, False, False),
-        #('ST-GATLTSM', False, False, False, False),
-        ('LTSM', False, False, False, False),
-        #('DST-GCNCONV_bin', False, True, False),
-        #('ST-GATTCN_bin', False, True, False),
-        #('ST-GATCONV_bin', False, True, False),
-        #('ST-GCNCONV_bin', False, True, False),
-        #('ATGN_bin', False, True, False),
-        #('ST-GATLTSM_bin', False, True, False),
-        #('Zhang', False, True)
-        #('ConvLSTM', False, True)
+        ('GAT_risk', False, 'risk', False, autoRegression),
+        #('DST-GCNCONV_risk', False, 'risk', False, autoRegression),
+        #('ST-GATTCN_risk', False, 'risk', False, autoRegression),
+        #('ST-GATCONV_risk', False, 'risk', False, autoRegression),
+        #('ST-GCNCONV_risk', False, 'risk', False, autoRegression),
+        #('ATGN_risk', False, 'risk', False, autoRegression),
+        #('ST-GATLTSM_risk', 'risk', False, False, autoRegression),
+        ('LTSM_risk', False, 'risk', False, autoRegression),
+
+        #('GAT_nbsinister', False, 'nbsinister', False, autoRegression),
+        #('DST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GATTCN_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GATCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('ATGN_nbsinister', False, 'nbsinister', False, autoRegression),
+        #('ST-GATLTSM_nbsinister', 'nbsinister', False, False, autoRegression),
+        #('LTSM_nbsinister', False, 'nbsinister', False, autoRegression),
+
+        #('DST-GCNCONV_binary', False, 'binary', autoRegression),
+        #('ST-GATTCN_binary', False, 'binary', autoRegression),
+        #('ST-GATCONV_binary', False, 'binary', autoRegression),
+        #('ST-GCNCONV_binary', False, 'binary', autoRegression),
+        #('ATGN_binary', False, 'binary', autoRegression),
+        #('ST-GATLTSM_binary', False, 'binary', autoRegression),
+        #('Zhang_binary', False, 'binary', autoRegression)
+        #('ConvLSTM_binary', False, 'binary', autoRegression)
     ]
 
     for dept in departements:

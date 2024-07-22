@@ -239,10 +239,17 @@ def myFunctionDistanceDugrandCercle3D(outputShape, earth_radius=6371.0, resoluti
     longitudes_rad = np.radians(longitudes)
 
     # Calculer la distance du grand cercle entre chaque point et le point central
-    delta_lon = longitudes_rad - np.radians(center_lon)
-    delta_lat = latitudes_rad - np.radians(center_lat)
-    delta_altitude = abs(altitudes - center_altitude)
-    
+    delta_lon = (longitudes_rad - np.radians(center_lon))
+    delta_lat = (latitudes_rad - np.radians(center_lat))
+    #delta_altitude = abs(altitudes - center_altitude)
+
+    delta_altitude_ = abs(altitudes)
+    delta_altitude = np.copy(delta_altitude_)
+    #for i in range(delta_altitude_.shape[0]):
+    #    for j in range(delta_altitude_.shape[1]):
+    #        delta_altitude[i, j, :delta_altitude_.shape[2] // 2 + 1] = np.flip(delta_altitude_[i, j, :delta_altitude_.shape[2] // 2 + 1])
+    #        delta_altitude[i, j, delta_altitude_.shape[2] // 2:] = np.flip(delta_altitude_[i, j, delta_altitude_.shape[2] // 2:])
+
     a = np.sin(delta_lat/2)**2 + np.cos(latitudes_rad) * np.cos(np.radians(center_lat)) * np.sin(delta_lon/2)**2
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     distances = earth_radius * c * np.cos(np.radians(center_lat)) + delta_altitude
@@ -284,7 +291,7 @@ def influence_index(raster, mask, dimS, mode, dim=(90,150)):
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]), dtype=float)
 
-    res = convolve_fft(array=raster, kernel=kernel, normalize_kernel=True, mask=mask)
+    res = convolve_fft(array=raster, kernel=kernel, normalize_kernel=False, mask=mask)
     #res = scipy_fft_conv(raster, kernel)
     return res
 
@@ -310,15 +317,21 @@ def find_n_component(thresh, pca):
 
 def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
     dimX, dimY, dimZ = dimS
+    if dim[-1] == 1:
+        dimZ = 1
+    else:
+        dimZ = np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1)[0] - np.linspace(dim[-1]//2, 0, num=(dim[-1] // 2) + 1)[1]
     if mode == "laplace":
-        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + 1
-        kernel = 1 / kernel 
+        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
+        kernel = dimZ / kernel 
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
         #kernel[:, :, dim[2]//2] = 0
 
     if semi:
         kernel[:,:,:(dim[2]//2)] = 0.0
+
+    print(dim[-1], np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1), kernel[1,1])
 
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
     #res = scipy_fft_conv(raster, kernel, mode='same')

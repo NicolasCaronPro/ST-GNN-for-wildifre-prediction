@@ -7,14 +7,16 @@ def realVspredict(ypred, y, band, dir_output, on):
 
     for d in dept:
         mask = np.argwhere(y[:,3] == d)
+        maxi = max(np.nanmax(ypred[mask]), np.nanmax(ytrue[mask]))
+        mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
         ids = np.unique(y[mask, 0])
         if ids.shape[0] == 1:
             _, ax = plt.subplots(ids.shape[0], figsize=(15,5))
             ax.plot(ypred[mask], color='red', label='predict')
             ax.plot(ytrue[mask], color='blue', label='real', alpha=0.5)
             x = np.argwhere(y[mask,-2] > 0)[:,0]
-            ax[i].scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
-            ax.set_ylim(ymin=0, ymax=np.nanmax(ypred[mask]))
+            ax.scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
+            ax.set_ylim(ymin=mini, ymax=maxi)
         else:
             _, ax = plt.subplots(ids.shape[0], figsize=(50,50))
             for i, id in enumerate(ids):
@@ -23,7 +25,7 @@ def realVspredict(ypred, y, band, dir_output, on):
                 ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
                 x = np.argwhere(y[mask2,-2] > 0)[:,0]
                 ax[i].scatter(x, ypred[mask2][x], color='black', label='fire', alpha=0.5)
-                ax[i].set_ylim(ymin=0, ymax=np.nanmax(ypred[mask]))
+                ax[i].set_ylim(ymin=mini, ymax=maxi)
         plt.legend()
         outn = str(d) + '_' + on + '.png'
         plt.savefig(dir_output / outn)

@@ -377,7 +377,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
         
-    def _predict_test_loader(self, X : DataLoader, features : np.array, device, isBin : bool, autoRegression : bool, pos_feature : dict) -> torch.tensor:
+    def _predict_test_loader(self, X : DataLoader, features : np.array, device, target_name : str, autoRegression : bool, pos_feature : dict) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
 
@@ -406,7 +406,7 @@ class GraphStructure():
                 #target = labels[weights.gt(0)]
                 #target = target[:, -1]
 
-                if isBin:
+                if target_name == 'binary':
                     output = output[:, 1]
 
                 output = torch.masked_select(output, weights.gt(0))

@@ -133,13 +133,13 @@ def plot_variation(df, base_label, met, dir_output, out_name, color):
 
 def load_and_evaluate(experiments, test_name, dir_output, sinister):
 
-    f1s, maes, bcas, rmses, maetop10s, crs = [], [], [], [], [], []
+    f1s, maes, bcas, rmses, maetop10s, crs, cals = [], [], [], [], [], [], []
     (_, _, base_label, _) = experiments[0]
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
         dir_test = Path(expe + '/' + sinister + '/' + resolution + '/test/' + test_name + '/' + label + '/')
-        
+        label = expe + ' ' + str(index) + ' : ' + label 
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
 
@@ -209,24 +209,32 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         f1s.append(f1)
 
         # MAE score
-        mae = evaluate_ca(metrics, 'meac')
-        mae = mae.groupby('model')['meac'].mean().reset_index()
-        mae['meac'] = mae['meac'].astype(float)
+        mae = evaluate_ca(metrics, 'maec')
+        mae = mae.groupby('model')['maec'].mean().reset_index()
+        mae['maec'] = mae['maec'].astype(float)
         mae['expe'] = expe
         mae['index'] = index
         mae['label'] = label
-        mae['meac_winter'] = evaluate_ca(metrics, 'meac_winter')['meac_winter']
-        mae['meac_spring'] = evaluate_ca(metrics, 'meac_spring')['meac_spring']
-        mae['meac_summer'] = evaluate_ca(metrics, 'meac_summer')['meac_summer']
-        mae['meac_autumn'] = evaluate_ca(metrics, 'meac_winter')['meac_winter']
-        mae['meac_top_5_cluster'] = evaluate_ca(metrics, 'meac_top_5_cluster')['meac_top_5_cluster']
-        mae['meac_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'meac_top_5_cluster_unweighted')['meac_top_5_cluster_unweighted']
+        mae['maec_winter'] = evaluate_ca(metrics, 'maec_winter')['maec_winter']
+        mae['maec_spring'] = evaluate_ca(metrics, 'maec_spring')['maec_spring']
+        mae['maec_summer'] = evaluate_ca(metrics, 'maec_summer')['maec_summer']
+        mae['maec_autumn'] = evaluate_ca(metrics, 'maec_winter')['maec_winter']
+        mae['maec_top_5_cluster'] = evaluate_ca(metrics, 'maec_top_5_cluster')['maec_top_5_cluster']
+        mae['maec_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'maec_top_5_cluster_unweighted')['maec_top_5_cluster_unweighted']
+
+        mae['mae'] = evaluate_met(metrics, 'mae')['mae']
+        mae['mae_winter'] = evaluate_met(metrics, 'mae_winter')['mae_winter']
+        mae['mae_spring'] = evaluate_met(metrics, 'mae_spring')['mae_spring']
+        mae['mae_summer'] = evaluate_met(metrics, 'mae_summer')['mae_summer']
+        mae['mae_autumn'] = evaluate_met(metrics, 'mae_winter')['mae_winter']
+        #mae['mae_top_5_cluster'] = evaluate_met(metrics, 'mae_top_5_cluster')['mae_top_5_cluster']
+        #mae['mae_top_5_cluster_unweighted'] = evaluate_met(metrics, 'mae_top_5_cluster_unweighted')['mae_top_5_cluster_unweighted']
 
         maes.append(mae)
 
-        maetop10 = evaluate_ca(metrics, 'meactop10')
-        maetop10 = maetop10.groupby('model')['meactop10'].mean().reset_index()
-        maetop10['meactop10'] = maetop10['meactop10'].astype(float)
+        maetop10 = evaluate_ca(metrics, 'maectop10')
+        maetop10 = maetop10.groupby('model')['maectop10'].mean().reset_index()
+        maetop10['maectop10'] = maetop10['maectop10'].astype(float)
         maetop10['expe'] = expe
         maetop10['index'] = index
         maetop10['label'] = label
@@ -261,22 +269,37 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
         rmse['rmse_autumn'] = evaluate_met(metrics, 'rmse_autumn')['rmse_autumn']
         rmse['rmse_top_5_cluster'] = evaluate_met(metrics, 'rmse_top_5_cluster')['rmse_top_5_cluster']
         #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
-        
         rmses.append(rmse)
+
+        # CAL
+        # RMSE score
+        cal = evaluate_met(metrics, 'cal')
+        cal = cal.groupby('model')['cal'].mean().reset_index()
+        cal['cal'] = cal['cal'].astype(float)
+        cal['expe'] = expe
+        cal['label'] = label
+        cal['index'] = index
+        cal['cal_winter'] = evaluate_met(metrics, 'cal_winter')['cal_winter']
+        cal['cal_spring'] = evaluate_met(metrics, 'cal_spring')['cal_spring']
+        cal['cal_summer'] = evaluate_met(metrics, 'cal_summer')['cal_summer']
+        cal['cal_autumn'] = evaluate_met(metrics, 'cal_autumn')['cal_autumn']
+        cal['cal_top_5_cluster'] = evaluate_met(metrics, 'cal_top_5_cluster')['cal_top_5_cluster']
+        #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
+        cals.append(cal)
 
     f1s = pd.concat(f1s).reset_index(drop=True)
     maes = pd.concat(maes).reset_index(drop=True)
     bcas = pd.concat(bcas).reset_index(drop=True)
     rmses = pd.concat(rmses).reset_index(drop=True)
     maetop10s = pd.concat(maetop10s).reset_index(drop=True)
-    #crs = pd.concat(crs).reset_index(drop=True)
+    cals = pd.concat(cals).reset_index(drop=True)
 
     f1s.to_csv(dir_output / 'f1s.csv')
     maes.to_csv(dir_output / 'maes.csv')
     bcas.to_csv(dir_output / 'bcas.csv')
     rmses.to_csv(dir_output / 'rmses.csv')
     maetop10.to_csv(dir_output / 'maetop10.csv')
-    #crs.to_csv(dir_output / 'crs.csv')
+    cals.to_csv(dir_output / 'cals.csv')
 
     index_colors = np.unique(f1s['index'].values)
 
@@ -305,15 +328,18 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(f1s, 'recall_top_5_cluster', dir_output, 'recall_top_5_cluster', color)
     plot(f1s, 'recall_top_5_cluster_unweighted', dir_output, 'recall_top_5_cluster_unweighted', color)
 
-    plot(maes, 'meac', dir_output, 'meac', color)
+    plot(cals, 'cal', dir_output, 'cal', color)
+    plot(maes, 'maec', dir_output, 'maec', color)
+    plot(maes, 'mae', dir_output, 'mae', color)
     plot(bcas, 'bca', dir_output, 'bca', color)
     plot(rmses, 'rmse', dir_output, 'rmse', color)
-    plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
+    plot(maetop10s, 'maectop10', dir_output, 'maectop10', color)
 
-    plot(maes, 'meac_top_5_cluster', dir_output, 'meac_top_5_cluster', color)
+    plot(maes, 'maec_top_5_cluster', dir_output, 'maec_top_5_cluster', color)
+    #plot(maes, 'mae_top_5_cluster', dir_output, 'mae_top_5_cluster', color)
     plot(bcas, 'bca_top_5_cluster', dir_output, 'bca_top_5_cluster', color)
     plot(rmses, 'rmse_top_5_cluster', dir_output, 'rmse_top_5_cluster', color)
-    plot(maetop10s, 'meactop10', dir_output, 'maectop10', color)
+    plot(maetop10s, 'maectop10', dir_output, 'maectop10', color)
 
     plot(f1s, 'f1_winter', dir_output, 'f1_winter', color)
     plot(f1s, 'f1_unweighted_winter', dir_output, 'f1_unweighted_winter', color)
@@ -324,7 +350,9 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(f1s, 'recall_winter', dir_output, 'recall_winter', color)
     plot(f1s, 'recall_unweighted_winter', dir_output, 'recall_unweighted_winter', color)
 
-    plot(maes, 'meac_winter', dir_output, 'meac_winter', color)
+    plot(cals, 'cal_winter', dir_output, 'cal_winter', color)
+    plot(maes, 'maec_winter', dir_output, 'maec_winter', color)
+    plot(maes, 'mae_winter', dir_output, 'mae_winter', color)
     plot(bcas, 'bca_winter', dir_output, 'bca_winter', color)
     plot(rmses, 'rmse_winter', dir_output, 'rmse_winter', color)
 
@@ -337,10 +365,13 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(f1s, 'recall_summer', dir_output, 'recall_summer', color)
     plot(f1s, 'recall_unweighted_summer', dir_output, 'recall_unweighted_summer', color)
 
-    plot(maes, 'meac_summer', dir_output, 'meac_summer', color)
+    plot(cals, 'cal_summer', dir_output, 'cal_summer', color)
+    plot(maes, 'maec_summer', dir_output, 'maec_summer', color)
+    plot(maes, 'mae_summer', dir_output, 'mae_summer', color)
     plot(bcas, 'bca_summer', dir_output, 'bca_summer', color)
     plot(rmses, 'rmse_summer', dir_output, 'rmse_summer', color)
 
+    plot(cals, 'cal_spring', dir_output, 'cal_spring', color)
     plot(f1s, 'f1_spring', dir_output, 'f1_spring', color)
     plot(f1s, 'f1_unweighted_spring', dir_output, 'f1_unweighted_spring', color)
 
@@ -350,10 +381,12 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(f1s, 'recall_spring', dir_output, 'recall_spring', color)
     plot(f1s, 'recall_unweighted_spring', dir_output, 'recall_unweighted_spring', color)
 
-    plot(maes, 'meac_spring', dir_output, 'meac_spring', color)
+    plot(maes, 'maec_spring', dir_output, 'maec_spring', color)
+    plot(maes, 'mae_spring', dir_output, 'mae_spring', color)
     plot(bcas, 'bca_spring', dir_output, 'bca_spring', color)
     plot(rmses, 'rmse_spring', dir_output, 'rmse_spring', color)
 
+    plot(cals, 'cal_autumn', dir_output, 'cal_autumn', color)
     plot(f1s, 'f1_autumn', dir_output, 'f1_autumn', color)
     plot(f1s, 'f1_unweighted_autumn', dir_output, 'f1_unweighted_autumn', color)
 
@@ -363,13 +396,14 @@ def load_and_evaluate(experiments, test_name, dir_output, sinister):
     plot(f1s, 'recall_autumn', dir_output, 'recall_autumn', color)
     plot(f1s, 'recall_unweighted_autumn', dir_output, 'recall_unweighted_autumn', color)
 
-    plot(maes, 'meac_autumn', dir_output, 'meac_autumn', color)
+    plot(maes, 'maec_autumn', dir_output, 'maec_autumn', color)
+    plot(maes, 'mae_autumn', dir_output, 'mae_autumn', color)
     plot(bcas, 'bca_autumn', dir_output, 'bca_autumn', color)
     plot(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color)
 
     """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
     plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
-    plot_variation(maes, base_label, 'meac', dir_output, 'meac_variation', color)
+    plot_variation(maes, base_label, 'maec', dir_output, 'maec_variation', color)
     plot_variation(bcas, base_label, 'bca', dir_output, 'bca_variation', color)
     plot_variation(rmses, base_label, 'rmse', dir_output, 'rmse_variation', color)"""
 
@@ -430,16 +464,18 @@ if __name__ == "__main__":
 
     # Inference
     experiments_inference = [
-                             ('final', 1, 'full_0_30_100', 'full_0_30_100_30_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 2, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 3, 'full_0_10_100_fusion', 'full_0_10_100_fusion_10_z-score_Catboost_'+test_name+'_fusion'),
-                             ('final', 0, 'full_0_10_100_7_mean', 'full_0_10_100_7_mean_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 1, 'full_0_30_100', 'full_0_30_100_30_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 2, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                             ('final', 6, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_dl'),
+                             #('final', 3, 'full_0_15_100', 'full_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 5, 'full_0_15_100_7_mean', 'full_0_15_100_7_mean_15_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 0, 'full_0_10_100_7_maen', 'full_0_10_100_7_maen_10_z-score_Catboost_'+test_name+'_tree'),
                              #('final', 2, 'full_0_25_100_TrainOnYvelines', 'full_0_25_100_TrainOnYvelines_25_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_3_mean', 'full_0_10_100_3_mean_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_7_mean', 'full_0_10_100_7_mean_10_MinMax_Catboost_'+test_name+'_tree'),
-                             #('final', 3, 'full_0_10_100_3_mean', 'full_0_10_100_3_mean_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, 'full_0_10_100_3_mean', 'full_0_10_100_3_mean_10_MinMax_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_15_100_7_mean', 'full_0_15_100_7_mean_15_MinMax_Catboost_'+test_name+'_tree'),
+                             #('final', 1, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 1, 'full_0_10_100_7_maen', 'full_0_10_100_7_maen_10_MinMax_Catboost_'+test_name+'_tree'),
+                             #('final', 3, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 4, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_MinMax_Catboost_'+test_name+'_tree'),
+                             #('final', 2, 'full_0_15_100_7_maen', 'full_0_15_100_7_maen_15_MinMax_Catboost_'+test_name+'_tree'),
                              #('final', 0, 'full_0_10_100', 'full_0_10_100_10_none_Catboost_'+test_name+'_tree'),
                              #('final', 2, 'full_0_15_100', 'full_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
                              #('final', 3, '1000_0_15_100', '1000_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
@@ -452,16 +488,15 @@ if __name__ == "__main__":
                              #('final', 2, '200_0_10_100', '200_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                              #('final', 3, '100_0_5_100', '100_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
                              #('final', 1, 'full_0_10_100_pca', 'full_0_10_100_pca_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_10_100_pca_kmeans_10', 'full_0_10_100_pca_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 3, 'full_0_10_100_kmeans_10', 'full_0_10_100_kmeans_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, '500_0_10_100_TempFetForKMEANS', '500_0_10_100_TempFetForKMEANS_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 2, 'full_0_10_100_pca_kmaens_10', 'full_0_10_100_pca_kmaens_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 3, 'full_0_10_100_kmaens_10', 'full_0_10_100_kmaens_10_10_z-score_Catboost_'+test_name+'_tree'),
+                             #('final', 4, '500_0_10_100_TempFetForKmaeNS', '500_0_10_100_TempFetForKmaeNS_10_z-score_Catboost_'+test_name+'_tree'),
                              #('final', 4, 'full_7_10_100_10', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl'),
                             ]
 
     # ECAI
-    experiments_ecai = [('ecai', 0, 'ecai', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                        ('inference', 1, 'inference', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                        ('final', 2, 'final', 'full_7_10_73_10_z-score_Catboost_'+test_name+'_tree'),
+    experiments_ecai = [ ('Ain', 0, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
+                         ('final', 1, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                         ]
 
     # exp
@@ -470,4 +505,4 @@ if __name__ == "__main__":
                             ]
 
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_ecai, test_name=test_name, dir_output=dir_output, sinister=sinister)

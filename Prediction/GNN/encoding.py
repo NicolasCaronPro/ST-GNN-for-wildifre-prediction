@@ -72,7 +72,6 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):
     calendar_array = np.asarray(calendar_array)
     geo_array = np.asarray(geo_array)
 
-
     logger.info(f'{spatialValues.shape, temporalValues.shape, foret.shape, landcover.shape, calendar_array.shape, geo_array.shape}')
 
     spatialValues = spatialValues.reshape(-1,1)

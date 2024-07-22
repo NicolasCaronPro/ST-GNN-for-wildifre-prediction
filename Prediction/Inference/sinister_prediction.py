@@ -1,4 +1,4 @@
-from tools_inference import *
+from graph_structure import *
 import datetime as dt
 import json
 from probabilistic import *
@@ -212,6 +212,7 @@ if __name__ == "__main__":
     parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
     parser.add_argument('-nf', '--nbFeature', type=str, help='Number of feature')
     parser.add_argument('-dh', '--doHistorical', type=str, help='Do Historical')
+    parser.add_argument('-r', '--resolution', type=str, help='Pixel resolution')
     args = parser.parse_args()
 
     # Input config
@@ -222,10 +223,11 @@ if __name__ == "__main__":
     model = args.model
     minPoint = args.nbpoint
     nbFeature = int(args.nbFeature)
+    resolution = args.resolution
     doHistorical = args.doHistorical == 'True'
-    scaling='z-score' # Scale to used
+    scaling = 'z-score' # Scale to used
 
-    dir_data = Path('../GNN/inference/' + sinister + '/train')
+    dir_data = Path('../GNN/final/' + sinister + '/' + resolution + '/train/')
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -293,7 +295,7 @@ if __name__ == "__main__":
 
     prefix = str(scale)
 
-    traditionnal_models = ['xgboost', 'lightgbm', 'ngboost', 'xgboost_bin', 'lightgbm_bin', 'ngboost_bin', 
+    traditionnal_models = ['xgboost_risk', 'lightgbm_risk', 'ngboost_risk', 'xgboost_bin', 'lightgbm_bin', 'ngboost_bin', 
                            'xgboost_unweighted', 'lightgbm_unweighted', 'ngboost_unweighted',
                            'xgboost_bin_unweighted', 'lightgbm_bin_unweighted', 'ngboost_bin_unweighted']
 
@@ -318,19 +320,35 @@ if __name__ == "__main__":
     incendie_feather_ori = pd.read_feather(dir_interface / 'incendie_final.feather')
 
     spa = 3
+
     if sinister == "firepoint":
         if dept == 'departement-01-ain':
-            dims = [(spa, spa, 11)]
+            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)]
+            k_days = max(9, k_days)
         elif dept == 'departement-25-doubs':
-            dims = [(spa,spa, 7)]
+            dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
+            k_days = max(5, k_days)
         elif dept == 'departement-69-rhone':
-            dims = [(spa, spa, 5)]
+            dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
+            k_days = max(5, k_days)
         elif dept == 'departement-78-yvelines':
-            dims = [(spa, spa, 9)]
+            dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)]
+            k_days = max(7, k_days)
     elif sinister == "inondation":
-        dims = [(spa,spa,5)]
-
-    k_days = max(dims[0][2], k_days)
+        if dept == 'departement-01-ain':
+            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)]
+            k_days = max(9, k_days)
+        elif dept == 'departement-25-doubs':
+            dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
+            k_days = max(5, k_days)
+        elif dept == 'departement-69-rhone':
+            dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
+            k_days = max(5, k_days)
+        elif dept == 'departement-78-yvelines':
+            dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)]
+            k_days = max(7, k_days)
+    else:
+        exit(2)
 
     if doHistorical:
         sd = dt.datetime.strptime('2024-01-01', '%Y-%m-%d').date()
@@ -405,7 +423,7 @@ if __name__ == "__main__":
 
         ######################### Predict ################################
 
-        interface = fire_prediction(spatialGeo, interface, dept, features, trainFeatures, features_selected, scaling, dir_data, dates)
+        interface = fire_prediction(spatialGeo, interface, dept, features, trainFeatures, scaling, dir_data, dates)
 
         ######################### Saving ###############################
 

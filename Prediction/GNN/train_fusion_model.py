@@ -24,12 +24,16 @@ parser.add_argument('-scS', '--scaleSpatial', type=str, help='Scale of spatial')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
+parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
 parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-tn', '--target_name', type=str, help='Target name')
+
 
 args = parser.parse_args()
 
@@ -57,6 +61,9 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
+target_name = args.target_name
+doGridSearch = args.GridSearch ==  'True'
+doBayesSearch = args.BayesSearch == 'True'
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -85,7 +92,7 @@ if spec == '' and autoRegression:
 
 ############################# INIT ########################################
 
-X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
+X, Y, graphScale, prefix, prefix_train, pos_feature, _ = init(args, False)
 
 ############################# Training ###########################
     
@@ -98,8 +105,9 @@ args1 = {'dir_train' : dir_train,
             'dir_model':  dir_train / f'check_z-score/full_0_{scaleSpatial}_100' / 'baseline',
             'autoRegression' : autoRegression,
             'pos_feature' : create_pos_feature(scaleSpatial, 6, trainFeatures)[0],
-            'model_name': 'xgboost_features',
+            'model_name': f'xgboost_{target_name}',
             'model_type' : 'traditionnal',
+            'target_name' : {target_name},
             'scale' : scaleSpatial,
             'isBin': False,
         'graph' : 'graph_'+str(scaleSpatial)+'.pkl',
@@ -115,9 +123,10 @@ args2 = {'train_dir' : dir_train,
             'dir_model': dir_train / f'check_z-score/full_0_{scale}_100_{scaleTemporal}_mean' / 'baseline',
             'autoRegression' : autoRegression,
             'pos_feature' : create_pos_feature(scale, 6, trainFeatures)[0],
-            'model_name': 'xgboost_features',
+            'model_name': f'xgboost_{target_name}',
             'model_type' : 'traditionnal',
             'scale' : scale,
+            'target_name' : {target_name},
             'isBin': False,
         'graph' : 'graph_'+str(scale)+'.pkl',
         }
@@ -134,7 +143,7 @@ X_localized = X_localized[:, np.asarray(train_fet_num)]
 trainFeatures += ['temporal_prediction', 'spatial_prediction']
 features += ['temporal_prediction', 'spatial_prediction']
 pos_feature, newshape = create_pos_feature(scale, 6, features)
-X = add_temporal_spatial_prediction(X, Y_localized, Y_daily, graph1, pos_feature)
+X = add_temporal_spatial_prediction(X, Y_localized, Y_daily, graph1, pos_feature, target_name)
 train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
 pos_feature, newshape = create_pos_feature(scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
@@ -181,12 +190,12 @@ if doTrain:
                  scale=scale, pos_feature=pos_feature, dir_output=dir_output / name)
 
     # Add features
-    train_sklearn_api_model(trainDataset=trainDataset, testDataset=testDataset, valDataset=valDataset,
-                            dir_output=dir_output / name, device=device, features=features_selected,
-                            scale=scale, pos_feature=pos_feature, autoRegression=autoRegression)
+    #train_sklearn_api_model(trainDataset=trainDataset, testDataset=testDataset, valDataset=valDataset,
+    #                        dir_output=dir_output / name, device=device, features=features_selected,
+    #                        scale=scale, pos_feature=pos_feature, autoRegression=autoRegression,
+    #                        doGridSearch=doGridSearch, doBayesSearch=doBayesSearch, optimize_feature=optimize_feature)
 
 if doTest:
-
     Xtest = testDataset[0]
     Ytest = testDataset[1]
 
@@ -203,6 +212,8 @@ if doTest:
     dir_output = Path(name_dir)
 
     testDepartement = [int2name[d] for d in np.unique(Ytest[:, 3])]
+
+    mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
     std = standard_deviation
     cal = quantile_prediction_error
@@ -213,7 +224,9 @@ if doTest:
     po = poisson_loss
     meac = mean_absolute_error_class
 
-    methods = [('rmse', rmse, 'proba'),
+    methods = [
+            ('mae', mae, 'proba'),
+            ('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
             ('cal', cal, 'bin'),
             ('f1', f1, 'bin'),
@@ -225,9 +238,17 @@ if doTest:
             ]
     
     models = [
-        ('linear', False, autoRegression),
-        ('mean', False, autoRegression),
-        ('xgboost_features', False, autoRegression),
+        ('linear', 'risk', autoRegression),
+        ('mean', 'risk', autoRegression),
+        #('xgboost_features', 'risk', autoRegression),
+
+        #('linear_binary', 'binary', autoRegression),
+        #('mean_binary', 'binary', autoRegression),
+        #('xgboost_features_binary', 'binary', autoRegression),
+
+        #('linear_nb_fire', 'nbsinister', autoRegression),
+        #('mean_nb_fire', 'nbsinister', autoRegression),
+        #('xgboost_features_nb_fire', 'nbsinister', autoRegression),
         ]
 
     for dept in departements:
@@ -258,4 +279,4 @@ if doTest:
                         dept,
                         methods,
                         prefix,
-                        pos_feature,)
+                        pos_feature)

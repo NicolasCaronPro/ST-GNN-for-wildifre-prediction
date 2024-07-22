@@ -25,10 +25,13 @@ parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
+parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
 parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
+parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 
 args = parser.parse_args()
@@ -51,9 +54,12 @@ sinister = args.sinister
 values_per_class = args.nbpoint
 scale = int(args.scale)
 spec = args.spec
-doPCA = args.pca == 'True'
 resolution = args.resolution
+doPCA = args.pca == 'True'
+doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
+doGridSearch = args.GridSearch ==  'True'
+doBayesSearch = args.BayesSearch == 'True'
 
 ######################### Incorporate new features ##########################
 
@@ -78,7 +84,7 @@ if dummy:
 
 ############################ INIT ################################
 
-X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
+X, Y, graphScale, prefix, prefix_train, pos_feature, _ = init(args, True)
 
 ############################# Training ###########################
 trainCode = [name2int[dept] for dept in trainDepartements]

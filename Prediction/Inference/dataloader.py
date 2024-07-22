@@ -754,7 +754,7 @@ def test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                                                         Rewrite=True)
         
         features_selected = read_object('features.pkl', model_dir)
-        log_features(features_selected, graphScale.scale, pos_feature, ['min', 'mean', 'max', 'std'])
+        log_features(features_selected, graphScale.scale, pos_feature, METHODS)
 
 
         XTensor = XTensor.detach().cpu().numpy()

@@ -24,6 +24,8 @@ parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
+parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
 parser.add_argument('-test', '--doTest', type=str, help='Launch test')
 parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
 parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
@@ -55,6 +57,8 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
+doGridSearch = args.GridSearch ==  'True'
+doBayesSearch = args.BayesSearch == 'True'
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -83,7 +87,7 @@ if spec == '' and autoRegression:
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, prefix_train, pos_feature = init(args)
+X, Y, graphScale, prefix, prefix_train, pos_feature, _ = init(args, add_time_varying_features=True)
 
 ############################# Training ###########################
 trainCode = [name2int[dept] for dept in trainDepartements]
@@ -170,11 +174,14 @@ if doTrain:
                             valDataset=valDataset,
                             testDataset=testDataset,
                             dir_output=dir_output / name,
-                            device='cuda',
+                            device='cpu',
                             features=features_selected,
                             autoRegression=autoRegression,
                             scale=scale,
-                            pos_feature=pos_feature)
+                            pos_feature=pos_feature,
+                            optimize_feature=optimize_feature,
+                            doGridSearch = doGridSearch,
+                            doBayesSearch = doBayesSearch)
 
 if doTest:
     logger.info('############################# TEST ###############################')
@@ -191,6 +198,7 @@ if doTest:
     name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
+    mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
     std = standard_deviation
     cal = quantile_prediction_error
@@ -201,7 +209,9 @@ if doTest:
     po = poisson_loss
     meac = mean_absolute_error_class
 
-    methods = [('rmse', rmse, 'proba'),
+    methods = [
+            ('mae', mae, 'proba'),
+            ('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
             ('cal', cal, 'bin'),
             ('f1', f1, 'bin'),
@@ -209,25 +219,25 @@ if doTest:
             ('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
-            ('meac', meac, 'class'),
+            ('maec', meac, 'class'),
             ]
 
     models = [
-        ('xgboost', False, autoRegression),
-        ('xgboost_features', False, autoRegression),
-        ('xgboost_features_binary', True, autoRegression),
-        ('xgboost_nb_fire', False, autoRegression),
+        ('xgboost_risk', 'risk', autoRegression),
+        ('xgboost_features_risk', 'risk', autoRegression),
+        #('xgboost_features_binary', 'binary', autoRegression),
+        ('xgboost_nbsinister', 'nbsinister', autoRegression),
         #('xgboost_rmlse', False, autoRegression),
         #('xgboost_optimize_feature', autoRegression),
         #('lightgbm', False, autoRegression),
         #('ngboost', False, autoRegression),
-        ('xgboost_binary', True, False),
+        ('xgboost_binary', 'binary', autoRegression),
         #('lightgbm_binary', True, False),
         #('xgboost_binary_unweighted', True, False),
         #('lightgbm_binary_unweighted', True, False),
         #('xgboost_unweighted', False, autoRegression),
         #('lightgbm_unweighted', False, autoRegression),
-        ('xgboost_grid_search', False, autoRegression), 
+        #('xgboost_grid_search_risk', 'risk', autoRegression), 
         #('ngboost_unweighted', autoRegression),
         #('ngboost_bin', autoRegression)
         ]

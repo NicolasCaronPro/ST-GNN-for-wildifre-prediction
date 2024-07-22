@@ -95,49 +95,48 @@ features = [
 
 # Train features 
 trainFeatures = [
-            'temp', 'dwpt',
-            'rhum', 'prcp', 'wdir', 'wspd','prec24h',
-            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-            'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
-            'elevation',
-            'population',
-            'sentinel',
-            'landcover',
-            #'vigicrues',
-            'foret',
-            'highway',
-            'dynamicWorld',
-            'Calendar',
-            'Historical',
-            'Geo',
-            'air',
-            #'nappes',
-            #'AutoRegressionReg',
-            'AutoRegressionBin'
-            ]
+                'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+                'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+                'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+                'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+                'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+                'elevation',
+                'population',
+                'sentinel',
+                'landcover',
+                #'vigicrues',
+                'foret',
+                'highway',
+                'dynamicWorld',
+                'Calendar',
+                'Historical',
+                'Geo',
+                'air',
+                #'nappes',
+                #'AutoRegressionReg',
+                'AutoRegressionBin'
+                ]
 
 newFeatures = []
 
 kmeansFeatures = [
             #'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd',
             #'prec24h',
-            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+            #'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             #'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             #'temp16', 'dwpt16', 'rhum16',
             # 'prcp16', # 'wdir16', 'wspd16',
             # 'prec24h16',
             #'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
             #'elevation',
-            'population',
+            #'population',
             #'sentinel',
-            'landcover',
+            #'landcover',
             #'vigicrues',
-            'foret',
-            'highway',
+            #'foret',
+            #'highway',
             #'dynamicWorld',
-            #'Calendar',
+            'Calendar',
             #'Historical',
             #'Geo',
             #'air',
@@ -218,7 +217,7 @@ streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
 
 k_days = 0 # Size of the time series sequence
-days_in_futur = 0 # The target time validation
+days_in_futur = 7 # The target time validation
 futur_met = 'mean'
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
@@ -240,7 +239,8 @@ maxDist = {0 : 5,
         20 : 45,
         25 : 50,
         30 : 50,
-        35 : 60
+        35 : 60,
+        40 : 60,
         }
 
 resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
@@ -269,7 +269,7 @@ num_lstm_layers = 1
 
 def make_models(in_dim, in_dim_2D, dropout, act_func):
     # Neural networks
-    dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
+    dico_model = {'GAT_risk': GAT(in_dim=[in_dim, 64, 64, 64],
                             heads=[4, 4, 2],
                             dropout=dropout,
                             bias=True,
@@ -278,7 +278,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                             n_sequences=k_days + 1,
                             binary=False),
 
-                        'DST-GCN': DSTGCN(n_sequences=k_days+1,
+                        'DST-GCN_risk': DSTGCN(n_sequences=k_days+1,
                                         in_channels=in_dim,
                                         end_channels=64,
                                         dilation_channels=[64],
@@ -288,7 +288,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                         device=device,
                                         binary=False),
                                                                     
-                        'ST-GAT': STGAT(n_sequences=k_days + 1,
+                        'ST-GAT_risk': STGAT(n_sequences=k_days + 1,
                                     in_channels=in_dim,
                                     hidden_channels=[64],
                                     end_channels=64,
@@ -296,7 +296,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                     act_func=act_func, device=device,
                                     binary=False),
 
-                        'ST-GCN' : STGCN(n_sequences=k_days + 1,
+                        'ST-GCN_risk' : STGCN(n_sequences=k_days + 1,
                                         in_channels=in_dim,
                                         hidden_channels=[64],
                                         end_channels=64,
@@ -305,7 +305,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                         device=device,
                                         binary=False),
 
-                        'SDT-GCN' : SDSTGCN(n_sequences=k_days + 1,
+                        'SDT-GCN_risk' : SDSTGCN(n_sequences=k_days + 1,
                                     in_channels=in_dim,
                                     hidden_channels_temporal=[64],
                                     dilations=[1],
@@ -316,7 +316,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                     device=device,
                                     binary=False),
 
-                        'ATGN' : TemporalGNN(in_channels=in_dim,
+                        'ATGN_risk' : TemporalGNN(in_channels=in_dim,
                                             hidden_channels=64,
                                             out_channels=64,
                                             n_sequences=k_days + 1,
@@ -325,7 +325,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                             dropout=dropout,
                                             binary=False),
 
-                        'ST-GATLTSM' : ST_GATLSTM(in_channels=in_dim,
+                        'ST-GATLTSM_risk' : ST_GATLSTM(in_channels=in_dim,
                                                 hidden_channels=64,
                                                 residual_channels=64,
                                                 end_channels=32,
@@ -335,7 +335,7 @@ def make_models(in_dim, in_dim_2D, dropout, act_func):
                                                 concat=False,
                                                 binary=False),
 
-                        'LTSM' : LSTM(in_channels=in_dim, residual_channels=64,
+                        'LTSM_risk' : LSTM(in_channels=in_dim, residual_channels=64,
                                       hidden_channels=64,
                                       end_channels=32, n_sequences=k_days + 1,
                                       device=device, act_func=act_func, binary=False,

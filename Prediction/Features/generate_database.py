@@ -81,11 +81,11 @@ class GenerateDatabase():
     def add_spatial(self):
         logger.info('Add spatial')
         raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
-        #raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
-        #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
-        #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
-        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
-        #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
+        raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        raster_elevation(self.h3tif, self.dir_raster, self.elevation)
+        raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
     def add_air_qualite(self):
         assert RASTER == True
@@ -244,7 +244,7 @@ class GenerateDatabase():
             if True:
                 logger.info(f"On collecte l'archive de {station}")
                 df = pd.DataFrame()
-                for annee in range(START.year, dt.datetime.now().year + 1):
+                for annee in range(START.year, STOP.year):
                     url=f"https://www.hydro.eaufrance.fr/stationhydro/ajax/{station}/series?hydro_series%5BstartAt%5D=01%2F01%2F{annee}&hydro_series%5BendAt%5D=01%2F01%2F{annee+1}&hydro_series%5BvariableType%5D=simple_and_interpolated_and_hourly_variable&hydro_series%5BsimpleAndInterpolatedAndHourlyVariable%5D=H&hydro_series%5BstatusData%5D=raw"
                     r = requests.get(url)
                     if r.status_code == 200:
@@ -566,7 +566,7 @@ if __name__ == '__main__':
     resolution = args.resolution
 
     ################## Ain ######################
-    launch('departement-01-ain', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    #launch('departement-01-ain', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## DOUBS ######################
     launch('departement-25-doubs', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)

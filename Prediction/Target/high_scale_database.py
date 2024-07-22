@@ -232,10 +232,11 @@ if __name__ == "__main__":
     spa = 3
 
     if sinister == "firepoint":
-        dims = [(spa,spa,8),
-                (spa,spa,4),
-                (spa,spa,4),
-                (spa,spa,6)]
+        dims = [[(spa,spa,5), (spa,spa,9), (spa,spa,3)],
+                [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
+                [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
+                [(spa,spa,3), (spa,spa,7), (spa,spa,3)]]
+        
     elif sinister == "inondation":
         dims = [(spa,spa,5),
                 (spa,spa,5),
@@ -252,5 +253,5 @@ if __name__ == "__main__":
     fp = pd.concat(fp).reset_index(drop=True)
     fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/'+sinister+'.csv', index=False)
 
-    model = Probabilistic(dims, n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
-    model._process_input_raster(input, len(departements), True, departements, doPast, creneaux, departements)
+    model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
+    model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements)

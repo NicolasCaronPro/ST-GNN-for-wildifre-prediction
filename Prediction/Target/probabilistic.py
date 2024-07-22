@@ -5,15 +5,14 @@ from sklearn.isotonic import IsotonicRegression
 from tools_functions import *
 
 class Probabilistic():
-    def __init__(self, dims,
+    def __init__(self,
                  precision_x: float,
                  precision_y: float,
                  precision_z :float,
                  learner,
                  dir_output: Path,
                  resolution : str):
-        
-        self.dim = dims
+
         self.precision = (precision_x, precision_y, precision_z)
         self.learner = learner
         self.dir_output = dir_output
@@ -77,7 +76,8 @@ class Probabilistic():
 
         return weights
     
-    def _process_input_raster(self, input : list,
+    def _process_input_raster(self, dims : list, 
+                                input : list,
                                 number_of_input : int,
                                 save : bool,
                                 names : list,
@@ -90,13 +90,56 @@ class Probabilistic():
         self.X = []
         self.Y = []
         self.W = []
+
+        months = [d.split('-')[1] for d in allDates]
+
+        high_season = []
+        low_season = []
+        medium_season = []
+
+        for i, month in enumerate(months):
+            if month in ['06', '07', '08', '09']:
+                high_season.append(i)
+            elif month in ['02', '03', '04', '05']:
+                medium_season.append(i)
+            else:
+                low_season.append(i)
+
         for band in range(number_of_input):
 
-            dim = self.dim[band]
+            dim = dims[band]
+            med_dim = dim[0]
+            high_dim = dim[1]
+            low_dim = dim[-1]
 
-            daily = np.array(influence_index3D(input[band], np.isnan(input[band]),
+            daily = np.full(input[band].shape, fill_value=np.nan)
+            seasonaly = np.full(input[band].shape, fill_value=np.nan)
+
+            daily[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                             dimS=self.precision, mode='laplace',
-                                                            dim=(dim[0], dim[1], dim[2]), semi=doPast))
+                                                            dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+            
+            seasonaly[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                          dimS=self.precision, mode='mean',
+                                                           dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+
+
+            daily[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                            dimS=self.precision, mode='laplace',
+                                                            dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+            
+            seasonaly[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                          dimS=self.precision, mode='mean',
+                                                           dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+            
+
+            daily[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                            dimS=self.precision, mode='laplace',
+                                                            dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
+            
+            seasonaly[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                          dimS=self.precision, mode='mean',
+                                                           dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
             
             years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
             if departement[band] == 'departement-01-ain' or departement[band] == 'departement-69-rhone':
@@ -118,25 +161,23 @@ class Probabilistic():
                         continue
                     historical[:, :, index] += input[band][:, :, newindex]
                 historical[:, :, index] /= len(years)
-
-            seasonaly = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                          dimS=self.precision, mode='mean',
-                                                           dim=(dim[0], dim[1], dim[2]), semi=doPast))
             
             influence = np.full(daily.shape, np.nan)
-
-            #influence = daily + historical + seasonaly
-            #influence = (daily + historical + seasonaly) / 3
 
             historical[np.isnan(input[band])] = np.nan
             seasonaly[np.isnan(input[band])] = np.nan
             daily[np.isnan(input[band])] = np.nan
+
+            #influence = daily + historical + seasonaly
+            #influence = (daily + historical + seasonaly) / 3
+            influence = np.copy(daily)
+
+            
             mask = ~np.isnan(input[band])
             df = pd.DataFrame(index=np.arange(0, historical[mask].shape[0]))
             df['1'] = historical[mask]
             df['2'] = seasonaly[mask]
             df['3'] = daily[mask]
-            df['4'] = input[band][mask]
             pca =  PCA(n_components='mle', svd_solver='full')
             components = pca.fit_transform(df.values)
             check_and_create_path(self.dir_output / 'pca')
@@ -144,12 +185,19 @@ class Probabilistic():
             print('99 % :',find_n_component(0.99, pca))
             print('95 % :', find_n_component(0.95, pca))
             print('90 % :' , find_n_component(0.90, pca))
+            print('85 % :' , find_n_component(0.85, pca))
+            print('75 % :' , find_n_component(0.75, pca))
+            print('70 % :' , find_n_component(0.70, pca))
+            print('60 % :' , find_n_component(0.60, pca))
+            print('50 % :' , find_n_component(0.50, pca))
 
             pca =  PCA(n_components=1, svd_solver='full')
             res = pca.fit_transform(df.values)
 
             influence[mask] = res[:, 0]
             influence[np.isnan(input[band])] = np.nan
+            if np.nanmin(influence) < 0:
+                influence += abs(np.nanmin(influence))
             
             print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
             if save:
@@ -158,12 +206,15 @@ class Probabilistic():
                     histoname = names[band]+'Historical.pkl'
                     dailyname = names[band]+'Daily.pkl'
                     seasoname = names[band]+'Season.pkl'
+                    pcaname = 'PCA.pkl'
                 else:
                     outputName = names[band]+'pastInfluence.pkl'
                     histoname = names[band]+'pastHistorical.pkl'
                     dailyname = names[band]+'pastDaily.pkl'
                     seasoname = names[band]+'pastSeason.pkl'
+                    pcaname = 'pastPCA.pkl'
 
+                #save_object(pca, pcaname, self.dir_output / 'log' / self.resolution)
                 save_object(influence, outputName ,self.dir_output / 'log' / self.resolution)
                 save_object(historical, histoname ,self.dir_output / 'log' / self.resolution)
                 save_object(daily, dailyname ,self.dir_output / 'log' / self.resolution)

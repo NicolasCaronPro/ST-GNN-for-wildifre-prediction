@@ -247,7 +247,7 @@ def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     name = sinister+'.csv'
     firepoints.to_csv(dir / sinister / name, index=False)
 
-def init(args):
+def init(args, add_time_varying_features):
     
     global trainFeatures
     global features
@@ -355,7 +355,6 @@ def init(args):
             logger.info(ps.departement.unique())
             ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
             logger.info(ps.departement.unique())
-            #ps['date'] = ps['date'] - 1
             ps = ps[ps['date'] > 0]
             logger.info(ps[ps['departement'] == 1].date.min())
         else:
@@ -393,6 +392,9 @@ def init(args):
             maxi, _, _ = calculate_feature_range(fet, scale)
             X[:, pos_feature[fet]: pos_feature[fet] + maxi] = X2[:, pos_feature_[fet]: pos_feature_[fet] + maxi]
 
+
+    ################################# 2D Database ###################################
+
     if do2D:
         subnode = X[:,:6]
         pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
@@ -412,8 +414,8 @@ def init(args):
     prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
 
-    # Add varying time features
-    if k_days > 0:
+    ############################## Add varying time features #############################
+    if k_days > 0 and add_time_varying_features:
         name = 'X_'+prefix+'.pkl'
         if (dir_output / name).is_file():
             X = read_object('X_'+prefix+'.pkl', dir_output)
@@ -428,4 +430,4 @@ def init(args):
                     X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
-    return X, Y, graphScale, prefix, prefix_train, pos_feature
+    return X, Y, graphScale, prefix, prefix_train, pos_feature, pos_feature_2D

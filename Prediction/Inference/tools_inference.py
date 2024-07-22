@@ -1,6 +1,6 @@
 from tools import *
 from dataloader import *
-from models.models import *
+from forecasting_models.models import *
 import geopandas as gpd
 import convertdate
 import copy
@@ -271,18 +271,26 @@ def myFunctionDistanceDugrandCercle3D(outputShape, earth_radius=6371.0,
 
 def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
     dimX, dimY, dimZ = dimS
+    if dim[-1] == 1:
+        dimZ = 1
+    else:
+        dimZ = np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1)[0] - np.linspace(dim[-1]//2, 0, num=(dim[-1] // 2) + 1)[1]
     if mode == "laplace":
-        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimY, resolution_lat=dimX, resolution_altitude=dimZ) + 1
-        kernel = 1 / kernel 
+        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
+        kernel = dimZ / kernel
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
+        #kernel[:, :, dim[2]//2] = 0
 
     if semi:
-        kernel[:,:,(dim[2]//2) + 1:] = 0.0
+        kernel[:,:,:(dim[2]//2)] = 0.0
+
+    print(dim[-1], np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1), kernel[1,1])
 
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
-
+    #res = scipy_fft_conv(raster, kernel, mode='same')
     return res
+
 
 def construct_historical_meteo(acq_date, region, dir_meteostat):
     MAX_NAN = 5000
