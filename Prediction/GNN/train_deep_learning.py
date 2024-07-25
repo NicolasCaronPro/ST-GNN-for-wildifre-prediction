@@ -2,7 +2,6 @@ from dataloader import *
 from config import *
 import geopandas as gpd
 import argparse
-from encoding import encode
 
 ########################### Input Arg ######################################
 
@@ -13,8 +12,8 @@ parser = argparse.ArgumentParser(
 parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-p', '--point', type=str, help='Construct n point')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
+parser.add_argument('-p', '--point', type=str, help='Construct points')
+parser.add_argument('-np', '--nbpoint', type=str, help='Number of points')
 parser.add_argument('-d', '--database', type=str, help='Do database')
 parser.add_argument('-g', '--graph', type=str, help='Construct graph')
 parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
@@ -23,16 +22,18 @@ parser.add_argument('-f', '--featuresSelection', type=str, help='Do features sel
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
 parser.add_argument('-sp', '--spec', type=str, help='spec')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
-parser.add_argument('-test', '--doTest', type=str, help='Launch test')
-parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
-parser.add_argument('-of', '--optimizeFeature', type=str, help='Number de Features')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
+parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
 parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
 parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
-parser.add_argument('-r', '--resolution', type=str, help='Resolution')
+parser.add_argument('-test', '--doTest', type=str, help='Launch test')
+parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
+parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
+parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 
 args = parser.parse_args()
 
@@ -40,35 +41,35 @@ args = parser.parse_args()
 nameExp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
-doEncoder = args.encoder == 'True'
+doEncoder = args.encoder == "True"
 doPoint = args.point == "True"
 doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
+optimize_feature = args.optimizeFeature == "True"
 doTest = args.doTest == "True"
 doTrain = args.doTrain == "True"
-optimize_feature = args.optimizeFeature == "True"
+nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 values_per_class = args.nbpoint
-nbfeatures = int(args.NbFeatures) if args.NbFeatures != 'all' else args.NbFeatures 
 scale = int(args.scale)
 spec = args.spec
-doPCA = args.pca == 'True'
 resolution = args.resolution
+doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
-doGridSearch = args.GridSearch
-doBayesSearch = args.BayesSearch
+doGridSearch = args.GridSearch ==  'True'
+doBayesSearch = args.BayesSearch == 'True'
+k_days = args.k_days # Size of the time series sequence use by DL models
+days_in_futur = args.days_in_futur # The target time validation
 
-######################### Incorporate new features ##########################
+############################# GLOBAL VARIABLES #############################
 
-newFeatures = []
-
-dir_target = root_target / sinister / 'log'
+dir_target = root_target / sinister / 'log' / resolution
 
 geo = gpd.read_file('regions/regions.geojson')
-geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
+geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
 name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
@@ -76,50 +77,40 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-if values_per_class == 'full':
-    prefix = str(values_per_class)+'_'+str(scale)
-else:
-    prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-if doPCA:
-    prefix += '_pca'
+if spec == '':
+    spec = 'default'
 
 if dummy:
-    prefix += '_dummy'
+    spec += '_dummy'
 
 autoRegression = 'AutoRegressionReg' in trainFeatures
-if spec == '' and autoRegression:
-    spec = 'AutoRegressionReg'
+if autoRegression:
+    spec = '_AutoRegressionReg'
 
-############################ INIT ##############################
+####################### INIT ################################
 
-X, Y, graphScale, prefix, prefix_train, pos_feature, pos_feature_2D = init(args, add_time_varying_features=False)
+X, Y, graphScale, prefix, features_name, features_name_2D = init(args, False)
 
 ############################# Training ###########################
-
 trainCode = [name2int[dept] for dept in trainDepartements]
 
-Xtrain, Ytrain = (X[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))],
-                      Y[(X[:,4] < allDates.index(trainDate)) & (np.isin(X[:,0], trainCode))])
+# Select train features
+train_fet_num = select_train_features(trainFeatures, scale, features_name)
 
-save_object(Xtrain, 'Xtrain_'+prefix+'.pkl', dir_output)
-save_object(Ytrain, 'Ytrain_'+prefix+'.pkl', dir_output)
+dir_output =  dir_output / spec
 
-train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
-
-save_object(features, spec+'_features.pkl', dir_output)
-save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)
-
-if spec != '':
-    prefix += '_'+spec
+save_object(features, 'features.pkl', dir_output)
+save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
+save_object(features_name, 'features_name.pkl', dir_output)
 
 if days_in_futur > 1:
     prefix += '_'+str(days_in_futur)
     prefix += '_'+futur_met
 
-logger.info(pos_feature)
-pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
+logger.info(features_name)
+features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
 X = X[:, np.asarray(train_fet_num)]
-logger.info(pos_feature)
+logger.info(features_name)
 logger.info(np.max(X[:,4]))
 logger.info(np.unique(X[:,0]))
 logger.info(np.nanmax(X))
@@ -129,7 +120,7 @@ logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
                                                    departements = departements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature,
+                                                   ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                    days_in_futur=days_in_futur,
                                                    futur_met=futur_met)
 
@@ -139,7 +130,13 @@ realVspredict(testDataset[1][:, -3], testDataset[1], -3, dir_output / prefix, 'c
 
 sinister_distribution_in_class(testDataset[1][:, -3], testDataset[1], dir_output / prefix)
 
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output, pos_feature, prefix, nbfeatures, scale)
+features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output / prefix, features_name, nbfeatures, scale)
+
+prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+
+if days_in_futur > 1:
+    prefix += '_'+str(days_in_futur)
+    prefix += '_'+futur_met
 
 if doPCA:
     prefix += '_pca'
@@ -150,12 +147,12 @@ if doPCA:
     testDataset = (apply_pca(testDataset[0], pca, components, features_selected), testDataset[1])
     features_selected = np.arange(6, components + 6)
     trainFeatures = ['pca_'+str(i) for i in range(components)]
-    pos_feature, _ = create_pos_feature(0, 6, trainFeatures)
+    features_name, _ = get_features_name_list(0, 6, trainFeatures)
     kmeansFeatures = trainFeatures
 
 if doKMEANS:
     prefix += '_kmeans_'+str(ncluster)
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
+    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
     Ytrain = trainDataset[1]
     Yval = valDataset[1]
     Ytest = testDataset[1]
@@ -250,8 +247,8 @@ if doTrain:
                                                                 batch_size=64,
                                                                 device=device,
                                                                 scaling=scaling,
-                                                                pos_feature=pos_feature,
-                                                                pos_feature_2D=pos_feature_2D,
+                                                                features_name=features_name,
+                                                                features_name_2D=features_name_2D,
                                                                 ks=k_days,
                                                                 shape=(shape2D[0], shape2D[1], newShape2D),
                                                                 path=dir_output / '2D' / prefix / 'data')
@@ -268,7 +265,7 @@ if doTrain:
             epochs=epochs,
             features=features_selected,
             lr=lr,
-            pos_feature=pos_feature,
+            features_name=features_name,
             criterion=criterion,
             modelname=model,
             dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model),
@@ -359,21 +356,21 @@ if doTest:
         test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
                            dept,
-                           pos_feature,
+                           features_name,
                            prefix,
                            prefix,
                            dummy,
                            gnnModels,
-                           dir_output / dept / prefix,
+                           dir_output / spec / dept / prefix,
                            device,
                            k_days,
                            Rewrite, 
                            encoding,
                            scaling,
                            [dept],
-                           train_dir,
+                           train_dir / spec,
                            dico_model,
-                           pos_feature_2D,
+                           features_name_2D,
                            shape2D,
                            sinister,
                            resolution)

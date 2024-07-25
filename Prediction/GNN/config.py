@@ -75,7 +75,9 @@ features = [
             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
             'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-            'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+            'days_since_rain', 'sum_consecutive_rainfall',
+            'sum_rain_last_7_days',
+            'sum_snow_last_7_days', 'snow24h', 'snow24h16',
             'elevation',
             'population',
             'sentinel',
@@ -99,10 +101,12 @@ trainFeatures = [
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                 'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
                 'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-                'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+                'days_since_rain', 'sum_consecutive_rainfall',
+                'sum_rain_last_7_days',
+                'sum_snow_last_7_days', 'snow24h', 'snow24h16',
                 'elevation',
                 'population',
-                'sentinel',
+                #'sentinel',
                 'landcover',
                 #'vigicrues',
                 'foret',
@@ -111,7 +115,7 @@ trainFeatures = [
                 'Calendar',
                 'Historical',
                 'Geo',
-                'air',
+                #'air',
                 #'nappes',
                 #'AutoRegressionReg',
                 'AutoRegressionBin'
@@ -145,9 +149,20 @@ kmeansFeatures = [
             #'AutoRegressionBin'
             ]
 
+SAISON_FEUX = {
+    1: {'jour_debut': 1, 'mois_debut': 3,
+           'jour_fin': 1, 'mois_fin': 10},
+    25: {'jour_debut': 1, 'mois_debut': 3,
+           'jour_fin': 1, 'mois_fin': 11},
+    78: {'jour_debut': 1, 'mois_debut': 3,
+           'jour_fin': 1, 'mois_fin': 11},
+    69: {'jour_debut': 1, 'mois_debut': 3,
+           'jour_fin': 1, 'mois_fin': 11},
+}
+
 PERIODES_A_IGNORER = {
     1: {'interventions': [(dt.datetime(2023, 7, 3), dt.datetime(2023, 7, 26)),
-                             (dt.datetime(2024, 3, 10), dt.datetime(2024,5,29))],
+                             (dt.datetime(2024, 3, 10), dt.datetime(2024,5,29)),],
            'appels': [(dt.datetime(2023, 3, 5), dt.datetime(2023, 7, 19)),
                       (dt.datetime(2024, 4, 1), dt.datetime(2024,5,24))]},
     25: {'interventions': [],
@@ -216,8 +231,6 @@ streamHandler = logging.StreamHandler(stream=sys.stdout)
 streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
 
-k_days = 0 # Size of the time series sequence
-days_in_futur = 7 # The target time validation
 futur_met = 'mean'
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
@@ -241,6 +254,7 @@ maxDist = {0 : 5,
         30 : 50,
         35 : 60,
         40 : 60,
+        60 : 50,
         }
 
 resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
@@ -265,9 +279,9 @@ METHODS = ['mean', 'min', 'max', 'std',
            'sum',
            #'grad'
            ] # Methods for reducing features
-num_lstm_layers = 1
+num_lstm_layers = 2
 
-def make_models(in_dim, in_dim_2D, dropout, act_func):
+def make_models(in_dim, in_dim_2D, dropout, act_func, k_days):
     # Neural networks
     dico_model = {'GAT_risk': GAT(in_dim=[in_dim, 64, 64, 64],
                             heads=[4, 4, 2],

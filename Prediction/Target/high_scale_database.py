@@ -254,4 +254,4 @@ if __name__ == "__main__":
     fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/'+sinister+'.csv', index=False)
 
     model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
-    model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements)
+    model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements, False)

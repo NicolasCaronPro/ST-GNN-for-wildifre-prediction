@@ -126,7 +126,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         ps['date'] = [allDates.index(date) - 1 for date in ps.date]
         ps = ps.sort_values(by='date')
 
-        X, Y, pos_feature = construct_database(graphScale, ps, scale, k_days, departements,
+        X, Y, features_name = construct_database(graphScale, ps, scale, k_days, departements,
                                                features, sinister, dir_output, train_dir, prefix, 'test')
         
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
@@ -137,7 +137,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
         graphScale._info_on_graph(X, dir_output)
 
-    pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
+    features_name, _ = get_features_name_list(graphScale.scale, 6, features)
 
     Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
     Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
@@ -154,9 +154,9 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     if k_days > 0:
         trainFeatures_ = copy(trainFeatures) + varying_time_variables
         features_ = copy(features) + varying_time_variables
-        pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features_)
+        features_name, newShape = get_features_name_list(graphScale.scale, 6, features_)
         if doDatabase:
-            X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k_days)
+            X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, features_name=features_name, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
         trainFeatures_ = copy(trainFeatures)
@@ -201,12 +201,12 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                 maxi = 1
             else:
                 maxi = coef
-            train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+            train_fet_num += list(np.arange(features_name.index(fet), features_name.index(fet) + maxi))
 
-    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures_)
+    features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures_)
     X = X[:, np.asarray(train_fet_num)]
     Xtrain = Xtrain[:, np.asarray(train_fet_num)]
-    logger.info(pos_feature)
+    logger.info(features_name)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     if spec != '':
@@ -220,7 +220,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
                            testname,
-                           pos_feature,
+                           features_name,
                            prefix,
                            prefix_train,
                            dummy,

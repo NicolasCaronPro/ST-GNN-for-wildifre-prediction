@@ -131,14 +131,14 @@ def plot_variation(df, base_label, met, dir_output, out_name, color):
     out_name += '.png'
     plt.savefig(dir_output / out_name)
 
-def load_and_evaluate(experiments, test_name, dir_output, sinister):
+def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
 
     f1s, maes, bcas, rmses, maetop10s, crs, cals = [], [], [], [], [], [], []
     (_, _, base_label, _) = experiments[0]
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
-        dir_test = Path(expe + '/' + sinister + '/' + resolution + '/test/' + test_name + '/' + label + '/')
+        dir_test = dir_input / Path(sinister + '/' + resolution + '/test/' + expe + '/' + test_name + '/' + label + '/')
         label = expe + ' ' + str(index) + ' : ' + label 
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
@@ -414,7 +414,9 @@ if __name__ == "__main__":
         description='Inference prediction',
     )
     parser.add_argument('-n', '--name', type=str, help='Test name')
+    parser.add_argument('-spec', '--spec', type=str, help='Test name')
     parser.add_argument('-o', '--output', type=str, help='Output directory')
+    parser.add_argument('-i', '--input', type=str, help='Input directory')
     parser.add_argument('-s', '--sinister', type=str, help='Sinister')
     parser.add_argument('-r', '--resolution', type=str, help='resolution')
 
@@ -423,7 +425,9 @@ if __name__ == "__main__":
     test_name = args.name
     sinister = args.sinister
     resolution = args.resolution
-    dir_output = Path(args.output + '/' + test_name)
+    spec = args.spec
+    dir_output = Path(args.output + '/' + spec + '/' + test_name)
+    dir_input = Path(args.input)
 
     # features
     experiments_features = [('exp1', 0, 'All', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
@@ -464,34 +468,14 @@ if __name__ == "__main__":
 
     # Inference
     experiments_inference = [
-                             #('final', 1, 'full_0_30_100', 'full_0_30_100_30_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             ('final', 6, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_dl'),
-                             #('final', 3, 'full_0_15_100', 'full_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 5, 'full_0_15_100_7_mean', 'full_0_15_100_7_mean_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 0, 'full_0_10_100_7_maen', 'full_0_10_100_7_maen_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_25_100_TrainOnYvelines', 'full_0_25_100_TrainOnYvelines_25_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_7_maen', 'full_0_10_100_7_maen_10_MinMax_Catboost_'+test_name+'_tree'),
-                             #('final', 3, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, 'full_0_10_100_3_maen', 'full_0_10_100_3_maen_10_MinMax_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_15_100_7_maen', 'full_0_15_100_7_maen_15_MinMax_Catboost_'+test_name+'_tree'),
-                             #('final', 0, 'full_0_10_100', 'full_0_10_100_10_none_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_15_100', 'full_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 3, '1000_0_15_100', '1000_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, '100_0_15_100', '100_0_15_100_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 5, '1000_7_15_100', '1000_7_15_100_15_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 6, 'full_0_20_100', 'full_0_20_100_20_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 7, 'full_0_35_100', 'full_0_35_100_35_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 3, 'full_0_10_3_Simple', 'full_0_10_3_Simple_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_noHistorical', 'full_0_10_100_noHistorical_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 2, '200_0_10_100', '200_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 3, '100_0_5_100', '100_0_5_100_5_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 1, 'full_0_10_100_pca', 'full_0_10_100_pca_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 2, 'full_0_10_100_pca_kmaens_10', 'full_0_10_100_pca_kmaens_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 3, 'full_0_10_100_kmaens_10', 'full_0_10_100_kmaens_10_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, '500_0_10_100_TempFetForKmaeNS', '500_0_10_100_TempFetForKmaeNS_10_z-score_Catboost_'+test_name+'_tree'),
-                             #('final', 4, 'full_7_10_100_10', 'full_7_10_100_10_z-score_Catboost_'+test_name+'_dl'),
+                             #(spec, 1, 'full_0_7_10_100', 'full_0_7_10_100_z-score_Catboost_'+test_name+'_dl'),
+                             #(spec, 2, 'full_0_7_30_100', 'full_0_7_30_100_z-score_Catboost_'+test_name+'_dl'),
+                             (spec, 3, 'full_0_30_100', 'full_0_30_100_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 4, 'full_0_10_100', 'full_0_10_100_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 4, 'full_0_35_100', 'full_0_35_100_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 6, 'full_0_40_100', 'full_0_40_100_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 7, 'full_0_60_100', 'full_0_60_100_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 4, 'full_0_10_100_fusion', 'full_0_10_100_fusion_10_z-score_Catboost_'+test_name+'_fusion'),
                             ]
 
     # ECAI
@@ -505,4 +489,4 @@ if __name__ == "__main__":
                             ]
 
     check_and_create_path(dir_output)
-    load_and_evaluate(experiments=experiments_ecai, test_name=test_name, dir_output=dir_output, sinister=sinister)
+    load_and_evaluate(experiments=experiments_inference, test_name=test_name, dir_output=dir_output, sinister=sinister, dir_input=dir_input)

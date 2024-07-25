@@ -377,7 +377,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
         
-    def _predict_test_loader(self, X : DataLoader, features : np.array, device, target_name : str, autoRegression : bool, pos_feature : dict) -> torch.tensor:
+    def _predict_test_loader(self, X : DataLoader, features : np.array, device, target_name : str, autoRegression : bool, features_name : dict) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
 
@@ -422,7 +422,7 @@ class GraphStructure():
         
     def predict_model_api_sklearn(self, X : np.array,
                                   features : np.array, isBin : bool,
-                                  autoRegression : bool, pos_feature : dict) -> np.array:
+                                  autoRegression : bool, features_name : dict) -> np.array:
         assert self.model is not None
         if not autoRegression:
             if not isBin:
@@ -449,9 +449,9 @@ class GraphStructure():
                         continue
                     else:
                         if not isBin:
-                            X[maskNext, pos_feature['AutoRegressionReg']] = preddd
+                            X[maskNext, features_name.index('AutoRegressionReg')] = preddd
                         else:
-                            X[maskNext, pos_feature['AutoRegressionBin']] = preddd
+                            X[maskNext, features_name.index('AutoRegressionBin')] = preddd
             return pred
 
     def _predict_perference_with_Y(self, Y : np.array, isBin : bool) -> np.array:
@@ -470,8 +470,8 @@ class GraphStructure():
                 res[i] = Y[index[0], -2] > 0
         return res
         
-    def _predict_perference_with_X(self, X : np.array, pos_feature : dict) -> np.array:
-        return X[:, pos_feature['Historical'] + 2]
+    def _predict_perference_with_X(self, X : np.array, features_name : dict) -> np.array:
+        return X[:, features_name.index('Historical') + 2]
 
     def _info_on_graph(self, nodes : np.array, output : Path) -> None:
         """

@@ -79,7 +79,8 @@ class Probabilistic():
                                 names : list,
                                 doPast : bool,
                                 allDates : list,
-                                departement : list):
+                                departement : list,
+                                read_pca : bool):
         if save:
             check_and_create_path(self.dir_output / 'log')
 
@@ -87,7 +88,10 @@ class Probabilistic():
         self.Y = []
         self.W = []
 
-        months = [d.split('-')[1] for d in allDates]
+        if isinstance(allDates[0], str):
+            months = [d.split('-')[1] for d in allDates]
+        else:
+            months = [d.strftime('%Y-%m-%d').split('-')[1] for d in allDates]
 
         high_season = []
         low_season = []
@@ -145,7 +149,10 @@ class Probabilistic():
             
             historical = np.zeros((daily.shape))
             for index, date in enumerate(allDates):
-                vec = date.split('-')
+                if isinstance(date, str):
+                    vec = date.split('-')
+                else:
+                     vec = date.strftime('%Y-%m-%d').split('-')
                 month = vec[1]
                 day = vec[2]
                 for y in years:
@@ -168,26 +175,32 @@ class Probabilistic():
             #influence = (daily + historical + seasonaly) / 3
             influence = np.copy(daily)
 
-            
             mask = ~np.isnan(input[band])
             df = pd.DataFrame(index=np.arange(0, historical[mask].shape[0]))
             df['1'] = historical[mask]
             df['2'] = seasonaly[mask]
             df['3'] = daily[mask]
-            pca =  PCA(n_components='mle', svd_solver='full')
-            components = pca.fit_transform(df.values)
-            check_and_create_path(self.dir_output / 'pca')
-            show_pcs(pca, 2, components, self.dir_output / 'pca')
-            print('99 % :',find_n_component(0.99, pca))
-            print('95 % :', find_n_component(0.95, pca))
-            print('90 % :' , find_n_component(0.90, pca))
-            print('85 % :' , find_n_component(0.85, pca))
-            print('75 % :' , find_n_component(0.75, pca))
-            print('70 % :' , find_n_component(0.70, pca))
-            print('60 % :' , find_n_component(0.60, pca))
-            print('50 % :' , find_n_component(0.50, pca))
+            if not read_pca:
+                pca =  PCA(n_components='mle', svd_solver='full')
+                components = pca.fit_transform(df.values)
+                check_and_create_path(self.dir_output / 'pca')
+                show_pcs(pca, 2, components, self.dir_output / 'pca')
+                print('99 % :',find_n_component(0.99, pca))
+                print('95 % :', find_n_component(0.95, pca))
+                print('90 % :' , find_n_component(0.90, pca))
+                print('85 % :' , find_n_component(0.85, pca))
+                print('75 % :' , find_n_component(0.75, pca))
+                print('70 % :' , find_n_component(0.70, pca))
+                print('60 % :' , find_n_component(0.60, pca))
+                print('50 % :' , find_n_component(0.50, pca))
 
-            pca =  PCA(n_components=1, svd_solver='full')
+                pca =  PCA(n_components=1, svd_solver='full')
+            else:
+                if not doPast:
+                    pca = read_object(f'{names[band]}PCA.pkl', self.dir_output / 'log' / self.resolution)
+                else:
+                    pca = read_object(f'{names[band]}pastPCA.pkl', self.dir_output / 'log' / self.resolution)
+
             res = pca.fit_transform(df.values)
 
             influence[mask] = res[:, 0]
@@ -195,22 +208,22 @@ class Probabilistic():
             if np.nanmin(influence) < 0:
                 influence += abs(np.nanmin(influence))
             
-            print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
+            #print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
             if save:
                 if not doPast:
                     outputName = names[band]+'Influence.pkl'
                     histoname = names[band]+'Historical.pkl'
                     dailyname = names[band]+'Daily.pkl'
                     seasoname = names[band]+'Season.pkl'
-                    pcaname = 'PCA.pkl'
+                    pcaname = names[band]+'PCA.pkl'
                 else:
                     outputName = names[band]+'pastInfluence.pkl'
                     histoname = names[band]+'pastHistorical.pkl'
                     dailyname = names[band]+'pastDaily.pkl'
                     seasoname = names[band]+'pastSeason.pkl'
-                    pcaname = 'pastPCA.pkl'
+                    pcaname = names[band]+'pastPCA.pkl'
 
-                #save_object(pca, pcaname, self.dir_output / 'log' / self.resolution)
+                save_object(pca, pcaname, self.dir_output / 'log' / self.resolution)
                 save_object(influence, outputName ,self.dir_output / 'log' / self.resolution)
                 save_object(historical, histoname ,self.dir_output / 'log' / self.resolution)
                 save_object(daily, dailyname ,self.dir_output / 'log' / self.resolution)

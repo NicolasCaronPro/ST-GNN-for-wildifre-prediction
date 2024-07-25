@@ -31,6 +31,8 @@ def realVspredict(ypred, y, band, dir_output, on):
         plt.savefig(dir_output / outn)
 
     uids = np.unique(y[:, 0])
+    if uids.shape[0] < 5:
+        return
     ysum = np.empty((uids.shape[0], 2))
     ysum[:, 0] = uids
     for id in uids:

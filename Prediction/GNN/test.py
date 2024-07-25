@@ -125,7 +125,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         ps['date'] = [allDates.index(date) - 1 for date in ps.date]
         ps = ps.sort_values(by='date')
 
-        X, Y, pos_feature = construct_database(graphScale, ps, scale, k_days, departements,
+        X, Y, features_name = construct_database(graphScale, ps, scale, k_days, departements,
                                                features, sinister, dir_output, train_dir, prefix, 'test')
         
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
@@ -136,21 +136,21 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
         graphScale._info_on_graph(X, dir_output)
 
-    pos_feature, _ = create_pos_feature(graphScale.scale, 6, features)
+    features_name, _ = get_features_name_list(graphScale.scale, 6, features)
     if do2D:
         subnode = X[:,:6]
-        pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
+        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
                                                  subnode.shape[1],
                                                  X,
                                                  scaling,
-                                                 pos_feature,
+                                                 features_name,
                                                  testDepartement,
                                                  features,
                                                  dir_output,
                                                  prefix)
     else:
         subnode = X[:,:6]
-        pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
+        features_name_2D, newShape2D = get_features_name_lists_2D(subnode.shape[1], features)
 
     Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
     Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
@@ -196,12 +196,12 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                 maxi = 1
             else:
                 maxi = coef
-            train_fet_num += list(np.arange(pos_feature[fet], pos_feature[fet] + maxi))
+            train_fet_num += list(np.arange(features_name.index(fet), features_name.index(fet) + maxi))
 
-    pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
+    features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
     X = X[:, np.asarray(train_fet_num)]
     Xtrain = Xtrain[:, np.asarray(train_fet_num)]
-    logger.info(pos_feature)
+    logger.info(features_name)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     if spec != '':
@@ -213,7 +213,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
                            testname,
-                           pos_feature,
+                           features_name,
                            prefix,
                            prefix_train,
                            dummy,
@@ -226,7 +226,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                            scaling,
                            testDepartement,
                            train_dir,
-                           pos_feature_2D,
+                           features_name_2D,
                            shape2D)
 
 def dummy_test(dates):

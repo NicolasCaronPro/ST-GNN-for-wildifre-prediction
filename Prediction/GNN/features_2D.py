@@ -10,7 +10,7 @@ def find_temporal_date(dates):
 def get_sub_nodes_feature_2D(graph, shape: int,
                             Xset : np.array,
                             scaling : str,
-                            pos_feature_1D : dict,
+                            features_name_1D : dict,
                             departements : list,
                             features : list,
                             sinister : str,
@@ -30,7 +30,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
     n_pixel_x = 0.012
 
     # Define Features for 2D database
-    pos_feature, newShape = create_pos_features_2D(shape, features)
+    features_name, newShape = get_features_name_lists_2D(shape, features)
 
     # Load mask
     dir_mask = path / 'raster' / '1x1'
@@ -84,7 +84,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
         if doMeteo:
             #meteostat = pd.read_csv(rootDisk / departement / 'data' / 'meteostat' / 'meteostat.csv')
             #for cem in cems_variables:
-            #    meteostat[cem] = scaler(meteostat[cem].values, Xtrain[:, pos_feature_1D[cem] + 2], concat=False)
+            #    meteostat[cem] = scaler(meteostat[cem].values, Xtrain[:, features_name_1D[cem] + 2], concat=False)
             pass
 
         # Load elevation raster
@@ -187,34 +187,34 @@ def get_sub_nodes_feature_2D(graph, shape: int,
 
             # Add historical
             if doHistorical:
-                spatioTemporalRaster[:,:,pos_feature['Historical']] = Xset[index_1D, pos_feature_1D['Historical'] + 2]
+                spatioTemporalRaster[:,:,features_name.index('Historical')] = Xset[index_1D, features_name_1D['Historical'] + 2]
 
             # Add calendar
             if doCalendar:
                 for iv in range(size_calendar):
-                    spatioTemporalRaster[:,:, pos_feature['Calendar'] + iv] = Xset[index_1D, pos_feature_1D['Calendar'] + iv]
+                    spatioTemporalRaster[:,:, features_name.index('Calendar') + iv] = Xset[index_1D, features_name_1D['Calendar'] + iv]
 
             # Add geo
             if doGeo:
                 for iv in range(size_geo):
-                    spatioTemporalRaster[:,:, pos_feature['Geo'] + iv] = Xset[index_1D, pos_feature_1D['Geo'] + iv]
+                    spatioTemporalRaster[:,:, features_name.index('Geo') + iv] = Xset[index_1D, features_name_1D['Geo'] + iv]
 
             # Add meteorological
             if doMeteo:
                 #meteostatDate = meteostat[meteostat['creneau'] == allDates[indD]]
                 #raster_meteo raster_meteo(spatioTemporalRaster, geo[geo['scale'] == node[0]], meteostatDate, \
-                #pos_feature['temp], n_pixel_x, n_pixel_y, dir_output)
+                #features_name.index('temp), n_pixel_x, n_pixel_y, dir_output)
                 for cems in cems_variables:
-                    spatioTemporalRaster[:,:, pos_feature[cems]] = Xset[index_1D, pos_feature_1D[cems]]
+                    spatioTemporalRaster[:,:, features_name.index(cems)] = Xset[index_1D, features_name_1D[cems]]
 
             if doAir:
                 for iv, pol in enumerate(air_variables):
-                    spatioTemporalRaster[:,:, pos_feature['air'] + iv] = Xset[index_1D, pos_feature_1D['air'] + iv ]
+                    spatioTemporalRaster[:,:, features_name.index('air') + iv] = Xset[index_1D, features_name_1D['air'] + iv ]
 
             ########################################### This is time consuming ##########################################################
             # Add sentinel
             if doSent:
-                #raster_sentinel(spatioTemporalRaster, allDates[indD], node[0], mask, rootDisk / departement / 'data', pos_feature['sentinel'])
+                #raster_sentinel(spatioTemporalRaster, allDates[indD], node[0], mask, rootDisk / departement / 'data', features_name.index('sentinel'))
                 month = allDates[node[4].astype(int)].split('-')[1]
                 if month >= '3' and month <= '5':
                     sent = spring
@@ -225,22 +225,22 @@ def get_sub_nodes_feature_2D(graph, shape: int,
                 else:
                     sent = winter
 
-                raster_sentinel_2(spatioTemporalRaster, node[0], mask, sent, pos_feature['sentinel'])
+                raster_sentinel_2(spatioTemporalRaster, node[0], mask, sent, features_name.index('sentinel'))
 
             # Add landcover
             if doLand:
-                raster_landcover_2(spatioTemporalRaster, node[0], mask, landcover, pos_feature['landcover'], encoder_landcover)
-                raster_foret(spatioTemporalRaster, mask, node[0], foret, pos_feature['foret'], encoder_foret)
-                raster_osmnx(spatioTemporalRaster, mask, node[0], osmnx, pos_feature['highway'], encoder_osmnx)
+                raster_landcover_2(spatioTemporalRaster, node[0], mask, landcover, features_name.index('landcover'), encoder_landcover)
+                raster_foret(spatioTemporalRaster, mask, node[0], foret, features_name.index('foret'), encoder_foret)
+                raster_osmnx(spatioTemporalRaster, mask, node[0], osmnx, features_name.index('highway'), encoder_osmnx)
             ############################################################################################################################
 
             # Add elevation
             if doEle:
-                raster_elevation(spatioTemporalRaster, mask, node[0], elevation, pos_feature['elevation'])
+                raster_elevation(spatioTemporalRaster, mask, node[0], elevation, features_name.index('elevation'))
 
             # Add population
             if doPop:
-                raster_population(spatioTemporalRaster, mask, node[0], population, n_pixel_x, n_pixel_y, pos_feature['population'])
+                raster_population(spatioTemporalRaster, mask, node[0], population, n_pixel_x, n_pixel_y, features_name.index('population'))
 
             if doForet:
                 pass
@@ -261,7 +261,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
             save_object(spatioTemporalRaster, str(int(node[0]))+'_'+str(indD)+'.pkl', dir_output / prefix / 'data')
 
     # Return original subnode
-    return pos_feature, newShape
+    return features_name, newShape
 
 if __name__ == '__main__':
 

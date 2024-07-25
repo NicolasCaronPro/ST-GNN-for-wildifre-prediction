@@ -161,13 +161,13 @@ class ReadGraphDataset_2D(Dataset):
 
 def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
                trainDate : str, trainDepartements : list, departements : list, ks : int, dir_output : Path,
-               prefix : str, pos_feature : dict, days_in_futur : int, futur_met :str):
+               prefix : str, features_name : list, days_in_futur : int, futur_met :str):
     """
     Preprocess the input features:
         X : input features
         Y  input target
         test_size : fraction of validation
-        pos_feature : dict storing feature's index
+        features_name : dict storing feature's index
         scaling : scale method
     """
 
@@ -178,9 +178,10 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     Xset, Yset = remove_none_target(Xset, Yset)
     Xset, Yset = remove_bad_period(Xset, Yset, PERIODES_A_IGNORER, departements)
 
-    print(f'We found nan at {np.unique(np.argwhere(np.isnan(X))[:,1])}')
+    nanmask = np.unique(np.argwhere(np.isnan(X))[:,1])
+    logger.info(f'We found nan at {[features_name[i] for i in nanmask]}')
 
-    print(f'X shape {X.shape}, X shape after removal nan and -1 target {Xset.shape}, Y shape is {Yset.shape}')
+    logger.info(f'X shape {X.shape}, X shape after removal nan and -1 target {Xset.shape}, Y shape is {Yset.shape}')
 
     assert Xset.shape[0] > 0
     assert Xset.shape[0] == Yset.shape[0]
@@ -225,7 +226,7 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
         exit(1)
 
     if 'AutoRegressionReg' in trainFeatures:
-        autoregressiveBand = pos_feature['AutoRegressionReg']
+        autoregressiveBand = features_name.index('AutoRegressionReg')
     else:
         autoregressiveBand = - 1
 
@@ -240,11 +241,11 @@ def preprocess(X : np.array, Y : np.array, scaling : str, maxDate : str,
     Xtrain, Ytrain = (Xset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))],
                       Yset[(Xset[:,4] < allDates.index(trainDate)) & (np.isin(Xset[:,3], trainCode))])
 
-    Xval, Yval = (Xset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))],
-                    Yset[(Xset[:,4] >= allDates.index(trainDate)) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))])
+    Xval, Yval = (Xset[(Xset[:,4] >= allDates.index(trainDate) + ks) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))],
+                    Yset[(Xset[:,4] >= allDates.index(trainDate) + ks) & (Xset[:,4] < allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))])
 
-    Xtest, Ytest = (Xset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))],
-                    Yset[((Xset[:,4] >= allDates.index(maxDate)) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))])
+    Xtest, Ytest = (Xset[((Xset[:,4] >= allDates.index(maxDate) + ks) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))],
+                    Yset[((Xset[:,4] >= allDates.index(maxDate) + ks) & (np.isin(Xset[:,3], trainCode))) |  (~np.isin(Xset[:,3], trainCode))])
     
     logger.info(f'Size of the train set {Xtrain.shape[0]}, size of the val set {Xval.shape[0]}, size of the test set {Xtest.shape[0]}')
     logger.info(f'Unique train dates set {np.unique(Xtrain[:,4]).shape[0]}, val dates {np.unique(Xval[:,4]).shape[0]}, test dates {np.unique(Xtest[:,4]).shape[0]}')
@@ -422,8 +423,8 @@ def train_val_data_loader_2D(graph,
                             batch_size : int,
                             device: torch.device,
                             scaling : str,
-                            pos_feature : dict,
-                            pos_feature_2D : dict,
+                            features_name : dict,
+                            features_name_2D : dict,
                             ks : int,
                             shape : tuple,
                             path : Path) -> None:
@@ -460,7 +461,7 @@ def train_val_data_loader_2D(graph,
         if x is None:
             continue
 
-        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, features_name, features_name_2D)
         save_object(x, str(id)+'.pkl', path / scaling)
     
         Xst.append(x)
@@ -476,7 +477,7 @@ def train_val_data_loader_2D(graph,
         if x is None:
             continue
 
-        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, features_name, features_name_2D)
         save_object(x, str(id)+'.pkl', path / scaling)
         
         XsV.append(x)
@@ -492,7 +493,7 @@ def train_val_data_loader_2D(graph,
         if x is None:
             continue
 
-        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, features_name, features_name_2D)
         save_object(x, str(id)+'.pkl', path / scaling)
     
         XsTe.append(x)
@@ -559,8 +560,8 @@ def create_test_loader_2D(graph,
                 use_temporal_as_edges : bool,
                 device: torch.device,
                 scaling : str,
-                pos_feature : dict,
-                pos_feature_2D : dict,
+                features_name : dict,
+                features_name_2D : dict,
                 ks : int,
                 shape : tuple,
                 path : Path) -> tuple:
@@ -585,7 +586,7 @@ def create_test_loader_2D(graph,
         if x is None:
             continue
     
-        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, pos_feature, pos_feature_2D)
+        x = load_x_from_pickle(x, shape, path, Xtrain, Ytrain, scaling, features_name, features_name_2D)
         save_object(x, str(id)+'.pkl', path / scaling)
 
         X.append(str(id)+'.pkl')
@@ -636,7 +637,7 @@ def create_test_loader(graph, Xset : np.array,
 
 def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device, encoding,
-                     k_days, test, pos_feature, scaling, prefix, Rewrite):
+                     k_days, test, features_name, scaling, prefix, Rewrite):
 
     if not Rewrite:
         XTensor = read_object('XTensor_'+test+'_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
@@ -657,7 +658,7 @@ def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
 
 def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device, k_days,
-                     test, pos_feature, scaling, encoding, prefix, Rewrite):
+                     test, features_name, scaling, encoding, prefix, Rewrite):
     loader = None
     if Rewrite:
         loader = create_test_loader(graph=graphScale, Xset=X, Yset=Y, device=device,
@@ -678,8 +679,8 @@ def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
 
 def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, Xtrain, Ytrain, device,
-                     k_days, test, pos_feature, scaling, encoding, prefix,
-                     shape, pos_feature_2D, Rewrite):
+                     k_days, test, features_name, scaling, encoding, prefix,
+                     shape, features_name_2D, Rewrite):
     loader = None
     if Rewrite:
         loader = create_test_loader_2D(graphScale,
@@ -690,8 +691,8 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                                     use_temporal_as_edges,
                                     device,
                                     scaling,
-                                    pos_feature,
-                                    pos_feature_2D,
+                                    features_name,
+                                    features_name_2D,
                                     k_days,
                                     shape,
                                     dir_output)
@@ -709,8 +710,8 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                                     use_temporal_as_edges,
                                     device,
                                     scaling,
-                                    pos_feature,
-                                    pos_feature_2D,
+                                    features_name,
+                                    features_name_2D,
                                     k_days,
                                     shape,
                                     dir_output)
@@ -731,7 +732,7 @@ def test_sklearn_api_model(graphScale,
                            scaling,
                            testDepartement,
                            train_dir,
-                           pos_feature):
+                           features_name):
     
     
     if Xset.shape[0] == 0:
@@ -776,10 +777,10 @@ def test_sklearn_api_model(graphScale,
         logger.info(f'{features_selected}')
         pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
-        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset, features_selected, target_name == 'binary', autoRegression, pos_feature)
+        pred[:, 0] = graphScale.predict_model_api_sklearn(Xset, features_selected, target_name == 'binary', autoRegression, features_name)
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
-        dir_predictor = root_graph / train_dir / 'influenceClustering'
+        dir_predictor = root_graph / train_dir / '../influenceClustering'
         for nameDep in departements:
             mask = np.argwhere(y[:, 3] == name2int[nameDep])
             if mask.shape[0] == 0:
@@ -815,7 +816,7 @@ def test_sklearn_api_model(graphScale,
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
             start = '2018-01-01'
@@ -851,13 +852,13 @@ def test_sklearn_api_model(graphScale,
         i += 1
 
     ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
     save_object(metrics, outname, dir_output)
 
 def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            methods,
                            testname,
-                           pos_feature,
+                           features_name,
                            prefix,
                            prefix_train,
                            dummy,
@@ -871,7 +872,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
                            testDepartement,
                            train_dir,
                            dico_model,
-                           pos_feature_2D,
+                           features_name_2D,
                            shape2D,
                            sinister,
                            resolution):
@@ -903,15 +904,15 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         if not is_2D_model:
             test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
                                         X=Xset, Y=Yset, Xtrain=Xtrain, Ytrain=Ytrain,
-                                        device=device, k_days=k_days, test=testname, pos_feature=pos_feature,
+                                        device=device, k_days=k_days, test=testname, features_name=features_name,
                                         scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=False)
 
         else:
             test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale,
                                               dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
                                             Xtrain=Xtrain, Ytrain=Ytrain, device=device, k_days=k_days, test=testname,
-                                            pos_feature=pos_feature, scaling=scaling, prefix=prefix,
-                                        shape=(shape2D[0], shape2D[1], shape2D[2]), pos_feature_2D=pos_feature_2D, encoding=encoding,
+                                            features_name=features_name, scaling=scaling, prefix=prefix,
+                                        shape=(shape2D[0], shape2D[1], shape2D[2]), features_name_2D=features_name_2D, encoding=encoding,
                                         Rewrite=False)
 
         graphScale._load_model_from_path(model_dir / 'best.pt', dico_model[mddel], device)
@@ -919,7 +920,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         features_selected = read_object('features.pkl', model_dir)
 
         predTensor, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device, target_name=target_name, 
-                                                              autoRegression=autoRegression, pos_feature=pos_feature)
+                                                              autoRegression=autoRegression, features_name=features_name)
         y = YTensor.detach().cpu().numpy()
 
         dir_predictor = root_graph / train_dir / 'influenceClustering'
@@ -957,7 +958,7 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, mddel+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
             start = '2022-06-01'
@@ -989,13 +990,13 @@ def test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
         i += 1
 
     ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
-    save_object(metrics, outname, dir_output)
+    outname = 'metrics'+'_'+prefix_train+'_'+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
+    save_object(metrics, outname, dir_output / n)
 
 def test_simple_model(graphScale, Xset, Yset,
                            methods,
                            testname,
-                           pos_feature,
+                           features_name,
                            prefix_train,
                            dummy,
                            dir_output,
@@ -1054,7 +1055,7 @@ def test_simple_model(graphScale, Xset, Yset,
         logger.info(f'      perf_X         ')
         logger.info('#########################')
         name = 'perf_X'
-        pred = graphScale._predict_perference_with_X(x, pos_feature)
+        pred = graphScale._predict_perference_with_X(x, features_name)
 
         predTensor = torch.tensor(pred, dtype=torch.float32, device=device)
         metrics[name] = add_metrics(methods, 2, predTensor, YTensor, testDepartement, False, scale, name, train_dir)
@@ -1065,8 +1066,8 @@ def test_simple_model(graphScale, Xset, Yset,
         res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
         res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-        outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_metrics.pkl'
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+        outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_metrics.pkl'
         save_object(metrics, outname, dir_output)
 
 def test_break_points_model(Xset, Yset,
@@ -1165,7 +1166,7 @@ def test_break_points_model(Xset, Yset,
 
     #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
     save_object(res, name+'_pred.pkl', dir_output)
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_bp.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_bp.pkl'
     save_object(metrics, outname, dir_output)
 
 def test_fusion_prediction(models,
@@ -1176,12 +1177,13 @@ def test_fusion_prediction(models,
                            Xset,
                            Yset,
                            dir_output,
+                           dir_train,
                            graphScale,
                         testDepartement,
                         testname,
                         methods,
                         prefix_train,
-                        pos_feature,):
+                        features_name,):
     
     scale = graphScale.scale
 
@@ -1204,50 +1206,50 @@ def test_fusion_prediction(models,
     for name, target_name, autoRegression in models:
         # Prediction
         if args1['model_type'] == 'traditionnal':
-            feature_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
-            logger.info(feature_selected)
+            features_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
+            logger.info(features_selected)
             logger.info(XsetDaily.shape)
             graph1._set_model(model1)
             pred1 = np.empty((XsetDaily.shape[0], y.shape[1]))
             pred1[:, :6] = XsetDaily[:, :6]
             pred1[:, -1] = graph1.predict_model_api_sklearn(X=XsetDaily,
-                                                            features=feature_selected, autoRegression=args1['autoRegression'],
-                                                            pos_feature=args1['pos_feature'], isBin=target_name == 'binary')
+                                                            features=features_selected, autoRegression=args1['autoRegression'],
+                                                            features_name=args1['features_name'], isBin=target_name == 'binary')
         else:
             test_loader = read_object('test_loader.pkl', args1['train_dir'])
-            feature_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
+            features_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
 
             graph1._load_model_from_path(args1['train_dir'] / 'best.pt', args1['model_name']+'.pkl', device)
 
-            predTensor, YTensor = graph1._predict_test_loader(test_loader, feature_selected, device=device, isBin=target_name == 'binary',
-                                                            autoRegression=args1['autoRegression'], pos_feature=args1['pos_feature'])
+            predTensor, YTensor = graph1._predict_test_loader(test_loader, features_selected, device=device, isBin=target_name == 'binary',
+                                                            autoRegression=args1['autoRegression'], features_name=args1['features_name'])
 
             pred1 = np.copy(y)
             pred1[:, -1] = predTensor.detach().cpu().numpy()
 
         if args2['model_type'] == 'traditionnal':
-            feature_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
+            features_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
             graph2._set_model(model2)
             pred2 = graph2.predict_model_api_sklearn(X=XsetLocalized,
-                                                            features=feature_selected, autoRegression=args2['autoRegression'],
-                                                            pos_feature=args2['pos_feature'], isBin=target_name == 'binary')
+                                                            features=features_selected, autoRegression=args2['autoRegression'],
+                                                            features_name=args2['features_name'], isBin=target_name == 'binary')
         else:
             test_loader = read_object('test_loader.pkl', args2['dir_model'])
-            feature_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
+            features_selected = read_object('features.pkl', args2['dir_model'] / args2['model_name'])
 
             graph2._load_model_from_path(args2['train_dir'] / 'best.pt', args2['model_name'], device)
 
-            predTensor, YTensor = graph2._predict_test_loader(test_loader, feature_selected, device=device, isBin=target_name == 'binary',
-                                                            autoRegression=args2['autoRegression'], pos_feature=args2['pos_feature'])
+            predTensor, YTensor = graph2._predict_test_loader(test_loader, features_selected, device=device, isBin=target_name == 'binary',
+                                                            autoRegression=args2['autoRegression'], features_name=args2['features_name'])
             y = YTensor.detach().cpu().numpy()
             pred2 = predTensor.detach().cpu().numpy()
         # Fusion
-        Xset = add_temporal_spatial_prediction(Xset[:, :-2], pred2.reshape(-1,1), pred1, graph1, pos_feature=pos_feature, target_name=target_name)
+        Xset = add_temporal_spatial_prediction(Xset[:, :-2], pred2.reshape(-1,1), pred1, graph1, features_name=features_name, target_name=target_name)
         i = 0
     
         y = Yset[Yset[:,-4] > 0]
         n = name
-        model_dir = args2['train_dir'] / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
+        model_dir = dir_train / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
         
         logger.info('#########################')
         logger.info(f'      {name}            ')
@@ -1266,8 +1268,9 @@ def test_fusion_prediction(models,
         pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
         pred[:, 0] = graphScale.predict_model_api_sklearn(X=Xset,
-                                                            features=feature_selected, autoRegression=autoRegression,
-                                                            pos_feature=pos_feature, isBin=target_name == 'binary')
+                                                            features=features_selected, autoRegression=autoRegression,
+                                                            features_name=features_name, isBin=target_name == 'binary')
+
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
         for nameDep in departements:
@@ -1284,7 +1287,7 @@ def test_fusion_prediction(models,
 
         metrics[name] = add_metrics(methods, i, pred, y, testDepartement, target_name, scale, name, None)
 
-        if target_name:
+        if target_name == 'binary':
             y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
 
         realVspredict(pred[:, 0], y, -1,
@@ -1302,7 +1305,7 @@ def test_fusion_prediction(models,
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
 
         if testname == '69':
             start = '2018-01-01'
@@ -1332,8 +1335,8 @@ def test_fusion_prediction(models,
             graphScale)"""
 
         i += 1
-    save_object(res, name+'_pred.pkl', dir_output)
-    outname = 'metrics'+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_fusion.pkl'
+    #save_object(res, name+'_pred.pkl', dir_output)
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_fusion.pkl'
     save_object(metrics, outname, dir_output)
 
 #########################################################################################################
@@ -1344,14 +1347,10 @@ def test_fusion_prediction(models,
 
 def create_inference(graph,
                      X : np.array,
-                     Xtrain : np.array,
                      device : torch.device,
                      use_temporal_as_edges,
                      graphId : int,
-                     ks : int,
-                     scaling : str) -> tuple:
-
-    Xset = preprocess_inference(X, Xtrain, scaling)
+                     ks : int,) -> tuple:
 
     graphId = [graphId]
 
@@ -1359,21 +1358,22 @@ def create_inference(graph,
 
     for id in graphId:
         if use_temporal_as_edges:
-            x, e = construct_graph_set(graph, id, Xset, None, ks)
+            x, e = construct_graph_set(graph, id, X, None, ks)
         else:
-            x, e = construct_graph_with_time_series(graph, id, Xset, None, ks)
+            x, e = construct_graph_with_time_series(graph, id, x, None, ks)
         if x is None:
             continue
         batch.append([torch.tensor(x, dtype=torch.float32, device=device), torch.tensor(e, dtype=torch.long, device=device)])
     if len(batch) == 0:
         return None, None
+    
     features, edges = graph_collate_fn_no_label(batch)
 
-    return features, edges
+    return features[:,:,0], edges
 
 
 def create_inference_2D(graph, X : np.array, Xtrain : np.array, Ytrain : np.array,
-                     device : torch.device, use_temporal_as_edges, ks : int, pos_feature : dict,
+                     device : torch.device, use_temporal_as_edges, ks : int, features_name : dict,
                      scaling : str) -> tuple:
 
     pass

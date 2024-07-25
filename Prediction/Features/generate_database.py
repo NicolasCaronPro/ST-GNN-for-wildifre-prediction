@@ -69,7 +69,7 @@ class GenerateDatabase():
     def compute_meteo_stat(self):
         logger.info('Compute compute_meteo_stat')
         self.meteostat = construct_historical_meteo(self.meteostatParams['start'], self.meteostatParams['end'],
-                                                    self.region, self.meteostatParams['dir'])
+                                                    self.region, self.meteostatParams['dir'], self.departement)
         
         self.meteostat['year'] = self.meteostat['creneau'].apply(lambda x : x.split('-')[0])
         self.meteostat.to_csv(self.meteostatParams['dir'] / 'meteostat.csv', index=False)
@@ -224,7 +224,7 @@ class GenerateDatabase():
         #########################################################################
 
         START = dt.datetime.strptime(self.vigicrueParams['start'], '%Y-%m-%d') 
-        STOP = dt.datetime.strptime(self.vigicrueParams['end'], '%Y-%m-%d')
+        STOP = dt.datetime.strptime(self.vigicrueParams['stop'], '%Y-%m-%d')
 
         rname = 'stations_'+self.departement.split('-')[1]+'_full.csv'
         fic_name = dir_hydroreel / rname
@@ -233,15 +233,18 @@ class GenerateDatabase():
             try:
                 return dt.datetime.strptime(chaine, "%d/%m/%Y %H:%M").strftime("%Y-%m-%d %H:%M:%S")
             except:
+                try:
                 #'2018-01-01 00:00:00+00:00'
-                return dt.datetime.strptime(chaine, "%Y-%m-%d %H:%M:%S+00:00").strftime("%Y-%m-%d %H:%M:%S")
+                    return dt.datetime.strptime(chaine, "%Y-%m-%d %H:%M:%S+00:00").strftime("%Y-%m-%d %H:%M:%S")
+                except:
+                    return dt.datetime.strptime(chaine, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
 
         logger.info('Collecting Hydroreel stations list')
 
         stations_a_ignorer = []
         for station in sorted(list(stations_hydroreel.station)):
-            #if not (dir_hydroreel / f"{station}.csv").is_file():
-            if True:
+            if not (dir_hydroreel / f"{station}.csv").is_file():
+            #if False:
                 logger.info(f"On collecte l'archive de {station}")
                 df = pd.DataFrame()
                 for annee in range(START.year, STOP.year):
@@ -267,11 +270,12 @@ class GenerateDatabase():
                         logger.info(f"    Le dataframe de {station} passe de {taille} à {df.shape}")
                     else:
                         logger.info(f" -> Erreur : code {r.status_code} pour la station {station}")
-                        #stations_a_ignorer.append(station)
+                        stations_a_ignorer.append(station)
                         break
-                df['latitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['latitude'].values[0]
-                df['longitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['longitude'].values[0]
-                df.to_csv(dir_hydroreel / f"{station}.csv", index=False)
+                if station not in stations_a_ignorer:
+                    df['latitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['latitude'].values[0]
+                    df['longitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['longitude'].values[0]
+                    df.to_csv(dir_hydroreel / f"{station}.csv", index=False)
 
         logger.info(f"On supprime les stations Hydroreel qui n'ont pas répondues : {', '.join(stations_a_ignorer)}")
         logger.info(f"Taille du dataframe avant suppression : {len(stations_hydroreel)}")
@@ -287,9 +291,13 @@ class GenerateDatabase():
         for index, station in enumerate(sorted(stations_hydroreel.station)):
             logger.info(f" * on tente de mettre à jour {station}") 
             df = pd.read_csv(dir_hydroreel / (station+'.csv'))
-            """Date_debut = max(df['Date'])
+            df['station_hydroreel'] = station
+            if 'Date' not in df.columns:
+                continue
+            df['Date'] = df['Date'].apply(hydroreel_date_parser)
+            Date_debut = max(df['Date'])
             if isinstance(Date_debut, str):
-                Date_debut = dt.datetime.strptime(Date_debut, '%Y-%m-%dT%H:%M:%S')
+                Date_debut = dt.datetime.strptime(Date_debut, '%Y-%m-%d %H:%M:%S')
             Date_debut += dt.timedelta(hours=1)
             Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
                         Date_debut + dt.timedelta(days=3))
@@ -314,7 +322,7 @@ class GenerateDatabase():
                             logger.info("  - some data have been received")
                             for data in text['data'][::-1]:
                                 f.write(
-                                f"{dt.datetime.strptime(data['date_obs'], '%Y-%m-%dT%H:%M:%SZ').strftime('%d/%m/%Y %H:%M')},{data['resultat_obs'] / 10}" + os.linesep)
+                                f"{dt.datetime.strptime(data['date_obs'], '%Y-%m-%d %H:%M:%SZ').strftime('%d/%m/%Y %H:%M')},{data['resultat_obs'] / 10}" + os.linesep)
                         else:
                             logger.info("  - nothing received")
                     except Exception as e:
@@ -323,15 +331,15 @@ class GenerateDatabase():
                             f.write(f'{dt.datetime.now()},{url}\n')
                     Date_debut = Date_fin
                     Date_fin = min(dt.datetime.now().replace(minute=0, second=0, microsecond=0),
-                                Date_debut + dt.timedelta(days=3))"""
+                                Date_debut + dt.timedelta(days=3))
 
-            total.append(pd.read_csv(dir_hydroreel / (station+'.csv')))
+        total.append(df)
 
         total = pd.concat(total).reset_index(drop=True)
-        total['Date'] = total['Date'].apply(lambda x : hydroreel_date_parser(x))
+        total['creneau'] = total['Date'].apply(lambda x : hydroreel_date_parser(x))
+        total['date'] = total['Date'].apply(lambda x : hydroreel_date_parser(x))
         total['hour'] = total['Date'].apply(lambda x : x.split(' ')[1])
-        total['Date'] = total['Date'].apply(lambda x : x.split(' ')[0])
-        total.rename({'Date' : 'creneau', 'H (cm)' : 'hauteur'}, inplace=True, axis=1)
+        total.rename({'H (cm)' : 'hauteur'}, inplace=True, axis=1)
         total = total[total['hour'] == '12:00:00']
         total16 = total[total['hour'] == '16:00:00']
 
@@ -566,7 +574,7 @@ if __name__ == '__main__':
     resolution = args.resolution
 
     ################## Ain ######################
-    #launch('departement-01-ain', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
+    launch('departement-01-ain', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)
 
     ################## DOUBS ######################
     launch('departement-25-doubs', resolution, computeMeteoStat, computeTemporal, addSpatial, addAir, addBouchon, addVigicrue, addNappes)

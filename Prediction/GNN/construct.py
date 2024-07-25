@@ -130,8 +130,9 @@ def construct_database(graphScale : GraphStructure,
         Y = read_object('Y_full_'+str(scale)+'.pkl', dir_output)
 
     n = 'X_full_'+str(scale)+'.pkl'
+    #if False:
     if (dir_output / n).is_file():
-        pos_feature, _ = create_pos_feature(scale, 6, features)
+        features_name, _ = get_features_name_list(scale, 6, features)
         X = read_object('X_full_'+str(scale)+'.pkl', dir_output)
     else:
         X = None
@@ -175,7 +176,7 @@ def construct_database(graphScale : GraphStructure,
             new_X_neighboor = Xtrain[mask_days]
             new_X_neighboor[:, 5] = 0
             X = np.concatenate((new_X, new_X_neighboor, Xtest), casting='no')
-            X[:, pos_feature['vigicrues']: pos_feature['vigicrues'] + 4] = -1
+            X[:, features_name.index('vigicrues'): features_name.index('vigicrues') + 4] = -1
 
         Y = np.concatenate((new_Y, new_Y_neighboor, Ytest), casting='no')
         X, Y = remove_nan_nodes(X, Y)
@@ -185,10 +186,7 @@ def construct_database(graphScale : GraphStructure,
         Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
 
     if X is None:
-        if graphScale.scale == 0:
-            X, pos_feature = get_sub_nodes_feature_2(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
-        else:
-            X, pos_feature = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
+        X, features_name = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
 
     ind = np.lexsort([Y[:, 4], Y[:, 0]])
     Y = Y[ind]
@@ -197,9 +195,10 @@ def construct_database(graphScale : GraphStructure,
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
+    Y[Y[:, 4] < k_days, 5] = 0
     X[:, 5] = Y[:, 5]
 
-    return X, Y, pos_feature
+    return X, Y, features_name
 
 def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     nfps = []
@@ -247,7 +246,7 @@ def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     name = sinister+'.csv'
     firepoints.to_csv(dir / sinister / name, index=False)
 
-def init(args, add_time_varying_features):
+def init(args, add_time_varying):
     
     global trainFeatures
     global features
@@ -274,6 +273,8 @@ def init(args, add_time_varying_features):
     doPCA = args.pca == 'True'
     doKMEANS = args.KMEANS == 'True'
     ncluster = int(args.ncluster)
+    k_days = int(args.k_days) # Size of the time series sequence use by DL models
+    days_in_futur = int(args.days_in_futur) # The target time validation
 
     ######################## CONFIG ################################
 
@@ -367,7 +368,7 @@ def init(args, add_time_varying_features):
             ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
             ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
 
-        X, Y, pos_feature = construct_database(graphScale,
+        X, Y, features_name = construct_database(graphScale,
                                             ps, scale, k_days,
                                             departements,
                                             features, sinister,
@@ -384,24 +385,24 @@ def init(args, add_time_varying_features):
     else:
         X = read_object('X_'+prefix+'.pkl', dir_output)
         Y = read_object('Y_'+prefix+'.pkl', dir_output)
-        pos_feature, newshape = create_pos_feature(graphScale.scale, 6, features)
+        features_name, newshape = get_features_name_list(graphScale.scale, 6, features)
 
+    print(features_name)
     if newFeatures != []:
-        X2, pos_feature_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
+        X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
         for fet in newFeatures:
-            maxi, _, _ = calculate_feature_range(fet, scale)
-            X[:, pos_feature[fet]: pos_feature[fet] + maxi] = X2[:, pos_feature_[fet]: pos_feature_[fet] + maxi]
-
+            start , maxi, _, _ = calculate_feature_range(fet, scale)
+            X[:, features_name.index(start): features_name.index(start) + maxi] = X2[:, features_name_.index(start): features_name_.index(start) + maxi]
 
     ################################# 2D Database ###################################
 
     if do2D:
         subnode = X[:,:6]
-        pos_feature_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
+        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
                                                     subnode.shape[1],
                                                     X,
                                                     scaling,
-                                                    pos_feature,
+                                                    features_name,
                                                     trainDepartements,
                                                     features,
                                                     sinister,
@@ -409,25 +410,27 @@ def init(args, add_time_varying_features):
                                                     prefix)
     else:
         subnode = X[:,:6]
-        pos_feature_2D, newShape2D = create_pos_features_2D(subnode.shape[1], features)
+        features_name_2D, newShape2D = get_features_name_lists_2D(subnode.shape[1], features)
 
-    prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-    prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+    prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
 
     ############################## Add varying time features #############################
-    if k_days > 0 and add_time_varying_features:
-        name = 'X_'+prefix+'.pkl'
-        if (dir_output / name).is_file():
+    if k_days > 0 and add_time_varying:
+        name = f'X_{prefix}.pkl'
+        if (dir_output / name).is_file() and not doDatabase:
+            for k in range(1, k_days + 1):
+                new_fet = [v+'_'+str(k) for v in varying_time_variables]
+                trainFeatures += [nf for nf in new_fet if nf.split('_')[0] in trainFeatures]
+                features += new_fet
+                features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
             X = read_object('X_'+prefix+'.pkl', dir_output)
         else:
             for k in range(1, k_days + 1):
-                new_fet = [v+'_'+str(k) for v in varying_time_variables]
-                logger.info(new_fet)
-                trainFeatures += new_fet
+                new_fet = [f'{v}_{str(k)}' for v in varying_time_variables]
+                trainFeatures += [nf for nf in new_fet if nf.split('_')[0] in trainFeatures]
                 features += new_fet
-                pos_feature, newShape = create_pos_feature(graphScale.scale, 6, features)
-                if doDatabase:
-                    X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, pos_feature=pos_feature, ks=k)
+                features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
+                X = add_varying_time_features(X=X, features=new_fet, newShape=newShape, features_name=features_name, ks=k, scale=scale)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
-    return X, Y, graphScale, prefix, prefix_train, pos_feature, pos_feature_2D
+    return X, Y, graphScale, prefix, features_name, features_name_2D

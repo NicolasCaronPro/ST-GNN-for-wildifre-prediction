@@ -2,7 +2,6 @@ from dataloader import *
 from config import *
 import geopandas as gpd
 import argparse
-from encoding import encode
 
 ########################### Input Arg ######################################
 
@@ -33,6 +32,8 @@ parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
+parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 
 args = parser.parse_args()
 
@@ -60,13 +61,15 @@ doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
 doGridSearch = args.GridSearch ==  'True'
 doBayesSearch = args.BayesSearch == 'True'
+k_days = int(args.k_days) # Size of the time series sequence use by DL models
+days_in_futur = int(args.days_in_futur) # The target time validation
 
-######################### Incorporate new features ##########################
+############################# GLOBAL VARIABLES #############################
 
-dir_target = root_target / sinister / 'log'
+dir_target = root_target / sinister / 'log' / resolution
 
 geo = gpd.read_file('regions/regions.geojson')
-geo = geo[geo['departement'].isin([name2str[dept] for dept in departements])].reset_index(drop=True)
+geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
 name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
@@ -74,41 +77,50 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-if values_per_class == 'full':
-    prefix = str(values_per_class)+'_'+str(scale)
-else:
-    prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+if spec == '':
+    spec = 'default'
 
 if dummy:
-    prefix += '_dummy'
+    spec += '_dummy'
 
-############################ INIT ################################
+autoRegression = 'AutoRegressionReg' in trainFeatures
+if autoRegression:
+    spec = '_AutoRegressionReg'
 
-X, Y, graphScale, prefix, prefix_train, pos_feature, _ = init(args, True)
+####################### INIT ################################
+
+X, Y, graphScale, prefix, features_name, _ = init(args, True)
 
 ############################# Training ###########################
 trainCode = [name2int[dept] for dept in trainDepartements]
 
-train_fet_num = select_train_features(trainFeatures, features, scale, pos_feature)
+# Select train features
+train_fet_num = select_train_features(trainFeatures, scale, features_name)
 
-save_object(features, spec+'_features.pkl', dir_output)
-save_object(trainFeatures, spec+'_trainFeatures.pkl', dir_output)
+dir_output =  dir_output / spec
 
-logger.info(pos_feature)
-pos_feature, newshape = create_pos_feature(graphScale.scale, 6, trainFeatures)
-
-X = X[:, np.asarray(train_fet_num)]
-logger.info(np.unravel_index(np.nanargmax(X), X.shape))
+save_object(features, 'features.pkl', dir_output)
+save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
+save_object(features_name, 'features_name.pkl', dir_output)
 
 if days_in_futur > 1:
     prefix += '_'+str(days_in_futur)
     prefix += '_'+futur_met
 
+features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
+
+X = X[:, np.asarray(train_fet_num)]
+logger.info(features_name)
+logger.info(np.max(X[:,4]))
+logger.info(np.unique(X[:,0]))
+logger.info(np.nanmax(X))
+logger.info(np.unravel_index(np.nanargmax(X), X.shape))
+
 # Preprocess
 trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
                                                    departements = departements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, pos_feature=pos_feature,
+                                                   ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                    days_in_futur=days_in_futur,
                                                    futur_met=futur_met)
 
@@ -121,16 +133,19 @@ if doPCA:
     testDataset = (apply_pca(testDataset[0], pca, components), testDataset[1], train_fet_num)
     features_selected = np.arange(6, components + 6)
     trainFeatures = ['pca_'+str(i) for i in range(components)]
-    pos_feature, _ = create_pos_feature(0, 6, trainFeatures)
+    features_name, _ = get_features_name_list(0, 6, trainFeatures)
     kmeansFeatures = trainFeatures
 else:
     features_selected = np.arange(6, X.shape[1])
 
-prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(features_selected))+'_'+str(ncluster)
-prefix_train = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(len(features_selected))+'_'+str(ncluster)
+prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+
+if days_in_futur > 1:
+    prefix += '_'+str(days_in_futur)
+    prefix += '_'+futur_met
 
 if doTrain:
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, pos_feature, scale, ncluster)
+    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
 
     Ytrain = trainDataset[1]
     Yval = valDataset[1]
@@ -157,8 +172,7 @@ if doTest:
     Xtest = testDataset[0]
     Ytest = testDataset[1]
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
-    train_dir = Path(name_dir)
+    train_dir = copy(dir_output)
 
     name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
@@ -199,12 +213,12 @@ if doTest:
         test_break_points_model(Xset, Yset,
                            methods,
                            dept,
-                           prefix_train,
+                           prefix,
                            dir_output / dept / prefix,
                            encoding,
                            scaling,
                            [dept],
                            scale,
-                           train_dir,
+                           train_dir / dept,
                            sinister,
                            resolution)
