@@ -91,94 +91,18 @@ if autoRegression:
 
 X, Y, graphScale, prefix, features_name, _ = init(args, True)
 
-############################# Training ###########################
-trainCode = [name2int[dept] for dept in trainDepartements]
+############################# Train, Val, test ###########################
 
-save_object(features_name, 'features_name.pkl', dir_output)
-
-# Select train features
-train_fet_num = select_train_features(trainFeatures, scale, features_name)
-#logger.info(len(train_fet_num))
-dir_output =  dir_output / spec
-
-save_object(features, 'features.pkl', dir_output)
-save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
-save_object(features_name, 'features_name_train.pkl', dir_output)
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
-X = X[:, np.asarray(train_fet_num)]
-logger.info(np.max(X[:,4]))
-logger.info(np.unique(X[:,0]))
-logger.info(np.nanmax(X))
-logger.info(np.unravel_index(np.nanargmax(X), X.shape))
-
-# Preprocess
-trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, trainDepartements=trainDepartements,
-                                                   departements = departements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
-                                                   days_in_futur=days_in_futur,
-                                                   futur_met=futur_met)
-
-realVspredict(testDataset[1][:, -1], testDataset[1], -1, dir_output / prefix, 'raw')
-
-realVspredict(testDataset[1][:, -3], testDataset[1], -3, dir_output / prefix, 'class')
-
-sinister_distribution_in_class(testDataset[1][:, -3], testDataset[1], dir_output / prefix)
-
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output / prefix, features_name, nbfeatures, scale)
-
-prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-if doPCA:
-    prefix += '_pca'
-    Xtrain = trainDataset[0]
-    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
-    trainDataset = (apply_pca(trainDataset[0], pca, components, features_selected), trainDataset[1])
-    valDataset = (apply_pca(valDataset[0], pca, components, features_selected), valDataset[1])
-    testDataset = (apply_pca(testDataset[0], pca, components, features_selected), testDataset[1])
-    features_selected = np.arange(6, components + 6)
-    trainFeatures = ['pca_'+str(i) for i in range(components)]
-    features_name, _ = get_features_name_list(0, 6, trainFeatures)
-    kmeansFeatures = trainFeatures
-
-if doKMEANS:
-    prefix += '_kmeans_'+str(ncluster)
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
-    Ytrain = trainDataset[1]
-    Yval = valDataset[1]
-    Ytest = testDataset[1]
-
-    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
-    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
-    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
-
-    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
-    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
-    
-    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
-
-logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
-logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
-
-# Features selection
+train_dataset, val_dataset, test_Dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args)
 
 ######################## Baseline ##############################
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 trainCode = [name2int[dept] for dept in trainDepartements]
 
 if doTrain:
-    wrapped_train_sklearn_api_model(trainDataset=trainDataset,
-                            valDataset=valDataset,
-                            testDataset=testDataset,
+    wrapped_train_sklearn_api_model(train_dataset=train_dataset,
+                            val_dataset=val_dataset,
+                            test_Dataset=test_Dataset,
                             dir_output=dir_output / name,
                             device='cpu',
                             features=features_selected,
@@ -192,11 +116,11 @@ if doTrain:
 if doTest:
     logger.info('############################# TEST ###############################')
 
-    Xtrain = trainDataset[0]
-    Ytrain = trainDataset[1]
+    Xtrain = train_dataset[0]
+    Ytrain = train_dataset[1]
 
-    Xtest = testDataset[0]
-    Ytest = testDataset[1]
+    Xtest = test_Dataset[0]
+    Ytest = test_Dataset[1]
 
     train_dir = copy(dir_output)
 
@@ -228,23 +152,9 @@ if doTest:
             ]
 
     models = [
-        ('xgboost_risk', 'risk', autoRegression),
-        ('xgboost_features_risk', 'risk', autoRegression),
-        #('xgboost_features_binary', 'binary', autoRegression),
-        ('xgboost_nbsinister', 'nbsinister', autoRegression),
-        #('xgboost_rmlse', False, autoRegression),
-        #('xgboost_optimize_feature', autoRegression),
-        #('lightgbm', False, autoRegression),
-        #('ngboost', False, autoRegression),
-        ('xgboost_binary', 'binary', autoRegression),
-        #('lightgbm_binary', True, False),
-        #('xgboost_binary_unweighted', True, False),
-        #('lightgbm_binary_unweighted', True, False),
-        #('xgboost_unweighted', False, autoRegression),
-        #('lightgbm_unweighted', False, autoRegression),
-        #('xgboost_grid_search_risk', 'risk', autoRegression), 
-        #('ngboost_unweighted', autoRegression),
-        #('ngboost_bin', autoRegression)
+        ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
+        ('xgboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
+        ('xgboost_binary_classficiation_logistic_features', 'binary', autoRegression),
         ]
         
     for dept in departements:

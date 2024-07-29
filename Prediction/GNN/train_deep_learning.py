@@ -91,83 +91,11 @@ if autoRegression:
 
 X, Y, graphScale, prefix, features_name, features_name_2D = init(args, False)
 
-############################# Training ###########################
-trainCode = [name2int[dept] for dept in trainDepartements]
+############################# Train, Val, test ###########################
 
-# Select train features
-train_fet_num = select_train_features(trainFeatures, scale, features_name)
+train_dataset, val_dataset, test_Dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args)
 
-dir_output =  dir_output / spec
-
-save_object(features, 'features.pkl', dir_output)
-save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
-save_object(features_name, 'features_name.pkl', dir_output)
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-logger.info(features_name)
-features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
-X = X[:, np.asarray(train_fet_num)]
-logger.info(features_name)
-logger.info(np.max(X[:,4]))
-logger.info(np.unique(X[:,0]))
-logger.info(np.nanmax(X))
-logger.info(np.unravel_index(np.nanargmax(X), X.shape))
-
-# Preprocess
-trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, trainDepartements=trainDepartements,
-                                                   departements = departements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
-                                                   days_in_futur=days_in_futur,
-                                                   futur_met=futur_met)
-
-realVspredict(testDataset[1][:, -1], testDataset[1], -1, dir_output / prefix, 'raw')
-
-realVspredict(testDataset[1][:, -3], testDataset[1], -3, dir_output / prefix, 'class')
-
-sinister_distribution_in_class(testDataset[1][:, -3], testDataset[1], dir_output / prefix)
-
-features_selected = features_selection(doFet, trainDataset[0], trainDataset[1], dir_output / prefix, features_name, nbfeatures, scale)
-
-prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-if doPCA:
-    prefix += '_pca'
-    Xtrain = trainDataset[0]
-    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
-    trainDataset = (apply_pca(trainDataset[0], pca, components, features_selected), trainDataset[1])
-    valDataset = (apply_pca(valDataset[0], pca, components, features_selected), valDataset[1])
-    testDataset = (apply_pca(testDataset[0], pca, components, features_selected), testDataset[1])
-    features_selected = np.arange(6, components + 6)
-    trainFeatures = ['pca_'+str(i) for i in range(components)]
-    features_name, _ = get_features_name_list(0, 6, trainFeatures)
-    kmeansFeatures = trainFeatures
-
-if doKMEANS:
-    prefix += '_kmeans_'+str(ncluster)
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
-    Ytrain = trainDataset[1]
-    Yval = valDataset[1]
-    Ytest = testDataset[1]
-
-    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
-    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
-    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
-
-    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
-    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
-    
-    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
-
-logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
-logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
+############################# Training ##################################
 
 # Train
 epochs = 10000
@@ -229,9 +157,9 @@ if doTrain:
             logger.info(f'Building loader, loading loader_{str(use_temporal_as_edges)}.pkl')
             last_bool = use_temporal_as_edges
             if not is_2D_model:
-                trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=trainDataset,
-                                                                        val=valDataset,
-                                                                        test=testDataset,
+                trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=train_dataset,
+                                                                        val=val_dataset,
+                                                                        test=test_Dataset,
                                                                 batch_size=64, device=device,
                                                                 use_temporal_as_edges = use_temporal_as_edges,
                                                                 ks=k_days)
@@ -240,9 +168,9 @@ if doTrain:
                 save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'.pkl', dir_output)
             else:
                 trainLoader, valLoader, testLoader = train_val_data_loader_2D(graph=graphScale,
-                                                                train=trainDataset,
-                                                                val=valDataset,
-                                                                test=testDataset,
+                                                                train=train_dataset,
+                                                                val=val_dataset,
+                                                                test=test_Dataset,
                                                                 use_temporal_as_edges=use_temporal_as_edges,
                                                                 batch_size=64,
                                                                 device=device,
@@ -278,9 +206,9 @@ if doTest:
 
     trainCode = [name2int[dept] for dept in trainDepartements]
 
-    Xtrain, Ytrain = trainDataset
+    Xtrain, Ytrain = train_dataset
 
-    Xtest, Ytest  = testDataset
+    Xtest, Ytest  = test_Dataset
 
     name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
     train_dir = Path(name_dir)

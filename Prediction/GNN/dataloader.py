@@ -153,6 +153,99 @@ class ReadGraphDataset_2D(Dataset):
     def get(self):
         pass
 
+#################################### NUMPY #############################################################
+def get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args):
+    # Input config
+    maxDate = args.maxDate
+    trainDate = args.trainDate
+    doFet = args.featuresSelection == "True"
+    nbfeatures = int(args.NbFeatures)
+    values_per_class = args.nbpoint
+    scale = int(args.scale)
+    spec = args.spec
+    doPCA = args.pca == 'True'
+    doKMEANS = args.KMEANS == 'True'
+    ncluster = int(args.ncluster)
+    k_days = int(args.k_days) # Size of the time series sequence use by DL models
+    days_in_futur = int(args.days_in_futur) # The target time validation
+
+    save_object(features_name, 'features_name.pkl', dir_output)
+
+    # Select train features
+    train_fet_num = select_train_features(trainFeatures, graphScale.scale, features_name)
+    #logger.info(len(train_fet_num))
+    dir_output =  dir_output / spec
+
+    save_object(features, 'features.pkl', dir_output)
+    save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
+    save_object(features_name, 'features_name_train.pkl', dir_output)
+
+    if days_in_futur > 1:
+        prefix += '_'+str(days_in_futur)
+        prefix += '_'+futur_met
+
+    features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
+    X = X[:, np.asarray(train_fet_num)]
+    logger.info(np.max(X[:,4]))
+    logger.info(np.unique(X[:,0]))
+    logger.info(np.nanmax(X))
+    logger.info(np.unravel_index(np.nanargmax(X), X.shape))
+
+    # Preprocess
+    train_dataset, val_dataset, test_Dataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
+                                                    trainDate=trainDate, trainDepartements=trainDepartements,
+                                                    departements = departements,
+                                                    ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
+                                                    days_in_futur=days_in_futur,
+                                                    futur_met=futur_met)
+
+    realVspredict(test_Dataset[1][:, -1], test_Dataset[1], -1, dir_output / prefix, 'raw')
+
+    realVspredict(test_Dataset[1][:, -3], test_Dataset[1], -3, dir_output / prefix, 'class')
+
+    sinister_distribution_in_class(test_Dataset[1][:, -3], test_Dataset[1], dir_output / prefix)
+
+    features_selected = features_selection(doFet, train_dataset[0], train_dataset[1], dir_output / prefix, features_name, nbfeatures, scale)
+
+    prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+
+    if days_in_futur > 1:
+        prefix += '_'+str(days_in_futur)
+        prefix += '_'+futur_met
+
+    if doPCA:
+        prefix += '_pca'
+        Xtrain = train_dataset[0]
+        pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, features_selected)
+        train_dataset = (apply_pca(train_dataset[0], pca, components, features_selected), train_dataset[1])
+        val_dataset = (apply_pca(val_dataset[0], pca, components, features_selected), val_dataset[1])
+        test_Dataset = (apply_pca(test_Dataset[0], pca, components, features_selected), test_Dataset[1])
+        features_selected = np.arange(6, components + 6)
+        trainFeatures = ['pca_'+str(i) for i in range(components)]
+        features_name, _ = get_features_name_list(0, 6, trainFeatures)
+        kmeansFeatures = trainFeatures
+
+    if doKMEANS:
+        prefix += f'_kmeans_{str(ncluster)}'
+        train_break_point(train_dataset[0], train_dataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
+        Ytrain = train_dataset[1]
+        Yval = val_dataset[1]
+        Ytest = test_Dataset[1]
+
+        train_dataset = (train_dataset[0], apply_kmeans_class_on_target(train_dataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
+        val_dataset = (val_dataset[0], apply_kmeans_class_on_target(val_dataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
+        test_Dataset = (test_Dataset[0], apply_kmeans_class_on_target(test_Dataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
+
+        realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
+        realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
+        
+        sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
+
+    logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset[0][:,4]))], allDates[int(np.max(train_dataset[0][:,4]))]}')
+    logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset[0][:,4]))], allDates[int(np.max(val_dataset[0][:,4]))]}')
+
+    return train_dataset, val_dataset, test_Dataset, features_selected
+
 #########################################################################################################
 #                                                                                                       #
 #                                         Preprocess                                                    #
@@ -389,10 +482,10 @@ def create_dataset(graph,
     assert len(XsV) > 0
     assert len(XsTe) > 0
 
-    trainDataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
-    valDataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
+    train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
+    val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
     testDatset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
-    return trainDataset, valDataset, testDatset
+    return train_dataset, val_dataset, testDatset
 
 def train_val_data_loader(graph,
                           train,
@@ -403,15 +496,15 @@ def train_val_data_loader(graph,
                         device,
                         ks : int) -> None:
 
-    trainDataset, valDataset, testDataset = create_dataset(graph,
+    train_dataset, val_dataset, test_Dataset = create_dataset(graph,
                                 train,
                                 val,
                                 test, use_temporal_as_edges,
                                 device, ks)
 
-    trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
+    trainLoader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+    valLoader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    testLoader = DataLoader(test_Dataset, test_Dataset.__len__(), False, collate_fn=graph_collate_fn)
     return trainLoader, valLoader, testLoader
 
 
@@ -508,13 +601,13 @@ def train_val_data_loader_2D(graph,
     assert len(Xst) > 0
     assert len(XsV) > 0
     
-    trainDataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / scaling)
-    valDataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path  / scaling)
-    testDataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path  / scaling)
+    train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / scaling)
+    val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path  / scaling)
+    test_Dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path  / scaling)
     
-    trainLoader = DataLoader(trainDataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(valDataset, valDataset.__len__(), False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(testDataset, testDataset.__len__(), False, collate_fn=graph_collate_fn)
+    trainLoader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+    valLoader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    testLoader = DataLoader(test_Dataset, test_Dataset.__len__(), False, collate_fn=graph_collate_fn)
     return trainLoader, valLoader, testLoader
 
 #########################################################################################################

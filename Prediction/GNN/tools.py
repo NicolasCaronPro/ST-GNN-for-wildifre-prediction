@@ -1467,10 +1467,10 @@ def log_features(features, features_name):
         for fet_index in features:
                 logger.info(f'{fet_index, features_name[fet_index]}')      
 
-def create_feature_map(features : np.array, features_name : dict, dir_output : Path, methods : list, scale : int):
+def create_feature_map(features : np.array, features_name : dict, dir_output : Path):
     with open(dir_output / 'feature_map.text', 'w') as file:
         for fet_index in features:
-            file.write(f'{features_name[fet_index - 6]} q\n')
+            file.write(f'{features_name[fet_index]} q\n')
         file.close()
     return
 

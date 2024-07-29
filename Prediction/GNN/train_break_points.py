@@ -117,7 +117,7 @@ logger.info(np.nanmax(X))
 logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 
 # Preprocess
-trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
+train_dataset, val_dataset, test_Dataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
                                                    trainDate=trainDate, trainDepartements=trainDepartements,
                                                    departements = departements,
                                                    ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
@@ -126,11 +126,11 @@ trainDataset, valDataset, testDataset = preprocess(X=X, Y=Y, scaling=scaling, ma
 
 if doPCA:
     prefix += '_pca'
-    Xtrain = trainDataset[0]
+    Xtrain = train_dataset[0]
     pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, train_fet_num)
-    trainDataset = (apply_pca(trainDataset[0], pca, components), trainDataset[1], train_fet_num)
-    valDataset = (apply_pca(valDataset[0], pca, components), valDataset[1], train_fet_num)
-    testDataset = (apply_pca(testDataset[0], pca, components), testDataset[1], train_fet_num)
+    train_dataset = (apply_pca(train_dataset[0], pca, components), train_dataset[1], train_fet_num)
+    val_dataset = (apply_pca(val_dataset[0], pca, components), val_dataset[1], train_fet_num)
+    test_Dataset = (apply_pca(test_Dataset[0], pca, components), test_Dataset[1], train_fet_num)
     features_selected = np.arange(6, components + 6)
     trainFeatures = ['pca_'+str(i) for i in range(components)]
     features_name, _ = get_features_name_list(0, 6, trainFeatures)
@@ -145,31 +145,31 @@ if days_in_futur > 1:
     prefix += '_'+futur_met
 
 if doTrain:
-    train_break_point(trainDataset[0], trainDataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
+    train_break_point(train_dataset[0], train_dataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
 
-    Ytrain = trainDataset[1]
-    Yval = valDataset[1]
-    Ytest = testDataset[1]
+    Ytrain = train_dataset[1]
+    Yval = val_dataset[1]
+    Ytest = test_Dataset[1]
 
-    trainDataset = (trainDataset[0], apply_kmeans_class_on_target(trainDataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
-    valDataset = (valDataset[0], apply_kmeans_class_on_target(valDataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
-    testDataset = (testDataset[0], apply_kmeans_class_on_target(testDataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
+    train_dataset = (train_dataset[0], apply_kmeans_class_on_target(train_dataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
+    val_dataset = (val_dataset[0], apply_kmeans_class_on_target(val_dataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
+    test_Dataset = (test_Dataset[0], apply_kmeans_class_on_target(test_Dataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
 
     realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
     realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
 
     sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
 
-logger.info(f'Train dates are between : {allDates[int(np.min(trainDataset[0][:,4]))], allDates[int(np.max(trainDataset[0][:,4]))]}')
-logger.info(f'Val dates are bewteen : {allDates[int(np.min(valDataset[0][:,4]))], allDates[int(np.max(valDataset[0][:,4]))]}')
+logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset[0][:,4]))], allDates[int(np.max(train_dataset[0][:,4]))]}')
+logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset[0][:,4]))], allDates[int(np.max(val_dataset[0][:,4]))]}')
 
 if doTest:
     logger.info('############################# TEST ###############################')
 
-    Xtrain = trainDataset[0]
-    Ytrain = trainDataset[1]
+    Xtrain = train_dataset[0]
+    Ytrain = train_dataset[1]
 
-    Xtest = testDataset[0]
+    Xtest = test_Dataset[0]
     Ytest = testDataset[1]
 
     train_dir = copy(dir_output)
