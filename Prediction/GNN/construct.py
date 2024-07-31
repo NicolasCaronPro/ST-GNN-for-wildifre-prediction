@@ -97,7 +97,7 @@ def construct_database(graphScale : GraphStructure,
                        resolution : str,
                        maxDate : str):
     
-    trainCode = [name2int[d] for d in trainDepartements]
+    trainCode = [name2int[d] for d in train_departements]
     X_kmeans = list(zip(ps.longitude, ps.latitude))
     ps['scale'+str(scale)] = graphScale._predict_node(X_kmeans)
     name = prefix+'.csv'
@@ -138,52 +138,52 @@ def construct_database(graphScale : GraphStructure,
         X = None
 
     if values_per_class != 'full':
-        Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
-        Ytest = Y[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
+        y_train = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+        y_test = Y[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
                 ((Y[:,4] > allDates.index('2017-12-31')) & (Y[:,4] < allDates.index('2022-12-31')) & (~np.isin(Y[:,3], trainCode)))]
         if X is not None:
-            Xtest = X[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
+            x_test = X[((Y[:,4] >= allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))) |
                 ((Y[:,4] > allDates.index('2017-12-31')) & (Y[:,4] < allDates.index('2022-12-31')) & (~np.isin(Y[:,3], trainCode)))]
     
-            Xtrain = X[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+            x_train = X[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
 
         values_per_class = int(values_per_class)
         new_Y = []
         new_X = []
         for dept in departements:
-            maskdept = np.argwhere(Ytrain[:, 3] == name2int[dept])
+            maskdept = np.argwhere(y_train[:, 3] == name2int[dept])
             if maskdept.shape[0] == 0:
                 continue
-            classs = np.unique(Ytrain[maskdept, -3])
+            classs = np.unique(y_train[maskdept, -3])
             new_Y_index = []
             for cls in classs:
-                Y_class_index = np.argwhere(Ytrain[maskdept, -3] == cls)[:, 0]
+                Y_class_index = np.argwhere(y_train[maskdept, -3] == cls)[:, 0]
                 choices = np.random.choice(Y_class_index, min(Y_class_index.shape[0], values_per_class), replace=False)
                 new_Y_index += list(choices)
-            new_Y += list(Ytrain[maskdept][new_Y_index])
+            new_Y += list(y_train[maskdept][new_Y_index])
             if X is not None:
-                new_X += list(Xtrain[maskdept][new_Y_index])
+                new_X += list(x_train[maskdept][new_Y_index])
 
-        new_Y = np.asarray(new_Y).reshape(-1, Ytrain.shape[-1])
-        mask_days = np.zeros(Ytrain.shape[0], dtype=bool)
+        new_Y = np.asarray(new_Y).reshape(-1, y_train.shape[-1])
+        mask_days = np.zeros(y_train.shape[0], dtype=bool)
         for k in range(k_days + 1):
-            mask_days = mask_days | np.isin(Ytrain[:, 4], new_Y[:, 4] - k)
-        new_Y_neighboor = Ytrain[mask_days]
+            mask_days = mask_days | np.isin(y_train[:, 4], new_Y[:, 4] - k)
+        new_Y_neighboor = y_train[mask_days]
         new_Y_neighboor[:, 5] = 0
 
         if X is not None:
-            new_X = np.asarray(new_X).reshape(-1, Xtrain.shape[-1])
-            new_X_neighboor = Xtrain[mask_days]
+            new_X = np.asarray(new_X).reshape(-1, x_train.shape[-1])
+            new_X_neighboor = x_train[mask_days]
             new_X_neighboor[:, 5] = 0
-            X = np.concatenate((new_X, new_X_neighboor, Xtest), casting='no')
+            X = np.concatenate((new_X, new_X_neighboor, x_test), casting='no')
             X[:, features_name.index('vigicrues'): features_name.index('vigicrues') + 4] = -1
 
-        Y = np.concatenate((new_Y, new_Y_neighboor, Ytest), casting='no')
+        Y = np.concatenate((new_Y, new_Y_neighboor, y_test), casting='no')
         X, Y = remove_nan_nodes(X, Y)
         X, Y = remove_none_target(X, Y)
         X = np.unique(X, axis=0)
         Y = np.unique(Y, axis=0)
-        Ytrain = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+        y_train = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
 
     if X is None:
         X, features_name = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
@@ -246,13 +246,13 @@ def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     name = sinister+'.csv'
     firepoints.to_csv(dir / sinister / name, index=False)
 
-def init(args, add_time_varying):
+def init(args, dir_output, add_time_varying):
     
-    global trainFeatures
+    global train_features
     global features
 
     ######################### Input config #############################
-    nameExp = args.name
+    name_exp = args.name
     maxDate = args.maxDate
     trainDate = args.trainDate
     doEncoder = args.encoder == "True"
@@ -275,6 +275,7 @@ def init(args, add_time_varying):
     ncluster = int(args.ncluster)
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
     days_in_futur = int(args.days_in_futur) # The target time validation
+    dir_output = dir_output
 
     ######################## CONFIG ################################
 
@@ -283,21 +284,21 @@ def init(args, add_time_varying):
     geo = gpd.read_file('regions/regions.geojson')
     geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
     dir_output = Path(name_dir)
     check_and_create_path(dir_output)
 
     minDate = '2017-06-12' # Starting point
 
     if values_per_class == 'full':
-        prefix = str(values_per_class)+'_'+str(scale)
+        prefix = f'{values_per_class}_{scale}'
     else:
-        prefix = str(values_per_class)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
+        prefix = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
 
     if dummy:
         prefix += '_dummy'
 
-    autoRegression = 'AutoRegressionReg' in trainFeatures
+    autoRegression = 'AutoRegressionReg' in train_features
     if spec == '' and autoRegression:
         spec = 'AutoRegressionReg'
 
@@ -308,18 +309,18 @@ def init(args, add_time_varying):
 
         fp = pd.read_csv('sinister/'+sinister+'.csv')
 
-        construct_non_point(fp, geo, maxDate, sinister, Path(nameExp))
+        construct_non_point(fp, geo, maxDate, sinister, Path(name_exp))
         look_for_information(dir_target,
                             departements,
                             geo,
                             maxDate,
                             sinister,
-                            Path(nameExp))
+                            Path(name_exp))
 
     ######################### Encoding ######################################
 
     if doEncoder:
-        encode(dir_target, trainDate, trainDepartements, dir_output / 'Encoder', resolution)
+        encode(dir_target, trainDate, train_departements, dir_output / 'Encoder', resolution)
 
     ########################## Do Graph ######################################
 
@@ -349,7 +350,7 @@ def init(args, add_time_varying):
         logger.info('#####################################')
         if not dummy:
             name = 'points.csv'
-            ps = pd.read_csv(Path(nameExp) / sinister / name)
+            ps = pd.read_csv(Path(name_exp) / sinister / name)
             logger.info(f'{ps.date.min(), allDates[ps.date.min()]}')
             logger.info(f'{ps.date.max(), allDates[ps.date.max()]}')
             depts = [name2int[dept] for dept in departements]
@@ -360,9 +361,9 @@ def init(args, add_time_varying):
             logger.info(ps[ps['departement'] == 1].date.min())
         else:
             name = sinister+'.csv'
-            fp = pd.read_csv(Path(nameExp) / sinister / name)
+            fp = pd.read_csv(Path(name_exp) / sinister / name)
             name = 'non'+sinister+'csv'
-            nfp = pd.read_csv(Path(nameExp) / sinister / name)
+            nfp = pd.read_csv(Path(name_exp) / sinister / name)
             ps = pd.concat((fp, nfp)).reset_index(drop=True)
             ps = ps.copy(deep=True)
             ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
@@ -403,7 +404,7 @@ def init(args, add_time_varying):
                                                     X,
                                                     scaling,
                                                     features_name,
-                                                    trainDepartements,
+                                                    train_departements,
                                                     features,
                                                     sinister,
                                                     dir_output,
@@ -420,14 +421,14 @@ def init(args, add_time_varying):
         if (dir_output / name).is_file() and not doDatabase:
             for k in range(1, k_days + 1):
                 new_fet = [v+'_'+str(k) for v in varying_time_variables]
-                trainFeatures += [nf for nf in new_fet if nf.split('_')[0] in trainFeatures]
+                train_features += [nf for nf in new_fet if nf.split('_')[0] in train_features]
                 features += new_fet
                 features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
             X = read_object('X_'+prefix+'.pkl', dir_output)
         else:
             for k in range(1, k_days + 1):
                 new_fet = [f'{v}_{str(k)}' for v in varying_time_variables]
-                trainFeatures += [nf for nf in new_fet if nf.split('_')[0] in trainFeatures]
+                train_features += [nf for nf in new_fet if nf.split('_')[0] in train_features]
                 features += new_fet
                 features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
                 X = add_varying_time_features(X=X, features=new_fet, newShape=newShape, features_name=features_name, ks=k, scale=scale)

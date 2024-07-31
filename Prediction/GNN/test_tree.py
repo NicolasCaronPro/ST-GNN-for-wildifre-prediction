@@ -25,7 +25,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Input config
-    nameExp = args.name
+    name_exp = args.name
     doGraph = args.graph == "True"
     doDatabase = args.database == "True"
     scale = int(args.scale)
@@ -40,10 +40,10 @@ if __name__ == '__main__':
 
 scaleTrain = scale
 
-name_dir = nameExp + '/' + sinister + '/' + 'train'
+name_dir = name_exp + '/' + sinister + '/' + 'train'
 train_dir = Path(name_dir)
 
-name_dir = nameExp + '/' + sinister + '/' + 'test'
+name_dir = name_exp + '/' + sinister + '/' + 'test'
 dir_output = Path(name_dir)
 
 rmse = weighted_rmse_loss
@@ -140,26 +140,26 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     features_name, _ = get_features_name_list(graphScale.scale, 6, features)
 
     Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
-    Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
+    y_train = read_object('y_train_'+prefix_train+'.pkl', train_dir)
     if Xtrain is None:
         logger.info(f'Fuck it')
         return
 
-    trainFeatures = read_object(spec+'_trainFeatures.pkl', train_dir)
-    if trainFeatures is None:
+    train_features = read_object(spec+'_train_features.pkl', train_dir)
+    if train_features is None:
         logger.info('Train Feature not found')
         exit(1)
 
     # Add varying time features
     if k_days > 0:
-        trainFeatures_ = copy(trainFeatures) + varying_time_variables
+        train_features_ = copy(train_features) + varying_time_variables
         features_ = copy(features) + varying_time_variables
         features_name, newShape = get_features_name_list(graphScale.scale, 6, features_)
         if doDatabase:
             X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, features_name=features_name, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
-        trainFeatures_ = copy(trainFeatures)
+        train_features_ = copy(train_features)
         features_ =  copy(features)
 
     # Remove some bad nodes that goes to wrong departement
@@ -171,7 +171,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     # Select train features
     train_fet_num = [0,1,2,3,4,5]
     for fet in features_:
-        if fet in trainFeatures_:
+        if fet in train_features_:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -203,7 +203,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                 maxi = coef
             train_fet_num += list(np.arange(features_name.index(fet), features_name.index(fet) + maxi))
 
-    features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures_)
+    features_name, newshape = get_features_name_list(graphScale.scale, 6, train_features_)
     X = X[:, np.asarray(train_fet_num)]
     Xtrain = Xtrain[:, np.asarray(train_fet_num)]
     logger.info(features_name)
@@ -217,7 +217,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
     logger.info(f'{testname} test {Xset.shape}')
     logger.info(f'{allDates[int(np.min(X[:,4]))], allDates[int(np.max(Y[:,4]))]}')
 
-    test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+    test_sklearn_api_model(graphScale, Xset, Yset, Xtrain, y_train,
                            methods,
                            testname,
                            features_name,
@@ -270,12 +270,12 @@ if sinister == 'inondation':
 
 # 2023 test Ain
 testDepartement = ['departement-01-ain']
-#test('Ain', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+#test('Ain', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)
 
 # 2023 test Doubs
 testDepartement = ['departement-25-doubs']
-#test('Doubs', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+#test('Doubs', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)
 
 # 2023 test Yvelines
 testDepartement = ['departement-78-yvelines']
-#test('Yvelines', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, trainFeatures)
+#test('Yvelines', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)

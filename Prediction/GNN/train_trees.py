@@ -38,7 +38,7 @@ parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in
 args = parser.parse_args()
 
 # Input config
-nameExp = args.name
+name_exp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
 doEncoder = args.encoder == "True"
@@ -59,8 +59,8 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
-doGridSearch = args.GridSearch ==  'True'
-doBayesSearch = args.BayesSearch == 'True'
+do_grid_search = args.GridSearch ==  'True'
+do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
 
@@ -71,7 +71,7 @@ dir_target = root_target / sinister / 'log' / resolution
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
 
@@ -83,48 +83,51 @@ if spec == '':
 if dummy:
     spec += '_dummy'
 
-autoRegression = 'AutoRegressionReg' in trainFeatures
+autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     spec = '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, True)
+X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
 
 ############################# Train, Val, test ###########################
 
-train_dataset, val_dataset, test_Dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args)
+train_dataset, val_dataset, test_dataset, features_selected, features_name = get_train_val_test_set(graphScale, X, Y,
+                                                                                     features_name, train_features, train_departements,
+                                                                                     prefix,
+                                                                                     dir_output, args)
 
-######################## Baseline ##############################
+######################## Training ##############################
+
+dir_output = dir_output / spec
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
-trainCode = [name2int[dept] for dept in trainDepartements]
 
 if doTrain:
     wrapped_train_sklearn_api_model(train_dataset=train_dataset,
                             val_dataset=val_dataset,
-                            test_Dataset=test_Dataset,
+                            test_dataset=test_dataset,
                             dir_output=dir_output / name,
-                            device='cpu',
+                            device='gpu',
                             features=features_selected,
                             autoRegression=autoRegression,
-                            scale=scale,
                             features_name=features_name,
                             optimize_feature=optimize_feature,
-                            doGridSearch = doGridSearch,
-                            doBayesSearch = doBayesSearch)
+                            do_grid_search = do_grid_search,
+                            do_bayes_search = do_bayes_search)
 
 if doTest:
     logger.info('############################# TEST ###############################')
 
-    Xtrain = train_dataset[0]
-    Ytrain = train_dataset[1]
+    x_train = train_dataset[0]
+    y_train = train_dataset[1]
 
-    Xtest = test_Dataset[0]
-    Ytest = test_Dataset[1]
+    x_test = test_dataset[0]
+    y_test = test_dataset[1]
 
     train_dir = copy(dir_output)
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/' + spec
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/' + spec
     dir_output = Path(name_dir)
 
     mae = my_mean_absolute_error
@@ -142,7 +145,7 @@ if doTest:
             ('mae', mae, 'proba'),
             ('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
-            ('cal', cal, 'bin'),
+            ('cal', cal, 'cal'),
             ('f1', f1, 'bin'),
             ('class', ck, 'class'),
             ('poisson', po, 'proba'),
@@ -154,14 +157,14 @@ if doTest:
     models = [
         ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
         ('xgboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        ('xgboost_binary_classficiation_logistic_features', 'binary', autoRegression),
+        ('xgboost_binary_classification_log_loss_features', 'binary', autoRegression),
         ]
         
     for dept in departements:
-        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
-        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
+        Xset = x_test[(x_test[:, 3] == name2int[dept])]
+        Yset = y_test[(x_test[:, 3] == name2int[dept])]
 
-        if Xset.shape[0] == 0:
+        if Xset.shape[0] < 5:
             continue
 
         save_object(Xset, 'X'+'_'+dept+'_'+prefix+'.pkl', dir_output / dept / prefix)

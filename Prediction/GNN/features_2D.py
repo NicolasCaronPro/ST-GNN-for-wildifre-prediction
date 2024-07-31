@@ -84,7 +84,7 @@ def get_sub_nodes_feature_2D(graph, shape: int,
         if doMeteo:
             #meteostat = pd.read_csv(rootDisk / departement / 'data' / 'meteostat' / 'meteostat.csv')
             #for cem in cems_variables:
-            #    meteostat[cem] = scaler(meteostat[cem].values, Xtrain[:, features_name_1D[cem] + 2], concat=False)
+            #    meteostat[cem] = scaler(meteostat[cem].values, x_train[:, features_name_1D[cem] + 2], concat=False)
             pass
 
         # Load elevation raster

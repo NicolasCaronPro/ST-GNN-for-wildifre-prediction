@@ -38,7 +38,7 @@ parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in
 args = parser.parse_args()
 
 # Input config
-nameExp = args.name
+name_exp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
 doEncoder = args.encoder == "True"
@@ -59,8 +59,8 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
-doGridSearch = args.GridSearch ==  'True'
-doBayesSearch = args.BayesSearch == 'True'
+do_grid_search = args.GridSearch ==  'True'
+do_bayes_search = args.BayesSearch == 'True'
 k_days = args.k_days # Size of the time series sequence use by DL models
 days_in_futur = args.days_in_futur # The target time validation
 
@@ -71,7 +71,7 @@ dir_target = root_target / sinister / 'log' / resolution
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
 
@@ -83,21 +83,21 @@ if spec == '':
 if dummy:
     spec += '_dummy'
 
-autoRegression = 'AutoRegressionReg' in trainFeatures
+autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     spec = '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, features_name_2D = init(args, False)
+X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
 
 ############################# Train, Val, test ###########################
 
-train_dataset, val_dataset, test_Dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args)
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
 
 ############################# Training ##################################
+dir_output = dir_output / spec
 
-# Train
 epochs = 10000
 lr = 0.01
 PATIENCE_CNT = 200
@@ -159,7 +159,7 @@ if doTrain:
             if not is_2D_model:
                 trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=train_dataset,
                                                                         val=val_dataset,
-                                                                        test=test_Dataset,
+                                                                        test=test_dataset,
                                                                 batch_size=64, device=device,
                                                                 use_temporal_as_edges = use_temporal_as_edges,
                                                                 ks=k_days)
@@ -170,7 +170,7 @@ if doTrain:
                 trainLoader, valLoader, testLoader = train_val_data_loader_2D(graph=graphScale,
                                                                 train=train_dataset,
                                                                 val=val_dataset,
-                                                                test=test_Dataset,
+                                                                test=test_dataset,
                                                                 use_temporal_as_edges=use_temporal_as_edges,
                                                                 batch_size=64,
                                                                 device=device,
@@ -204,16 +204,16 @@ if doTest:
 
     dico_model = make_models(len(features_selected), 52, 0.03, 'relu')
 
-    trainCode = [name2int[dept] for dept in trainDepartements]
+    trainCode = [name2int[dept] for dept in train_departements]
 
-    Xtrain, Ytrain = train_dataset
+    x_train, y_train = train_dataset
 
-    Xtest, Ytest  = test_Dataset
+    x_test, y_test  = test_dataset
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/train' + '/'
     train_dir = Path(name_dir)
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
     mae = my_mean_absolute_error
@@ -270,8 +270,8 @@ if doTest:
     ]
 
     for dept in departements:
-        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
-        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
+        Xset = x_test[(x_test[:, 3] == name2int[dept])]
+        Yset = y_test[(x_test[:, 3] == name2int[dept])]
 
         if Xset.shape[0] == 0:
             continue
@@ -281,7 +281,7 @@ if doTest:
 
         logger.info(f'{dept} test : {Xset.shape}, {allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
 
-        test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+        test_dl_model(graphScale, Xset, Yset, x_train, y_train,
                            methods,
                            dept,
                            features_name,

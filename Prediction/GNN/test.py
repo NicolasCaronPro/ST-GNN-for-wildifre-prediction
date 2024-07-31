@@ -24,7 +24,7 @@ parser.add_argument('-nf', '--NbFeatures', type=str, help='Nombur de Features')
 args = parser.parse_args()
 
 # Input config
-nameExp = args.name
+name_exp = args.name
 doDatabase = args.database == "True"
 doGraph = args.graph == "True"
 do2D = args.database2D == "True"
@@ -40,10 +40,10 @@ newFeatures = []
 
 scaleTrain = scale
 
-name_dir = nameExp + '/' + sinister + '/' + 'train'
+name_dir = name_exp + '/' + sinister + '/' + 'train'
 train_dir = Path(name_dir)
 
-name_dir = nameExp + '/' + sinister + '/' + 'test'
+name_dir = name_exp + '/' + sinister + '/' + 'test'
 dir_output = Path(name_dir)
 
 rmse = weighted_rmse_loss
@@ -152,21 +152,21 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         subnode = X[:,:6]
         features_name_2D, newShape2D = get_features_name_lists_2D(subnode.shape[1], features)
 
-    Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
-    Ytrain = read_object('Ytrain_'+prefix_train+'.pkl', train_dir)
-    if Xtrain is None:
+    x_train = read_object('x_train_'+prefix_train+'.pkl', train_dir)
+    y_train = read_object('y_train_'+prefix_train+'.pkl', train_dir)
+    if x_train is None:
         logger.info(f'Fuck it')
         return
     
-    trainFeatures = read_object(spec+'_trainFeatures.pkl', train_dir)
-    if trainFeatures is None:
+    train_features = read_object(spec+'_train_features.pkl', train_dir)
+    if train_features is None:
         logger.info('Train Feature not found')
         exit(1)
 
     # Select train features
     train_fet_num = [0,1,2,3,4,5]
     for fet in features:
-        if fet in trainFeatures:
+        if fet in train_features:
             coef = 4 if scale > 0 else 1
             if fet == 'Calendar' or fet == 'Calendar_mean':
                 maxi = len(calendar_variables)
@@ -198,9 +198,9 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                 maxi = coef
             train_fet_num += list(np.arange(features_name.index(fet), features_name.index(fet) + maxi))
 
-    features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
+    features_name, newshape = get_features_name_list(graphScale.scale, 6, train_features)
     X = X[:, np.asarray(train_fet_num)]
-    Xtrain = Xtrain[:, np.asarray(train_fet_num)]
+    x_train = x_train[:, np.asarray(train_fet_num)]
     logger.info(features_name)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
@@ -208,9 +208,9 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         prefix_train += '_'+spec
         prefix += '_'+spec
 
-    Xset, Yset = preprocess_test(X, Y , Xtrain, scaling)
+    Xset, Yset = preprocess_test(X, Y , x_train, scaling)
 
-    test_dl_model(graphScale, Xset, Yset, Xtrain, Ytrain,
+    test_dl_model(graphScale, Xset, Yset, x_train, y_train,
                            methods,
                            testname,
                            features_name,

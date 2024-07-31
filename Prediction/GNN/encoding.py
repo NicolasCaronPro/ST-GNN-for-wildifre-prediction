@@ -1,9 +1,9 @@
 from graph_structure import *
 from array_fet import *
 
-def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):
+def encode(path_to_target, maxDate, train_departements, dir_output, resolution):
 
-    print(f'Create encoder for categorical features using {trainDepartements}, at max {maxDate}')
+    print(f'Create encoder for categorical features using {train_departements}, at max {maxDate}')
     stop_calendar = 11
     trainMax = allDates.index(maxDate)
     foret = []
@@ -14,7 +14,7 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):
     osmnx = []
     calendar_array = [[] for j in range(stop_calendar)]
     geo_array = []
-    for dep in trainDepartements:
+    for dep in train_departements:
         
         dir_data = root / 'csv' / dep /  'raster' / resolution
 
@@ -110,7 +110,7 @@ def encode(path_to_target, maxDate, trainDepartements, dir_output, resolution):
     save_object(encoder, 'encoder_geo.pkl', dir_output)
 
 if __name__ == '__main__':
-    traindepartements = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+    train_departements = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
     departements = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
 
     path_to_target = root / 'Model/HexagonalScale/log'

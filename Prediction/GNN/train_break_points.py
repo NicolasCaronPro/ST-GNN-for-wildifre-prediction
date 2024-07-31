@@ -38,7 +38,7 @@ parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in
 args = parser.parse_args()
 
 # Input config
-nameExp = args.name
+name_exp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
 doEncoder = args.encoder == "True"
@@ -59,8 +59,8 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
-doGridSearch = args.GridSearch ==  'True'
-doBayesSearch = args.BayesSearch == 'True'
+do_grid_search = args.GridSearch ==  'True'
+do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
 
@@ -71,7 +71,7 @@ dir_target = root_target / sinister / 'log' / resolution
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
 
@@ -83,31 +83,36 @@ if spec == '':
 if dummy:
     spec += '_dummy'
 
-autoRegression = 'AutoRegressionReg' in trainFeatures
+autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     spec = '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, True)
+X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+
+############################# Train, Val, test ###########################
+
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
 
 ############################# Training ###########################
-trainCode = [name2int[dept] for dept in trainDepartements]
+
+trainCode = [name2int[dept] for dept in train_departements]
 
 # Select train features
-train_fet_num = select_train_features(trainFeatures, scale, features_name)
+train_fet_num = select_train_features(train_features, scale, features_name)
 
 dir_output =  dir_output / spec
 
 save_object(features, 'features.pkl', dir_output)
-save_object(trainFeatures, 'trainFeatures.pkl', dir_output)
+save_object(train_features, 'train_features.pkl', dir_output)
 save_object(features_name, 'features_name.pkl', dir_output)
 
 if days_in_futur > 1:
     prefix += '_'+str(days_in_futur)
     prefix += '_'+futur_met
 
-features_name, newshape = get_features_name_list(graphScale.scale, 6, trainFeatures)
+features_name, newshape = get_features_name_list(graphScale.scale, 6, train_features)
 
 X = X[:, np.asarray(train_fet_num)]
 logger.info(features_name)
@@ -117,8 +122,8 @@ logger.info(np.nanmax(X))
 logger.info(np.unravel_index(np.nanargmax(X), X.shape))
 
 # Preprocess
-train_dataset, val_dataset, test_Dataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, trainDepartements=trainDepartements,
+train_dataset, val_dataset, test_dataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
+                                                   trainDate=trainDate, train_departements=train_departements,
                                                    departements = departements,
                                                    ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                    days_in_futur=days_in_futur,
@@ -130,11 +135,11 @@ if doPCA:
     pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, train_fet_num)
     train_dataset = (apply_pca(train_dataset[0], pca, components), train_dataset[1], train_fet_num)
     val_dataset = (apply_pca(val_dataset[0], pca, components), val_dataset[1], train_fet_num)
-    test_Dataset = (apply_pca(test_Dataset[0], pca, components), test_Dataset[1], train_fet_num)
+    test_dataset = (apply_pca(test_dataset[0], pca, components), test_dataset[1], train_fet_num)
     features_selected = np.arange(6, components + 6)
-    trainFeatures = ['pca_'+str(i) for i in range(components)]
-    features_name, _ = get_features_name_list(0, 6, trainFeatures)
-    kmeansFeatures = trainFeatures
+    train_features = ['pca_'+str(i) for i in range(components)]
+    features_name, _ = get_features_name_list(0, 6, train_features)
+    kmeansFeatures = train_features
 else:
     features_selected = np.arange(6, X.shape[1])
 
@@ -147,13 +152,13 @@ if days_in_futur > 1:
 if doTrain:
     train_break_point(train_dataset[0], train_dataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
 
-    Ytrain = train_dataset[1]
-    Yval = val_dataset[1]
-    Ytest = test_Dataset[1]
+    y_train = train_dataset[1]
+    y_val = val_dataset[1]
+    y_test = test_dataset[1]
 
-    train_dataset = (train_dataset[0], apply_kmeans_class_on_target(train_dataset[0], Ytrain, dir_output / 'varOnValue' / prefix, True))
-    val_dataset = (val_dataset[0], apply_kmeans_class_on_target(val_dataset[0], Yval, dir_output / 'varOnValue' / prefix, True))
-    test_Dataset = (test_Dataset[0], apply_kmeans_class_on_target(test_Dataset[0], Ytest, dir_output / 'varOnValue' / prefix, True))
+    train_dataset = (train_dataset[0], apply_kmeans_class_on_target(train_dataset[0], y_train, dir_output / 'varOnValue' / prefix, True))
+    val_dataset = (val_dataset[0], apply_kmeans_class_on_target(val_dataset[0], y_val, dir_output / 'varOnValue' / prefix, True))
+    test_dataset = (test_dataset[0], apply_kmeans_class_on_target(test_dataset[0], y_test, dir_output / 'varOnValue' / prefix, True))
 
     realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
     realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
@@ -167,10 +172,10 @@ if doTest:
     logger.info('############################# TEST ###############################')
 
     Xtrain = train_dataset[0]
-    Ytrain = train_dataset[1]
+    y_train = train_dataset[1]
 
-    Xtest = test_Dataset[0]
-    Ytest = testDataset[1]
+    x_test = test_dataset[0]
+    y_test = testDataset[1]
 
     train_dir = copy(dir_output)
 
@@ -199,8 +204,8 @@ if doTest:
             ]
     
     for dept in departements:
-        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
-        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
+        Xset = x_test[(x_test[:, 3] == name2int[dept])]
+        Yset = y_test[(x_test[:, 3] == name2int[dept])]
 
         if Xset.shape[0] == 0:
             continue

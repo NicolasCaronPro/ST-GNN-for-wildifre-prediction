@@ -73,13 +73,12 @@ def sinister_distribution_in_class(ypredclass, y, dir_output):
             meansinisteriny.append(-1)
             
         nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
-        meansinisteriny.append(np.nanmean(y[mask, -2]))
+        meansinisteriny.append(np.nanmean((y[mask, -2] > 0).astype(int)))
 
         mask = np.argwhere(ypredclass == cls)[:, 0]
 
         nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
-        meansinisterinpred.append(np.nanmean(y[mask, -2]))
-
+        meansinisterinpred.append(np.nanmean((y[mask, -2] > 0).astype(int)))
 
     fig, ax = plt.subplots(2, figsize=(15,10))
     ax[0].plot(nbclass, meansinisteriny, label='GT')

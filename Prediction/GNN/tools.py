@@ -386,40 +386,77 @@ def remove_none_target(nodes : np.array, target : np.array) -> np.array:
     return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
 
 def remove_bad_period(X : np.array, Y : np.array, period2ignore : dict, departements: list):
+
     for dept in departements:
         period = period2ignore[name2int[dept]]['interventions']
-        if period == []:
-            continue
-        for per in period:
-            logger.info(f'{dept} -> Remove period {per}')
-            ds = per[0].strftime('%Y-%m-%d')
-            de = per[1].strftime('%Y-%m-%d')
-            if ds not in allDates:
-                continue
-            if de not in allDates:
-                de = allDates[-1]
-            arg = np.argwhere(((~((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(ds)) & (X[:, 4] <= allDates.index(de))))))[:, 0]
-            X = X[arg, :]
-            Y = Y[arg, :]
-    logger.info(f'{np.unique(X[:, 3])}')
+        if period != []:
+            for per in period:
+                logger.info(f'{dept} -> Remove period {per}')
+
+                ds = per[0].strftime('%Y-%m-%d')
+                de = per[1].strftime('%Y-%m-%d')
+
+                if ds < allDates[0]:
+                    ds = allDates[0]
+                if de > allDates[-1]:
+                    de = allDates[-1]
+
+                if de not in allDates or ds not in allDates:
+                    continue
+
+                ds = allDates.index(ds)
+                de = allDates.index(de)
+
+                if 'bad_dates' not in locals():
+                    bad_dates = np.arange(start=ds, stop=de)
+                else:
+                    bad_dates = np.concatenate((bad_dates, np.arange(start=ds, stop=de)))
+            if 'arg' not in locals():
+                arg = np.argwhere((X[:, 3] == name2int[dept]) & (~np.isin(X[:, 4], bad_dates)))[:, 0]
+            else:
+                arg2 = np.argwhere((X[:, 3] == name2int[dept]) & (~np.isin(X[:, 4], bad_dates)))[:,0]
+                arg = np.concatenate((arg, arg2))
+        else:
+            if 'arg' not in locals():
+                arg = np.argwhere(X[:, 3] == name2int[dept])[:, 0]
+            else:
+                arg2 = np.argwhere(X[:, 3] == name2int[dept])[:,0]
+                arg = np.concatenate((arg, arg2))
+
+    X = X[arg, :]
+    Y = Y[arg, :]
+
     return X, Y
 
-def remove_non_fire_season(X : np.array, Y : np.array, departements : list):
+def remove_non_fire_season(X : np.array, Y : np.array, SAISON_FEUX : dict, departements : list):
     for dept in departements:
         jour_debut = SAISON_FEUX[name2int[dept]]['jour_debut']
         mois_debut = SAISON_FEUX[name2int[dept]]['mois_debut']
 
         jour_fin = SAISON_FEUX[name2int[dept]]['jour_fin']
         mois_fin = SAISON_FEUX[name2int[dept]]['mois_fin']
-
+        
         for year in years:
+        
             date_debut = f'{year}-{mois_debut}-{jour_debut}'
             date_fin = f'{year}-{mois_fin}-{jour_fin}'
+            
+            if date_debut < allDates[0]:
+                date_debut = allDates[0]
+            if date_fin > allDates[-1]:
+                date_fin = allDates[-1]
 
-            arg = np.argwhere(~(X[:, 3] == name2int[dept] & ((X[:, 4] < allDates.index(date_debut) | (X[:, 4] > allDates.index(date_fin))))))
+            if date_debut not in allDates or date_fin not in allDates:
+                continue
 
-            X = X[arg, :]
-            Y = Y[arg, :]
+            if 'arg' not in locals():
+                arg = np.argwhere(((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(date_debut)) & (X[:, 4] < allDates.index(date_fin))))[:, 0]
+            else:
+                arg2 = np.argwhere(((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(date_debut)) & (X[:, 4] < allDates.index(date_fin))))[:, 0]
+                arg = np.concatenate((arg, arg2))
+
+    X = X[arg, :]
+    Y = Y[arg, :]
 
     return X, Y
 
@@ -694,7 +731,7 @@ def construct_graph_with_time_series(graph, date : int,
 
 def load_x_from_pickle(x : np.array, shape : tuple,
                        path : Path,
-                       Xtrain : np.array, Ytrain : np.array,
+                       x_train : np.array, y_train : np.array,
                        scaling : str,
                        features_name : dict,
                        features_name_2D : dict) -> np.array:
@@ -747,11 +784,11 @@ def load_x_from_pickle(x : np.array, shape : tuple,
             for i in range(size_sent):
                 index2D = features_name_2D[feature]
                 index1D = features_name.index(feature) + (4 * i)
-                newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D + i,:], Xtrain[:, index1D + 2], concat=False)
+                newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D + i,:], x_train[:, index1D + 2], concat=False)
         else:
             index2D = features_name_2D[feature]
             index1D = features_name.index(feature) + 2
-            newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D,:], Xtrain[:, index1D], concat=False)
+            newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D,:], x_train[:, index1D], concat=False)
     return newx
 
 def order_class(predictor, pred):
@@ -910,6 +947,50 @@ def add_metrics(methods : list, i : int,
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
+        elif met_type == 'cal':
+            mett = met(ytrue, ypred[:,1], target, ytrue[:,-4])
+
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name] = mett
+
+            for season, datesIndex in seasons.items():
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett = met(ytrue[:, :], ypred[:,1], target, ytrue[:,-4], mask)
+                if torch.is_tensor(mett):
+                    mett = mett.detach().cpu().numpy()
+
+                res[name+'_'+season] = mett
+
+            mett = met(ytrue, ypred[:,1], target, None, None)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            
+            res[name+'_unweighted'] = mett
+
+            for season, datesIndex in seasons.items():
+                mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
+                if mask.shape[0] == 0:
+                    continue
+                mett = met(ytrue[:], ypred[:, 1], target, None, mask)
+
+                if torch.is_tensor(mett):
+                    mett = mett.detach().cpu().numpy()
+
+                res[name+'_unweighted_'+season] = mett
+
+            mett = met(ytrue[:], ypred[:, 1], target, None, mask_top)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
+
+            mett = met(ytrue[:], ypred[:, 1], target, ytrue[:,-4], mask_top)
+            if torch.is_tensor(mett):
+                mett = mett.detach().cpu().numpy()
+            res[name+'_top_'+str(top)+'_cluster'] = mett
+
         elif met_type == 'bin':
 
             mett = met(ytrue, ypred[:,0], target, ytrue[:,-4])
@@ -1024,35 +1105,26 @@ def quantile_prediction_error(Y : np.array, ypred : np.array, target : str, weig
     if mask is None:
         mask = np.arange(ypred.shape[0])
 
-    if target == 'binary':
-        maxi = 1 
-    elif target == 'nbsinister':
-        maxi = np.max(Y[:, -2])
-    else :
-        maxi = np.max(Y[:, -1])
-
     ytrue = Y[mask,-2]
     ypred = ypred[mask]
 
-    quantiles = [(0.0,0.2),
-                 (0.2,0.4),
-                 (0.4,0.6),
-                 (0.6,0.8),
-                 (0.8,1.1)
+    quantiles = [(0, 0.0),
+                 (1, 0.2),
+                 (2, 0.4),
+                 (3, 0.6),
+                 (4, 8.0),
+                 (5, 1.0)
                  ]
     
     error = []
-    for (minB, maxB) in quantiles:
-        pred_quantile = ypred[(ypred >= minB * maxi) & (ypred < maxB * maxi)]
-        nf = ytrue[(ypred >= minB * maxi) & (ypred < maxB * maxi)]
-        if pred_quantile.shape[0] != 0:
-            pred_quantile = np.mean(pred_quantile)
-            number_of_fire = np.mean(nf)
-            error.append(abs((((minB * maxi) + (maxB * maxi)) / 2) - number_of_fire))
+    for (cl, expected) in quantiles:
+        nf = (ytrue[ypred == cl] > 0).astype(int)
+        number_of_fire = np.mean(nf)
+        error.append(abs((expected - number_of_fire)))
     if len(error) == 0:
         return math.inf
-
-    return np.mean(error)
+    
+    return np.nanmean(error)
 
 def my_f1_score(Y : np.array, ypred : np.array, target : str, weights : np.array = None, mask : np.array = None):
 
@@ -1360,31 +1432,31 @@ def get_features_name_lists_2D(shape, features):
 
     return features_name, len(features_name) + shape
 
-def min_max_scaler(array : np.array, arrayTrain: np.array, concat : bool) -> np.array:
+def min_max_scaler(array : np.array, array_train: np.array, concat : bool) -> np.array:
     if concat:
-        Xt = np.concatenate((array, arrayTrain))
+        Xt = np.concatenate((array, array_train))
     else:
-        Xt = arrayTrain
+        Xt = array_train
     scaler = MinMaxScaler()
     scaler.fit(Xt.reshape(-1,1))
     res = scaler.transform(array.reshape(-1,1))
     return res.reshape(array.shape)
 
-def standart_scaler(array: np.array, arrayTrain: np.array, concat : bool) -> np.array:
+def standart_scaler(array: np.array, array_train: np.array, concat : bool) -> np.array:
     if concat:
-        Xt = np.concatenate((array, arrayTrain))
+        Xt = np.concatenate((array, array_train))
     else:
-        Xt = arrayTrain
+        Xt = array_train
     scaler = StandardScaler()
     scaler.fit(Xt.reshape(-1,1))
     res = scaler.transform(array.reshape(-1,1))
     return res.reshape(array.shape)
 
-def robust_scaler(array : np.array, arrayTrain: np.array, concat : bool) -> np.array:
+def robust_scaler(array : np.array, array_train: np.array, concat : bool) -> np.array:
     if concat:
-        Xt = np.concatenate((array, arrayTrain))
+        Xt = np.concatenate((array, array_train))
     else:
-        Xt = arrayTrain
+        Xt = array_train
     scaler = RobustScaler()
     scaler.fit(Xt.reshape(-1,1))
     res = scaler.transform(array.reshape(-1,1))
@@ -1447,15 +1519,15 @@ def pendant_couvrefeux(date):
             return 1
     return 0
 
-def target_encoding(features_name, Xset, Xtrain, Ytrain, variableType, size):
+def target_encoding(features_name, Xset, x_train, y_train, variableType, size):
     logger.info(f'Target Encoding')
-    enc = TargetEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(Xtrain, Ytrain[:, -1])
+    enc = TargetEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(x_train, y_train[:, -1])
     Xset = enc.transform(Xset).values
     return Xset
 
-def catboost_encoding(features_name, Xset, Xtrain, Ytrain, variableType, size):
+def catboost_encoding(features_name, Xset, x_train, y_train, variableType, size):
     logger.info(f'Catboost Encoding')
-    enc = CatBoostEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(Xtrain, Ytrain[:, -1])
+    enc = CatBoostEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(x_train, y_train[:, -1])
     Xset = enc.transform(Xset).values
     return Xset
 
@@ -1465,7 +1537,7 @@ def log_features(features, features_name):
             logger.info(f'{fet_index, features_name[fet_index]} {nb}')
     else:
         for fet_index in features:
-                logger.info(f'{fet_index, features_name[fet_index]}')      
+                logger.info(f'{fet_index, features_name[fet_index]}')
 
 def create_feature_map(features : np.array, features_name : dict, dir_output : Path):
     with open(dir_output / 'feature_map.text', 'w') as file:
@@ -1574,10 +1646,10 @@ def calculate_feature_range(fet, scale):
 
     return start, maxi, methods, variables
 
-def select_train_features(trainFeatures, scale, features_name):
+def select_train_features(train_features, scale, features_name):
     # Select train features
     train_fet_num = []
-    features_name_train, _ = get_features_name_list(scale, len(train_fet_num), trainFeatures)
+    features_name_train, _ = get_features_name_list(scale, len(train_fet_num), train_features)
     for fet in features_name_train:
         train_fet_num.append(features_name.index(fet))
     return train_fet_num

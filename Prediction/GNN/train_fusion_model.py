@@ -38,7 +38,7 @@ parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in
 args = parser.parse_args()
 
 # Input config
-nameExp = args.name
+name_exp = args.name
 maxDate = args.maxDate
 trainDate = args.trainDate
 doEncoder = args.encoder == "True"
@@ -59,8 +59,8 @@ resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
-doGridSearch = args.GridSearch ==  'True'
-doBayesSearch = args.BayesSearch == 'True'
+do_grid_search = args.GridSearch ==  'True'
+do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
 
@@ -71,7 +71,7 @@ dir_target = root_target / sinister / 'log' / resolution
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-name_dir = nameExp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
+name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
 
@@ -83,58 +83,125 @@ if spec == '':
 if dummy:
     spec += '_dummy'
 
-autoRegression = 'AutoRegressionReg' in trainFeatures
+autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     spec = '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, True)
+X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+
+############################# Train, Val, test ###########################
+
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
 
 ############################# Train Val test ###########################
 
-train_dataset_list, val_dataset_list, test_Dataset_list, features_selected_list  = [], [], [], []
+# Fusion
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, args)
 
-train_dataset, val_dataset, test_Dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, trainDepartements, args)
+
+# Base models
+train_dataset_list, val_dataset_list, test_dataset_list, features_selected_list, dir_model_list, model_list = [], [], [], [], [], []
+
+############################ Models ####################################
+
+# Model 1
+values_per_class = 'full'
+k_days = 7
+scale = 30
+nbfeatures = 700
+model_type = 'xgboost'
+target = 'risk'
+task_type = 'regression'
+loss = 'rmse'
+name_exp_model = 'default'
+sinister_model = 'firepoint'
+resolution_model = '2x2'
+prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
+model_name = f'{model_type}_{target}_{task_type}_{loss}'
+dir_model =  Path(name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/')
+
+X_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+Y_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+features_name_model = read_object('train_features.pkl', dir_model)
+graph_model = read_object(f'graph_{scale}.pkl', dir_model)
+
+dir_model = dir_model / prefix_model
+
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, X_model, Y_model, features_name, train_departements, args)
 
 train_dataset_list.append(train_dataset)
 val_dataset_list.append(val_dataset)
-test_Dataset_list.append(test_Dataset)
+test_dataset_list.append(test_dataset)
 features_selected_list.append(features_selected)
+dir_model_list.append(dir_model)
+model_list.append(model_name)
+
+
+# Model 2
+values_per_class = 'full'
+k_days = 7
+scale = 10
+nbfeatures = 700
+model_type = 'xgboost'
+target = 'risk'
+task_type = 'regression'
+loss = 'rmse'
+name_exp_model = 'default'
+sinister_model = 'firepoint'
+resolution_model = '2x2'
+prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
+model_name = f'{model_type}_{target}_{task_type}_{loss}'
+dir_model =  Path(name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/')
+
+X_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+Y_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+features_name_model = read_object('train_features.pkl', dir_model)
+graph_model = read_object(f'graph_{scale}.pkl', dir_model)
+
+dir_model = dir_model / prefix_model
+
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, X_model, Y_model, features_name, train_departements, args)
+
+train_dataset_list.append(train_dataset)
+val_dataset_list.append(val_dataset)
+test_dataset_list.append(test_dataset)
+features_selected_list.append(features_selected)
+dir_model_list.append(dir_model)
+model_list.append(model_name)
 
 ############################# Training ###########################
 
 if doTrain:
     name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
-    wrapped_train_sklearn_api_fusion_model(train_dataset=train_dataset_list,
-                        val_dataset=val_dataset_list,
-                        test_Dataset=test_Dataset_list,
-                        dir_output=dir_output / name,
-                        device='cpu',
-                        features=features_selected_list,
-                        autoRegression=autoRegression,
-                        features_name=features_name,
-                        optimize_feature=optimize_feature,
-                        doGridSearch = doGridSearch,
-                        doBayesSearch = doBayesSearch)
+    wrapped_train_sklearn_api_fusion_model(train_dataset, val_dataset,
+                                           test_dataset,
+                                           train_dataset_list=train_dataset_list,
+                                           val_dataset_list=val_dataset_list,
+                                           test_dataset_list=test_dataset_list,
+                                           model_list=model_list,
+                                           dir_model_list=dir_model_list,
+                            dir_output=dir_output,
+                            device='cpu',
+                            features_name=feature_names,
+                            autoRegression=autoRegression,
+                            optimize_feature=optimize_feature,
+                            do_grid_search=do_grid_search,
+                            do_bayes_search=do_bayes_search,
+                            deep=False)
 
 if doTest:
-    Xtest = test_Dataset[0]
-    Ytest = test_Dataset[1]
+    x_test = test_dataset[0]
+    y_test = test_dataset[1]
 
-    XtestDaily = test_DatasetDaily[0]
-    YtestDaily = test_DatasetDaily[1]
-
-    XtestLocalized = test_DatasetLocalized[0]
-    YtestLocalized = test_DatasetLocalized[1]
-
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/train' + '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/train' + '/'
     train_dir = Path(name_dir)
 
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
-    testDepartement = [int2name[d] for d in np.unique(Ytest[:, 3])]
+    testDepartement = [int2name[d] for d in np.unique(y_test[:, 3])]
 
     mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
@@ -175,11 +242,8 @@ if doTest:
         ]
 
     for dept in departements:
-        Xset = Xtest[(Xtest[:, 3] == name2int[dept])]
-        Yset = Ytest[(Xtest[:, 3] == name2int[dept])]
-
-        XsetDaily = XtestDaily[(XtestDaily[:, 3] == name2int[dept])]
-        XsetLocalized = XtestLocalized[(XtestLocalized[:, 3] == name2int[dept])]
+        Xset = x_test[(x_test[:, 3] == name2int[dept])]
+        Yset = y_test[(x_test[:, 3] == name2int[dept])]
 
         if Xset.shape[0] == 0:
             continue

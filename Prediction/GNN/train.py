@@ -33,17 +33,30 @@ def switch_target(target, y_train, y_val, y_test, use_weight):
     return Y_train, W_train, Y_val, Y_test, W_test
 
 def get_model_and_fit_params(x_train, Y_train, x_val, Y_val, W_train,
-                      features, name, type, task_type, 
+                      features, name, model_type, task_type, 
                       params, loss):
-    logger.info(features)
-
-    fit_params = {
-            'eval_set': [(x_train[:, features], Y_train), (x_val[:, features], Y_val)],
+    
+    if model_type == 'xgboost':
+        fit_params = {
+                'eval_set': [(x_train[:, features], Y_train), (x_val[:, features], Y_val)],
+                'sample_weight': W_train,
+                'verbose': False
+         }
+        
+    elif model_type == 'ngboost':
+        fit_params = {
+            'X_val': x_val[:, features],
+            'Y_val': Y_val,
             'sample_weight': W_train,
-            'verbose': False
+            'early_stopping_rounds': 100,
+            'monitor': None
         }
-
-    model = get_model(type=type, name=name, device=device, task_type=task_type, params=params, loss=loss)
+    elif model_type == 'linear':
+        fit_params = {}
+    else:
+        raise ValueError(f"Unsupported model model_type: {model_type}")
+    
+    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss)
     return model, fit_params
 
 ############################################### SKLEARN ##################################################
@@ -107,18 +120,17 @@ def fit(params):
 
     create_feature_map(features=features, features_name=features_name, dir_output=dir_output / name)
 
-    if isinstance(model, Model):
-
+    """if isinstance(model, Model):
         if name.find('features') != -1:
             logger.info('Features importance')
-            model.plot_features_importance(x_train[:, features], y, features_name[features], 'test', dir_output / name, mode='bar')
-            model.plot_features_importance(x_test[:, features], y_test, features_name[features], 'train', dir_output / name, mode='bar')
+            model.plot_features_importance(x_train[:, features], y, [features_name[i] for i in features], 'train', dir_output / name, mode='bar')
+            model.plot_features_importance(x_test[:, features], y_test, [features_name[i] for i in features], 'test', dir_output / name, mode='bar')
 
         if name.find('search') != -1:
             model.plot_param_influence('max_depth', dir_output / name)
 
     if isinstance(model, ModelTree):
-        model.plot_tree(features_name=features_name, outname=name, dir_output= dir_output / name, figsize=(50,25))
+        model.plot_tree(features_name=features_name, outname=name, dir_output= dir_output / name, figsize=(50,25))"""
 
 def train_sklearn_api_model(params):
     """
@@ -170,32 +182,32 @@ def train_sklearn_api_model(params):
             Le dispositif à utiliser pour l'entraînement (`cpu` ou `cuda`).
             Example: `device = 'cpu'`
 
-        - doGridSearch : bool
+        - do_grid_search : bool
             Indicateur pour savoir si une recherche de grille (GridSearch) doit être effectuée pour l'optimisation des hyperparamètres.
-            Example: `doGridSearch = True`
+            Example: `do_grid_search = True`
 
-        - doBayesSearch : bool
+        - do_bayes_search : bool
             Indicateur pour savoir si une recherche bayésienne (BayesSearch) doit être effectuée pour l'optimisation des hyperparamètres.
-            Example: `doBayesSearch = False`
+            Example: `do_bayes_search = False`
 
         - task_type : str
-            Le type de tâche (`regression` ou `classification`).
+            Le model_type de tâche (`regression` ou `classification`).
             Example: `task_type = 'regression'`
 
         - loss : str
             La fonction de perte à utiliser pour l'entraînement (par exemple, `rmse`, `log_loss`).
             Example: `loss = 'rmse'`
 
-        - type : str
-            Le type de modèle à entraîner (par exemple, `xgboost`, `lightgbm`, `ngboost`).
-            Example: `type = 'xgboost'`
+        - model_type : str
+            Le model_type de modèle à entraîner (par exemple, `xgboost`, `lightgbm`, `ngboost`).
+            Example: `model_type = 'xgboost'`
 
         - name : str
             Le nom du modèle, utilisé pour l'identifier et sauvegarder les résultats.
             Example: `name = 'xgboost_risk_regression_rmse'`
 
         - model_params : dict
-            Les paramètres du modèle, spécifiques au type de modèle utilisé.
+            Les paramètres du modèle, spécifiques au model_type de modèle utilisé.
             Example: `model_params = {'objective': 'reg:squarederror', 'learning_rate': 0.01, 'n_estimators': 10000}`
 
         - grid_params : dict
@@ -206,7 +218,7 @@ def train_sklearn_api_model(params):
     required_params = [
         'x_train', 'y_train', 'x_val', 'y_val', 'x_test', 'y_test', 'features', 'target',
         'features_name', 'optimize_feature', 'dir_output', 'device',
-        'doGridSearch', 'doBayesSearch', 'task_type', 'loss', 'type', 'name', 'model_params', 'grid_params'
+        'do_grid_search', 'do_bayes_search', 'task_type', 'loss', 'model_type', 'name', 'model_params', 'grid_params'
     ]
 
     # Ensure all required parameters are present
@@ -225,11 +237,11 @@ def train_sklearn_api_model(params):
     optimize_feature = params['optimize_feature']
     dir_output = params['dir_output']
     device = params['device']
-    doGridSearch = params['doGridSearch']
-    doBayesSearch = params['doBayesSearch']
+    do_grid_search = params['do_grid_search']
+    do_bayes_search = params['do_bayes_search']
     task_type = params['task_type']
     loss = params['loss']
-    type = params['type']
+    model_type = params['model_type']
     name = params['name']
     model_params = params['model_params']
     grid_params = params['grid_params']
@@ -237,45 +249,80 @@ def train_sklearn_api_model(params):
     Y_train, W_train, Y_val, Y_test, W_test = switch_target(target=target, y_train=y_train, y_val=y_val, y_test=y_test, use_weight=True)
 
     model, fit_params = get_model_and_fit_params(x_train, Y_train, x_val, Y_val, W_train,
-                                        features, name, type, task_type, 
+                                        features, name, model_type, task_type, 
                                         model_params, loss)
 
-    fit(x_train, Y_train, x_test, Y_test, W_test, features, features_name,
-        f'{name}', model, fit_params, 'skip', grid_params, dir_output)
+    fit_params_dict = {
+        'x_train': x_train,
+        'y': Y_train,
+        'x_test': x_test,
+        'y_test': Y_test,
+        'w_test': W_test,
+        'features': features,
+        'features_name': features_name,
+        'name': f'{name}',
+        'model': model,
+        'fit_params': fit_params,
+        'parameter_optimization_method': 'skip',
+        'grid_params': grid_params,
+        'dir_output': dir_output
+    }
+
+    fit(fit_params_dict)
     
     if optimize_feature:
-        model = get_model(type=type, name=f'{name}_features', device=device, task_type=task_type, params=model_params, loss=loss)
-        relevent_features = explore_features(model=model,
+        model = get_model(model_type=model_type, name=f'{name}_features', device=device, task_type=task_type, params=model_params, loss=loss)
+        relevant_features = explore_features(model=model,
                                                 features=features,
                                                 X=x_train, y=Y_train, w=W_train, X_val=x_val, y_val=Y_val, w_val=None,
                                                 X_test=x_test, y_test=Y_test, w_test=W_test)
 
-        log_features(relevent_features, features_name)
+        log_features(relevant_features, features_name)
 
-        save_object(relevent_features, f'relevent_features_{target}.pkl', dir_output)
+        save_object(relevant_features, f'relevant_features_{target}.pkl', dir_output)
     else:
-        if (dir_output / ('relevent_features.pkl')).is_file():
-            relevent_features = read_object('relevent_features.pkl', dir_output)
-        else:
-            logger.info('No relevent features found, train with all features')
-            relevent_features = features
+        relevant_features = read_object(f'relevant_features_{target}.pkl', dir_output)
+        if relevant_features is None:
+            logger.info('No relevant features found, train with all features')
+            relevant_features = features
     
     model, fit_params = get_model_and_fit_params(x_train, Y_train, x_val, Y_val, W_train,
-                                        features, f'{name}_features', type, task_type, 
+                                        relevant_features, f'{name}_features', model_type, task_type, 
                                         model_params, loss)
     
-    fit(x_train, Y_train, x_test, Y_test, W_test, relevent_features, features_name,
-        f'{name}_features', model, fit_params, 'skip', grid_params, dir_output)
-    
-    if doGridSearch:
-        model = get_model(type=type, name=f'{name}_grid_search', device=device, task_type=task_type, params=model_params, loss=loss)
-        fit(x_train, Y_train, x_test, Y_test, W_test, relevent_features, features_name,
-            f'{name}_grid_search', model, fit_params, 'grid', grid_params, dir_output)    
+    fit_params_dict = {
+        'x_train': x_train,
+        'y': Y_train,
+        'x_test': x_test,
+        'y_test': Y_test,
+        'w_test': W_test,
+        'features': relevant_features,
+        'features_name': features_name,
+        'name': f'{name}_features',
+        'model': model,
+        'fit_params': fit_params,
+        'parameter_optimization_method': 'skip',
+        'grid_params': grid_params,
+        'dir_output': dir_output
+    }
 
-    if doBayesSearch:
-        model = get_model(type=type, name=f'{name}_bayes_search', device=device, task_type=task_type, params=model_params, loss=loss)
-        fit(x_train, Y_train, x_test, Y_test, W_test, relevent_features, features_name,
-            f'{name}_bayes_search', model, fit_params, 'bayes', grid_params, dir_output)
+    fit(fit_params_dict)
+
+    if do_grid_search:
+        model = get_model(model_type=model_type, name=f'{name}_grid_search', device=device, task_type=task_type, params=model_params, loss=loss)
+        fit_params_dict['name'] = f'{name}_grid_search'
+        fit_params_dict['model'] = model
+        fit_params_dict['parameter_optimization_method'] = 'grid'
+
+        fit(fit_params_dict)    
+
+    if do_bayes_search:
+        model = get_model(model_type=model_type, name=f'{name}_bayes_search', device=device, task_type=task_type, params=model_params, loss=loss)
+        fit_params_dict['name'] = f'{name}_bayes_search'
+        fit_params_dict['model'] = model
+        fit_params_dict['parameter_optimization_method'] = 'bayes'
+
+        fit(fit_params_dict)
 
 def train_xgboost(params):
     """
@@ -292,10 +339,12 @@ def train_xgboost(params):
     optimize_feature = params['optimize_feature']
     dir_output = params['dir_output']
     device = params['device']
-    doGridSearch = params['doGridSearch']
-    doBayesSearch = params['doBayesSearch']
+    do_grid_search = params['do_grid_search']
+    do_bayes_search = params['do_bayes_search']
 
-    for target in ['risk', 'nbsinister', 'binary']:
+    targets = ['risk', 'nbsinister', 'binary']
+
+    for target in targets:
         if target == 'risk':
             loss = 'rmse'
             task_type = 'regression'
@@ -315,13 +364,13 @@ def train_xgboost(params):
             'verbosity': 0,
             'early_stopping_rounds': None,
             'learning_rate': 0.01,
-            'min_child_weight': 5.0,
+            'min_child_weight': 1.0,
             'max_depth': 6,
             'max_delta_step': 1.0,
             'subsample': 0.3,
             'colsample_bytree': 0.8,
             'colsample_bylevel': 0.8,
-            'reg_lambda': 10.5,
+            'reg_lambda': 1.0,
             'reg_alpha': 0.9,
             'n_estimators': 10000,
             'random_state': 42,
@@ -342,22 +391,22 @@ def train_xgboost(params):
             'optimize_feature': optimize_feature,
             'dir_output': dir_output,
             'device': device,
-            'doGridSearch': doGridSearch,
-            'doBayesSearch': doBayesSearch,
+            'do_grid_search': do_grid_search,
+            'do_bayes_search': do_bayes_search,
             'task_type': task_type,
             'loss': loss,
-            'type': 'xgboost',
+            'model_type': 'xgboost',
             'name': name,
             'model_params': model_params,
             'grid_params': grid_params,
         })
 
 def train_ngboost(params):
-    type = 'ngboost'
+    model_type = 'ngboost'
     target = 'risk'
     loss = 'rmse'
     task_type = 'regression'
-    name = f'{type}_{target}_{task_type}_{loss}'
+    name = f'{model_type}_{target}_{task_type}_{loss}'
     model_params = {
         'Dist': 'normal',
         'Score': 'MLE',
@@ -382,11 +431,11 @@ def train_ngboost(params):
         'optimize_feature': params['optimize_feature'],
         'dir_output': params['dir_output'],
         'device': params['device'],
-        'doGridSearch': params['doGridSearch'],
-        'doBayesSearch': params['doBayesSearch'],
+        'do_grid_search': params['do_grid_search'],
+        'do_bayes_search': params['do_bayes_search'],
         'task_type': task_type,
         'loss': loss,
-        'type': type,
+        'model_type': model_type,
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
@@ -394,11 +443,11 @@ def train_ngboost(params):
 
 
 def train_lightgbm(params):
-    type = 'lightgbm'
+    model_type = 'lightgbm'
     target = 'risk'
     loss = 'rmse'
     task_type = 'regression'
-    name = f'{type}_{target}_{task_type}_{loss}'
+    name = f'{model_type}_{target}_{task_type}_{loss}'
     model_params = {
         'objective': 'regression',
         'learning_rate': 0.01,
@@ -427,11 +476,11 @@ def train_lightgbm(params):
         'optimize_feature': params['optimize_feature'],
         'dir_output': params['dir_output'],
         'device': params['device'],
-        'doGridSearch': params['doGridSearch'],
-        'doBayesSearch': params['doBayesSearch'],
+        'do_grid_search': params['do_grid_search'],
+        'do_bayes_search': params['do_bayes_search'],
         'task_type': task_type,
         'loss': loss,
-        'type': type,
+        'model_type': model_type,
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
@@ -439,11 +488,11 @@ def train_lightgbm(params):
 
 
 def train_svm(params):
-    type = 'svm'
+    model_type = 'svm'
     target = 'risk'
     loss = 'rmse'
     task_type = 'regression'
-    name = f'{type}_{target}_{task_type}_{loss}'
+    name = f'{model_type}_{target}_{task_type}_{loss}'
     model_params = {
         'C': 1.0,
         'kernel': 'rbf',
@@ -468,11 +517,11 @@ def train_svm(params):
         'optimize_feature': params['optimize_feature'],
         'dir_output': params['dir_output'],
         'device': params['device'],
-        'doGridSearch': params['doGridSearch'],
-        'doBayesSearch': params['doBayesSearch'],
+        'do_grid_search': params['do_grid_search'],
+        'do_bayes_search': params['do_bayes_search'],
         'task_type': task_type,
         'loss': loss,
-        'type': type,
+        'model_type': model_type,
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
@@ -480,11 +529,11 @@ def train_svm(params):
 
 
 def train_rf(params):
-    type = 'rf'
+    model_type = 'rf'
     target = 'risk'
     loss = 'rmse'
     task_type = 'regression'
-    name = f'{type}_{target}_{task_type}_{loss}'
+    name = f'{model_type}_{target}_{task_type}_{loss}'
     model_params = {
         'n_estimators': 100,
         'max_depth': None,
@@ -510,22 +559,22 @@ def train_rf(params):
         'optimize_feature': params['optimize_feature'],
         'dir_output': params['dir_output'],
         'device': params['device'],
-        'doGridSearch': params['doGridSearch'],
-        'doBayesSearch': params['doBayesSearch'],
+        'do_grid_search': params['do_grid_search'],
+        'do_bayes_search': params['do_bayes_search'],
         'task_type': task_type,
         'loss': loss,
-        'type': type,
+        'model_type': model_type,
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
     })
 
 def train_decision_tree(params):
-    type = 'decision_tree'
+    model_type = 'decision_tree'
     target = 'risk'
     loss = 'rmse'
     task_type = 'regression'
-    name = f'{type}_{target}_{task_type}_{loss}'
+    name = f'{model_type}_{target}_{task_type}_{loss}'
     model_params = {
         'criterion': 'mse',
         'splitter': 'best',
@@ -552,33 +601,33 @@ def train_decision_tree(params):
         'optimize_feature': params['optimize_feature'],
         'dir_output': params['dir_output'],
         'device': params['device'],
-        'doGridSearch': params['doGridSearch'],
-        'doBayesSearch': params['doBayesSearch'],
+        'do_grid_search': params['do_grid_search'],
+        'do_bayes_search': params['do_bayes_search'],
         'task_type': task_type,
         'loss': loss,
-        'type': type,
+        'model_type': model_type,
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
     })
 
-def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_Dataset,
+def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                             dir_output: Path,
                             device: str,
                             features: np.array,
                             features_name: dict,
                             autoRegression: bool,
                             optimize_feature: bool,
-                            doGridSearch: bool,
-                            doBayesSearch: bool):
+                            do_grid_search: bool,
+                            do_bayes_search: bool):
     x_train = train_dataset[0]
     y_train = train_dataset[1]
 
     x_val = val_dataset[0]
     y_val = val_dataset[1]
 
-    x_test = test_Dataset[0]
-    y_test = test_Dataset[1]
+    x_test = test_dataset[0]
+    y_test = test_dataset[1]
 
     x_train = x_train[x_train[:, 5] > 0]
     y_train = y_train[y_train[:, 5] > 0]
@@ -589,7 +638,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_Dataset,
     x_test = x_test[x_test[:, 5] > 0]
     y_test = y_test[y_test[:, 5] > 0]
 
-    logger.info(f'x_train shape: {x_train.shape}, x_val shape: {x_val.shape}, x_test shape: {test_Dataset[0].shape}, y_train shape: {y_train.shape}, y_val shape: {y_val.shape}, x_test shape: {x_test.shape}')
+    logger.info(f'x_train shape: {x_train.shape}, x_val shape: {x_val.shape}, x_test shape: {test_dataset[0].shape}, y_train shape: {y_train.shape}, y_val shape: {y_val.shape}, x_test shape: {x_test.shape}')
 
     params = {
         'x_train': x_train,
@@ -603,8 +652,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_Dataset,
         'optimize_feature': optimize_feature,
         'dir_output': dir_output,
         'device': device,
-        'doGridSearch': doGridSearch,
-        'doBayesSearch': doBayesSearch,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
     }
 
     train_xgboost(params)
@@ -616,18 +665,23 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_Dataset,
 
 ############################################################# Fusion ######################################################################
 
-def wrapped_train_sklearn_api_fusion_model(train_dataset_list : list,
+def wrapped_train_sklearn_api_fusion_model(train_dataset, val_dataset,
+                                           test_dataset,
+                                           train_dataset_list : list,
                                            val_dataset_list : list,
-                                           test_Dataset_list : list,
-                                            models_list : list,
-                                            features_list : list,
+                                           test_dataset_list : list,
+                                           model_list : list,
+                                           dir_model_list : list,
                             dir_output: Path,
                             device: str,
                             features_name: dict,
                             autoRegression: bool,
                             optimize_feature: bool,
-                            doGridSearch: bool,
-                            doBayesSearch: bool):
+                            do_grid_search: bool,
+                            do_bayes_search: bool,
+                            deep : bool):
+    
+    params_list = []
     
     for i, train_dataset in enumerate(train_dataset_list):
         x_train = train_dataset[0]
@@ -636,8 +690,8 @@ def wrapped_train_sklearn_api_fusion_model(train_dataset_list : list,
         x_val = val_dataset_list[i][0]
         y_val = val_dataset_list[i][1]
 
-        x_test = test_Dataset_list[i][0]
-        y_test = test_Dataset_list[i][1]
+        x_test = test_dataset_list[i][0]
+        y_test = test_dataset_list[i][1]
 
         train_dataset_list[i][0] = x_train[x_train[:, 5] > 0]
         train_dataset_list[i][1] = y_train[y_train[:, 5] > 0]
@@ -645,9 +699,305 @@ def wrapped_train_sklearn_api_fusion_model(train_dataset_list : list,
         val_dataset_list[i][0] = x_val[x_val[:, 5] > 0]
         val_dataset_list[i][1] = y_val[y_val[:, 5] > 0]
 
-        test_Dataset_list[i][0] = x_test[x_test[:, 5] > 0]
-        test_Dataset_list[i][1] = y_test[y_test[:, 5] > 0]
+        test_dataset_list[i][0] = x_test[x_test[:, 5] > 0]
+        test_dataset_list[i][1] = y_test[y_test[:, 5] > 0]
+
+        model_name = model_list[i]
+        dir_model = dir_model_list[i]
+
+        model_type, target, task_type, loss  = model_name.split('_')
+        
+        params = {
+        'x_train': x_train,
+        'y_train': y_train,
+        'x_val': x_val,
+        'y_val': y_val,
+        'x_test': x_test,
+        'y_test': y_test,
+        'features': features,
+        'features_name': features_name,
+        'optimize_feature': optimize_feature,
+        'dir_output': dir_model,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'model_type': model_type,
+        'name' : model_name,
+        'task_type' : task_type,
+        'loss' : loss
+        }
+
+        params_list.append(params)
+
+    x_train = train_dataset[0]
+    y_train = train_dataset[1]
+
+    x_val = val_dataset[0]
+    y_val = val_dataset[1]
+
+    x_test = test_dataset[0]
+    y_test = test_dataset[1]
+
+    x_train = x_train[x_train[:, 5] > 0]
+    y_train = y_train[y_train[:, 5] > 0]
+
+    x_val = x_val[x_val[:, 5] > 0]
+    y_val = y_val[y_val[:, 5] > 0]
+
+    x_test= x_test[x_test[:, 5] > 0]
+    y_test = y_test[y_test[:, 5] > 0]
+
+    params_fusion = {
+        'x_train': x_train,
+        'y_train': y_train,
+        'x_val': x_val,
+        'y_val': y_val,
+        'x_test': x_test,
+        'y_test': y_test,
+        'features': features,
+        'features_name': features_name,
+        'optimize_feature': optimize_feature,
+        'dir_output': dir_output,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        }
     
+    targets = ['risk', 'nbsinister', 'binary']
+
+    for target in targets:
+        if target == 'risk':
+            loss = 'rmse'
+            task_type = 'regression'
+        elif target == 'nbsinister':
+            loss = 'rmse'
+            task_type = 'regression'
+        else:
+            loss = 'log_loss'
+            task_type = 'classification'
+
+        ####################### Linear ############################
+        params_fusion['model_type'] = 'linear'
+        params_fusion['name'] = 'linear_fusion'
+        params_fusion['parameter_optimization_method'] = 'skip'
+        params_fusion['fit_params'] = 'skip'
+        params_fusion['grid_params'] = {}
+        params_fusion['deep'] = deep
+
+        train_sklearn_api_model_fusion(params_list, params_fusion)
+    
+def train_sklearn_api_model_fusion(params_list, params_fusion):
+    """
+    Entraîne plusieurs modèles en utilisant les ensembles de paramètres fournis.
+
+    Parameters:
+    ----------
+    params : dict
+        Contient les paramètres du modèle de fusion. Même clefs que params_list
+    params_list : list of dict
+        Une liste de dictionnaires contenant les paramètres nécessaires pour l'entraînement de chaque modèle.
+        Chaque dictionnaire dans la liste doit contenir les clés suivantes :
+
+        - x_train : np.array
+            Les données d'entraînement, contenant les features (caractéristiques) à utiliser pour entraîner le modèle.
+            Example: `x_train = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])`
+
+        - y_train : np.array
+            Les étiquettes (labels) correspondantes aux données d'entraînement.
+            Example: `y_train = np.array([0, 1, 1])`
+
+        - x_val : np.array
+            Les données de validation, utilisées pour valider le modèle pendant l'entraînement.
+            Example: `x_val = np.array([[1, 2, 3], [4, 5, 6]])`
+
+        - y_val : np.array
+            Les étiquettes correspondantes aux données de validation.
+            Example: `y_val = np.array([0, 1])`
+
+        - x_test : np.array
+            Les données de test, utilisées pour tester les performances finales du modèle.
+            Example: `x_test = np.array([[1, 2, 3], [4, 5, 6]])`
+
+        - y_test : np.array
+            Les étiquettes correspondantes aux données de test.
+            Example: `y_test = np.array([0, 1])`
+
+        - features : list
+            La liste des indices des features à utiliser pour l'entraînement.
+            Example: `features = [0, 1, 2]`
+
+        - target : str
+            Le nom de la cible (target) que le modèle essaie de prédire. Peut être `risk`, `nbsinister` ou `binary`.
+            Example: `target = 'risk'`
+
+        - features_name : dict
+            Un dictionnaire contenant les noms des features, mappés par leurs indices.
+            Example: `features_name = {0: 'feature1', 1: 'feature2', 2: 'feature3'}`
+
+        - optimize_feature : bool
+            Indicateur pour savoir si une optimisation des features doit être réalisée avant l'entraînement.
+            Example: `optimize_feature = True`
+
+        - dir_output : Path
+            Le chemin du répertoire où les résultats et les modèles seront sauvegardés.
+            Example: `dir_output = Path('./output')`
+
+        - device : str
+            Le dispositif à utiliser pour l'entraînement (`cpu` ou `cuda`).
+            Example: `device = 'cpu'`
+
+        - do_grid_search : bool
+            Indicateur pour savoir si une recherche de grille (GridSearch) doit être effectuée pour l'optimisation des hyperparamètres.
+            Example: `do_grid_search = True`
+
+        - do_bayes_search : bool
+            Indicateur pour savoir si une recherche bayésienne (BayesSearch) doit être effectuée pour l'optimisation des hyperparamètres.
+            Example: `do_bayes_search = False`
+
+        - task_type : str
+            Le model_type de tâche (`regression` ou `classification`).
+            Example: `task_type = 'regression'`
+
+        - loss : str
+            La fonction de perte à utiliser pour l'entraînement (par exemple, `rmse`, `log_loss`).
+            Example: `loss = 'rmse'`
+
+        - model_type : str
+            Le model_type de modèle à entraîner (par exemple, `xgboost`, `lightgbm`, `ngboost`).
+            Example: `model_type = 'xgboost'`
+
+        - name : str
+            Le nom du modèle, utilisé pour l'identifier et sauvegarder les résultats.
+            Example: `name = 'xgboost_risk_regression_rmse'`
+
+        - model_params : dict
+            Les paramètres du modèle, spécifiques au model_type de modèle utilisé.
+            Example: `model_params = {'objective': 'reg:squarederror', 'learning_rate': 0.01, 'n_estimators': 10000}`
+
+        - grid_params : dict
+            La grille des hyperparamètres à explorer lors de l'optimisation.
+            Example: `grid_params = {'max_depth': [2, 5, 10], 'learning_rate': [0.01, 0.1]}`
+    """
+    required_params = [
+        'x_train', 'y_train', 'x_val', 'y_val', 'x_test', 'y_test', 'features', 'target',
+        'features_name', 'optimize_feature', 'dir_output', 'device',
+        'do_grid_search', 'do_bayes_search', 'task_type', 'loss', 'model_type', 'name', 'model_params', 'grid_params'
+    ]
+
+    for param in required_params:
+            assert param in params_fusion, f"Missing required parameter: {param}"
+
+    x_train = params_fusion['x_train']
+    y_train = params_fusion['y_train']
+    x_val = params_fusion['x_val']
+    y_val = params_fusion['y_val']
+    x_test = params_fusion['x_test']
+    y_test = params_fusion['y_test']
+    features = params_fusion['features']
+    target = params_fusion['target']
+    features_name = params_fusion['features_name']
+    optimize_feature = params_fusion['optimize_feature']
+    dir_output = params_fusion['dir_output']
+    device = params_fusion['device']
+    do_grid_search = params_fusion['do_grid_search']
+    do_bayes_search = params_fusion['do_bayes_search']
+    task_type = params_fusion['task_type']
+    loss = params_fusion['loss']
+    model_type = params_fusion['model_type']
+    name = params_fusion['name']
+    model_params = params_fusion['model_params']
+    grid_params = params_fusion['grid_params']
+    deep = params_fusion['deep']
+
+    Y_train, W_train, Y_val, Y_test, W_test = switch_target(target=target, y_train=y_train, y_val=y_val, y_test=y_test, use_weight=True)
+
+    model, fit_params = get_model_and_fit_params(x_train, Y_train, x_val, Y_val, W_train,
+                                        features, name, model_type, task_type, 
+                                        model_params, loss)
+    
+    # Valeurs par défaut pour le dictionnaire
+    params = {
+        'x_train_list': [],
+        'y_train_list': [],
+        'x_test_list': [],
+        'y_test_list': [],
+        'w_test_list': [],
+        'features_name_list': [],
+        'fit_params_list': [],
+        'features_list': [],
+        'grid_params_list': [],
+        'y_train': Y_train,
+        'y_test': Y_test,
+        'w_test': W_test,
+        'name': name,
+        'model': model,
+        'deep': deep,
+        'fit_params': fit_params,
+        'grid_params': grid_params,
+        'dir_output': dir_output
+    }
+
+    model_list = []
+
+    for params in params_list:
+        # Ensure all required parameters are present
+        for param in required_params:
+            assert param in params, f"Missing required parameter: {param}"
+
+        x_train_p = params['x_train']
+        y_train_p = params['y_train']
+        x_val_p = params['x_val']
+        y_val_p = params['y_val']
+        x_test_p = params['x_test']
+        y_test_p = params['y_test']
+        features_p = params['features']
+        target_p = params['target']
+        features_name_p = params['features_name']
+        optimize_feature_p = params['optimize_feature']
+        dir_output_p = params['dir_output']
+        device_p = params['device']
+        do_grid_search_p = params['do_grid_search']
+        do_bayes_search_p = params['do_bayes_search']
+        task_type_p = params['task_type']
+        loss_p = params['loss']
+        model_type_p = params['model_type']
+        name_p = params['name']
+        model_params_p = params['model_params']
+        grid_params_p = params['grid_params']
+
+
+        Y_train_p, W_train_p, Y_val_p, Y_test_p, W_test_p = switch_target(target=target_p, y_train=y_train_p, y_val=y_val_p, y_test=y_test_p, use_weight=True)
+        if deep:
+            model_p, fit_params_p = get_model_and_fit_params(x_train_p, Y_train_p, x_val_p, Y_val_p, W_train_p,
+                                          features_p, name_p, model_type_p, task_type_p,
+                                            model_params_p, loss_p)
+        
+        else:
+            model_p = read_object(f'{name_p}.pkl', dir_output_p)
+            if model_p is None:
+                raise ValueError(f'Error : train model first or use deep at True, now {deep}')
+        
+        params['x_train_list'].append(x_train_p)
+        params['y_train_list'].append(Y_train_p)
+        params['x_test_list'].append(x_test_p)
+        params['y_test_list'].append(Y_test_p)
+        params['w_test_list'].append(W_test_p)
+        params['features_name_list'].append(features_name_p)
+        params['fit_params_list'].append(fit_params_p)
+        params['features_list'].append(features_p)
+        params['grid_params_list'].append(grid_params_p)
+        params['do_grid_search_list'].append(do_grid_search_p)
+        params['do_bayes_search_list'].append(do_bayes_search_p)
+        params['dir_output_list'].append(dir_output_p)
+        params['optimize_feature_list'].append(optimize_feature_p)
+        params['device_list'].append(device_p)
+        model_list.append(model_p)
+
+    model_fusion = ModelFusion(model_list=model_list, model=model, loss=loss, name=name)
+    params['model'] = model_fusion
+
+    fit_fusion(params)
+
 def fit_fusion(params):
     """
     Entraîne et évalue un modèle de fusion en utilisant les paramètres fournis.
@@ -721,211 +1071,11 @@ def fit_fusion(params):
 
     if name.find('features') != -1:
         logger.info('Features importance')
-        model.plot_features_importance(x_train_list, y_train_list, y_test, features_name_list, f'test', dir_output / name, mode='bar', deep=deep)
-        model.plot_features_importance(x_test_list, y_test_list, y_test, features_name_list, f'train', dir_output / name, mode='bar', deep=deep)
+        model.plot_features_importance(x_train_list, y_train_list, y_test, features_name_list, f'test', dir_output / name, mode='bar', deep=True)
+        model.plot_features_importance(x_test_list, y_test_list, y_test, features_name_list, f'train', dir_output / name, mode='bar', deep=True)
 
     if name.find('search') != -1:
         model.plot_param_influence('max_depth', dir_output / name)
-
-def train_sklearn_api_model_fusion(params_list, params_fusion):
-    """
-    Entraîne plusieurs modèles en utilisant les ensembles de paramètres fournis.
-
-    Parameters:
-    ----------
-    params : dict
-        Contient les paramètres du modèle de fusion. Même clefs que params_list
-    params_list : list of dict
-        Une liste de dictionnaires contenant les paramètres nécessaires pour l'entraînement de chaque modèle.
-        Chaque dictionnaire dans la liste doit contenir les clés suivantes :
-
-        - x_train : np.array
-            Les données d'entraînement, contenant les features (caractéristiques) à utiliser pour entraîner le modèle.
-            Example: `x_train = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])`
-
-        - y_train : np.array
-            Les étiquettes (labels) correspondantes aux données d'entraînement.
-            Example: `y_train = np.array([0, 1, 1])`
-
-        - x_val : np.array
-            Les données de validation, utilisées pour valider le modèle pendant l'entraînement.
-            Example: `x_val = np.array([[1, 2, 3], [4, 5, 6]])`
-
-        - y_val : np.array
-            Les étiquettes correspondantes aux données de validation.
-            Example: `y_val = np.array([0, 1])`
-
-        - x_test : np.array
-            Les données de test, utilisées pour tester les performances finales du modèle.
-            Example: `x_test = np.array([[1, 2, 3], [4, 5, 6]])`
-
-        - y_test : np.array
-            Les étiquettes correspondantes aux données de test.
-            Example: `y_test = np.array([0, 1])`
-
-        - features : list
-            La liste des indices des features à utiliser pour l'entraînement.
-            Example: `features = [0, 1, 2]`
-
-        - target : str
-            Le nom de la cible (target) que le modèle essaie de prédire. Peut être `risk`, `nbsinister` ou `binary`.
-            Example: `target = 'risk'`
-
-        - features_name : dict
-            Un dictionnaire contenant les noms des features, mappés par leurs indices.
-            Example: `features_name = {0: 'feature1', 1: 'feature2', 2: 'feature3'}`
-
-        - optimize_feature : bool
-            Indicateur pour savoir si une optimisation des features doit être réalisée avant l'entraînement.
-            Example: `optimize_feature = True`
-
-        - dir_output : Path
-            Le chemin du répertoire où les résultats et les modèles seront sauvegardés.
-            Example: `dir_output = Path('./output')`
-
-        - device : str
-            Le dispositif à utiliser pour l'entraînement (`cpu` ou `cuda`).
-            Example: `device = 'cpu'`
-
-        - doGridSearch : bool
-            Indicateur pour savoir si une recherche de grille (GridSearch) doit être effectuée pour l'optimisation des hyperparamètres.
-            Example: `doGridSearch = True`
-
-        - doBayesSearch : bool
-            Indicateur pour savoir si une recherche bayésienne (BayesSearch) doit être effectuée pour l'optimisation des hyperparamètres.
-            Example: `doBayesSearch = False`
-
-        - task_type : str
-            Le type de tâche (`regression` ou `classification`).
-            Example: `task_type = 'regression'`
-
-        - loss : str
-            La fonction de perte à utiliser pour l'entraînement (par exemple, `rmse`, `log_loss`).
-            Example: `loss = 'rmse'`
-
-        - type : str
-            Le type de modèle à entraîner (par exemple, `xgboost`, `lightgbm`, `ngboost`).
-            Example: `type = 'xgboost'`
-
-        - name : str
-            Le nom du modèle, utilisé pour l'identifier et sauvegarder les résultats.
-            Example: `name = 'xgboost_risk_regression_rmse'`
-
-        - model_params : dict
-            Les paramètres du modèle, spécifiques au type de modèle utilisé.
-            Example: `model_params = {'objective': 'reg:squarederror', 'learning_rate': 0.01, 'n_estimators': 10000}`
-
-        - grid_params : dict
-            La grille des hyperparamètres à explorer lors de l'optimisation.
-            Example: `grid_params = {'max_depth': [2, 5, 10], 'learning_rate': [0.01, 0.1]}`
-    """
-    required_params = [
-        'x_train', 'y_train', 'x_val', 'y_val', 'x_test', 'y_test', 'features', 'target',
-        'features_name', 'optimize_feature', 'dir_output', 'device',
-        'doGridSearch', 'doBayesSearch', 'task_type', 'loss', 'type', 'name', 'model_params', 'grid_params'
-    ]
-
-    for param in required_params:
-            assert param in params_fusion, f"Missing required parameter: {param}"
-
-    x_train = params_fusion['x_train']
-    y_train = params_fusion['y_train']
-    x_val = params_fusion['x_val']
-    y_val = params_fusion['y_val']
-    x_test = params_fusion['x_test']
-    y_test = params_fusion['y_test']
-    features = params_fusion['features']
-    target = params_fusion['target']
-    features_name = params_fusion['features_name']
-    optimize_feature = params_fusion['optimize_feature']
-    dir_output = params_fusion['dir_output']
-    device = params_fusion['device']
-    doGridSearch = params_fusion['doGridSearch']
-    doBayesSearch = params_fusion['doBayesSearch']
-    task_type = params_fusion['task_type']
-    loss = params_fusion['loss']
-    type = params_fusion['type']
-    name = params_fusion['name']
-    model_params = params_fusion['model_params']
-    grid_params = params_fusion['grid_params']
-
-    Y_train, W_train, Y_val, Y_test, W_test = switch_target(target=target, y_train=y_train, y_val=y_val, y_test=y_test, use_weight=True)
-
-    model, fit_params = get_model_and_fit_params(x_train, Y_train, x_val, Y_val, W_train,
-                                        features, name, type, task_type, 
-                                        model_params, loss)
-    
-    # Valeurs par défaut pour le dictionnaire
-    params = {
-        'x_train_list': [],
-        'y_train_list': [],
-        'x_test_list': [],
-        'y_test_list': [],
-        'w_test_list': [],
-        'features_name_list': [],
-        'fit_params_list': [],
-        'features_list': [],
-        'grid_params_list': [],
-        'y_train': Y_train,
-        'y_test': Y_test,
-        'w_test': W_test,
-        'name': name,
-        'model': model,
-        'deep': True,
-        'fit_params': fit_params,
-        'grid_params': grid_params,
-        'dir_output': dir_output
-    }
-
-    model_list = []
-
-    for params in params_list:
-        # Ensure all required parameters are present
-        for param in required_params:
-            assert param in params, f"Missing required parameter: {param}"
-
-        x_train_p = params['x_train']
-        y_train_p = params['y_train']
-        x_val_p = params['x_val']
-        y_val_p = params['y_val']
-        x_test_p = params['x_test']
-        y_test_p = params['y_test']
-        features_p = params['features']
-        target_p = params['target']
-        features_name_p = params['features_name']
-        optimize_feature_p = params['optimize_feature']
-        dir_output_p = params['dir_output']
-        device_p = params['device']
-        doGridSearch_p = params['doGridSearch']
-        doBayesSearch_p = params['doBayesSearch']
-        task_type_p = params['task_type']
-        loss_p = params['loss']
-        type_p = params['type']
-        name_p = params['name']
-        model_params_p = params['model_params']
-        grid_params_p = params['grid_params']
-
-        Y_train_p, W_train_p, Y_val_p, Y_test_p, W_test_p = switch_target(target=target, y_train=y_train, y_val=y_val, y_test=y_test, use_weight=True)
-
-        model_p, fit_params_p = get_model_and_fit_params(x_train_p, y_train_p, x_val_p, x_val_p, W_train_p,
-                                        features_p, name_p, type_p, task_type_p,
-                                        model_params_p, loss_p)
-        
-        params['x_train_list'].append(x_train_p)
-        params['y_train_list'].append(y_train_p)
-        params['x_test_list'].append(x_test_p)
-        params['y_test_list'].append(y_test_p)
-        params['w_test_list'].append(W_test_p)
-        params['features_name_list'].append(features_name_p)
-        params['fit_params_list'].append(fit_params_p)
-        params['features_list'].append(features_p)
-        params['grid_params_list'].append(grid_params_p)
-        model_list.append(model_p)
-
-    model_fusion = ModelFusion(model_list=model_list, model=model, loss=loss, name=name)
-    params['model'] = model_fusion
-
-    fit_fusion(params)
 
 ############################################################# BREAK POINT #################################################################
 
@@ -1026,13 +1176,13 @@ def train_break_point(Xset : np.array, Yset : np.array, features : list, dir_out
 
 ################################ DEEP LEARNING #########################################
 
-def launch_loader(model, loader, type,
+def launch_loader(model, loader, model_type,
                   features, target_name,
                   criterion, optimizer,
                   autoRegression,
                   features_name):
 
-    if type == 'train':
+    if model_type == 'train':
         model.train()
     else:
         model.eval()
@@ -1049,7 +1199,7 @@ def launch_loader(model, loader, type,
 
         weights = labels[:,-4]
 
-        if autoRegression and type != 'train':
+        if autoRegression and model_type != 'train':
             inode = inputs[:, 0]
             idate = inputs[:, 4]
             if inode in prev_input[:, 0] and idate - 1 in prev_input[:, 4]:
@@ -1061,7 +1211,7 @@ def launch_loader(model, loader, type,
         inputs = inputs[:, features]
         output = model(inputs, edges)
 
-        if autoRegression and type != 'train':
+        if autoRegression and model_type != 'train':
             inputs[:, features_name.index('AutoRegressionReg')] = output
             prev_input = torch.cat((prev_input, inputs))
 
@@ -1075,7 +1225,7 @@ def launch_loader(model, loader, type,
         else:
             loss = criterion(output, target)
 
-        if type == 'train':
+        if model_type == 'train':
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()

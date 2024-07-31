@@ -96,7 +96,7 @@ features = [
             ]
 
 # Train features 
-trainFeatures = [
+train_features = [
                 'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                 'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
@@ -150,18 +150,19 @@ kmeansFeatures = [
             ]
 
 SAISON_FEUX = {
-    1: {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 10},
-    25: {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 11},
-    78: {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 11},
-    69: {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 11},
+    1: {'jour_debut': '01', 'mois_debut': '03',
+           'jour_fin': '01', 'mois_fin': '10'},
+    25: {'jour_debut': '01', 'mois_debut': '03',
+           'jour_fin': '01', 'mois_fin': '11'},
+    78: {'jour_debut': '01', 'mois_debut': '03',
+           'jour_fin': '01', 'mois_fin': '11'},
+    69: {'jour_debut': '01', 'mois_debut': '03',
+           'jour_fin': '01', 'mois_fin': '11'},
 }
 
 PERIODES_A_IGNORER = {
-    1: {'interventions': [(dt.datetime(2023, 7, 3), dt.datetime(2023, 7, 26)),
+    1: {'interventions': [(dt.datetime(2017, 6, 12), dt.datetime(2017, 12, 31)),
+                            (dt.datetime(2023, 7, 3), dt.datetime(2023, 7, 26)),
                              (dt.datetime(2024, 3, 10), dt.datetime(2024,5,29)),],
            'appels': [(dt.datetime(2023, 3, 5), dt.datetime(2023, 7, 19)),
                       (dt.datetime(2024, 4, 1), dt.datetime(2024,5,24))]},
@@ -169,7 +170,8 @@ PERIODES_A_IGNORER = {
            'appels': []},
     78: {'interventions': [],
            'appels': []},
-    69: {'interventions': [(dt.datetime(2023, 1, 1), dt.datetime(2024, 6, 26))],
+    69: {'interventions': [(dt.datetime(2023, 1, 1), dt.datetime(2024, 6, 26)),
+                            (dt.datetime(2017, 6, 12), dt.datetime(2017, 12, 31))],
            'appels': []}       
 }
 
@@ -213,7 +215,7 @@ departements = ['departement-01-ain',
                 ]
 
 # We trained only on those 3 departmenet
-trainDepartements = [
+train_departements = [
                 'departement-01-ain',
                 'departement-25-doubs',
                 'departement-69-rhone',
@@ -255,6 +257,7 @@ maxDist = {0 : 5,
         35 : 60,
         40 : 60,
         60 : 50,
+        70 : 55
         }
 
 resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},

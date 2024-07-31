@@ -28,23 +28,36 @@ def evaluate_ca(metrics, met):
     df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'departement', met])
     i = 0
     for key, value in metrics.items():
-        for keys in value[met].keys():
-            df.loc[i, 'model'] = key
-            df.loc[i, 'departement'] = keys
-            df.loc[i, met] = round(value[met][keys], 3)
-            i += 1
+        if met not in value.keys():
+                df.loc[i, 'model'] = key
+                df.loc[i, 'departement'] = -1
+                df.loc[i, met] = -1
+                i += 1
+        else:
+            for keys in value[met].keys():
+                df.loc[i, 'model'] = key
+                df.loc[i, 'departement'] = keys
+                df.loc[i, met] = round(value[met][keys], 3)
+                i += 1
     return df
 
 def evaluate_f1(metrics, met):
     df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', 'f1', 'precision', 'recall'])
     i = 0
     for key, value in metrics.items():
-        df.loc[i, 'model'] = key
-        df.loc[i, 'f1'] = value[met][0]
-        df.loc[i, 'precision'] = value[met][1]
-        df.loc[i, 'recall'] = value[met][2]
-        df.loc[i, 'tresh'] = value[met][3]
-        #df.loc[i, 'value'] = value[met][4]
+        if met not in value.keys():
+            df.loc[i, 'model'] = key
+            df.loc[i, 'f1'] = -1
+            df.loc[i, 'precision'] = -1
+            df.loc[i, 'recall'] = -1
+            df.loc[i, 'tresh'] = -1
+        else:
+            df.loc[i, 'model'] = key
+            df.loc[i, 'f1'] = value[met][0]
+            df.loc[i, 'precision'] = value[met][1]
+            df.loc[i, 'recall'] = value[met][2]
+            df.loc[i, 'tresh'] = value[met][3]
+            #df.loc[i, 'value'] = value[met][4]
         i += 1
     return df.sort_values('f1')
 
@@ -52,9 +65,14 @@ def evaluate_met(metrics, met):
     df = pd.DataFrame(index=np.arange(len(metrics)), columns=['model', met])
     i = 0
     for key, value in metrics.items():
-        df.loc[i, 'model'] = key
-        df.loc[i, met] = value[met]
-        i += 1
+        if met not in value.keys():
+            df.loc[i, 'model'] = key
+            df.loc[i, met] = -1
+            i += 1
+        else:
+            df.loc[i, 'model'] = key
+            df.loc[i, met] = value[met]
+            i += 1
     return df.sort_values(met)
 
 def evaluate_cr(metrics, met):
@@ -80,7 +98,7 @@ def plot(df, met, dir_output, out_name, color):
     labels = []
     scatters_unique = []
 
-    fig = plt.figure(figsize=(15, 10))
+    fig = plt.figure(figsize=(30, 15))
     for i, m in enumerate(mets):
         sc = plt.scatter(m, model[i], c=color[index[i]], alpha=0.8)
         scatters.append(sc)
@@ -92,8 +110,26 @@ def plot(df, met, dir_output, out_name, color):
     plt.ylabel('Model')
     plt.grid(True)
     plt.legend(scatters_unique, labels, loc='upper left', ncol=3)
-
     out_name += '.png'
+    plt.savefig(dir_output / out_name)
+    plt.close('all')
+
+def plot_by_index(df, met, dir_output, out_name, color):
+    index = df['index'].values
+    label = df['label'].values
+    model = df.model.values
+    mets = df[met].values
+    scales = df['scale'].values
+
+    dfgp = df.groupby(['model', 'scale'])[met].mean()
+
+    dfgp.plot()
+
+    plt.xlabel('scale')
+    plt.ylabel('Model')
+    plt.grid(True)
+    plt.legend(loc='upper left', ncol=3)
+    out_name += f'_scale.png'
     plt.savefig(dir_output / out_name)
     plt.close('all')
 
@@ -139,6 +175,8 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
     for elt in experiments:
         (expe, index, label, prefix) = elt
         dir_test = dir_input / Path(sinister + '/' + resolution + '/test/' + expe + '/' + test_name + '/' + label + '/')
+        values_per_class, kdays, scale, nf = label.split('_')
+
         label = expe + ' ' + str(index) + ' : ' + label 
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
@@ -151,6 +189,10 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         f1['expe'] = expe
         f1['index'] = index
         f1['label'] = label
+        f1['values_per_class'] = values_per_class
+        f1['kdays'] = kdays
+        f1['scale'] = scale
+        f1['nf'] = nf
 
         # F1 score
         f1['f1_unweighted'] = evaluate_f1(metrics, 'f1_unweighted')['f1']
@@ -230,6 +272,11 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         #mae['mae_top_5_cluster'] = evaluate_met(metrics, 'mae_top_5_cluster')['mae_top_5_cluster']
         #mae['mae_top_5_cluster_unweighted'] = evaluate_met(metrics, 'mae_top_5_cluster_unweighted')['mae_top_5_cluster_unweighted']
 
+        mae['values_per_class'] = values_per_class
+        mae['kdays'] = kdays
+        mae['scale'] = scale
+        mae['nf'] = nf
+
         maes.append(mae)
 
         maetop10 = evaluate_ca(metrics, 'maectop10')
@@ -238,6 +285,10 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         maetop10['expe'] = expe
         maetop10['index'] = index
         maetop10['label'] = label
+        maetop10['values_per_class'] = values_per_class
+        maetop10['kdays'] = kdays
+        maetop10['scale'] = scale
+        maetop10['nf'] = nf
         maetop10s.append(maetop10)
 
         # Bcas score
@@ -253,7 +304,10 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         bca['bca_autumn'] = evaluate_ca(metrics, 'bca_autumn')['bca_autumn']
         bca['bca_top_5_cluster'] = evaluate_ca(metrics, 'bca_top_5_cluster')['bca_top_5_cluster']
         bca['bca_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'bca_top_5_cluster_unweighted')['bca_top_5_cluster_unweighted']
-
+        bca['values_per_class'] = values_per_class
+        bca['kdays'] = kdays
+        bca['scale'] = scale
+        bca['nf'] = nf
         bcas.append(bca)
 
         # RMSE score
@@ -269,6 +323,10 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         rmse['rmse_autumn'] = evaluate_met(metrics, 'rmse_autumn')['rmse_autumn']
         rmse['rmse_top_5_cluster'] = evaluate_met(metrics, 'rmse_top_5_cluster')['rmse_top_5_cluster']
         #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
+        rmse['values_per_class'] = values_per_class
+        rmse['kdays'] = kdays
+        rmse['scale'] = scale
+        rmse['nf'] = nf
         rmses.append(rmse)
 
         # CAL
@@ -285,6 +343,10 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         cal['cal_autumn'] = evaluate_met(metrics, 'cal_autumn')['cal_autumn']
         cal['cal_top_5_cluster'] = evaluate_met(metrics, 'cal_top_5_cluster')['cal_top_5_cluster']
         #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
+        cal['values_per_class'] = values_per_class
+        cal['kdays'] = kdays
+        cal['scale'] = scale
+        cal['nf'] = nf
         cals.append(cal)
 
     f1s = pd.concat(f1s).reset_index(drop=True)
@@ -401,6 +463,96 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
     plot(bcas, 'bca_autumn', dir_output, 'bca_autumn', color)
     plot(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color)
 
+    ################ Plot by scale ####################
+
+    plot_by_index(f1s, 'f1', dir_output, 'f1', color)
+    plot_by_index(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color)
+    plot_by_index(f1s, 'f1_top_5_cluster', dir_output, 'f1_top_5_cluster', color)
+    plot_by_index(f1s, 'f1_top_5_cluster_unweighted', dir_output, 'f1_top_5_cluster_unweighted', color)
+
+    plot_by_index(f1s, 'precision', dir_output, 'precision', color)
+    plot_by_index(f1s, 'precision_unweighted', dir_output, 'precision_unweighted', color)
+    plot_by_index(f1s, 'precision_top_5_cluster', dir_output, 'precision_top_5_cluster', color)
+    plot_by_index(f1s, 'precision_top_5_cluster_unweighted', dir_output, 'precision_top_5_cluster_unweighted', color)
+
+    plot_by_index(f1s, 'recall', dir_output, 'recall', color)
+    plot_by_index(f1s, 'recall_unweighted', dir_output, 'recall_unweighted', color)
+    plot_by_index(f1s, 'recall_top_5_cluster', dir_output, 'recall_top_5_cluster', color)
+    plot_by_index(f1s, 'recall_top_5_cluster_unweighted', dir_output, 'recall_top_5_cluster_unweighted', color)
+
+    plot_by_index(cals, 'cal', dir_output, 'cal', color)
+    plot_by_index(maes, 'maec', dir_output, 'maec', color)
+    plot_by_index(maes, 'mae', dir_output, 'mae', color)
+    plot_by_index(bcas, 'bca', dir_output, 'bca', color)
+    plot_by_index(rmses, 'rmse', dir_output, 'rmse', color)
+    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color)
+
+    plot_by_index(maes, 'maec_top_5_cluster', dir_output, 'maec_top_5_cluster', color)
+    #plot_by_index(maes, 'mae_top_5_cluster', dir_output, 'mae_top_5_cluster', color)
+    plot_by_index(bcas, 'bca_top_5_cluster', dir_output, 'bca_top_5_cluster', color)
+    plot_by_index(rmses, 'rmse_top_5_cluster', dir_output, 'rmse_top_5_cluster', color)
+    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color)
+
+    plot_by_index(f1s, 'f1_winter', dir_output, 'f1_winter', color)
+    plot_by_index(f1s, 'f1_unweighted_winter', dir_output, 'f1_unweighted_winter', color)
+
+    plot_by_index(f1s, 'precision_winter', dir_output, 'precision_winter', color)
+    plot_by_index(f1s, 'precision_unweighted_winter', dir_output, 'precision_unweighted_winter', color)
+
+    plot_by_index(f1s, 'recall_winter', dir_output, 'recall_winter', color)
+    plot_by_index(f1s, 'recall_unweighted_winter', dir_output, 'recall_unweighted_winter', color)
+
+    plot_by_index(cals, 'cal_winter', dir_output, 'cal_winter', color)
+    plot_by_index(maes, 'maec_winter', dir_output, 'maec_winter', color)
+    plot_by_index(maes, 'mae_winter', dir_output, 'mae_winter', color)
+    plot_by_index(bcas, 'bca_winter', dir_output, 'bca_winter', color)
+    plot_by_index(rmses, 'rmse_winter', dir_output, 'rmse_winter', color)
+
+    plot_by_index(f1s, 'f1_summer', dir_output, 'f1_summer', color)
+    plot_by_index(f1s, 'f1_unweighted_summer', dir_output, 'f1_unweighted_summer', color)
+
+    plot_by_index(f1s, 'precision_summer', dir_output, 'precision_summer', color)
+    plot_by_index(f1s, 'precision_unweighted_summer', dir_output, 'precision_unweighted_summer', color)
+
+    plot_by_index(f1s, 'recall_summer', dir_output, 'recall_summer', color)
+    plot_by_index(f1s, 'recall_unweighted_summer', dir_output, 'recall_unweighted_summer', color)
+
+    plot_by_index(cals, 'cal_summer', dir_output, 'cal_summer', color)
+    plot_by_index(maes, 'maec_summer', dir_output, 'maec_summer', color)
+    plot_by_index(maes, 'mae_summer', dir_output, 'mae_summer', color)
+    plot_by_index(bcas, 'bca_summer', dir_output, 'bca_summer', color)
+    plot_by_index(rmses, 'rmse_summer', dir_output, 'rmse_summer', color)
+
+    plot_by_index(cals, 'cal_spring', dir_output, 'cal_spring', color)
+    plot_by_index(f1s, 'f1_spring', dir_output, 'f1_spring', color)
+    plot_by_index(f1s, 'f1_unweighted_spring', dir_output, 'f1_unweighted_spring', color)
+
+    plot_by_index(f1s, 'precision_spring', dir_output, 'precision_spring', color)
+    plot_by_index(f1s, 'precision_unweighted_spring', dir_output, 'precision_unweighted_spring', color)
+
+    plot_by_index(f1s, 'recall_spring', dir_output, 'recall_spring', color)
+    plot_by_index(f1s, 'recall_unweighted_spring', dir_output, 'recall_unweighted_spring', color)
+
+    plot_by_index(maes, 'maec_spring', dir_output, 'maec_spring', color)
+    plot_by_index(maes, 'mae_spring', dir_output, 'mae_spring', color)
+    plot_by_index(bcas, 'bca_spring', dir_output, 'bca_spring', color)
+    plot_by_index(rmses, 'rmse_spring', dir_output, 'rmse_spring', color)
+
+    plot_by_index(cals, 'cal_autumn', dir_output, 'cal_autumn', color)
+    plot_by_index(f1s, 'f1_autumn', dir_output, 'f1_autumn', color)
+    plot_by_index(f1s, 'f1_unweighted_autumn', dir_output, 'f1_unweighted_autumn', color)
+
+    plot_by_index(f1s, 'precision_autumn', dir_output, 'precision_autumn', color)
+    plot_by_index(f1s, 'precision_unweighted_autumn', dir_output, 'precision_unweighted_autumn', color)
+
+    plot_by_index(f1s, 'recall_autumn', dir_output, 'recall_autumn', color)
+    plot_by_index(f1s, 'recall_unweighted_autumn', dir_output, 'recall_unweighted_autumn', color)
+
+    plot_by_index(maes, 'maec_autumn', dir_output, 'maec_autumn', color)
+    plot_by_index(maes, 'mae_autumn', dir_output, 'mae_autumn', color)
+    plot_by_index(bcas, 'bca_autumn', dir_output, 'bca_autumn', color)
+    plot_by_index(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color)
+
     """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
     plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
     plot_variation(maes, base_label, 'maec', dir_output, 'maec_variation', color)
@@ -470,11 +622,12 @@ if __name__ == "__main__":
     experiments_inference = [
                              #(spec, 1, 'full_0_7_10_100', 'full_0_7_10_100_z-score_Catboost_'+test_name+'_dl'),
                              #(spec, 2, 'full_0_7_30_100', 'full_0_7_30_100_z-score_Catboost_'+test_name+'_dl'),
-                             (spec, 3, 'full_0_30_100', 'full_0_30_100_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 4, 'full_0_10_100', 'full_0_10_100_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 4, 'full_0_35_100', 'full_0_35_100_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 6, 'full_0_40_100', 'full_0_40_100_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 7, 'full_0_60_100', 'full_0_60_100_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 3, 'full_0_30_100', 'full_0_30_100_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 4, 'full_0_10_100', 'full_0_10_100_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 4, 'full_0_35_100', 'full_0_35_100_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 6, 'full_0_40_100', 'full_0_40_100_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 7, 'full_7_60_700', 'full_7_60_700_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 8, 'full_7_30_700', 'full_7_30_700_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 4, 'full_0_10_100_fusion', 'full_0_10_100_fusion_10_z-score_Catboost_'+test_name+'_fusion'),
                             ]
 
