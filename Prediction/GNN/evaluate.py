@@ -2,6 +2,7 @@ from tools import *
 import matplotlib.pyplot as plt
 import argparse
 import matplotlib.colors as mcolors
+from glob import glob
 
 XKCD_COLORS = {
     'cloudy blue': '#acc2d9',
@@ -114,24 +115,41 @@ def plot(df, met, dir_output, out_name, color):
     plt.savefig(dir_output / out_name)
     plt.close('all')
 
-def plot_by_index(df, met, dir_output, out_name, color):
-    index = df['index'].values
+def plot_by_index(df, met, dir_output, out_name, color, index):
     label = df['label'].values
     model = df.model.values
     mets = df[met].values
     scales = df['scale'].values
 
-    dfgp = df.groupby(['model', 'scale'])[met].mean()
+    dfgp = df.groupby(['model', index])[met].mean().reset_index()
+    dfgp.index = dfgp[index]
 
-    dfgp.plot()
+    fig, ax = plt.subplots(1, figsize=(15,10))
+
+    umodels = dfgp.model.unique()
+    for i, model in enumerate(umodels):
+        dfgp[dfgp['model'] == model][met].plot(label=model, color=color[model], ax=ax)
 
     plt.xlabel('scale')
-    plt.ylabel('Model')
+    plt.ylabel(met)
     plt.grid(True)
     plt.legend(loc='upper left', ncol=3)
-    out_name += f'_scale.png'
+    out_name += f'_{index}.png'
     plt.savefig(dir_output / out_name)
     plt.close('all')
+
+def plot_features_importances(df, name, dir_output, color):
+    dfb = df.groupby(['scale', 'features_name'])['Permutation_importance'].mean().reset_index()
+
+    fig, ax = plt.subplots(1, figsize=(15,10))
+    dfb.index = dfb.scale
+    features_name = dfb.features_name
+    print(color)
+    for i, fet in enumerate(features_name):
+        dfb[dfb['features_name'] == fet].plot(label=fet, color=color[fet], ax=ax)
+    plt.title(name)
+    plt.legend(loc='upper left', ncol=3)
+    plt.savefig(dir_output / f'{name}.png')
 
 def plot_variation(df, base_label, met, dir_output, out_name, color):
 
@@ -170,16 +188,91 @@ def plot_variation(df, base_label, met, dir_output, out_name, color):
 def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
 
     f1s, maes, bcas, rmses, maetop10s, crs, cals = [], [], [], [], [], [], []
+    features_importance_test = []
+    features_importance_train = []
+    features_name_full = []
     (_, _, base_label, _) = experiments[0]
 
     for elt in experiments:
         (expe, index, label, prefix) = elt
+        dir_train = dir_input / Path(sinister + '/' + resolution + '/train/' + expe + '/check_z-score/' + label + '/baseline' )
         dir_test = dir_input / Path(sinister + '/' + resolution + '/test/' + expe + '/' + test_name + '/' + label + '/')
-        values_per_class, kdays, scale, nf = label.split('_')
-
+        vec = label.split('_')
+        values_per_class, kdays, scale, nf = vec[0], vec[1], vec[2], vec[3]
         label = expe + ' ' + str(index) + ' : ' + label 
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
+
+        # Features importance
+        sub_features_importance_train = []
+        sub_features_importance_test = []
+        sub_features_importance_index = []
+        sub_features_name = []
+        features_name = read_object('features_name_train.pkl', dir_input / sinister / resolution / 'train' / expe)
+        features_name_full.extend(features_name)
+
+        filename = 'test_permutation_importances.pkl'
+        filename2 = 'features.pkl'
+        for root, dirs, files in os.walk(dir_test):
+            for dir in dirs:
+                importances = read_object(filename, dir_test / dir)
+
+                if importances is None:
+                    continue
+                importances = importances.importances_mean
+                indices = importances.argsort()[:10]
+                sub_features_importance_test.extend(importances[indices])
+
+                fet = read_object(filename2, dir_train / dir)
+                if fet is None:
+                    continue
+                sub_features_name.extend(fet[indices])
+        
+        if len(sub_features_importance_test) > 0:
+            sub_features_importance_test_df = pd.DataFrame(index=np.arange(0, len(sub_features_importance_test)))
+            sub_features_importance_test_df['Permutation_importance'] = sub_features_importance_test
+            sub_features_importance_test_df['features_name'] = sub_features_name
+            sub_features_importance_test_df['expe'] = expe
+            sub_features_importance_test_df['index'] = index
+            sub_features_importance_test_df['label'] = label
+            sub_features_importance_test_df['values_per_class'] = values_per_class
+            sub_features_importance_test_df['kdays'] = kdays
+            sub_features_importance_test_df['scale'] = scale
+            sub_features_importance_test_df['nf'] = nf
+            features_importance_test.append(sub_features_importance_test_df)
+        else:
+            logger.info('No file found for test permutation importance')
+        sub_features_name = [] 
+        filename = 'train_permutation_importances.pkl'
+        for root, dirs, files in os.walk(dir_train):
+            for dir in dirs:
+                importances = read_object(filename, dir_train / dir)
+                if importances is None:
+                    continue
+                importances = importances.importances_mean
+                indices = importances.argsort()[:10]
+                sub_features_importance_test.extend(importances[indices])
+
+                fet = read_object(filename2, dir_train / dir)
+                if fet is None:
+                    continue
+
+                sub_features_name.extend(fet[indices])
+
+        if len(sub_features_importance_train) > 0:
+            sub_features_importance_train_df = pd.DataFrame(index=np.arange(0, len(sub_features_importance_train)))
+            sub_features_importance_train_df['Permutation_importance'] = sub_features_importance_train
+            sub_features_importance_train_df['features_name'] = sub_features_name
+            sub_features_importance_train_df['expe'] = expe
+            sub_features_importance_train_df['index'] = index
+            sub_features_importance_train_df['label'] = label
+            sub_features_importance_train_df['values_per_class'] = values_per_class
+            sub_features_importance_train_df['kdays'] = kdays
+            sub_features_importance_train_df['scale'] = scale
+            sub_features_importance_train_df['nf'] = nf
+            features_importance_train.append(sub_features_importance_train_df)
+        else:
+            logger.info('No file found for train permutation importance')
 
         # F1 score
         f1 = evaluate_f1(metrics, 'f1')
@@ -349,6 +442,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         cal['nf'] = nf
         cals.append(cal)
 
+
     f1s = pd.concat(f1s).reset_index(drop=True)
     maes = pd.concat(maes).reset_index(drop=True)
     bcas = pd.concat(bcas).reset_index(drop=True)
@@ -372,8 +466,6 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         if c.find('yellow') > -1:
             continue
         color[i] = c
-
-    index_colors = np.unique(index)
 
     plot(f1s, 'f1', dir_output, 'f1', color)
     plot(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color)
@@ -465,99 +557,125 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
 
     ################ Plot by scale ####################
 
-    plot_by_index(f1s, 'f1', dir_output, 'f1', color)
-    plot_by_index(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color)
-    plot_by_index(f1s, 'f1_top_5_cluster', dir_output, 'f1_top_5_cluster', color)
-    plot_by_index(f1s, 'f1_top_5_cluster_unweighted', dir_output, 'f1_top_5_cluster_unweighted', color)
+    index = 'scale'
 
-    plot_by_index(f1s, 'precision', dir_output, 'precision', color)
-    plot_by_index(f1s, 'precision_unweighted', dir_output, 'precision_unweighted', color)
-    plot_by_index(f1s, 'precision_top_5_cluster', dir_output, 'precision_top_5_cluster', color)
-    plot_by_index(f1s, 'precision_top_5_cluster_unweighted', dir_output, 'precision_top_5_cluster_unweighted', color)
+    index_colors = np.unique(f1s['model'].values)
 
-    plot_by_index(f1s, 'recall', dir_output, 'recall', color)
-    plot_by_index(f1s, 'recall_unweighted', dir_output, 'recall_unweighted', color)
-    plot_by_index(f1s, 'recall_top_5_cluster', dir_output, 'recall_top_5_cluster', color)
-    plot_by_index(f1s, 'recall_top_5_cluster_unweighted', dir_output, 'recall_top_5_cluster_unweighted', color)
+    color = {}
+    for i in index_colors:
+        c = random.choice(list(mcolors.XKCD_COLORS.keys()))
+        print(c)
+        if c.find('yellow') > -1:
+            continue
+        color[i] = c
 
-    plot_by_index(cals, 'cal', dir_output, 'cal', color)
-    plot_by_index(maes, 'maec', dir_output, 'maec', color)
-    plot_by_index(maes, 'mae', dir_output, 'mae', color)
-    plot_by_index(bcas, 'bca', dir_output, 'bca', color)
-    plot_by_index(rmses, 'rmse', dir_output, 'rmse', color)
-    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color)
+    plot_by_index(f1s, 'f1', dir_output, 'f1', color, index)
+    plot_by_index(f1s, 'f1_unweighted', dir_output, 'f1_unweighted', color, index)
+    plot_by_index(f1s, 'f1_top_5_cluster', dir_output, 'f1_top_5_cluster', color, index)
+    plot_by_index(f1s, 'f1_top_5_cluster_unweighted', dir_output, 'f1_top_5_cluster_unweighted', color, index)
 
-    plot_by_index(maes, 'maec_top_5_cluster', dir_output, 'maec_top_5_cluster', color)
-    #plot_by_index(maes, 'mae_top_5_cluster', dir_output, 'mae_top_5_cluster', color)
-    plot_by_index(bcas, 'bca_top_5_cluster', dir_output, 'bca_top_5_cluster', color)
-    plot_by_index(rmses, 'rmse_top_5_cluster', dir_output, 'rmse_top_5_cluster', color)
-    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color)
+    plot_by_index(f1s, 'precision', dir_output, 'precision', color, index)
+    plot_by_index(f1s, 'precision_unweighted', dir_output, 'precision_unweighted', color, index)
+    plot_by_index(f1s, 'precision_top_5_cluster', dir_output, 'precision_top_5_cluster', color, index)
+    plot_by_index(f1s, 'precision_top_5_cluster_unweighted', dir_output, 'precision_top_5_cluster_unweighted', color, index)
 
-    plot_by_index(f1s, 'f1_winter', dir_output, 'f1_winter', color)
-    plot_by_index(f1s, 'f1_unweighted_winter', dir_output, 'f1_unweighted_winter', color)
+    plot_by_index(f1s, 'recall', dir_output, 'recall', color, index)
+    plot_by_index(f1s, 'recall_unweighted', dir_output, 'recall_unweighted', color, index)
+    plot_by_index(f1s, 'recall_top_5_cluster', dir_output, 'recall_top_5_cluster', color, index)
+    plot_by_index(f1s, 'recall_top_5_cluster_unweighted', dir_output, 'recall_top_5_cluster_unweighted', color, index)
 
-    plot_by_index(f1s, 'precision_winter', dir_output, 'precision_winter', color)
-    plot_by_index(f1s, 'precision_unweighted_winter', dir_output, 'precision_unweighted_winter', color)
+    plot_by_index(cals, 'cal', dir_output, 'cal', color, index)
+    plot_by_index(maes, 'maec', dir_output, 'maec', color, index)
+    plot_by_index(maes, 'mae', dir_output, 'mae', color, index)
+    plot_by_index(bcas, 'bca', dir_output, 'bca', color, index)
+    plot_by_index(rmses, 'rmse', dir_output, 'rmse', color, index)
+    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color, index)
 
-    plot_by_index(f1s, 'recall_winter', dir_output, 'recall_winter', color)
-    plot_by_index(f1s, 'recall_unweighted_winter', dir_output, 'recall_unweighted_winter', color)
+    plot_by_index(maes, 'maec_top_5_cluster', dir_output, 'maec_top_5_cluster', color, index)
+    #plot_by_index(maes, 'mae_top_5_cluster', dir_output, 'mae_top_5_cluster', color, index)
+    plot_by_index(bcas, 'bca_top_5_cluster', dir_output, 'bca_top_5_cluster', color, index)
+    plot_by_index(rmses, 'rmse_top_5_cluster', dir_output, 'rmse_top_5_cluster', color, index)
+    plot_by_index(maetop10s, 'maectop10', dir_output, 'maectop10', color, index)
 
-    plot_by_index(cals, 'cal_winter', dir_output, 'cal_winter', color)
-    plot_by_index(maes, 'maec_winter', dir_output, 'maec_winter', color)
-    plot_by_index(maes, 'mae_winter', dir_output, 'mae_winter', color)
-    plot_by_index(bcas, 'bca_winter', dir_output, 'bca_winter', color)
-    plot_by_index(rmses, 'rmse_winter', dir_output, 'rmse_winter', color)
+    plot_by_index(f1s, 'f1_winter', dir_output, 'f1_winter', color, index)
+    plot_by_index(f1s, 'f1_unweighted_winter', dir_output, 'f1_unweighted_winter', color, index)
 
-    plot_by_index(f1s, 'f1_summer', dir_output, 'f1_summer', color)
-    plot_by_index(f1s, 'f1_unweighted_summer', dir_output, 'f1_unweighted_summer', color)
+    plot_by_index(f1s, 'precision_winter', dir_output, 'precision_winter', color, index)
+    plot_by_index(f1s, 'precision_unweighted_winter', dir_output, 'precision_unweighted_winter', color, index)
 
-    plot_by_index(f1s, 'precision_summer', dir_output, 'precision_summer', color)
-    plot_by_index(f1s, 'precision_unweighted_summer', dir_output, 'precision_unweighted_summer', color)
+    plot_by_index(f1s, 'recall_winter', dir_output, 'recall_winter', color, index)
+    plot_by_index(f1s, 'recall_unweighted_winter', dir_output, 'recall_unweighted_winter', color, index)
 
-    plot_by_index(f1s, 'recall_summer', dir_output, 'recall_summer', color)
-    plot_by_index(f1s, 'recall_unweighted_summer', dir_output, 'recall_unweighted_summer', color)
+    plot_by_index(cals, 'cal_winter', dir_output, 'cal_winter', color, index)
+    plot_by_index(maes, 'maec_winter', dir_output, 'maec_winter', color, index)
+    plot_by_index(maes, 'mae_winter', dir_output, 'mae_winter', color, index)
+    plot_by_index(bcas, 'bca_winter', dir_output, 'bca_winter', color, index)
+    plot_by_index(rmses, 'rmse_winter', dir_output, 'rmse_winter', color, index)
 
-    plot_by_index(cals, 'cal_summer', dir_output, 'cal_summer', color)
-    plot_by_index(maes, 'maec_summer', dir_output, 'maec_summer', color)
-    plot_by_index(maes, 'mae_summer', dir_output, 'mae_summer', color)
-    plot_by_index(bcas, 'bca_summer', dir_output, 'bca_summer', color)
-    plot_by_index(rmses, 'rmse_summer', dir_output, 'rmse_summer', color)
+    plot_by_index(f1s, 'f1_summer', dir_output, 'f1_summer', color, index)
+    plot_by_index(f1s, 'f1_unweighted_summer', dir_output, 'f1_unweighted_summer', color, index)
 
-    plot_by_index(cals, 'cal_spring', dir_output, 'cal_spring', color)
-    plot_by_index(f1s, 'f1_spring', dir_output, 'f1_spring', color)
-    plot_by_index(f1s, 'f1_unweighted_spring', dir_output, 'f1_unweighted_spring', color)
+    plot_by_index(f1s, 'precision_summer', dir_output, 'precision_summer', color, index)
+    plot_by_index(f1s, 'precision_unweighted_summer', dir_output, 'precision_unweighted_summer', color, index)
 
-    plot_by_index(f1s, 'precision_spring', dir_output, 'precision_spring', color)
-    plot_by_index(f1s, 'precision_unweighted_spring', dir_output, 'precision_unweighted_spring', color)
+    plot_by_index(f1s, 'recall_summer', dir_output, 'recall_summer', color, index)
+    plot_by_index(f1s, 'recall_unweighted_summer', dir_output, 'recall_unweighted_summer', color, index)
 
-    plot_by_index(f1s, 'recall_spring', dir_output, 'recall_spring', color)
-    plot_by_index(f1s, 'recall_unweighted_spring', dir_output, 'recall_unweighted_spring', color)
+    plot_by_index(cals, 'cal_summer', dir_output, 'cal_summer', color, index)
+    plot_by_index(maes, 'maec_summer', dir_output, 'maec_summer', color, index)
+    plot_by_index(maes, 'mae_summer', dir_output, 'mae_summer', color, index)
+    plot_by_index(bcas, 'bca_summer', dir_output, 'bca_summer', color, index)
+    plot_by_index(rmses, 'rmse_summer', dir_output, 'rmse_summer', color, index)
 
-    plot_by_index(maes, 'maec_spring', dir_output, 'maec_spring', color)
-    plot_by_index(maes, 'mae_spring', dir_output, 'mae_spring', color)
-    plot_by_index(bcas, 'bca_spring', dir_output, 'bca_spring', color)
-    plot_by_index(rmses, 'rmse_spring', dir_output, 'rmse_spring', color)
+    plot_by_index(cals, 'cal_spring', dir_output, 'cal_spring', color, index)
+    plot_by_index(f1s, 'f1_spring', dir_output, 'f1_spring', color, index)
+    plot_by_index(f1s, 'f1_unweighted_spring', dir_output, 'f1_unweighted_spring', color, index)
 
-    plot_by_index(cals, 'cal_autumn', dir_output, 'cal_autumn', color)
-    plot_by_index(f1s, 'f1_autumn', dir_output, 'f1_autumn', color)
-    plot_by_index(f1s, 'f1_unweighted_autumn', dir_output, 'f1_unweighted_autumn', color)
+    plot_by_index(f1s, 'precision_spring', dir_output, 'precision_spring', color, index)
+    plot_by_index(f1s, 'precision_unweighted_spring', dir_output, 'precision_unweighted_spring', color, index)
 
-    plot_by_index(f1s, 'precision_autumn', dir_output, 'precision_autumn', color)
-    plot_by_index(f1s, 'precision_unweighted_autumn', dir_output, 'precision_unweighted_autumn', color)
+    plot_by_index(f1s, 'recall_spring', dir_output, 'recall_spring', color, index)
+    plot_by_index(f1s, 'recall_unweighted_spring', dir_output, 'recall_unweighted_spring', color, index)
 
-    plot_by_index(f1s, 'recall_autumn', dir_output, 'recall_autumn', color)
-    plot_by_index(f1s, 'recall_unweighted_autumn', dir_output, 'recall_unweighted_autumn', color)
+    plot_by_index(maes, 'maec_spring', dir_output, 'maec_spring', color, index)
+    plot_by_index(maes, 'mae_spring', dir_output, 'mae_spring', color, index)
+    plot_by_index(bcas, 'bca_spring', dir_output, 'bca_spring', color, index)
+    plot_by_index(rmses, 'rmse_spring', dir_output, 'rmse_spring', color, index)
 
-    plot_by_index(maes, 'maec_autumn', dir_output, 'maec_autumn', color)
-    plot_by_index(maes, 'mae_autumn', dir_output, 'mae_autumn', color)
-    plot_by_index(bcas, 'bca_autumn', dir_output, 'bca_autumn', color)
-    plot_by_index(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color)
+    plot_by_index(cals, 'cal_autumn', dir_output, 'cal_autumn', color, index)
+    plot_by_index(f1s, 'f1_autumn', dir_output, 'f1_autumn', color, index)
+    plot_by_index(f1s, 'f1_unweighted_autumn', dir_output, 'f1_unweighted_autumn', color, index)
 
-    """plot_variation(f1s, base_label, 'f1', dir_output, 'f1_variation', color)
-    plot_variation(f12s, base_label, 'f1no_weighted', dir_output, 'f1no_weighted_variation', color)
-    plot_variation(maes, base_label, 'maec', dir_output, 'maec_variation', color)
-    plot_variation(bcas, base_label, 'bca', dir_output, 'bca_variation', color)
-    plot_variation(rmses, base_label, 'rmse', dir_output, 'rmse_variation', color)"""
+    plot_by_index(f1s, 'precision_autumn', dir_output, 'precision_autumn', color, index)
+    plot_by_index(f1s, 'precision_unweighted_autumn', dir_output, 'precision_unweighted_autumn', color, index)
+
+    plot_by_index(f1s, 'recall_autumn', dir_output, 'recall_autumn', color, index)
+    plot_by_index(f1s, 'recall_unweighted_autumn', dir_output, 'recall_unweighted_autumn', color, index)
+
+    plot_by_index(maes, 'maec_autumn', dir_output, 'maec_autumn', color, index)
+    plot_by_index(maes, 'mae_autumn', dir_output, 'mae_autumn', color, index)
+    plot_by_index(bcas, 'bca_autumn', dir_output, 'bca_autumn', color, index)
+    plot_by_index(rmses, 'rmse_autumn', dir_output, 'rmse_autumn', color, index)
+
+    ################################## FEATURES IMPORTANCE #################################
+
+    index_colors = np.unique(features_name_full)
+    color = {}
+    for i in index_colors:
+        c = random.choice(list(mcolors.XKCD_COLORS.keys()))
+        if c.find('yellow') > -1:
+            continue
+        color[i] = c
+
+    index_colors = np.unique(index)
+
+    if len(features_importance_test) > 0:
+        features_importance_test = pd.concat(features_importance_test).reset_index()
+        plot_features_importances(features_importance_test, 'features_importance_test', dir_output, color=color)
+
+    if len(features_importance_train) > 0:
+        features_importance_train = pd.concat(features_importance_train).reset_index()
+        plot_features_importances(features_importance_train, 'features_importance_train', dir_output, color=color)
 
 if __name__ == "__main__":
 
@@ -613,10 +731,10 @@ if __name__ == "__main__":
 
     # Scale
     experiments_scale = [('ecai', 10, '10', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
-                            ('ecai', 2, '2', '20_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
-                             ('ecai', 1, '1', '20_0_1_100_1_z-score_Catboost_'+test_name+'_tree'),
-                             ('try_0_scale', 0, '0', '20_0_0_20_0_z-score_Catboost_'+test_name+'_tree'),
-                            ]
+                        ('ecai', 2, '2', '20_0_2_100_2_z-score_Catboost_'+test_name+'_tree'),
+                        ('ecai', 1, '1', '20_0_1_100_1_z-score_Catboost_'+test_name+'_tree'),
+                        ('try_0_scale', 0, '0', '20_0_0_20_0_z-score_Catboost_'+test_name+'_tree'),
+                        ]
 
     # Inference
     experiments_inference = [
@@ -626,11 +744,16 @@ if __name__ == "__main__":
                              #(spec, 4, 'full_0_10_100', 'full_0_10_100_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 4, 'full_0_35_100', 'full_0_35_100_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 6, 'full_0_40_100', 'full_0_40_100_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 7, 'full_7_60_700', 'full_7_60_700_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 8, 'full_7_30_700', 'full_7_30_700_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 7, 'full_7_60_700', 'full_7_60_700_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 8, 'full_7_30_300', 'full_7_30_300_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 9, 'full_7_60_300', 'full_7_60_300_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 9, 'full_7_60_300', 'full_7_60_300_none_Catboost_'+test_name+'_bp'),
+                             (spec, 8, 'full_7_30_300', 'full_7_30_300_none_Catboost_'+test_name+'_bp'),
+                             (spec, 10, 'full_7_30_300_kmeans', 'full_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 12, 'full_7_60_300_kmeans', 'full_7_60_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 4, 'full_0_10_100_fusion', 'full_0_10_100_fusion_10_z-score_Catboost_'+test_name+'_fusion'),
                             ]
-
+    
     # ECAI
     experiments_ecai = [ ('Ain', 0, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),
                          ('final', 1, 'full_0_10_100', 'full_0_10_100_10_z-score_Catboost_'+test_name+'_tree'),

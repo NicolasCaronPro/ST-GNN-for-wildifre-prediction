@@ -123,15 +123,27 @@ train_features = [
 
 newFeatures = []
 
-kmeansFeatures = [
-            #'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd',
-            #'prec24h',
+kmeans_features = [
+            #'temp',
+            #'dwpt',
+            'rhum',
+            #'prcp',
+            #'wdir',
+            #'wspd',
+            'prec24h',
             #'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
             #'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-            #'temp16', 'dwpt16', 'rhum16',
-            # 'prcp16', # 'wdir16', 'wspd16',
-            # 'prec24h16',
-            #'days_since_rain', 'sum_consecutive_rainfall', 'sum_last_7_days',
+            #'temp16',
+            #'dwpt16',
+            'rhum16',
+            #'prcp16',
+            #'wdir16', 'wspd16',
+            'prec24h16',
+            #'days_since_rain',
+            'sum_consecutive_rainfall',
+            'sum_rain_last_7_days',
+            'sum_snow_last_7_days',
+            'snow24h', 'snow24h16',
             #'elevation',
             #'population',
             #'sentinel',
@@ -140,7 +152,7 @@ kmeansFeatures = [
             #'foret',
             #'highway',
             #'dynamicWorld',
-            'Calendar',
+            #'Calendar',
             #'Historical',
             #'Geo',
             #'air',
@@ -170,7 +182,7 @@ PERIODES_A_IGNORER = {
            'appels': []},
     78: {'interventions': [],
            'appels': []},
-    69: {'interventions': [(dt.datetime(2023, 1, 1), dt.datetime(2024, 6, 26)),
+    69: {'interventions': [#(dt.datetime(2023, 1, 1), dt.datetime(2024, 6, 26)),
                             (dt.datetime(2017, 6, 12), dt.datetime(2017, 12, 31))],
            'appels': []}       
 }
@@ -222,6 +234,9 @@ train_departements = [
                 'departement-78-yvelines',
                 ]
 
+ids_columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight']
+targets_columns = ['class_risk', 'nbsinister', 'risk']
+
 ############################ Logger ######################################
 
 logger = logging.getLogger()
@@ -236,6 +251,7 @@ logger.addHandler(streamHandler)
 futur_met = 'mean'
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
+tresh_kmeans = 0.15
 
 FAST = False
 
@@ -257,7 +273,10 @@ maxDist = {0 : 5,
         35 : 60,
         40 : 60,
         60 : 50,
-        70 : 55
+        70 : 55,
+        80 : 60,
+        100 : 75,
+        143 : 100
         }
 
 resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
@@ -274,14 +293,34 @@ vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holi
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
 #device = torch.device('cpu')
 Rewrite = True
-scaling='z-score' # Scale to used
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used
 encoding='Catboost' # How we encode the categorical variable
-METHODS = ['mean', 'min', 'max', 'std',
+# Methods for reducing features
+
+METHODS_TEMPORAL = ['mean', 'min', 'max', 'std',
            'sum',
            #'grad'
-           ] # Methods for reducing features
+           ] 
+
+METHODS_SPATIAL = ['mean', 'min', 'max', 'std',
+           'sum',
+           #'grad'
+           ] 
+
+METHODS_TEMPORAL_TRAIN = ['mean', 'min', 'max', 'std',
+           'sum',
+           #'grad'
+           ]
+
+METHODS_SPATIAL_TRAIN = ['mean', 'min', 'max', 'std',
+           #'sum',
+           #'grad'
+           ]
+
+METHODS_KMEANS = ['mean', 'min', 'max', 'std']
+METHODS_KMEANS_TRAIN = ['mean', 'min', 'max', 'std']
+
 num_lstm_layers = 2
 
 def make_models(in_dim, in_dim_2D, dropout, act_func, k_days):

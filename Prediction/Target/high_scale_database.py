@@ -190,13 +190,15 @@ if __name__ == "__main__":
 
     #regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions = []
+
     for dept in departements:
         h3 = gpd.read_file(root / dept / 'data' / 'spatial/hexagones.geojson')
         h3['latitude'] = h3['geometry'].apply(lambda x : float(x.centroid.y))
         h3['longitude'] = h3['geometry'].apply(lambda x : float(x.centroid.x))
         h3['departement'] = dept
         regions.append(h3)
-    regions = pd.concat(regions)
+
+    regions = pd.concat(regions).reset_index(drop=True)
     regions['scale0'] = regions.index
     regions.index = regions['hex_id']
     dico = regions['scale0'].to_dict()

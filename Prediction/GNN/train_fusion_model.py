@@ -63,6 +63,7 @@ do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
+scaling = args.scaling
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -89,20 +90,18 @@ if autoRegression:
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+df, graphScale, prefix, _ = init(args, dir_output, True)
+save_object(df.columns, 'features_name.pkl', dir_output)
 
 ############################# Train, Val, test ###########################
 
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
-
-############################# Train Val test ###########################
-
-# Fusion
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, args)
-
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                    train_features, train_departements,
+                                                                                    prefix,
+                                                                                    dir_output, args)
 
 # Base models
-train_dataset_list, val_dataset_list, test_dataset_list, features_selected_list, dir_model_list, model_list = [], [], [], [], [], []
+train_dataset_list, val_dataset_list, test_dataset_list, features_selected_list, dir_model_list, model_list, target_list = [], [], [], [], [], [], []
 
 ############################ Models ####################################
 
@@ -122,14 +121,15 @@ prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
 model_name = f'{model_type}_{target}_{task_type}_{loss}'
 dir_model =  Path(name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/')
 
-X_model = read_object(f'X_{values_per_class}.pkl', dir_model)
-Y_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+df_model = read_object(f'df_{prefix_model}.pkl', dir_model)
 features_name_model = read_object('train_features.pkl', dir_model)
 graph_model = read_object(f'graph_{scale}.pkl', dir_model)
 
 dir_model = dir_model / prefix_model
 
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, X_model, Y_model, features_name, train_departements, args)
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, df_model, train_features, train_departements,
+                                                                                    prefix,
+                                                                                    dir_output, args)
 
 train_dataset_list.append(train_dataset)
 val_dataset_list.append(val_dataset)
@@ -137,6 +137,7 @@ test_dataset_list.append(test_dataset)
 features_selected_list.append(features_selected)
 dir_model_list.append(dir_model)
 model_list.append(model_name)
+target_list.append(target)
 
 
 # Model 2
@@ -155,14 +156,15 @@ prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
 model_name = f'{model_type}_{target}_{task_type}_{loss}'
 dir_model =  Path(name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/')
 
-X_model = read_object(f'X_{values_per_class}.pkl', dir_model)
-Y_model = read_object(f'X_{values_per_class}.pkl', dir_model)
+df_model = read_object(f'df_{prefix_model}.pkl', dir_model)
 features_name_model = read_object('train_features.pkl', dir_model)
 graph_model = read_object(f'graph_{scale}.pkl', dir_model)
 
 dir_model = dir_model / prefix_model
 
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, X_model, Y_model, features_name, train_departements, args)
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graph_model, df_model, train_features, train_departements,
+                                                                                    prefix,
+                                                                                    dir_output, args)
 
 train_dataset_list.append(train_dataset)
 val_dataset_list.append(val_dataset)
@@ -170,6 +172,7 @@ test_dataset_list.append(test_dataset)
 features_selected_list.append(features_selected)
 dir_model_list.append(dir_model)
 model_list.append(model_name)
+target_list.append(target)
 
 ############################# Training ###########################
 
@@ -180,11 +183,11 @@ if doTrain:
                                            train_dataset_list=train_dataset_list,
                                            val_dataset_list=val_dataset_list,
                                            test_dataset_list=test_dataset_list,
+                                           target_list=target_list,
                                            model_list=model_list,
                                            dir_model_list=dir_model_list,
                             dir_output=dir_output,
                             device='cpu',
-                            features_name=feature_names,
                             autoRegression=autoRegression,
                             optimize_feature=optimize_feature,
                             do_grid_search=do_grid_search,
@@ -196,12 +199,12 @@ if doTest:
     y_test = test_dataset[1]
 
     name_dir = name_exp + '/' + sinister + '/' + resolution + '/train' + '/'
-    train_dir = Path(name_dir)
+    dir_train = Path(name_dir)
 
     name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
-    testDepartement = [int2name[d] for d in np.unique(y_test[:, 3])]
+    testd_departement = [int2name[d] for d in np.unique(y_test[:, 3])]
 
     mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
@@ -263,5 +266,5 @@ if doTest:
                         encoding,
                         scaling,
                         [dept],
-                        train_dir,
+                        dir_train,
                         features_name)

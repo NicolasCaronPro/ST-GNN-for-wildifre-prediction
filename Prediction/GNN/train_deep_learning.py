@@ -1,7 +1,7 @@
 from dataloader import *
-from config import *
 import geopandas as gpd
 import argparse
+
 
 ########################### Input Arg ######################################
 
@@ -61,8 +61,9 @@ doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
-k_days = args.k_days # Size of the time series sequence use by DL models
+k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = args.days_in_futur # The target time validation
+scaling = args.scaling
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -89,12 +90,15 @@ if autoRegression:
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+df, graphScale, prefix, features_name_2D, newShape2D = init(args, dir_output, True)
+save_object(df.columns, 'features_name.pkl', dir_output)
 
 ############################# Train, Val, test ###########################
 
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
-
+train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                    train_features, train_departements,
+                                                                                    prefix,
+                                                                                    dir_output, args)
 ############################# Training ##################################
 dir_output = dir_output / spec
 
@@ -104,32 +108,31 @@ PATIENCE_CNT = 200
 CHECKPOINT = 100
 
 gnnModels = [
-        ('GAT_risk', False, 'risk', False, autoRegression),
-        #('DST-GCNCONV_risk', 'risk', False, False, autoRegression),
-        #('ST-GATTCN_risk', 'risk', False, False, autoRegression),
-        #('ST-GATCONV_risk', 'risk', False, False, autoRegression),
-        #('ST-GCNCONV_risk', 'risk', False, False, autoRegression),
-        #('ATGN_risk', False, 'risk', False, autoRegression),
-        #('ST-GATLTSM_risk', 'risk', False, False, autoRegression),
-        ('LTSM_risk', False, 'risk', False, autoRegression),
+         ('GAT', False, 'risk_regression_rmse', False, autoRegression),
+        ('DST-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GAT', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('SDT-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('ATGN', False, 'risk_regression_rmse', False, autoRegression),
+        ('LTSM', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GATLTSM', False, 'risk_regression_rmse', False, autoRegression),
 
-        #('GAT_nbsinister', False, 'nbsinister', False, autoRegression),
-        #('DST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GATTCN_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GATCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ATGN_nbsinister', False, 'nbsinister', False, autoRegression),
-        #('ST-GATLTSM_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('LTSM_nbsinister', False, 'nbsinister', False, autoRegression),
+        ('GAT', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('DST-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GAT', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('SDT-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ATGN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GATLTSM', False, 'nbsinister_regression_rmse', False, autoRegression),
 
-        #('DST-GCNCONV_bin', False, 'binary', False, autoRegression),
-        #('ST-GATTCN_bin', False, 'binary', False, autoRegression),
-        #('ST-GATCONV_bin', False, 'binary', False, autoRegression),
-        #('ST-GCNCONV_bin', False, 'binary', False, autoRegression),
-        #('ATGN_bin', False, 'binary', False, autoRegression),
-        #('ST-GATLTSM_bin', False, 'binary', False, autoRegression),
-        #('Zhang', False, 'binary', autoRegression)
-        #('ConvLSTM', False, 'binary', autoRegression)
+        #('DST-GCNCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATTCN', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GCNCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ATGN', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATLTSM', False, 'binary_classification_rmse', False, autoRegression),
+        #('Zhang', False, 'binary_classification_rmse', autoRegression)
+        #('ConvLSTM', False, 'binary_classification_rmse', autoRegression)
         ]
 
 trainLoader = None
@@ -137,7 +140,9 @@ valLoader = None
 last_bool = None
 
 if doTrain:
-    for model, use_temporal_as_edges, target_name, is_2D_model, autoRegression in gnnModels:
+    for model, use_temporal_as_edges, infos, is_2D_model, autoRegression in gnnModels:
+        target_name, task_type, loss = infos.split('_')
+
         if target_name != 'binary':
             criterion = weighted_rmse_loss
         else:
@@ -160,6 +165,7 @@ if doTrain:
                 trainLoader, valLoader, testLoader = train_val_data_loader(graph=graphScale, train=train_dataset,
                                                                         val=val_dataset,
                                                                         test=test_dataset,
+                                                                        features_name=features_selected,
                                                                 batch_size=64, device=device,
                                                                 use_temporal_as_edges = use_temporal_as_edges,
                                                                 ks=k_days)
@@ -183,26 +189,30 @@ if doTrain:
 
                 save_object(trainLoader, 'trainloader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
                 save_object(valLoader, 'valLoader_'+prefix+'_'+scaling+'_'+encoding+'_'+str(use_temporal_as_edges)+'_2D.pkl', dir_output)
+        params = {
+            "trainLoader": trainLoader,
+            "valLoader": valLoader,
+            "testLoader": testLoader,
+            "k_days": k_days,
+            "optimize_feature": optimize_feature,
+            "PATIENCE_CNT": PATIENCE_CNT,
+            "CHECKPOINT": CHECKPOINT,
+            "epochs": epochs,
+            "features": features_selected,
+            "lr": lr,
+            "features_name": features_name,
+            "criterion": criterion,
+            "modelname": model,
+            "dir_output": dir_output / Path('check_' + scaling + '/' + prefix + '/' + model),
+            "target_name": target_name,
+            "autoRegression": autoRegression
+        }
 
-        train(trainLoader=trainLoader, valLoader=valLoader,
-            testLoader=testLoader,
-            scale=scale,
-            optmize_feature = optimize_feature,
-            PATIENCE_CNT=PATIENCE_CNT,
-            CHECKPOINT=CHECKPOINT,
-            epochs=epochs,
-            features=features_selected,
-            lr=lr,
-            features_name=features_name,
-            criterion=criterion,
-            modelname=model,
-            dir_output=dir_output / Path('check_'+scaling + '/' + prefix + '/' + model),
-            target_name=target_name,
-            autoRegression=autoRegression)
+        train(params)
 
 if doTest:
 
-    dico_model = make_models(len(features_selected), 52, 0.03, 'relu')
+    dico_model = make_models(len(features_selected), 52, 0.03, 'relu', k_days)
 
     trainCode = [name2int[dept] for dept in train_departements]
 
@@ -211,7 +221,7 @@ if doTest:
     x_test, y_test  = test_dataset
 
     name_dir = name_exp + '/' + sinister + '/' + resolution + '/train' + '/'
-    train_dir = Path(name_dir)
+    dir_train = Path(name_dir)
 
     name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
@@ -241,33 +251,32 @@ if doTest:
             ]
 
     gnnModels = [
-        ('GAT_risk', False, 'risk', False, autoRegression),
-        #('DST-GCNCONV_risk', False, 'risk', False, autoRegression),
-        #('ST-GATTCN_risk', False, 'risk', False, autoRegression),
-        #('ST-GATCONV_risk', False, 'risk', False, autoRegression),
-        #('ST-GCNCONV_risk', False, 'risk', False, autoRegression),
-        #('ATGN_risk', False, 'risk', False, autoRegression),
-        #('ST-GATLTSM_risk', 'risk', False, False, autoRegression),
-        ('LTSM_risk', False, 'risk', False, autoRegression),
+         ('GAT', False, 'risk_regression_rmse', False, autoRegression),
+        ('DST-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GAT', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('SDT-GCN', False, 'risk_regression_rmse', False, autoRegression),
+        ('ATGN', False, 'risk_regression_rmse', False, autoRegression),
+        ('LTSM', False, 'risk_regression_rmse', False, autoRegression),
+        ('ST-GATLTSM', False, 'risk_regression_rmse', False, autoRegression),
 
-        #('GAT_nbsinister', False, 'nbsinister', False, autoRegression),
-        #('DST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GATTCN_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GATCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ST-GCNCONV_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('ATGN_nbsinister', False, 'nbsinister', False, autoRegression),
-        #('ST-GATLTSM_nbsinister', 'nbsinister', False, False, autoRegression),
-        #('LTSM_nbsinister', False, 'nbsinister', False, autoRegression),
+        ('GAT', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('DST-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GAT', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('SDT-GCN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ATGN', False, 'nbsinister_regression_rmse', False, autoRegression),
+        ('ST-GATLTSM', False, 'nbsinister_regression_rmse', False, autoRegression),
 
-        #('DST-GCNCONV_binary', False, 'binary', autoRegression),
-        #('ST-GATTCN_binary', False, 'binary', autoRegression),
-        #('ST-GATCONV_binary', False, 'binary', autoRegression),
-        #('ST-GCNCONV_binary', False, 'binary', autoRegression),
-        #('ATGN_binary', False, 'binary', autoRegression),
-        #('ST-GATLTSM_binary', False, 'binary', autoRegression),
-        #('Zhang_binary', False, 'binary', autoRegression)
-        #('ConvLSTM_binary', False, 'binary', autoRegression)
-    ]
+        #('DST-GCNCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATTCN', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GCNCONV', False, 'binary_classification_rmse', False, autoRegression),
+        #('ATGN', False, 'binary_classification_rmse', False, autoRegression),
+        #('ST-GATLTSM', False, 'binary_classification_rmse', False, autoRegression),
+        #('Zhang', False, 'binary_classification_rmse', autoRegression)
+        #('ConvLSTM', False, 'binary_classification_rmse', autoRegression)
+        ]
 
     for dept in departements:
         Xset = x_test[(x_test[:, 3] == name2int[dept])]
@@ -296,7 +305,7 @@ if doTest:
                            encoding,
                            scaling,
                            [dept],
-                           train_dir / spec,
+                           dir_train / spec,
                            dico_model,
                            features_name_2D,
                            shape2D,

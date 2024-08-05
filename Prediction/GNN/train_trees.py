@@ -34,6 +34,7 @@ parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preproce
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
+parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
 
 args = parser.parse_args()
 
@@ -63,6 +64,7 @@ do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
+scaling = args.scaling
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -89,18 +91,16 @@ if autoRegression:
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+df, graphScale, prefix, _ = init(args, dir_output, True)
 
 ############################# Train, Val, test ###########################
-
-train_dataset, val_dataset, test_dataset, features_selected, features_name = get_train_val_test_set(graphScale, X, Y,
-                                                                                     features_name, train_features, train_departements,
-                                                                                     prefix,
-                                                                                     dir_output, args)
-
+dir_output = dir_output / spec
+train_dataset, val_dataset, test_dataset, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                    train_features, train_departements,
+                                                                                    prefix,
+                                                                                    dir_output, args)
 ######################## Training ##############################
 
-dir_output = dir_output / spec
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 
 if doTrain:
@@ -108,10 +108,9 @@ if doTrain:
                             val_dataset=val_dataset,
                             test_dataset=test_dataset,
                             dir_output=dir_output / name,
-                            device='gpu',
-                            features=features_selected,
+                            device='cpu',
                             autoRegression=autoRegression,
-                            features_name=features_name,
+                            features=features_selected,
                             optimize_feature=optimize_feature,
                             do_grid_search = do_grid_search,
                             do_bayes_search = do_bayes_search)
@@ -119,13 +118,7 @@ if doTrain:
 if doTest:
     logger.info('############################# TEST ###############################')
 
-    x_train = train_dataset[0]
-    y_train = train_dataset[1]
-
-    x_test = test_dataset[0]
-    y_test = test_dataset[1]
-
-    train_dir = copy(dir_output)
+    dir_train = copy(dir_output)
 
     name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/' + spec
     dir_output = Path(name_dir)
@@ -156,31 +149,31 @@ if doTest:
 
     models = [
         ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
-        ('xgboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        ('xgboost_binary_classification_log_loss_features', 'binary', autoRegression),
+        ('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('xgboost_binary_classification_log_loss', 'binary', autoRegression),
         ]
         
     for dept in departements:
-        Xset = x_test[(x_test[:, 3] == name2int[dept])]
-        Yset = y_test[(x_test[:, 3] == name2int[dept])]
+        test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
+        test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
 
-        if Xset.shape[0] < 5:
+        if test_dataset_dept.shape[0] < 5:
             continue
 
-        save_object(Xset, 'X'+'_'+dept+'_'+prefix+'.pkl', dir_output / dept / prefix)
-        save_object(Xset, 'Y_'+dept+'_'+prefix+'.pkl', dir_output / dept / prefix)
-
-        logger.info(f'{dept} test : {Xset.shape}, {allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-
-        test_sklearn_api_model(graphScale, Xset, Yset,
-                        methods,
-                        dept,
-                        prefix,
-                        models,
-                        dir_output / dept / prefix,
-                        device,
-                        encoding,
-                        scaling,
-                        [dept],
-                        train_dir,
-                        features_name)
+        logger.info(f'{dept} test : {test_dataset_dept.shape}')
+        prefix_kmeans = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+        test_sklearn_api_model(graphScale, test_dataset_dept,
+                               test_dataset_unscale_dept,
+                                methods,
+                                dept,
+                                prefix,
+                                models,
+                                dir_output / dept / prefix,
+                                device,
+                                encoding,
+                                scaling,
+                                [dept],
+                                dir_train,
+                                dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                                doKMEANS
+                                )

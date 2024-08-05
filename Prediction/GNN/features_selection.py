@@ -160,7 +160,7 @@ def get_features(df, variables, target='appels', num_feats=100, learn_mode = 'sl
                 eval_set=(X_val[variables], y_val))
         #embeded_lgb_selector.fit(X.to_pandas(), y.to_pandas())
         embeded_lgb_support = embeded_lgb_selector.get_support()
-        embeded_lgb_feature = [item for index, item in enumerate(X_train.columns) if embeded_lgb_support[index]]
+        embeded_lgb_feature = [item for index, item in enumerate(variables) if embeded_lgb_support[index]]
     else:
         embeded_lgb_feature = []
     #loc[:, embeded_lgb_support].columns.tolist()

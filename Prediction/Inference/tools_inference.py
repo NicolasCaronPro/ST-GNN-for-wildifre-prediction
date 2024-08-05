@@ -17,25 +17,25 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         path : Path,
                         geo : gpd.GeoDataFrame,
                         dates : np.array,
-                        departement : str) -> np.array:
+                        departement : str,
+                        resolution : str) -> np.array:
     
     assert graph.nodes is not None
 
-    features_name, newShape = get_features_name_list(graph.scale, subNode.shape[1], features)
+    methods = METHODS_SPATIAL
 
-    logger.info(features_name)
-    logger.info({len(features_name)})
-    
+    features_name, newShape = get_features_name_list(graph.scale, features, methods)
+
     def save_values(array, band, indexNode, mask):
 
         indexVar = features_name.index(f'{band}_mean')
 
         if False not in np.unique(np.isnan(array[mask])):
             return
-
+        
         values = array[mask].reshape(-1,1)
         if graph.scale > 0:
-            for imet, metstr in enumerate(METHODS):
+            for imet, metstr in enumerate(methods):
                 if metstr == 'mean':
                     X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(values), 3)
                 elif metstr == 'min':
@@ -66,7 +66,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         encode_values = encoder.transform(values).values
         indexVar = features_name.index(f'{band}_mean')
         if graph.scale > 0:
-            for imet, metstr in enumerate(METHODS):
+            for imet, metstr in enumerate(methods):
                 if metstr == 'mean':
                     X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(encode_values), 3)
                 elif metstr == 'min':
@@ -89,7 +89,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     X[:,:subNode.shape[1]] = subNode
 
     dir_encoder = path / 'Encoder'
-
     if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
         encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
@@ -132,18 +131,18 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             stop_calendar = 11
 
             X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = \
-                    encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar)
-            
+                    np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
+
             for ir in range(stop_calendar, size_calendar):
                 var_ir = calendar_variables[ir]
                 if var_ir == 'calendar_mean':
-                    X[index, features_name.index(band) + ir] = np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar])
+                    X[index, features_name.index(band) + ir] = round(np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
                 elif var_ir == 'calendar_max':
-                    X[index, features_name.index(band) + ir] = np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar])
+                    X[index, features_name.index(band) + ir] = round(np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
                 elif var_ir == 'calendar_min':
-                    X[index, features_name.index(band) + ir] = np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar])
+                    X[index, features_name.index(band) + ir] = round(np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
                 elif var_ir == 'calendar_sum':
-                    X[index, features_name.index(band) + ir] = np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar])
+                    X[index, features_name.index(band) + ir] = round(np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
                 else:
                     logger.info(f'Unknow operation {var_ir}')
                     exit(1)
@@ -191,11 +190,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         if 'highway' in features:   
             for var in osmnx_variables:
-                save_values(geo[var].values, osmnxint2str[var], index, maskNode)
+                save_values(geo[osmnxint2str[var]].values, osmnxint2str[var], index, maskNode)
 
         if 'foret' in features:
             for var in foret_variables:
-                save_values(geo[var].values, foretint2str[var], index, maskNode)
+                save_values(geo[foretint2str[var]].values, foretint2str[var], index, maskNode)
 
         if 'landcover' in features:
             if 'foret_encoder' in landcover_variables:
@@ -224,7 +223,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info('Historical')
     if 'Historical' in features:
         name = departement+'pastInfluence.pkl'
-        arrayInfluence = read_object(name, Path('./log/'))
+        arrayInfluence = read_object(name, Path('./log/'+resolution))
         if arrayInfluence is not None:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -277,7 +276,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     return X, features_name
 
-def add_varying_time_features(X : np.array, newShape : int, features : list, features_name : list, ks : int, scale : int):
+def add_varying_time_features(X : np.array, Y : np.array, newShape : int, features : list, features_name : list, ks : int, scale : int, methods : list):
     res = np.empty((X.shape[0], newShape))
     res[:, :X.shape[1]] = X
 
@@ -287,10 +286,10 @@ def add_varying_time_features(X : np.array, newShape : int, features : list, fea
                     'std': np.nanstd,
                     'sum' : np.nansum}
     
-    unodes = np.unique(X[: , 0])
+    unodes = np.unique(Y[: , 0])
 
     for node in unodes:
-        index_node = np.argwhere((X[:,0] == node))[:, 0]
+        index_node = np.argwhere((Y[:,0] == node))[:, 0]
         res[index_node, X.shape[1]:] = 0
 
         X_node_copy = []
@@ -307,24 +306,24 @@ def add_varying_time_features(X : np.array, newShape : int, features : list, fea
             name = vec[0]
 
             if feat.find('Calendar') != -1:
-                _, limit, _, _ = calculate_feature_range('Calendar', scale)
+                _, limit, _, _ = calculate_feature_range('Calendar', scale, methods)
                 index_feat = features_name.index(f'{calendar_variables[0]}')
             elif feat.find('air') != -1:
-                _, limit, _, _ = calculate_feature_range('air', scale)
+                _, limit, _, _ = calculate_feature_range('air', scale, methods)
                 index_feat = features_name.index(f'{air_variables[0]}')
             elif feat.find('Historical') != -1:
-                _, limit, _, _ = calculate_feature_range('Historical', scale)
+                _, limit, _, _ = calculate_feature_range('Historical', scale, methods)
                 index_feat = features_name.index(f'{historical_variables[0]}_mean')
             else:
                 index_feat = features_name.index(f'{name}_mean')
                 limit = 1
 
-            for method in METHODS:
+            for method in methods:
                 try:
                     func = methods_dict[method]
                 except:
                     raise ValueError(f'{method} unknow method, {feat}')
-
+                
                 if feat.find('Calendar') != -1:
                     index_new_feat = features_name.index(f'{calendar_variables[0]}_{method}_{ks}')
                 elif feat.find('air') != -1:
@@ -333,7 +332,7 @@ def add_varying_time_features(X : np.array, newShape : int, features : list, fea
                     index_new_feat = features_name.index(f'{historical_variables[0]}_{method}_{ks}')
                 else:
                     index_new_feat = features_name.index(feat)
-
+                
                 res[index_node, index_new_feat:index_new_feat+limit] = \
                             func(X_node_copy[:, :, index_feat:index_feat+limit], axis=0)
 

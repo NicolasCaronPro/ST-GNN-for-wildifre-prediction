@@ -3,16 +3,11 @@ from sklearn.cluster import KMeans
 import math
 import geopandas as gpd 
 from shapely import unary_union
-import warnings
 from shapely import Point
 from forecasting_models.models import *
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 from features_2D import *
-
-# Suppress FutureWarning messages
-warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-warnings.simplefilter(action='ignore', category=UserWarning)
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -35,28 +30,52 @@ class GraphStructure():
         self.scale = scale # current scale define by numUniqueNode // 6
         self.oriLatitues = geo.latitude # all original latitude of interest
         self.oriLongitude = geo.longitude # all original longitude of interest
-        self.oriLen = self.oriLatitues.shape[0] # original len of data
+        self.oriLen = self.oriLatitues.shape[0] # len of data
         self.oriGeometry = geo['geometry'].values # original geometry
         self.departements = geo.departement # original dept of each geometry
         self.maxDist = maxDist # max dist to link two nodes
         self.numNei = numNei # max connect neighbor a node can have
+        self.kmeans = {}
 
     def _train_kmeans(self, doRaster: bool, path : Path, sinister : str, resolution) -> None:
         self.train_kmeans = True
         logger.info('Create node via KMEANS')
-        X = list(zip(self.oriLongitude, self.oriLatitues))
-        if self.scale != 0:
-            self.numCluster = self.oriLen // (self.scale * 6)
-        else:
-            self.numCluster = self.oriLen
-        self.kmeans = KMeans(self.numCluster, random_state=42, n_init=10)
-        self.ids = self.kmeans.fit_predict(X)
+        udept = np.unique(self.departements)
+        node_already_predicted = 0
+        self.ids = np.empty(self.oriLatitues.shape[0], dtype=int)
+        self.numCluster = 0
+        for dept in udept:
+            self.kmeans[dept] = {}
+            mask = self.departements == dept
+            X = list(zip(self.oriLongitude[mask], self.oriLatitues[mask]))
+            leni = len(X)
+            if self.scale != 0:
+                current_cluster = leni // (self.scale * 6)
+            else:
+               current_cluster += leni
+            logger.info(f'Constructing {dept}, {leni} divide by {self.scale * 6} hexagones give a graph with {current_cluster} nodes')
+            self.numCluster += current_cluster
+            self.kmeans[dept]['kmeans'] = KMeans(current_cluster, random_state=42, n_init=10)
+            self.kmeans[dept]['node_already_predicted'] = node_already_predicted
+            self.ids[mask] = self.kmeans[dept]['kmeans'].fit_predict(X) + node_already_predicted
+            node_already_predicted += current_cluster
         if doRaster:
             self._raster(path=path, sinister=sinister, resolution=resolution)
 
-    def _predict_node(self, array : list) -> np.array:
+    def _predict_node(self, array : list, depts = None) -> np.array:
         assert self.kmeans is not None
-        res = self.kmeans.predict(array)
+        if depts is None:
+            array2 = np.empty((np.asarray(array).shape[0], 4))
+            array2[:, 1:3] = np.asarray(array).reshape(-1,2)
+            depts = self._assign_department(array2)[:, -1]
+        udept = np.unique(depts)
+        res = np.empty(len(array))
+        for dept in udept:
+            if dept is None:
+                continue
+            mask = np.argwhere(depts == dept)[:, 0]
+            x = np.asarray(array)[mask]
+            res[mask] = self.kmeans[int2name[dept]]['kmeans'].predict(x) + self.kmeans[int2name[dept]]['node_already_predicted']
         return res
 
     def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, sinister):
@@ -180,6 +199,7 @@ class GraphStructure():
         logger.info('Creating node list')
         self.nodes = np.full((self.numCluster, 5), np.nan) # [id, longitude, latitude]
         self.uniqueIDS = np.unique(self.ids)
+        print(self.uniqueIDS.shape, self.nodes.shape)
         for id in self.uniqueIDS:
             mask = np.argwhere(id == self.ids)
             if self.scale != 0:
@@ -199,10 +219,12 @@ class GraphStructure():
         self.edges = None # (2, E) where E is the number of edges in the graph
         src_nodes = []
         target_nodes = []
+        if self.uniqueIDS.shape[0] == 1:
+            self.edges = []
         for id in self.uniqueIDS:
             closest = self._distances_from_node(self.nodes[id], self.nodes[self.nodes[:,0] != id])
             closest = closest[closest[:, 1].argsort()]
-            for i in range(self.numNei):
+            for i in range(min(self.numNei, len(closest))):
                 if closest[i, 1] > self.maxDist:
                     break
                 src_nodes.append(id)
@@ -420,15 +442,15 @@ class GraphStructure():
 
             return pred, y
         
-    def predict_model_api_sklearn(self, X : np.array,
-                                  features : np.array, isBin : bool,
-                                  autoRegression : bool, features_name : dict) -> np.array:
+    def predict_model_api_sklearn(self, X : pd.DataFrame,
+                                  features : list, isBin : bool,
+                                  autoRegression : bool) -> np.array:
         assert self.model is not None
         if not autoRegression:
             if not isBin:
-                return self.model.predict(X[:, features])
+                return self.model.predict(X[features])
             else:
-                return self.model.predict_proba(X[:, features])[:,1]
+                return self.model.predict_proba(X[features])[:,1]
         else:
             pred = np.empty(X.shape[0])
             uid = np.unique(X[:, 0])

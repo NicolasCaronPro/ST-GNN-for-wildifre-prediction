@@ -99,7 +99,7 @@ def construct_database(graphScale : GraphStructure,
     
     trainCode = [name2int[d] for d in train_departements]
     X_kmeans = list(zip(ps.longitude, ps.latitude))
-    ps['scale'+str(scale)] = graphScale._predict_node(X_kmeans)
+    ps['scale'+str(scale)] = graphScale._predict_node(X_kmeans, ps.departement)
     name = prefix+'.csv'
     ps.to_csv(dir_output / name, index=False)
     print(np.unique(ps['scale'+str(scale)].values))
@@ -115,6 +115,9 @@ def construct_database(graphScale : GraphStructure,
     subNode = add_k_temporal_node(k_days=k_days, nodes=orinode)
 
     subNode = graphScale._assign_latitude_longitude(subNode)
+
+    print(subNode)
+
     subNode = graphScale._assign_department(subNode)
 
     print(np.unique(subNode[:,3]))
@@ -132,7 +135,7 @@ def construct_database(graphScale : GraphStructure,
     n = 'X_full_'+str(scale)+'.pkl'
     #if False:
     if (dir_output / n).is_file():
-        features_name, _ = get_features_name_list(scale, 6, features)
+        features_name, _ = get_features_name_list(scale, features, METHODS_SPATIAL)
         X = read_object('X_full_'+str(scale)+'.pkl', dir_output)
     else:
         X = None
@@ -174,7 +177,6 @@ def construct_database(graphScale : GraphStructure,
         if X is not None:
             new_X = np.asarray(new_X).reshape(-1, x_train.shape[-1])
             new_X_neighboor = x_train[mask_days]
-            new_X_neighboor[:, 5] = 0
             X = np.concatenate((new_X, new_X_neighboor, x_test), casting='no')
             X[:, features_name.index('vigicrues'): features_name.index('vigicrues') + 4] = -1
 
@@ -191,12 +193,11 @@ def construct_database(graphScale : GraphStructure,
     ind = np.lexsort([Y[:, 4], Y[:, 0]])
     Y = Y[ind]
     if X is not None:
-        ind = np.lexsort([X[:, 4], X[:, 0]])
+        ind = np.lexsort([Y[:, 4], Y[:, 0]])
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
     Y[Y[:, 4] < k_days, 5] = 0
-    X[:, 5] = Y[:, 5]
 
     return X, Y, features_name
 
@@ -284,19 +285,12 @@ def init(args, dir_output, add_time_varying):
     geo = gpd.read_file('regions/regions.geojson')
     geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
-    name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
-    dir_output = Path(name_dir)
-    check_and_create_path(dir_output)
-
     minDate = '2017-06-12' # Starting point
 
     if values_per_class == 'full':
         prefix = f'{values_per_class}_{scale}'
     else:
-        prefix = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
-
-    if dummy:
-        prefix += '_dummy'
+        prefix = f'{values_per_class}_{k_days}_{scale}'
 
     autoRegression = 'AutoRegressionReg' in train_features
     if spec == '' and autoRegression:
@@ -386,13 +380,12 @@ def init(args, dir_output, add_time_varying):
     else:
         X = read_object('X_'+prefix+'.pkl', dir_output)
         Y = read_object('Y_'+prefix+'.pkl', dir_output)
-        features_name, newshape = get_features_name_list(graphScale.scale, 6, features)
+        features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
-    print(features_name)
     if newFeatures != []:
         X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
         for fet in newFeatures:
-            start , maxi, _, _ = calculate_feature_range(fet, scale)
+            start , maxi, _, _ = calculate_feature_range(fet, scale, METHODS_SPATIAL)
             X[:, features_name.index(start): features_name.index(start) + maxi] = X2[:, features_name_.index(start): features_name_.index(start) + maxi]
 
     ################################# 2D Database ###################################
@@ -423,15 +416,21 @@ def init(args, dir_output, add_time_varying):
                 new_fet = [v+'_'+str(k) for v in varying_time_variables]
                 train_features += [nf for nf in new_fet if nf.split('_')[0] in train_features]
                 features += new_fet
-                features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
+                features_name, newShape = get_features_name_list(graphScale.scale, features, METHODS_TEMPORAL)
             X = read_object('X_'+prefix+'.pkl', dir_output)
         else:
             for k in range(1, k_days + 1):
                 new_fet = [f'{v}_{str(k)}' for v in varying_time_variables]
                 train_features += [nf for nf in new_fet if nf.split('_')[0] in train_features]
                 features += new_fet
-                features_name, newShape = get_features_name_list(graphScale.scale, 6, features)
-                X = add_varying_time_features(X=X, features=new_fet, newShape=newShape, features_name=features_name, ks=k, scale=scale)
+                features_name, newShape = get_features_name_list(graphScale.scale, features, METHODS_TEMPORAL)
+                X = add_varying_time_features(X=X, Y=Y, features=new_fet, newShape=newShape, features_name=features_name, ks=k, scale=scale, methods=METHODS_TEMPORAL)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
+    
+    df = pd.DataFrame(columns=features_name + ids_columns + targets_columns, index=np.arange(0, X.shape[0]))
+    df[features_name] = X
+    df[ids_columns + targets_columns] = Y
 
-    return X, Y, graphScale, prefix, features_name, features_name_2D
+    save_object(df, 'df_'+prefix+'.pkl', dir_output)
+
+    return df, graphScale, prefix, features_name_2D

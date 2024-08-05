@@ -124,7 +124,7 @@ def compute_fire_indices(point, date_debut, date_fin, saison_feux):
     daily_prec['prec24veille'] = daily_max_temp['prcp'].shift(1)
     df = df.merge(daily_prec['prec24veille'].asfreq('H', method='ffill'), left_index=True, right_index=True, how='left')    
     # Somme des précipitations de la semaine écoulée, pour le KBDI
-    df['sum_last_7_days'] = df['prcp'].rolling('7D').sum()
+    df['sum_rain_last_7_days'] = df['prcp'].rolling('7D').sum()
     df['sum_snow_last_7_days'] = df['snow'].rolling('7D').sum()
     df.reset_index(inplace=True)    
     # Somme des précipitations consécutives, toujours pour le KBDI
@@ -153,7 +153,7 @@ def compute_fire_indices(point, date_debut, date_fin, saison_feux):
     prec24h12s = df['prec24h12'].to_numpy()
     prec24hs = df['prec24h'].to_numpy()
     prec24veilles = df['prec24veille'].to_numpy()
-    sum_last_7_days = df['sum_last_7_days'].to_numpy()
+    sum_rain_last_7_days = df['sum_rain_last_7_days'].to_numpy()
     sum_snow_last_7_days = df['sum_snow_last_7_days'].to_numpy()
     sum_consecutive_rainfall = df['sum_consecutive_rainfall'].to_numpy()    
     months = df['creneau'].dt.month.to_numpy() + 1
@@ -290,7 +290,7 @@ def compute_fire_indices(point, date_debut, date_fin, saison_feux):
                                                           prec24veilles[i],
                                                           kbdi[i-1], 
                                                           sum_consecutive_rainfall[i],
-                                                          sum_last_7_days[i],
+                                                          sum_rain_last_7_days[i],
                                                           30, # weekly rain threshold to initialize index [mm]
                                                           pAnnualAvg)))
     df['kbdi'] = kbdi    
@@ -332,7 +332,7 @@ def get_fire_indices(point, date_debut, date_fin, departement):
                                    SAISON_FEUX[departement]['jour_fin'])
         
         dg = compute_fire_indices(point, debut, debut_saison, False)
-        dg2 = compute_fire_indices(point, debut_saison, fin_saison, False)
+        dg2 = compute_fire_indices(point, debut_saison, fin_saison, True)
         if fin_saison < fin:
             dg3 = compute_fire_indices(point, fin_saison, fin, False)
             if 'df' not in locals():
@@ -692,14 +692,13 @@ def myRasterization(geo, tif, maskNan, sh, column):
     return res
 
 def rasterise_meteo_data(h3, maskh3, cems, sh, dates, dir_output):
-    cems_variables = ['temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'snow', 'prec24h', 'snow24h',
+    cems_variables = [
+                    'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'snow', 'prec24h', 'snow24h',
                     'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                     'isi', 'angstroem', 'bui', 'fwi', 'daily_severity_rating',
                     'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16', 'snow24h16',
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
-                    'sum_consecutive_snowfall',
-                    'days_since_snow',
                     'sum_snow_last_7_days',
                     ]
     
@@ -716,6 +715,8 @@ def rasterise_meteo_data(h3, maskh3, cems, sh, dates, dir_output):
             cems_grid = create_grid_cems(cems, date, 0, var)
 
             h3[var] = interpolate_gridd(var, cems_grid, h3.longitude.values, h3.latitude.values, 'cubic')
+            h3[var].fillna(value=np.nanmean(h3[var]), inplace=True)
+            h3[var] = [max(0, u) for u in  h3[var].values]
 
             rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, var)
 

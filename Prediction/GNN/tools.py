@@ -46,7 +46,14 @@ import scipy.stats
 import plotly.express as px
 import plotly.io as pio
 from forecasting_models.sklearn_api_models_config import *
+import warnings
 random.seed(42)
+
+# Suppress FutureWarning messages
+warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+warnings.simplefilter(action='ignore', category=UserWarning)
+warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
+
 
 # Dictionnaire de gestion des départements
 int2str = {
@@ -134,7 +141,7 @@ def create_larger_scale_bin(input, bin, influence, raster):
                 
                 binval = 0
                 influenceval = 0
-                
+
                 for uim in unique_ids_in_mask:
                     mask3 = (raster == uim)
                     binval += (np.unique(bin[mask3, di]))[0]
@@ -372,27 +379,29 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     source_ds = None
     return read_tif(output_raster)
 
-def remove_nan_nodes(nodes : np.array, target : np.array) -> np.array:
+import pandas as pd
+import numpy as np
+
+def remove_nan_nodes(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Remove non nodes for array
+    Remove rows where any NaN values are present in 'nodes' columns.
     """
-    mask = np.unique(np.argwhere(np.isnan(nodes))[:,0])
-    if target is None:
-        return np.copy(np.delete(nodes, mask, axis=0)), None
-    return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
+    return df.dropna().reset_index(drop=True)
 
-def remove_none_target(nodes : np.array, target : np.array) -> np.array:
-    mask = np.argwhere((target[:, -1] == -1) | (np.isnan(target[:, -1])))[:,0]
-    return np.copy(np.delete(nodes, mask, axis=0)), np.copy(np.delete(target, mask, axis=0))
+def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove rows where the target column has -1 or NaN values.
+    """
+    return df[(df['risk'] != -1) & (~df['risk'].isna())].reset_index(drop=True)
 
-def remove_bad_period(X : np.array, Y : np.array, period2ignore : dict, departements: list):
+def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list) -> pd.DataFrame:
+    global allDates, name2int
 
+    bad_dates = np.array([], dtype=int)
     for dept in departements:
         period = period2ignore[name2int[dept]]['interventions']
         if period != []:
             for per in period:
-                logger.info(f'{dept} -> Remove period {per}')
-
                 ds = per[0].strftime('%Y-%m-%d')
                 de = per[1].strftime('%Y-%m-%d')
 
@@ -404,43 +413,29 @@ def remove_bad_period(X : np.array, Y : np.array, period2ignore : dict, departem
                 if de not in allDates or ds not in allDates:
                     continue
 
-                ds = allDates.index(ds)
-                de = allDates.index(de)
+                ds_idx = allDates.index(ds)
+                de_idx = allDates.index(de)
+                bad_dates = np.concatenate((bad_dates, np.arange(start=ds_idx, stop=de_idx)))
 
-                if 'bad_dates' not in locals():
-                    bad_dates = np.arange(start=ds, stop=de)
-                else:
-                    bad_dates = np.concatenate((bad_dates, np.arange(start=ds, stop=de)))
-            if 'arg' not in locals():
-                arg = np.argwhere((X[:, 3] == name2int[dept]) & (~np.isin(X[:, 4], bad_dates)))[:, 0]
-            else:
-                arg2 = np.argwhere((X[:, 3] == name2int[dept]) & (~np.isin(X[:, 4], bad_dates)))[:,0]
-                arg = np.concatenate((arg, arg2))
-        else:
-            if 'arg' not in locals():
-                arg = np.argwhere(X[:, 3] == name2int[dept])[:, 0]
-            else:
-                arg2 = np.argwhere(X[:, 3] == name2int[dept])[:,0]
-                arg = np.concatenate((arg, arg2))
+    for dept in departements:
+        df = df[~((df['departement'] == name2int[dept]) & (df['date'].isin(bad_dates)))]
 
-    X = X[arg, :]
-    Y = Y[arg, :]
+    return df.reset_index(drop=True)
 
-    return X, Y
+def remove_non_fire_season(df: pd.DataFrame, SAISON_FEUX: dict, departements: list) -> pd.DataFrame:
+    global allDates, name2int, years
 
-def remove_non_fire_season(X : np.array, Y : np.array, SAISON_FEUX : dict, departements : list):
+    valid_indices = np.array([], dtype=int)
     for dept in departements:
         jour_debut = SAISON_FEUX[name2int[dept]]['jour_debut']
         mois_debut = SAISON_FEUX[name2int[dept]]['mois_debut']
-
         jour_fin = SAISON_FEUX[name2int[dept]]['jour_fin']
         mois_fin = SAISON_FEUX[name2int[dept]]['mois_fin']
-        
+
         for year in years:
-        
             date_debut = f'{year}-{mois_debut}-{jour_debut}'
             date_fin = f'{year}-{mois_fin}-{jour_fin}'
-            
+
             if date_debut < allDates[0]:
                 date_debut = allDates[0]
             if date_fin > allDates[-1]:
@@ -449,16 +444,13 @@ def remove_non_fire_season(X : np.array, Y : np.array, SAISON_FEUX : dict, depar
             if date_debut not in allDates or date_fin not in allDates:
                 continue
 
-            if 'arg' not in locals():
-                arg = np.argwhere(((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(date_debut)) & (X[:, 4] < allDates.index(date_fin))))[:, 0]
-            else:
-                arg2 = np.argwhere(((X[:, 3] == name2int[dept]) & (X[:, 4] >= allDates.index(date_debut)) & (X[:, 4] < allDates.index(date_fin))))[:, 0]
-                arg = np.concatenate((arg, arg2))
+            start_idx = allDates.index(date_debut)
+            end_idx = allDates.index(date_fin)
 
-    X = X[arg, :]
-    Y = Y[arg, :]
+            valid_indices = np.concatenate((valid_indices, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < end_idx)].index))
 
-    return X, Y
+    df = df.loc[valid_indices]
+    return df.reset_index(drop=True)
 
 def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
 
@@ -661,7 +653,7 @@ def concat_temporal_graph_into_time_series(array : np.array, ks : int, isY=False
         #ind = np.flip(ind)
         arrayNode = arrayNode[ind]
 
-        if ks + 1 > arrayNode.shape[0]:
+        if ks > arrayNode.shape[0]:
             return None
         res.append(arrayNode[:ks+1])
 
@@ -791,7 +783,7 @@ def load_x_from_pickle(x : np.array, shape : tuple,
             newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D,:], x_train[:, index1D], concat=False)
     return newx
 
-def order_class(predictor, pred):
+def order_class(predictor, pred, min_values=0):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
     cc = predictor.cluster_centers.reshape(-1)
     classes = np.arange(cc.shape[0])
@@ -801,7 +793,7 @@ def order_class(predictor, pred):
     for c in range(cc.shape[0]):
         mask = np.argwhere(pred == classes[c])
         res[mask] = c
-    return res
+    return res + min_values
 
 def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, method : str, band : int, dir_output : Path, name : str):
 
@@ -895,7 +887,7 @@ def np_groupby(x, index):
 def add_metrics(methods : list, i : int,
                 ypred : torch.tensor,
                 ytrue : torch.tensor,
-                testDepartement : list,
+                testd_departement : list,
                 target : str,
                 scale : int,
                 model : Model,
@@ -1037,25 +1029,25 @@ def add_metrics(methods : list, i : int,
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
         elif met_type == 'class':
-            mett = met(ypred, ytrue, testDepartement, dir, weights=ytrue[:,-4], top=None)
+            mett = met(ypred, ytrue, testd_departement, dir, weights=ytrue[:,-4], top=None)
             res[name] = mett
 
             for season, datesIndex in seasons.items():
                 mask = np.argwhere(np.isin(ytrue[:, 4], datesIndex))[:,0]
                 if mask.shape[0] == 0:
                     continue
-                mett = met(ypred[mask], ytrue[mask], testDepartement, dir, weights=ytrue[mask,-4], top=None)
+                mett = met(ypred[mask], ytrue[mask], testd_departement, dir, weights=ytrue[mask,-4], top=None)
                 res[name+'_'+season] = mett
 
-            mett = met(ypred, ytrue, testDepartement, dir, weights=None, top=10)
+            mett = met(ypred, ytrue, testd_departement, dir, weights=None, top=10)
             res[name+'top10'] = mett
 
-            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, dir, weights=ytrue[mask_top,-4], top=None)
+            mett = met(ypred[mask_top], ytrue[mask_top], testd_departement, dir, weights=ytrue[mask_top,-4], top=None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster'] = mett
 
-            mett = met(ypred[mask_top], ytrue[mask_top], testDepartement, dir, weights=None, top=None)
+            mett = met(ypred[mask_top], ytrue[mask_top], testd_departement, dir, weights=None, top=None)
             if torch.is_tensor(mett):
                 mett = mett.detach().cpu().numpy()
             res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
@@ -1112,7 +1104,7 @@ def quantile_prediction_error(Y : np.array, ypred : np.array, target : str, weig
                  (1, 0.2),
                  (2, 0.4),
                  (3, 0.6),
-                 (4, 8.0),
+                 (4, 0.8),
                  (5, 1.0)
                  ]
     
@@ -1329,12 +1321,10 @@ def mean_absolute_error_class(ypred, ytrue, departements : list,
 
     return res
 
-def get_features_name_list(scale, shape, features):
+def get_features_name_list(scale, features, methods):
 
-    features_name = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight']
-    if scale > 0:
-        methods = METHODS
-    else:
+    features_name = []
+    if scale == 0:
         methods = ['mean']
     for var in features:
         if var == 'Calendar':
@@ -1381,7 +1371,7 @@ def get_features_name_list(scale, shape, features):
         else:
             features_name += [f'{var}_{met}' for met in methods]
 
-    return features_name, len(features_name) + shape
+    return features_name, len(features_name)
 
 def get_features_name_lists_2D(shape, features):
 
@@ -1442,7 +1432,7 @@ def min_max_scaler(array : np.array, array_train: np.array, concat : bool) -> np
     res = scaler.transform(array.reshape(-1,1))
     return res.reshape(array.shape)
 
-def standart_scaler(array: np.array, array_train: np.array, concat : bool) -> np.array:
+def standard_scaler(array: np.array, array_train: np.array, concat : bool) -> np.array:
     if concat:
         Xt = np.concatenate((array, array_train))
     else:
@@ -1546,8 +1536,8 @@ def create_feature_map(features : np.array, features_name : dict, dir_output : P
         file.close()
     return
 
-def calculate_feature_range(fet, scale):
-    coef = len(METHODS) if scale > 0 else 1
+def calculate_feature_range(fet, scale, methods):
+    coef = len(methods) if scale > 0 else 1
     if fet == 'Calendar':
         variables = calendar_variables
         maxi = len(calendar_variables)
@@ -1561,7 +1551,7 @@ def calculate_feature_range(fet, scale):
     elif fet == 'sentinel':
         variables = sentinel_variables
         maxi = coef * len(sentinel_variables)
-        methods = METHODS
+        methods = methods
         start = f'{sentinel_variables[0]}_mean'
     elif fet == 'Geo':
         variables = geo_variables
@@ -1571,47 +1561,47 @@ def calculate_feature_range(fet, scale):
     elif fet == 'foret':
         variables = foret_variables
         maxi = coef * len(foret_variables)
-        methods = METHODS
+        methods = methods
         start = f'{foretint2str[foret_variables[0]]}_mean'
     elif fet == 'highway':
         variables = osmnx_variables
         maxi = coef * len(osmnx_variables)
-        methods = METHODS
+        methods = methods
         start = f'{osmnxint2str[osmnx_variables[0]]}_mean'
     elif fet == 'landcover':
         variables = landcover_variables
         maxi = coef * len(landcover_variables)
-        methods = METHODS
+        methods = methods
         start = f'{landcover_variables[0]}_mean'
     elif fet == 'dynamicWorld':
         variables = dynamic_world_variables
         maxi = coef * len(dynamic_world_variables)
-        methods = METHODS
+        methods = methods
         start = f'{dynamic_world_variables[0]}_mean'
     elif fet == 'vigicrues':
         variables = vigicrues_variables
         maxi = coef * len(vigicrues_variables)
-        methods = METHODS
+        methods = methods
         start = f'{vigicrues_variables[0]}_mean'
     elif fet == 'elevation':
         variables = elevation_variables
         maxi = coef * len(elevation_variables)
-        methods = METHODS
+        methods = methods
         start = f'{elevation_variables[0]}_mean'
     elif fet == 'population':
         variables = population_variabes
         maxi = coef * len(population_variabes)
-        methods = METHODS
+        methods = methods
         start = f'{population_variabes[0]}_mean'
     elif fet == 'nappes':
         variables = nappes_variables
         maxi = coef * len(nappes_variables)
-        methods = METHODS
+        methods = methods
         start = f'{nappes_variables[0]}_mean'
     elif fet == 'Historical':
         variables = historical_variables
         maxi = coef * len(historical_variables)
-        methods = METHODS
+        methods = methods
         start = f'{historical_variables[0]}_mean'
     elif fet == 'AutoRegressionReg':
         variables = auto_regression_variable_reg
@@ -1636,7 +1626,7 @@ def calculate_feature_range(fet, scale):
     elif fet in cems_variables:
         variables = [fet]
         maxi = coef
-        methods = METHODS
+        methods = methods
         start = f'{fet}_mean'
     else:
         variables = [fet]
@@ -1649,36 +1639,28 @@ def calculate_feature_range(fet, scale):
 def select_train_features(train_features, scale, features_name):
     # Select train features
     train_fet_num = []
-    features_name_train, _ = get_features_name_list(scale, len(train_fet_num), train_features)
+    features_name_train, _ = get_features_name_list(scale, train_features)
     for fet in features_name_train:
         train_fet_num.append(features_name.index(fet))
     return train_fet_num
 
-def features_selection(doFet, Xset, Yset, dir_output, features_name, NbFeatures, scale):
+def features_selection(doFet, df, dir_output, features_name, NbFeatures, target):
 
     if NbFeatures == 'all':
-        features_selected = np.arange(0, Xset.shape[1])
+        features_selected = features_name
         return features_selected
 
     if doFet:
-        variables = []
-        df = pd.DataFrame(index=np.arange(Xset.shape[0]))
-        for i in range(Xset.shape[1]):
-            if i >= 6:
-                variables.append(i)
-                df[i] = Xset[:,i]
-
-        df['target'] = Yset[:,-1]
-
-        features_importance = get_features(df, variables, target='target', num_feats=NbFeatures)
+        df_weight = df[df['weight'] > 0]
+        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=NbFeatures)
         features_importance = np.asarray(features_importance)
 
         save_object(features_importance, 'features_importance.pkl', dir_output)
     else:
         features_importance = read_object('features_importance.pkl', dir_output)
 
-    log_features(features_importance, features_name)
-    features_selected = features_importance[:,0].astype(int)
+    logger.info(features_importance)
+    features_selected = features_importance[:,0]
     return features_selected
 
 def shapiro_wilk(ypred, ytrue, dir_output):
@@ -1727,27 +1709,37 @@ def check_class(influence, bin):
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
-def apply_kmeans_class_on_target(Xset : np.array, Yset : np.array, dir_output : Path, change_class : bool):
-    dir_break_point = dir_output
-    features_selected = read_object('features.pkl', dir_break_point)
+def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target : str, tresh : int, features_selected, new_val : int):
     dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
-
+    values_risk = df[target].values
     for fet in features_selected:
-        if 'name' not in dico_correlation[fet].keys():
+        logger.info(f'############## {fet} #################')
+        values = df[fet].values
+        predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
+        if predictor is None:
             continue
-        on = dico_correlation[fet]['name']+'.pkl'
-        predictor = read_object(on, dir_break_point / dico_correlation[fet]['fet'])
-        predclass = order_class(predictor, predictor.predict(Xset[:, fet]))
+        predclass = order_class(predictor, predictor.predict(values))
         cls = np.unique(predclass)
+        low = False
+        previous_class = -1
         for c in cls:
-            if dico_correlation[fet][int(c)] < 0.01:
-                mask = np.argwhere(predclass == c)
-                logger.info(f'We change {mask.shape} value to class {np.unique(Yset[Yset[:, -1] == np.nanmin(Yset[:, -1])][:, -3])[0]}')
-                Yset[mask, -1] = np.nanmin(Yset[:, -1])
-                if change_class:
-                    Yset[mask, -3] = np.unique(Yset[Yset[:, -1] == np.nanmin(Yset[:, -1])][:, -3])[0]
+            mask = predclass == c
+            if dico_correlation[fet][int(c)] < tresh:
+                low = True
+                previous_class = c
+                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} -> 0')
+                values_risk[mask] = new_val
+            elif low:
+                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} due to {previous_class} -> 0')
+                values_risk[mask] = new_val
 
-    return Yset
+    df[target] = values_risk
+    return df
+
+def group_probability(group):
+    # Calculer la probabilité que au moins un des événements se produise
+    combined_prob = 1 - (1 - group['prediction']).prod()
+    return pd.Series({'prediction': combined_prob})
 
 def est_bissextile(annee):
     return annee % 4 == 0 and (annee % 100 != 0 or annee % 400 == 0)
@@ -1806,28 +1798,40 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
-def target_by_day(Y: np.array, days : int, method : str):
-    res = np.empty((Y.shape[0], Y.shape[1]))
+def target_by_day(df: pd.DataFrame, days: int, method: str) -> pd.DataFrame:
+    """
+    Adjust target values based on specified method (mean or max) over a number of future days.
+    
+    Parameters:
+    df : DataFrame containing the data
+    days : number of days to look ahead for calculating the target
+    method : method to use for aggregation ('mean' or 'max')
+    
+    Returns:
+    DataFrame with adjusted target values.
+    """
+    df_res = df.copy()
 
-    res[:, :-3] = Y[:, :-3]
-
-    unode = np.unique(Y[:, 0])
-    for node in unode:
-        udate = np.unique(Y[Y[:, 0] == node, 4])
-        for date in udate:
-            mask = np.argwhere((Y[:, 4] == date) & (Y[:, 0] == node))[:, 0]
-            mask2 = np.argwhere((Y[:, 4] >= date) & (Y[:, 4] < date + days) & (Y[:, 0] == node))[:, 0]
-            if method == 'mean':
-                res[mask, -1] = np.mean(Y[mask2, -1])
-            elif method == 'max':
-                res[mask, -1] = np.max(Y[mask2, -1])
-            else:
-                raise ValueError(f'Unknow method {method}')
+    unique_nodes = df['id'].unique()
+    for node in unique_nodes:
+        node_df = df[df['id'] == node]
+        unique_dates = node_df['date'].unique()
+        for date in unique_dates:
+            mask = (df['date'] == date) & (df['id'] == node)
+            future_mask = (df['date'] >= date) & (df['date'] < date + days) & (df['id'] == node)
             
-            res[mask, -3] = np.max(Y[mask2, -3])
-            res[mask, -2] = np.sum(Y[mask2, -2])
+            if method == 'mean':
+                df_res.loc[mask, 'risk'] = node_df[future_mask]['risk'].mean()
+            elif method == 'max':
+                df_res.loc[mask, 'risk'] = node_df[future_mask]['risk'].max()
+            else:
+                raise ValueError(f'Unknown method {method}')
+                
+            df_res.loc[mask, 'class_risk'] = node_df[future_mask]['class_risk'].max()
+            df_res.loc[mask, 'nbsinister'] = node_df[future_mask]['nbsinister'].sum()
+            
+    return df_res
 
-    return res
 
 def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, features_name : dict, target_name : str):
     logger.info(features_name)

@@ -41,7 +41,7 @@ if __name__ == '__main__':
 scaleTrain = scale
 
 name_dir = name_exp + '/' + sinister + '/' + 'train'
-train_dir = Path(name_dir)
+dir_train = Path(name_dir)
 
 name_dir = name_exp + '/' + sinister + '/' + 'test'
 dir_output = Path(name_dir)
@@ -85,7 +85,7 @@ metrics = {}
 
 ############################# Pipelines ##############################
 
-def process_test(testname, testDate, pss, geo, testDepartement, dir_output, features, doDatabase):
+def process_test(testname, testDate, pss, geo, testd_departement, dir_output, features, doDatabase):
     logger.info('##############################################################')
     logger.info(f'                        {testname}                            ')
     logger.info('##############################################################')
@@ -110,7 +110,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
     ########################## Construct database #############################
     if doDatabase:
-        pss = pss[pss['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
+        pss = pss[pss['departement'].isin([name2str[dep] for dep in testd_departement])].reset_index(drop=True)
         if testDate is not None:
             iterables = [testDate, list(pss.latitude)]
             ps = pd.DataFrame(index=pd.MultiIndex.from_product(iterables=iterables,  names=['date', 'latitude'])).reset_index()
@@ -127,7 +127,7 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
         ps = ps.sort_values(by='date')
 
         X, Y, features_name = construct_database(graphScale, ps, scale, k_days, departements,
-                                               features, sinister, dir_output, train_dir, prefix, 'test')
+                                               features, sinister, dir_output, dir_train, prefix, 'test')
         
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
@@ -139,13 +139,13 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
     features_name, _ = get_features_name_list(graphScale.scale, 6, features)
 
-    Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', train_dir)
-    y_train = read_object('y_train_'+prefix_train+'.pkl', train_dir)
+    Xtrain = read_object('Xtrain_'+prefix_train+'.pkl', dir_train)
+    y_train = read_object('y_train_'+prefix_train+'.pkl', dir_train)
     if Xtrain is None:
         logger.info(f'Fuck it')
         return
 
-    train_features = read_object(spec+'_train_features.pkl', train_dir)
+    train_features = read_object(spec+'_train_features.pkl', dir_train)
     if train_features is None:
         logger.info('Train Feature not found')
         exit(1)
@@ -164,8 +164,8 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
 
     # Remove some bad nodes that goes to wrong departement
     logger.info(f'Orignal dept {np.unique(X[:, 3]), X.shape}')
-    X = X[np.isin(X[:, 3], [name2int[dep] for dep in testDepartement])]
-    Y = Y[np.isin(Y[:, 3], [name2int[dep] for dep in testDepartement])]
+    X = X[np.isin(X[:, 3], [name2int[dep] for dep in testd_departement])]
+    Y = Y[np.isin(Y[:, 3], [name2int[dep] for dep in testd_departement])]
     logger.info(f'Test dept {np.unique(X[:, 3]), X.shape}')
 
     # Select train features
@@ -231,14 +231,14 @@ def process_test(testname, testDate, pss, geo, testDepartement, dir_output, feat
                            Rewrite, 
                            encoding,
                            scaling,
-                           testDepartement,
-                           train_dir)
+                           testd_departement,
+                           dir_train)
 
 def dummy_test(dates):
     name = sinister+".csv"
-    fp = pd.read_csv(train_dir / ".." / name)
+    fp = pd.read_csv(dir_train / ".." / name)
     name = "non"+sinister+".csv"
-    nfp = pd.read_csv(train_dir / ".." / name)
+    nfp = pd.read_csv(dir_train / ".." / name)
     fp = fp[fp['date'].isin(dates)]
     nfp = nfp[nfp['date'].isin(dates)]
     logger.info(f'Dummy test {len(fp)}, {len(nfp)}')
@@ -249,33 +249,33 @@ def dummy_test(dates):
 if sinister == 'firepoint':
     # 69 test
     testDates = find_dates_between('2018-01-01', '2023-01-01')
-    testDepartement = ['departement-69-rhone']
-    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+    testd_departement = ['departement-69-rhone']
+    process_test('69', testDates, geo, geo, testd_departement, dir_output, features, doDatabase)
 
     # 2023 test
     testDates = find_dates_between('2023-01-01', '2023-09-11')
-    testDepartement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
-    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+    testd_departement = ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines']
+    process_test('2023', testDates, geo, geo, testd_departement, dir_output, features, doDatabase)
 
 if sinister == 'inondation':
     # 69 test
     testDates = find_dates_between('2018-01-01', '2023-09-11')
-    testDepartement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
-    process_test('69', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+    testd_departement = ['departement-69-rhone', 'departement-01-ain', 'departement-78-yvelines']
+    process_test('69', testDates, geo, geo, testd_departement, dir_output, features, doDatabase)
 
     # 2023 test
     testDates = find_dates_between('2023-01-01', '2023-09-11')
-    testDepartement = ['departement-25-doubs']
-    process_test('2023', testDates, geo, geo, testDepartement, dir_output, features, doDatabase)
+    testd_departement = ['departement-25-doubs']
+    process_test('2023', testDates, geo, geo, testd_departement, dir_output, features, doDatabase)
 
 # 2023 test Ain
-testDepartement = ['departement-01-ain']
-#test('Ain', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)
+testd_departement = ['departement-01-ain']
+#test('Ain', testDates, geo, geo, testd_departement, dir_output, features, doDatabase, train_features)
 
 # 2023 test Doubs
-testDepartement = ['departement-25-doubs']
-#test('Doubs', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)
+testd_departement = ['departement-25-doubs']
+#test('Doubs', testDates, geo, geo, testd_departement, dir_output, features, doDatabase, train_features)
 
 # 2023 test Yvelines
-testDepartement = ['departement-78-yvelines']
-#test('Yvelines', testDates, geo, geo, testDepartement, dir_output, features, doDatabase, train_features)
+testd_departement = ['departement-78-yvelines']
+#test('Yvelines', testDates, geo, geo, testd_departement, dir_output, features, doDatabase, train_features)

@@ -2,29 +2,32 @@ from construct import *
 
 def realVspredict(ypred, y, band, dir_output, on):
     check_and_create_path(dir_output)
-    ytrue = y[:,band]
+    ytrue = y[:, band]
     dept = np.unique(y[:, 3])
-
+    classes = np.unique(y[:, -3])
+    colors = plt.cm.get_cmap('jet', 5)
     for d in dept:
-        mask = np.argwhere(y[:,3] == d)
+        mask = np.argwhere(y[:, 3] == d)
         maxi = max(np.nanmax(ypred[mask]), np.nanmax(ytrue[mask]))
         mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
         ids = np.unique(y[mask, 0])
         if ids.shape[0] == 1:
-            _, ax = plt.subplots(ids.shape[0], figsize=(15,5))
+            _, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
             ax.plot(ypred[mask], color='red', label='predict')
             ax.plot(ytrue[mask], color='blue', label='real', alpha=0.5)
-            x = np.argwhere(y[mask,-2] > 0)[:,0]
-            ax.scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
+            for class_value in classes:
+                class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
+                ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
             ax.set_ylim(ymin=mini, ymax=maxi)
         else:
-            _, ax = plt.subplots(ids.shape[0], figsize=(50,50))
+            _, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
                 mask2 = np.argwhere(y[:, 0] == id)
                 ax[i].plot(ypred[mask2], color='red', label='predict')
                 ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
-                x = np.argwhere(y[mask2,-2] > 0)[:,0]
-                ax[i].scatter(x, ypred[mask2][x], color='black', label='fire', alpha=0.5)
+                for class_value in classes:
+                    class_mask = np.argwhere((y[mask2, -3] == class_value) & (y[mask2,-2] > 0))[:, 0]
+                    ax[i].scatter(class_mask, ypred[mask2][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
                 ax[i].set_ylim(ymin=mini, ymax=maxi)
         plt.legend()
         outn = str(d) + '_' + on + '.png'
@@ -38,22 +41,23 @@ def realVspredict(ypred, y, band, dir_output, on):
     for id in uids:
         ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, 0] == id)[:, 0], -2])
 
-    ind = np.lexsort([ysum[:,1]])
+    ind = np.lexsort([ysum[:, 1]])
     ymax = np.flip(ysum[ind, 0])[:5]
-    _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50,25))
+    _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50, 25))
     for i, idtop in enumerate(ymax):
-        mask = np.argwhere(y[:,0] == idtop)
+        mask = np.argwhere(y[:, 0] == idtop)
         dept = np.unique(y[mask, 3])[0]
         ids = np.unique(y[mask, 0])
         ax[i].plot(ypred[mask], color='red', label='predict')
         ax[i].plot(ytrue[mask], color='blue', label='real', alpha=0.5)
+        for class_value in classes:
+            class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
+            ax[i].scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
         ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
-        x = np.argwhere(y[mask,-2] > 0)[:,0]
-        ax[i].scatter(x, ypred[mask][x], color='black', label='fire', alpha=0.5)
-        ax[i].set_title(str(dept)+'_'+str(idtop))
+        ax[i].set_title(str(dept) + '_' + str(idtop))
 
     plt.tight_layout()
-    outn =  'top_5' + on + '.png'
+    outn = 'top_5' + on + '.png'
     plt.savefig(dir_output / outn)
 
 def sinister_distribution_in_class(ypredclass, y, dir_output):
@@ -71,13 +75,18 @@ def sinister_distribution_in_class(ypredclass, y, dir_output):
         if mask.shape[0] == 0:
             nbsinisteriny.append(-1)
             meansinisteriny.append(-1)
-            
-        nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
+
+        if np.nansum(y[:, -2]) == 0:
+            nbsinisteriny.append(0)
+        else:
+            nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
         meansinisteriny.append(np.nanmean((y[mask, -2] > 0).astype(int)))
 
         mask = np.argwhere(ypredclass == cls)[:, 0]
-
-        nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
+        if np.nansum(y[:, -2]) == 0:
+            nbsinisterinpred.append(0)
+        else:
+            nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
         meansinisterinpred.append(np.nanmean((y[mask, -2] > 0).astype(int)))
 
     fig, ax = plt.subplots(2, figsize=(15,10))
@@ -106,13 +115,13 @@ def realVspredict2d(ypred : np.array,
                     dir_output : Path,
                     dir : Path,
                     Geo : gpd.GeoDataFrame,
-                    testDepartement : list,
+                    testd_departement : list,
                     graph : GraphStructure):
 
     dir_predictor = root_graph / dir / 'influenceClustering'
 
     yclass = np.empty(ypred.shape)
-    for nameDep in testDepartement:
+    for nameDep in testd_departement:
         mask = np.argwhere(ytrue[:,3] == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
@@ -125,7 +134,7 @@ def realVspredict2d(ypred : np.array,
 
         yclass[mask] = order_class(predictor, classpred).reshape(-1, 1)
 
-    geo = Geo[Geo['departement'].isin([name2str[dep] for dep in testDepartement])].reset_index(drop=True)
+    geo = Geo[Geo['departement'].isin([name2str[dep] for dep in testd_departement])].reset_index(drop=True)
 
     x = list(zip(geo.longitude, geo.latitude))
 
@@ -202,13 +211,13 @@ def realVspredict2d(ypred : np.array,
     plt.close('all')
 
 def susectibility_map(dept : str, sinister : str,
-                      train_dir : Path, dir_output : Path, k_days : int,
+                      dir_train : Path, dir_output : Path, k_days : int,
                       isBin : bool, scale : int, name : str, res : np.array, n : str,
                       minDate : str, maxDate : str, resolution : str):
     
     # Wildfire susceptibility map
-    dir_predictor = root_graph / train_dir / 'influenceClustering'
-    dir_mask = root_graph / train_dir / 'raster'
+    dir_predictor = root_graph / dir_train / 'influenceClustering'
+    dir_mask = root_graph / dir_train / 'raster'
     name_0 = dept + 'rasterScale0.pkl'
     sinister_file = sinister+'.csv' 
     sinister_df = pd.read_csv(root_graph / 'sinister' / sinister_file)
@@ -219,12 +228,12 @@ def susectibility_map(dept : str, sinister : str,
                                 maxDist[scale],
                                 sinister,
                                 geo, 6, k_days,
-                                train_dir,
+                                dir_train,
                                 True,
                                 False, 
                                 resolution)
     else:
-        graphScale = read_object('graph_0.pkl', train_dir)
+        graphScale = read_object('graph_0.pkl', dir_train)
         
     X_kmeans = list(zip(sinister_df.longitude, sinister_df.latitude))
     sinister_df['scale'+str(scale)] = graphScale._predict_node(X_kmeans)

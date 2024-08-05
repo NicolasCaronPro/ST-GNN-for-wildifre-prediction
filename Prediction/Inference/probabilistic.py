@@ -118,7 +118,7 @@ class Probabilistic():
             daily[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                             dimS=self.precision, mode='laplace',
                                                             dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
-            
+
             seasonaly[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                           dimS=self.precision, mode='mean',
                                                            dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
@@ -127,11 +127,10 @@ class Probabilistic():
             daily[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                             dimS=self.precision, mode='laplace',
                                                             dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
-            
+
             seasonaly[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                           dimS=self.precision, mode='mean',
                                                            dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
-            
 
             daily[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                             dimS=self.precision, mode='laplace',
@@ -140,6 +139,7 @@ class Probabilistic():
             seasonaly[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
                                                           dimS=self.precision, mode='mean',
                                                            dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
+
             
             years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
             if departement[band] == 'departement-01-ain' or departement[band] == 'departement-69-rhone':
@@ -208,7 +208,7 @@ class Probabilistic():
             if np.nanmin(influence) < 0:
                 influence += abs(np.nanmin(influence))
             
-            #print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
+            logger.info(f'{np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence)}')
             if save:
                 if not doPast:
                     outputName = names[band]+'Influence.pkl'

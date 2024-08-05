@@ -34,6 +34,7 @@ parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preproce
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
+parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
 
 args = parser.parse_args()
 
@@ -63,6 +64,7 @@ do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
+scaling = args.scaling
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -89,99 +91,30 @@ if autoRegression:
 
 ####################### INIT ################################
 
-X, Y, graphScale, prefix, features_name, _ = init(args, dir_output, True)
+df, graphScale, prefix, _ = init(args, dir_output, True)
+dir_output = dir_output / spec
 
 ############################# Train, Val, test ###########################
+features_selected, newshape = get_features_name_list(graphScale.scale, kmeans_features, METHODS_SPATIAL_TRAIN)
 
-train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, X, Y, features_name, train_departements, dir_output, args)
+df = df[ids_columns + features_selected + targets_columns]
 
-############################# Training ###########################
-
-trainCode = [name2int[dept] for dept in train_departements]
-
-# Select train features
-train_fet_num = select_train_features(train_features, scale, features_name)
-
-dir_output =  dir_output / spec
-
-save_object(features, 'features.pkl', dir_output)
-save_object(train_features, 'train_features.pkl', dir_output)
-save_object(features_name, 'features_name.pkl', dir_output)
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-features_name, newshape = get_features_name_list(graphScale.scale, 6, train_features)
-
-X = X[:, np.asarray(train_fet_num)]
-logger.info(features_name)
-logger.info(np.max(X[:,4]))
-logger.info(np.unique(X[:,0]))
-logger.info(np.nanmax(X))
-logger.info(np.unravel_index(np.nanargmax(X), X.shape))
-
-# Preprocess
-train_dataset, val_dataset, test_dataset = preprocess(X=X, Y=Y, scaling=scaling, maxDate=maxDate,
-                                                   trainDate=trainDate, train_departements=train_departements,
-                                                   departements = departements,
-                                                   ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
-                                                   days_in_futur=days_in_futur,
-                                                   futur_met=futur_met)
-
-if doPCA:
-    prefix += '_pca'
-    Xtrain = train_dataset[0]
-    pca, components = train_pca(Xtrain, 0.99, dir_output / prefix, train_fet_num)
-    train_dataset = (apply_pca(train_dataset[0], pca, components), train_dataset[1], train_fet_num)
-    val_dataset = (apply_pca(val_dataset[0], pca, components), val_dataset[1], train_fet_num)
-    test_dataset = (apply_pca(test_dataset[0], pca, components), test_dataset[1], train_fet_num)
-    features_selected = np.arange(6, components + 6)
-    train_features = ['pca_'+str(i) for i in range(components)]
-    features_name, _ = get_features_name_list(0, 6, train_features)
-    kmeansFeatures = train_features
-else:
-    features_selected = np.arange(6, X.shape[1])
-
-prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
-
-if days_in_futur > 1:
-    prefix += '_'+str(days_in_futur)
-    prefix += '_'+futur_met
-
-if doTrain:
-    train_break_point(train_dataset[0], train_dataset[1], kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
-
-    y_train = train_dataset[1]
-    y_val = val_dataset[1]
-    y_test = test_dataset[1]
-
-    train_dataset = (train_dataset[0], apply_kmeans_class_on_target(train_dataset[0], y_train, dir_output / 'varOnValue' / prefix, True))
-    val_dataset = (val_dataset[0], apply_kmeans_class_on_target(val_dataset[0], y_val, dir_output / 'varOnValue' / prefix, True))
-    test_dataset = (test_dataset[0], apply_kmeans_class_on_target(test_dataset[0], y_test, dir_output / 'varOnValue' / prefix, True))
-
-    realVspredict(Y[:, -1], Y, -1, dir_output / prefix, 'raw')
-    realVspredict(Y[:, -3], Y, -3, dir_output / prefix, 'class')
-
-    sinister_distribution_in_class(Y[:, -3], Y, dir_output / prefix)
-
-logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset[0][:,4]))], allDates[int(np.max(train_dataset[0][:,4]))]}')
-logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset[0][:,4]))], allDates[int(np.max(val_dataset[0][:,4]))]}')
+train_dataset, val_dataset, test_dataset = preprocess(df=df, scaling=scaling, maxDate=maxDate,
+                                                trainDate=trainDate, train_departements=train_departements,
+                                                departements = departements,
+                                                ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_selected,
+                                                days_in_futur=days_in_futur,
+                                                futur_met=futur_met, doKMEANS=doKMEANS | doTrain, ncluster=ncluster, scale=scale, save=False)
 
 if doTest:
     logger.info('############################# TEST ###############################')
 
-    Xtrain = train_dataset[0]
-    y_train = train_dataset[1]
+    dir_train = dir_output
 
-    x_test = test_dataset[0]
-    y_test = testDataset[1]
-
-    train_dir = copy(dir_output)
-
-    name_dir = nameExp + '/' + sinister + '/' + resolution + '/test' + '/'
+    name_dir = name_exp + '/' + sinister + '/' + resolution + '/test' + '/'
     dir_output = Path(name_dir)
 
+    mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
     std = standard_deviation
     cal = quantile_prediction_error
@@ -192,38 +125,35 @@ if doTest:
     po = poisson_loss
     meac = mean_absolute_error_class
 
-    methods = [('rmse', rmse, 'proba'),
+    methods = [
+            ('mae', mae, 'proba'),
+            ('rmse', rmse, 'proba'),
             ('std', std, 'proba'),
-            #('cal', cal, 'bin'),
+            ('cal', cal, 'cal'),
             ('f1', f1, 'bin'),
-            #('class', ck, 'class'),
-            #('poisson', po, 'proba'),
-            #('ca', ca, 'class'),
-            #('bca', bca, 'class'),
-            #('meac', meac, 'class'),
+            ('class', ck, 'class'),
+            ('poisson', po, 'proba'),
+            ('ca', ca, 'class'),
+            ('bca', bca, 'class'),
+            ('maec', meac, 'class'),
             ]
     
     for dept in departements:
-        Xset = x_test[(x_test[:, 3] == name2int[dept])]
-        Yset = y_test[(x_test[:, 3] == name2int[dept])]
+        test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])]
 
-        if Xset.shape[0] == 0:
+        if test_dataset_dept.shape[0] == 0:
             continue
 
-        save_object(Xset, 'X'+'_'+dept+'_'+prefix+'.pkl', dir_output)
-        save_object(Xset, 'Y_'+dept+'_'+prefix+'.pkl', dir_output)
+        logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
-        logger.info(f'{dept} test : {Xset.shape}, {allDates[int(np.min(Xset[:,4]))], allDates[int(np.max(Yset[:,4]))]}')
-
-        test_break_points_model(Xset, Yset,
+        test_break_points_model(test_dataset_dept,
                            methods,
                            dept,
                            prefix,
-                           dir_output / dept / prefix,
+                           dir_output / spec / dept / prefix,
                            encoding,
                            scaling,
                            [dept],
                            scale,
-                           train_dir / dept,
-                           sinister,
-                           resolution)
+                           dir_train,
+                           features_selected)
