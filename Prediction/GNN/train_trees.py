@@ -35,6 +35,7 @@ parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
+parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
 
 args = parser.parse_args()
 
@@ -65,6 +66,7 @@ do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
 scaling = args.scaling
+graph_construct = args.graphConstruct
 
 ############################# GLOBAL VARIABLES #############################
 
@@ -91,14 +93,35 @@ if autoRegression:
 
 ####################### INIT ################################
 
-df, graphScale, prefix, _ = init(args, dir_output, True)
+df, graphScale, prefix = init(args, dir_output, True)
 
+if MLFLOW:
+    mlflow.set_experiment(f"{dir_output}_{prefix}")
+    existing_run = get_existing_run('Preprocessing')
+    if existing_run:
+        mlflow.start_run(run_id=existing_run.info.run_id)
+    else:
+        mlflow.start_run(run_name='Preprocessing')
+    
 ############################# Train, Val, test ###########################
 dir_output = dir_output / spec
-train_dataset, val_dataset, test_dataset, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+train_dataset, val_dataset, test_dataset, train_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     train_features, train_departements,
                                                                                     prefix,
-                                                                                    dir_output, args)
+                                                                                    dir_output, METHODS_SPATIAL_TRAIN, args)
+
+if MLFLOW:
+    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
+    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
+    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+
+    mlflow.log_param('train_features', train_features)
+    mlflow.log_param('features', features)
+    mlflow.log_param('features_selected', features_selected)
+    mlflow.log_input(train_dataset_ml_flow, context='trainig')
+    mlflow.log_input(val_dataset_ml_flow, context='validation')
+    mlflow.log_input(test_dataset_ml_flow, context='testing')
+
 ######################## Training ##############################
 
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
@@ -114,8 +137,18 @@ if doTrain:
                             optimize_feature=optimize_feature,
                             do_grid_search = do_grid_search,
                             do_bayes_search = do_bayes_search)
+    
+    if MLFLOW:
+        mlflow.end_run()
 
 if doTest:
+    if MLFLOW:
+        mlflow.set_experiment(f"{dir_output}_{prefix}")
+        existing_run = get_existing_run('Preprocessing')
+        if existing_run:
+            mlflow.start_run(run_id=existing_run.info.run_id)
+        else:
+            mlflow.start_run(run_name='Preprocessing')
     logger.info('############################# TEST ###############################')
 
     dir_train = copy(dir_output)
@@ -141,7 +174,7 @@ if doTest:
             ('cal', cal, 'cal'),
             ('f1', f1, 'bin'),
             ('class', ck, 'class'),
-            ('poisson', po, 'proba'),
+            #('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
             ('maec', meac, 'class'),
@@ -152,16 +185,29 @@ if doTest:
         ('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
         ('xgboost_binary_classification_log_loss', 'binary', autoRegression),
         ]
-        
+    
+    prefix_kmeans = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+    if days_in_futur > 0:
+        prefix_kmeans += f'_{days_in_futur}_{futur_met}'
+    
+    if graph_construct == 'geometry':
+        prefix_kmeans += f'_{scale}_{graph_construct}'
+    else:
+        prefix_kmeans += f'_{graph_construct}'
+
     for dept in departements:
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
-        test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
+        if test_dataset_unscale is not None:
+            test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
+        else:
+            test_dataset_unscale_dept = None
 
         if test_dataset_dept.shape[0] < 5:
             continue
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
-        prefix_kmeans = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+
+
         test_sklearn_api_model(graphScale, test_dataset_dept,
                                test_dataset_unscale_dept,
                                 methods,
@@ -177,3 +223,5 @@ if doTest:
                                 dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                                 doKMEANS
                                 )
+        if MLFLOW:
+            mlflow.end_run()

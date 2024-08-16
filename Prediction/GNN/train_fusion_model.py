@@ -90,15 +90,38 @@ if autoRegression:
 
 ####################### INIT ################################
 
-df, graphScale, prefix, _ = init(args, dir_output, True)
+df, graphScale, prefix = init(args, dir_output, True)
 save_object(df.columns, 'features_name.pkl', dir_output)
 
+if MLFLOW:
+    mlflow.set_experiment(f"{prefix}")
+    existing_run = get_existing_run('Preprocessing')
+    if existing_run:
+        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+    else:
+        mlflow.start_run(run_name='Preprocessing', nested=True)
+    
 ############################# Train, Val, test ###########################
 
 train_dataset, val_dataset, test_dataset, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     train_features, train_departements,
                                                                                     prefix,
                                                                                     dir_output, args)
+
+if MLFLOW:
+
+    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
+    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
+    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+
+    mlflow.log_param('train_features', train_features)
+    mlflow.log_param('features', features)
+    mlflow.log_param('features_selected', features_selected)
+    mlflow.log_input(train_dataset_ml_flow, context='trainig')
+    mlflow.log_input(val_dataset_ml_flow, context='validation')
+    mlflow.log_input(test_dataset_ml_flow, context='testing')
+
+    mlflow.end_run()
 
 # Base models
 train_dataset_list, val_dataset_list, test_dataset_list, features_selected_list, dir_model_list, model_list, target_list = [], [], [], [], [], [], []
@@ -110,6 +133,8 @@ values_per_class = 'full'
 k_days = 7
 scale = 30
 nbfeatures = 700
+days_in_future = 0
+futur_met = None
 model_type = 'xgboost'
 target = 'risk'
 task_type = 'regression'
@@ -145,6 +170,8 @@ values_per_class = 'full'
 k_days = 7
 scale = 10
 nbfeatures = 700
+days_in_future = 7
+futur_met = 'mean'
 model_type = 'xgboost'
 target = 'risk'
 task_type = 'regression'
@@ -152,7 +179,7 @@ loss = 'rmse'
 name_exp_model = 'default'
 sinister_model = 'firepoint'
 resolution_model = '2x2'
-prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}'
+prefix_model = f'{values_per_class}_{k_days}_{scale}_{nbfeatures}_{days_in_future}_{futur_met}'
 model_name = f'{model_type}_{target}_{task_type}_{loss}'
 dir_model =  Path(name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/')
 
@@ -231,19 +258,16 @@ if doTest:
             ]
     
     models = [
-        ('linear', 'risk', autoRegression),
-        ('mean', 'risk', autoRegression),
-        ('xgboost_risk', 'risk', autoRegression),
+        ('linear_risk_classification_log_loss', 'risk', autoRegression),
+        ('xgboost_risk_classification_log_loss', 'risk', autoRegression),
 
-        ('linear_binary', 'binary', autoRegression),
-        ('mean_binary', 'binary', autoRegression),
-        ('xgboost_binary', 'binary', autoRegression),
+        ('linear_binary_classification_log_loss', 'binary', autoRegression),
+        ('xgboost_binary_classification_log_loss', 'binary', autoRegression),
 
-        ('linear_nbsinister', 'nbsinister', autoRegression),
-        ('mean_nbsinister', 'nbsinister', autoRegression),
-        ('xgboost_nbsinister', 'nbsinister', autoRegression),
+        ('linear_nbsinister_classification_log_loss', 'nbsinister', autoRegression),
+        ('xgboost_nbsinister_classification_log_loss', 'nbsinister', autoRegression),
         ]
-
+    
     for dept in departements:
         Xset = x_test[(x_test[:, 3] == name2int[dept])]
         Yset = y_test[(x_test[:, 3] == name2int[dept])]

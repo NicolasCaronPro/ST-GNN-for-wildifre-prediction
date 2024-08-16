@@ -1,0 +1,6 @@
+artifact_location: mlflow-artifacts:/923380569075259843
+creation_time: 1723785893306
+experiment_id: '923380569075259843'
+last_update_time: 1723785893306
+lifecycle_stage: active
+name: final/firepoint/2x2/train_100_7_foret_landcover

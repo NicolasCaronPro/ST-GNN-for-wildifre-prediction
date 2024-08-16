@@ -1,0 +1,1282 @@
+digest: bb14c388
+name: dataset
+profile: '{"num_rows": 18382, "num_elements": 31947916}'
+schema: '{"mlflow_colspec": [{"type": "double", "name": "id", "required": true}, {"type":
+  "double", "name": "longitude", "required": true}, {"type": "double", "name": "latitude",
+  "required": true}, {"type": "double", "name": "departement", "required": true},
+  {"type": "double", "name": "date", "required": true}, {"type": "double", "name":
+  "weight", "required": true}, {"type": "double", "name": "temp_mean", "required":
+  true}, {"type": "double", "name": "temp_min", "required": true}, {"type": "double",
+  "name": "temp_max", "required": true}, {"type": "double", "name": "temp_std", "required":
+  true}, {"type": "double", "name": "dwpt_mean", "required": true}, {"type": "double",
+  "name": "dwpt_min", "required": true}, {"type": "double", "name": "dwpt_max", "required":
+  true}, {"type": "double", "name": "dwpt_std", "required": true}, {"type": "double",
+  "name": "rhum_mean", "required": true}, {"type": "double", "name": "rhum_min", "required":
+  true}, {"type": "double", "name": "rhum_max", "required": true}, {"type": "double",
+  "name": "rhum_std", "required": true}, {"type": "double", "name": "prcp_mean", "required":
+  true}, {"type": "double", "name": "prcp_min", "required": true}, {"type": "double",
+  "name": "prcp_max", "required": true}, {"type": "double", "name": "prcp_std", "required":
+  true}, {"type": "double", "name": "wdir_mean", "required": true}, {"type": "double",
+  "name": "wdir_min", "required": true}, {"type": "double", "name": "wdir_max", "required":
+  true}, {"type": "double", "name": "wdir_std", "required": true}, {"type": "double",
+  "name": "wspd_mean", "required": true}, {"type": "double", "name": "wspd_min", "required":
+  true}, {"type": "double", "name": "wspd_max", "required": true}, {"type": "double",
+  "name": "wspd_std", "required": true}, {"type": "double", "name": "prec24h_mean",
+  "required": true}, {"type": "double", "name": "prec24h_min", "required": true},
+  {"type": "double", "name": "prec24h_max", "required": true}, {"type": "double",
+  "name": "prec24h_std", "required": true}, {"type": "double", "name": "dc_mean",
+  "required": true}, {"type": "double", "name": "dc_min", "required": true}, {"type":
+  "double", "name": "dc_max", "required": true}, {"type": "double", "name": "dc_std",
+  "required": true}, {"type": "double", "name": "ffmc_mean", "required": true}, {"type":
+  "double", "name": "ffmc_min", "required": true}, {"type": "double", "name": "ffmc_max",
+  "required": true}, {"type": "double", "name": "ffmc_std", "required": true}, {"type":
+  "double", "name": "dmc_mean", "required": true}, {"type": "double", "name": "dmc_min",
+  "required": true}, {"type": "double", "name": "dmc_max", "required": true}, {"type":
+  "double", "name": "dmc_std", "required": true}, {"type": "double", "name": "nesterov_mean",
+  "required": true}, {"type": "double", "name": "nesterov_min", "required": true},
+  {"type": "double", "name": "nesterov_max", "required": true}, {"type": "double",
+  "name": "nesterov_std", "required": true}, {"type": "double", "name": "munger_mean",
+  "required": true}, {"type": "double", "name": "munger_min", "required": true}, {"type":
+  "double", "name": "munger_max", "required": true}, {"type": "double", "name": "munger_std",
+  "required": true}, {"type": "double", "name": "kbdi_mean", "required": true}, {"type":
+  "double", "name": "kbdi_min", "required": true}, {"type": "double", "name": "kbdi_max",
+  "required": true}, {"type": "double", "name": "kbdi_std", "required": true}, {"type":
+  "double", "name": "isi_mean", "required": true}, {"type": "double", "name": "isi_min",
+  "required": true}, {"type": "double", "name": "isi_max", "required": true}, {"type":
+  "double", "name": "isi_std", "required": true}, {"type": "double", "name": "angstroem_mean",
+  "required": true}, {"type": "double", "name": "angstroem_min", "required": true},
+  {"type": "double", "name": "angstroem_max", "required": true}, {"type": "double",
+  "name": "angstroem_std", "required": true}, {"type": "double", "name": "bui_mean",
+  "required": true}, {"type": "double", "name": "bui_min", "required": true}, {"type":
+  "double", "name": "bui_max", "required": true}, {"type": "double", "name": "bui_std",
+  "required": true}, {"type": "double", "name": "fwi_mean", "required": true}, {"type":
+  "double", "name": "fwi_min", "required": true}, {"type": "double", "name": "fwi_max",
+  "required": true}, {"type": "double", "name": "fwi_std", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_mean", "required": true}, {"type": "double",
+  "name": "dailySeverityRating_min", "required": true}, {"type": "double", "name":
+  "dailySeverityRating_max", "required": true}, {"type": "double", "name": "dailySeverityRating_std",
+  "required": true}, {"type": "double", "name": "temp16_mean", "required": true},
+  {"type": "double", "name": "temp16_min", "required": true}, {"type": "double", "name":
+  "temp16_max", "required": true}, {"type": "double", "name": "temp16_std", "required":
+  true}, {"type": "double", "name": "dwpt16_mean", "required": true}, {"type": "double",
+  "name": "dwpt16_min", "required": true}, {"type": "double", "name": "dwpt16_max",
+  "required": true}, {"type": "double", "name": "dwpt16_std", "required": true}, {"type":
+  "double", "name": "rhum16_mean", "required": true}, {"type": "double", "name": "rhum16_min",
+  "required": true}, {"type": "double", "name": "rhum16_max", "required": true}, {"type":
+  "double", "name": "rhum16_std", "required": true}, {"type": "double", "name": "prcp16_mean",
+  "required": true}, {"type": "double", "name": "prcp16_min", "required": true}, {"type":
+  "double", "name": "prcp16_max", "required": true}, {"type": "double", "name": "prcp16_std",
+  "required": true}, {"type": "double", "name": "wdir16_mean", "required": true},
+  {"type": "double", "name": "wdir16_min", "required": true}, {"type": "double", "name":
+  "wdir16_max", "required": true}, {"type": "double", "name": "wdir16_std", "required":
+  true}, {"type": "double", "name": "wspd16_mean", "required": true}, {"type": "double",
+  "name": "wspd16_min", "required": true}, {"type": "double", "name": "wspd16_max",
+  "required": true}, {"type": "double", "name": "wspd16_std", "required": true}, {"type":
+  "double", "name": "prec24h16_mean", "required": true}, {"type": "double", "name":
+  "prec24h16_min", "required": true}, {"type": "double", "name": "prec24h16_max",
+  "required": true}, {"type": "double", "name": "prec24h16_std", "required": true},
+  {"type": "double", "name": "days_since_rain_mean", "required": true}, {"type": "double",
+  "name": "days_since_rain_min", "required": true}, {"type": "double", "name": "days_since_rain_max",
+  "required": true}, {"type": "double", "name": "days_since_rain_std", "required":
+  true}, {"type": "double", "name": "sum_consecutive_rainfall_mean", "required": true},
+  {"type": "double", "name": "sum_consecutive_rainfall_min", "required": true}, {"type":
+  "double", "name": "sum_consecutive_rainfall_max", "required": true}, {"type": "double",
+  "name": "sum_consecutive_rainfall_std", "required": true}, {"type": "double", "name":
+  "sum_rain_last_7_days_mean", "required": true}, {"type": "double", "name": "sum_rain_last_7_days_min",
+  "required": true}, {"type": "double", "name": "sum_rain_last_7_days_max", "required":
+  true}, {"type": "double", "name": "sum_rain_last_7_days_std", "required": true},
+  {"type": "double", "name": "sum_snow_last_7_days_mean", "required": true}, {"type":
+  "double", "name": "sum_snow_last_7_days_min", "required": true}, {"type": "double",
+  "name": "sum_snow_last_7_days_max", "required": true}, {"type": "double", "name":
+  "sum_snow_last_7_days_std", "required": true}, {"type": "double", "name": "snow24h_mean",
+  "required": true}, {"type": "double", "name": "snow24h_min", "required": true},
+  {"type": "double", "name": "snow24h_max", "required": true}, {"type": "double",
+  "name": "snow24h_std", "required": true}, {"type": "double", "name": "snow24h16_mean",
+  "required": true}, {"type": "double", "name": "snow24h16_min", "required": true},
+  {"type": "double", "name": "snow24h16_max", "required": true}, {"type": "double",
+  "name": "snow24h16_std", "required": true}, {"type": "double", "name": "elevation_mean",
+  "required": true}, {"type": "double", "name": "elevation_min", "required": true},
+  {"type": "double", "name": "elevation_max", "required": true}, {"type": "double",
+  "name": "elevation_std", "required": true}, {"type": "double", "name": "population_mean",
+  "required": true}, {"type": "double", "name": "population_min", "required": true},
+  {"type": "double", "name": "population_max", "required": true}, {"type": "double",
+  "name": "population_std", "required": true}, {"type": "double", "name": "NDVI_mean",
+  "required": true}, {"type": "double", "name": "NDVI_min", "required": true}, {"type":
+  "double", "name": "NDVI_max", "required": true}, {"type": "double", "name": "NDVI_std",
+  "required": true}, {"type": "double", "name": "NDMI_mean", "required": true}, {"type":
+  "double", "name": "NDMI_min", "required": true}, {"type": "double", "name": "NDMI_max",
+  "required": true}, {"type": "double", "name": "NDMI_std", "required": true}, {"type":
+  "double", "name": "NDBI_mean", "required": true}, {"type": "double", "name": "NDBI_min",
+  "required": true}, {"type": "double", "name": "NDBI_max", "required": true}, {"type":
+  "double", "name": "NDBI_std", "required": true}, {"type": "double", "name": "NDSI_mean",
+  "required": true}, {"type": "double", "name": "NDSI_min", "required": true}, {"type":
+  "double", "name": "NDSI_max", "required": true}, {"type": "double", "name": "NDSI_std",
+  "required": true}, {"type": "double", "name": "NDWI_mean", "required": true}, {"type":
+  "double", "name": "NDWI_min", "required": true}, {"type": "double", "name": "NDWI_max",
+  "required": true}, {"type": "double", "name": "NDWI_std", "required": true}, {"type":
+  "double", "name": "highway_encoder_mean", "required": true}, {"type": "double",
+  "name": "highway_encoder_min", "required": true}, {"type": "double", "name": "highway_encoder_max",
+  "required": true}, {"type": "double", "name": "highway_encoder_std", "required":
+  true}, {"type": "double", "name": "foret_encoder_mean", "required": true}, {"type":
+  "double", "name": "foret_encoder_min", "required": true}, {"type": "double", "name":
+  "foret_encoder_max", "required": true}, {"type": "double", "name": "foret_encoder_std",
+  "required": true}, {"type": "double", "name": "PasDeforet_mean", "required": true},
+  {"type": "double", "name": "PasDeforet_min", "required": true}, {"type": "double",
+  "name": "PasDeforet_max", "required": true}, {"type": "double", "name": "PasDeforet_std",
+  "required": true}, {"type": "double", "name": "Ch\u00e2taignier_mean", "required":
+  true}, {"type": "double", "name": "Ch\u00e2taignier_min", "required": true}, {"type":
+  "double", "name": "Ch\u00e2taignier_max", "required": true}, {"type": "double",
+  "name": "Ch\u00e2taignier_std", "required": true}, {"type": "double", "name": "Ch\u00eanes
+  d\u00e9cidus_mean", "required": true}, {"type": "double", "name": "Ch\u00eanes d\u00e9cidus_min",
+  "required": true}, {"type": "double", "name": "Ch\u00eanes d\u00e9cidus_max", "required":
+  true}, {"type": "double", "name": "Ch\u00eanes d\u00e9cidus_std", "required": true},
+  {"type": "double", "name": "Conif\u00e8res_mean", "required": true}, {"type": "double",
+  "name": "Conif\u00e8res_min", "required": true}, {"type": "double", "name": "Conif\u00e8res_max",
+  "required": true}, {"type": "double", "name": "Conif\u00e8res_std", "required":
+  true}, {"type": "double", "name": "Douglas_mean", "required": true}, {"type": "double",
+  "name": "Douglas_min", "required": true}, {"type": "double", "name": "Douglas_max",
+  "required": true}, {"type": "double", "name": "Douglas_std", "required": true},
+  {"type": "double", "name": "Feuillus_mean", "required": true}, {"type": "double",
+  "name": "Feuillus_min", "required": true}, {"type": "double", "name": "Feuillus_max",
+  "required": true}, {"type": "double", "name": "Feuillus_std", "required": true},
+  {"type": "double", "name": "H\u00eatre_mean", "required": true}, {"type": "double",
+  "name": "H\u00eatre_min", "required": true}, {"type": "double", "name": "H\u00eatre_max",
+  "required": true}, {"type": "double", "name": "H\u00eatre_std", "required": true},
+  {"type": "double", "name": "Mixte_mean", "required": true}, {"type": "double", "name":
+  "Mixte_min", "required": true}, {"type": "double", "name": "Mixte_max", "required":
+  true}, {"type": "double", "name": "Mixte_std", "required": true}, {"type": "double",
+  "name": "M\u00e9l\u00e8ze_mean", "required": true}, {"type": "double", "name": "M\u00e9l\u00e8ze_min",
+  "required": true}, {"type": "double", "name": "M\u00e9l\u00e8ze_max", "required":
+  true}, {"type": "double", "name": "M\u00e9l\u00e8ze_std", "required": true}, {"type":
+  "double", "name": "NC_mean", "required": true}, {"type": "double", "name": "NC_min",
+  "required": true}, {"type": "double", "name": "NC_max", "required": true}, {"type":
+  "double", "name": "NC_std", "required": true}, {"type": "double", "name": "NR_mean",
+  "required": true}, {"type": "double", "name": "NR_min", "required": true}, {"type":
+  "double", "name": "NR_max", "required": true}, {"type": "double", "name": "NR_std",
+  "required": true}, {"type": "double", "name": "Peuplier_mean", "required": true},
+  {"type": "double", "name": "Peuplier_min", "required": true}, {"type": "double",
+  "name": "Peuplier_max", "required": true}, {"type": "double", "name": "Peuplier_std",
+  "required": true}, {"type": "double", "name": "Pin autre_mean", "required": true},
+  {"type": "double", "name": "Pin autre_min", "required": true}, {"type": "double",
+  "name": "Pin autre_max", "required": true}, {"type": "double", "name": "Pin autre_std",
+  "required": true}, {"type": "double", "name": "Pin laricio, pin noir_mean", "required":
+  true}, {"type": "double", "name": "Pin laricio, pin noir_min", "required": true},
+  {"type": "double", "name": "Pin laricio, pin noir_max", "required": true}, {"type":
+  "double", "name": "Pin laricio, pin noir_std", "required": true}, {"type": "double",
+  "name": "Pin maritime_mean", "required": true}, {"type": "double", "name": "Pin
+  maritime_min", "required": true}, {"type": "double", "name": "Pin maritime_max",
+  "required": true}, {"type": "double", "name": "Pin maritime_std", "required": true},
+  {"type": "double", "name": "Pin sylvestre_mean", "required": true}, {"type": "double",
+  "name": "Pin sylvestre_min", "required": true}, {"type": "double", "name": "Pin
+  sylvestre_max", "required": true}, {"type": "double", "name": "Pin sylvestre_std",
+  "required": true}, {"type": "double", "name": "Pins m\u00e9lang\u00e9s_mean", "required":
+  true}, {"type": "double", "name": "Pins m\u00e9lang\u00e9s_min", "required": true},
+  {"type": "double", "name": "Pins m\u00e9lang\u00e9s_max", "required": true}, {"type":
+  "double", "name": "Pins m\u00e9lang\u00e9s_std", "required": true}, {"type": "double",
+  "name": "Robinier_mean", "required": true}, {"type": "double", "name": "Robinier_min",
+  "required": true}, {"type": "double", "name": "Robinier_max", "required": true},
+  {"type": "double", "name": "Robinier_std", "required": true}, {"type": "double",
+  "name": "Sapin, \u00e9pic\u00e9a_mean", "required": true}, {"type": "double", "name":
+  "Sapin, \u00e9pic\u00e9a_min", "required": true}, {"type": "double", "name": "Sapin,
+  \u00e9pic\u00e9a_max", "required": true}, {"type": "double", "name": "Sapin, \u00e9pic\u00e9a_std",
+  "required": true}, {"type": "double", "name": "PasDeRoute_mean", "required": true},
+  {"type": "double", "name": "PasDeRoute_min", "required": true}, {"type": "double",
+  "name": "PasDeRoute_max", "required": true}, {"type": "double", "name": "PasDeRoute_std",
+  "required": true}, {"type": "double", "name": "motorway_mean", "required": true},
+  {"type": "double", "name": "motorway_min", "required": true}, {"type": "double",
+  "name": "motorway_max", "required": true}, {"type": "double", "name": "motorway_std",
+  "required": true}, {"type": "double", "name": "primary_mean", "required": true},
+  {"type": "double", "name": "primary_min", "required": true}, {"type": "double",
+  "name": "primary_max", "required": true}, {"type": "double", "name": "primary_std",
+  "required": true}, {"type": "double", "name": "secondary_mean", "required": true},
+  {"type": "double", "name": "secondary_min", "required": true}, {"type": "double",
+  "name": "secondary_max", "required": true}, {"type": "double", "name": "secondary_std",
+  "required": true}, {"type": "double", "name": "tertiary_mean", "required": true},
+  {"type": "double", "name": "tertiary_min", "required": true}, {"type": "double",
+  "name": "tertiary_max", "required": true}, {"type": "double", "name": "tertiary_std",
+  "required": true}, {"type": "double", "name": "path_mean", "required": true}, {"type":
+  "double", "name": "path_min", "required": true}, {"type": "double", "name": "path_max",
+  "required": true}, {"type": "double", "name": "path_std", "required": true}, {"type":
+  "double", "name": "water_mean", "required": true}, {"type": "double", "name": "water_min",
+  "required": true}, {"type": "double", "name": "water_max", "required": true}, {"type":
+  "double", "name": "water_std", "required": true}, {"type": "double", "name": "tree_mean",
+  "required": true}, {"type": "double", "name": "tree_min", "required": true}, {"type":
+  "double", "name": "tree_max", "required": true}, {"type": "double", "name": "tree_std",
+  "required": true}, {"type": "double", "name": "grass_mean", "required": true}, {"type":
+  "double", "name": "grass_min", "required": true}, {"type": "double", "name": "grass_max",
+  "required": true}, {"type": "double", "name": "grass_std", "required": true}, {"type":
+  "double", "name": "crops_mean", "required": true}, {"type": "double", "name": "crops_min",
+  "required": true}, {"type": "double", "name": "crops_max", "required": true}, {"type":
+  "double", "name": "crops_std", "required": true}, {"type": "double", "name": "shrub_mean",
+  "required": true}, {"type": "double", "name": "shrub_min", "required": true}, {"type":
+  "double", "name": "shrub_max", "required": true}, {"type": "double", "name": "shrub_std",
+  "required": true}, {"type": "double", "name": "flooded_mean", "required": true},
+  {"type": "double", "name": "flooded_min", "required": true}, {"type": "double",
+  "name": "flooded_max", "required": true}, {"type": "double", "name": "flooded_std",
+  "required": true}, {"type": "double", "name": "built_mean", "required": true}, {"type":
+  "double", "name": "built_min", "required": true}, {"type": "double", "name": "built_max",
+  "required": true}, {"type": "double", "name": "built_std", "required": true}, {"type":
+  "double", "name": "bare_mean", "required": true}, {"type": "double", "name": "bare_min",
+  "required": true}, {"type": "double", "name": "bare_max", "required": true}, {"type":
+  "double", "name": "bare_std", "required": true}, {"type": "double", "name": "snow_mean",
+  "required": true}, {"type": "double", "name": "snow_min", "required": true}, {"type":
+  "double", "name": "snow_max", "required": true}, {"type": "double", "name": "snow_std",
+  "required": true}, {"type": "double", "name": "month", "required": true}, {"type":
+  "double", "name": "dayofyear", "required": true}, {"type": "double", "name": "dayofweek",
+  "required": true}, {"type": "double", "name": "isweekend", "required": true}, {"type":
+  "double", "name": "couvrefeux", "required": true}, {"type": "double", "name": "confinemenent",
+  "required": true}, {"type": "double", "name": "ramadan", "required": true}, {"type":
+  "double", "name": "bankHolidays", "required": true}, {"type": "double", "name":
+  "bankHolidaysEve", "required": true}, {"type": "double", "name": "holidays", "required":
+  true}, {"type": "double", "name": "holidaysBorder", "required": true}, {"type":
+  "double", "name": "calendar_mean", "required": true}, {"type": "double", "name":
+  "calendar_min", "required": true}, {"type": "double", "name": "calendar_max", "required":
+  true}, {"type": "double", "name": "calendar_sum", "required": true}, {"type": "double",
+  "name": "pastinfluence_mean", "required": true}, {"type": "double", "name": "pastinfluence_min",
+  "required": true}, {"type": "double", "name": "pastinfluence_max", "required": true},
+  {"type": "double", "name": "pastinfluence_std", "required": true}, {"type": "double",
+  "name": "departement_encoder", "required": true}, {"type": "double", "name": "O3",
+  "required": true}, {"type": "double", "name": "NO2", "required": true}, {"type":
+  "double", "name": "PM10", "required": true}, {"type": "double", "name": "PM25",
+  "required": true}, {"type": "double", "name": "niveau_nappe_eau_mean", "required":
+  true}, {"type": "double", "name": "niveau_nappe_eau_min", "required": true}, {"type":
+  "double", "name": "niveau_nappe_eau_max", "required": true}, {"type": "double",
+  "name": "niveau_nappe_eau_std", "required": true}, {"type": "double", "name": "profondeur_nappe_mean",
+  "required": true}, {"type": "double", "name": "profondeur_nappe_min", "required":
+  true}, {"type": "double", "name": "profondeur_nappe_max", "required": true}, {"type":
+  "double", "name": "profondeur_nappe_std", "required": true}, {"type": "double",
+  "name": "AutoRegressionBin_B-1", "required": true}, {"type": "double", "name": "temp_mean_1",
+  "required": true}, {"type": "double", "name": "dwpt_mean_1", "required": true},
+  {"type": "double", "name": "rhum_mean_1", "required": true}, {"type": "double",
+  "name": "wdir_mean_1", "required": true}, {"type": "double", "name": "wspd_mean_1",
+  "required": true}, {"type": "double", "name": "dc_mean_1", "required": true}, {"type":
+  "double", "name": "ffmc_mean_1", "required": true}, {"type": "double", "name": "dmc_mean_1",
+  "required": true}, {"type": "double", "name": "nesterov_mean_1", "required": true},
+  {"type": "double", "name": "munger_mean_1", "required": true}, {"type": "double",
+  "name": "kbdi_mean_1", "required": true}, {"type": "double", "name": "isi_mean_1",
+  "required": true}, {"type": "double", "name": "angstroem_mean_1", "required": true},
+  {"type": "double", "name": "bui_mean_1", "required": true}, {"type": "double", "name":
+  "fwi_mean_1", "required": true}, {"type": "double", "name": "dailySeverityRating_mean_1",
+  "required": true}, {"type": "double", "name": "temp16_mean_1", "required": true},
+  {"type": "double", "name": "dwpt16_mean_1", "required": true}, {"type": "double",
+  "name": "rhum16_mean_1", "required": true}, {"type": "double", "name": "wdir16_mean_1",
+  "required": true}, {"type": "double", "name": "wspd16_mean_1", "required": true},
+  {"type": "double", "name": "O3_mean_1", "required": true}, {"type": "double", "name":
+  "NO2_mean_1", "required": true}, {"type": "double", "name": "PM10_mean_1", "required":
+  true}, {"type": "double", "name": "PM25_mean_1", "required": true}, {"type": "double",
+  "name": "month_mean_1", "required": true}, {"type": "double", "name": "dayofyear_mean_1",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_1", "required": true},
+  {"type": "double", "name": "isweekend_mean_1", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_1", "required": true}, {"type": "double", "name": "confinemenent_mean_1",
+  "required": true}, {"type": "double", "name": "ramadan_mean_1", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_1", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_1", "required": true}, {"type": "double", "name":
+  "holidays_mean_1", "required": true}, {"type": "double", "name": "holidaysBorder_mean_1",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_1", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_1", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_1", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_1", "required": true}, {"type": "double", "name": "temp_min_1",
+  "required": true}, {"type": "double", "name": "dwpt_min_1", "required": true}, {"type":
+  "double", "name": "rhum_min_1", "required": true}, {"type": "double", "name": "wdir_min_1",
+  "required": true}, {"type": "double", "name": "wspd_min_1", "required": true}, {"type":
+  "double", "name": "dc_min_1", "required": true}, {"type": "double", "name": "ffmc_min_1",
+  "required": true}, {"type": "double", "name": "dmc_min_1", "required": true}, {"type":
+  "double", "name": "nesterov_min_1", "required": true}, {"type": "double", "name":
+  "munger_min_1", "required": true}, {"type": "double", "name": "kbdi_min_1", "required":
+  true}, {"type": "double", "name": "isi_min_1", "required": true}, {"type": "double",
+  "name": "angstroem_min_1", "required": true}, {"type": "double", "name": "bui_min_1",
+  "required": true}, {"type": "double", "name": "fwi_min_1", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_1", "required": true}, {"type": "double",
+  "name": "temp16_min_1", "required": true}, {"type": "double", "name": "dwpt16_min_1",
+  "required": true}, {"type": "double", "name": "rhum16_min_1", "required": true},
+  {"type": "double", "name": "wdir16_min_1", "required": true}, {"type": "double",
+  "name": "wspd16_min_1", "required": true}, {"type": "double", "name": "O3_min_1",
+  "required": true}, {"type": "double", "name": "NO2_min_1", "required": true}, {"type":
+  "double", "name": "PM10_min_1", "required": true}, {"type": "double", "name": "PM25_min_1",
+  "required": true}, {"type": "double", "name": "month_min_1", "required": true},
+  {"type": "double", "name": "dayofyear_min_1", "required": true}, {"type": "double",
+  "name": "dayofweek_min_1", "required": true}, {"type": "double", "name": "isweekend_min_1",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_1", "required": true},
+  {"type": "double", "name": "confinemenent_min_1", "required": true}, {"type": "double",
+  "name": "ramadan_min_1", "required": true}, {"type": "double", "name": "bankHolidays_min_1",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_1", "required":
+  true}, {"type": "double", "name": "holidays_min_1", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_1", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_1", "required": true}, {"type": "double", "name": "calendar_min_min_1",
+  "required": true}, {"type": "double", "name": "calendar_max_min_1", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_1", "required": true}, {"type":
+  "double", "name": "temp_max_1", "required": true}, {"type": "double", "name": "dwpt_max_1",
+  "required": true}, {"type": "double", "name": "rhum_max_1", "required": true}, {"type":
+  "double", "name": "wdir_max_1", "required": true}, {"type": "double", "name": "wspd_max_1",
+  "required": true}, {"type": "double", "name": "dc_max_1", "required": true}, {"type":
+  "double", "name": "ffmc_max_1", "required": true}, {"type": "double", "name": "dmc_max_1",
+  "required": true}, {"type": "double", "name": "nesterov_max_1", "required": true},
+  {"type": "double", "name": "munger_max_1", "required": true}, {"type": "double",
+  "name": "kbdi_max_1", "required": true}, {"type": "double", "name": "isi_max_1",
+  "required": true}, {"type": "double", "name": "angstroem_max_1", "required": true},
+  {"type": "double", "name": "bui_max_1", "required": true}, {"type": "double", "name":
+  "fwi_max_1", "required": true}, {"type": "double", "name": "dailySeverityRating_max_1",
+  "required": true}, {"type": "double", "name": "temp16_max_1", "required": true},
+  {"type": "double", "name": "dwpt16_max_1", "required": true}, {"type": "double",
+  "name": "rhum16_max_1", "required": true}, {"type": "double", "name": "wdir16_max_1",
+  "required": true}, {"type": "double", "name": "wspd16_max_1", "required": true},
+  {"type": "double", "name": "O3_max_1", "required": true}, {"type": "double", "name":
+  "NO2_max_1", "required": true}, {"type": "double", "name": "PM10_max_1", "required":
+  true}, {"type": "double", "name": "PM25_max_1", "required": true}, {"type": "double",
+  "name": "month_max_1", "required": true}, {"type": "double", "name": "dayofyear_max_1",
+  "required": true}, {"type": "double", "name": "dayofweek_max_1", "required": true},
+  {"type": "double", "name": "isweekend_max_1", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_1", "required": true}, {"type": "double", "name": "confinemenent_max_1",
+  "required": true}, {"type": "double", "name": "ramadan_max_1", "required": true},
+  {"type": "double", "name": "bankHolidays_max_1", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_1", "required": true}, {"type": "double", "name": "holidays_max_1",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_1", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_1", "required": true}, {"type":
+  "double", "name": "calendar_min_max_1", "required": true}, {"type": "double", "name":
+  "calendar_max_max_1", "required": true}, {"type": "double", "name": "calendar_sum_max_1",
+  "required": true}, {"type": "double", "name": "temp_std_1", "required": true}, {"type":
+  "double", "name": "dwpt_std_1", "required": true}, {"type": "double", "name": "rhum_std_1",
+  "required": true}, {"type": "double", "name": "wdir_std_1", "required": true}, {"type":
+  "double", "name": "wspd_std_1", "required": true}, {"type": "double", "name": "dc_std_1",
+  "required": true}, {"type": "double", "name": "ffmc_std_1", "required": true}, {"type":
+  "double", "name": "dmc_std_1", "required": true}, {"type": "double", "name": "nesterov_std_1",
+  "required": true}, {"type": "double", "name": "munger_std_1", "required": true},
+  {"type": "double", "name": "kbdi_std_1", "required": true}, {"type": "double", "name":
+  "isi_std_1", "required": true}, {"type": "double", "name": "angstroem_std_1", "required":
+  true}, {"type": "double", "name": "bui_std_1", "required": true}, {"type": "double",
+  "name": "fwi_std_1", "required": true}, {"type": "double", "name": "dailySeverityRating_std_1",
+  "required": true}, {"type": "double", "name": "temp16_std_1", "required": true},
+  {"type": "double", "name": "dwpt16_std_1", "required": true}, {"type": "double",
+  "name": "rhum16_std_1", "required": true}, {"type": "double", "name": "wdir16_std_1",
+  "required": true}, {"type": "double", "name": "wspd16_std_1", "required": true},
+  {"type": "double", "name": "O3_std_1", "required": true}, {"type": "double", "name":
+  "NO2_std_1", "required": true}, {"type": "double", "name": "PM10_std_1", "required":
+  true}, {"type": "double", "name": "PM25_std_1", "required": true}, {"type": "double",
+  "name": "month_std_1", "required": true}, {"type": "double", "name": "dayofyear_std_1",
+  "required": true}, {"type": "double", "name": "dayofweek_std_1", "required": true},
+  {"type": "double", "name": "isweekend_std_1", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_1", "required": true}, {"type": "double", "name": "confinemenent_std_1",
+  "required": true}, {"type": "double", "name": "ramadan_std_1", "required": true},
+  {"type": "double", "name": "bankHolidays_std_1", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_1", "required": true}, {"type": "double", "name": "holidays_std_1",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_1", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_1", "required": true}, {"type":
+  "double", "name": "calendar_min_std_1", "required": true}, {"type": "double", "name":
+  "calendar_max_std_1", "required": true}, {"type": "double", "name": "calendar_sum_std_1",
+  "required": true}, {"type": "double", "name": "temp_sum_1", "required": true}, {"type":
+  "double", "name": "dwpt_sum_1", "required": true}, {"type": "double", "name": "rhum_sum_1",
+  "required": true}, {"type": "double", "name": "wdir_sum_1", "required": true}, {"type":
+  "double", "name": "wspd_sum_1", "required": true}, {"type": "double", "name": "dc_sum_1",
+  "required": true}, {"type": "double", "name": "ffmc_sum_1", "required": true}, {"type":
+  "double", "name": "dmc_sum_1", "required": true}, {"type": "double", "name": "nesterov_sum_1",
+  "required": true}, {"type": "double", "name": "munger_sum_1", "required": true},
+  {"type": "double", "name": "kbdi_sum_1", "required": true}, {"type": "double", "name":
+  "isi_sum_1", "required": true}, {"type": "double", "name": "angstroem_sum_1", "required":
+  true}, {"type": "double", "name": "bui_sum_1", "required": true}, {"type": "double",
+  "name": "fwi_sum_1", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_1",
+  "required": true}, {"type": "double", "name": "temp16_sum_1", "required": true},
+  {"type": "double", "name": "dwpt16_sum_1", "required": true}, {"type": "double",
+  "name": "rhum16_sum_1", "required": true}, {"type": "double", "name": "wdir16_sum_1",
+  "required": true}, {"type": "double", "name": "wspd16_sum_1", "required": true},
+  {"type": "double", "name": "O3_sum_1", "required": true}, {"type": "double", "name":
+  "NO2_sum_1", "required": true}, {"type": "double", "name": "PM10_sum_1", "required":
+  true}, {"type": "double", "name": "PM25_sum_1", "required": true}, {"type": "double",
+  "name": "month_sum_1", "required": true}, {"type": "double", "name": "dayofyear_sum_1",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_1", "required": true},
+  {"type": "double", "name": "isweekend_sum_1", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_1", "required": true}, {"type": "double", "name": "confinemenent_sum_1",
+  "required": true}, {"type": "double", "name": "ramadan_sum_1", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_1", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_1", "required": true}, {"type": "double", "name": "holidays_sum_1",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_1", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_1", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_1", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_1", "required": true}, {"type": "double", "name": "calendar_sum_sum_1",
+  "required": true}, {"type": "double", "name": "temp_mean_2", "required": true},
+  {"type": "double", "name": "dwpt_mean_2", "required": true}, {"type": "double",
+  "name": "rhum_mean_2", "required": true}, {"type": "double", "name": "wdir_mean_2",
+  "required": true}, {"type": "double", "name": "wspd_mean_2", "required": true},
+  {"type": "double", "name": "dc_mean_2", "required": true}, {"type": "double", "name":
+  "ffmc_mean_2", "required": true}, {"type": "double", "name": "dmc_mean_2", "required":
+  true}, {"type": "double", "name": "nesterov_mean_2", "required": true}, {"type":
+  "double", "name": "munger_mean_2", "required": true}, {"type": "double", "name":
+  "kbdi_mean_2", "required": true}, {"type": "double", "name": "isi_mean_2", "required":
+  true}, {"type": "double", "name": "angstroem_mean_2", "required": true}, {"type":
+  "double", "name": "bui_mean_2", "required": true}, {"type": "double", "name": "fwi_mean_2",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_2", "required":
+  true}, {"type": "double", "name": "temp16_mean_2", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_2", "required": true}, {"type": "double", "name": "rhum16_mean_2",
+  "required": true}, {"type": "double", "name": "wdir16_mean_2", "required": true},
+  {"type": "double", "name": "wspd16_mean_2", "required": true}, {"type": "double",
+  "name": "O3_mean_2", "required": true}, {"type": "double", "name": "NO2_mean_2",
+  "required": true}, {"type": "double", "name": "PM10_mean_2", "required": true},
+  {"type": "double", "name": "PM25_mean_2", "required": true}, {"type": "double",
+  "name": "month_mean_2", "required": true}, {"type": "double", "name": "dayofyear_mean_2",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_2", "required": true},
+  {"type": "double", "name": "isweekend_mean_2", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_2", "required": true}, {"type": "double", "name": "confinemenent_mean_2",
+  "required": true}, {"type": "double", "name": "ramadan_mean_2", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_2", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_2", "required": true}, {"type": "double", "name":
+  "holidays_mean_2", "required": true}, {"type": "double", "name": "holidaysBorder_mean_2",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_2", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_2", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_2", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_2", "required": true}, {"type": "double", "name": "temp_min_2",
+  "required": true}, {"type": "double", "name": "dwpt_min_2", "required": true}, {"type":
+  "double", "name": "rhum_min_2", "required": true}, {"type": "double", "name": "wdir_min_2",
+  "required": true}, {"type": "double", "name": "wspd_min_2", "required": true}, {"type":
+  "double", "name": "dc_min_2", "required": true}, {"type": "double", "name": "ffmc_min_2",
+  "required": true}, {"type": "double", "name": "dmc_min_2", "required": true}, {"type":
+  "double", "name": "nesterov_min_2", "required": true}, {"type": "double", "name":
+  "munger_min_2", "required": true}, {"type": "double", "name": "kbdi_min_2", "required":
+  true}, {"type": "double", "name": "isi_min_2", "required": true}, {"type": "double",
+  "name": "angstroem_min_2", "required": true}, {"type": "double", "name": "bui_min_2",
+  "required": true}, {"type": "double", "name": "fwi_min_2", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_2", "required": true}, {"type": "double",
+  "name": "temp16_min_2", "required": true}, {"type": "double", "name": "dwpt16_min_2",
+  "required": true}, {"type": "double", "name": "rhum16_min_2", "required": true},
+  {"type": "double", "name": "wdir16_min_2", "required": true}, {"type": "double",
+  "name": "wspd16_min_2", "required": true}, {"type": "double", "name": "O3_min_2",
+  "required": true}, {"type": "double", "name": "NO2_min_2", "required": true}, {"type":
+  "double", "name": "PM10_min_2", "required": true}, {"type": "double", "name": "PM25_min_2",
+  "required": true}, {"type": "double", "name": "month_min_2", "required": true},
+  {"type": "double", "name": "dayofyear_min_2", "required": true}, {"type": "double",
+  "name": "dayofweek_min_2", "required": true}, {"type": "double", "name": "isweekend_min_2",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_2", "required": true},
+  {"type": "double", "name": "confinemenent_min_2", "required": true}, {"type": "double",
+  "name": "ramadan_min_2", "required": true}, {"type": "double", "name": "bankHolidays_min_2",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_2", "required":
+  true}, {"type": "double", "name": "holidays_min_2", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_2", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_2", "required": true}, {"type": "double", "name": "calendar_min_min_2",
+  "required": true}, {"type": "double", "name": "calendar_max_min_2", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_2", "required": true}, {"type":
+  "double", "name": "temp_max_2", "required": true}, {"type": "double", "name": "dwpt_max_2",
+  "required": true}, {"type": "double", "name": "rhum_max_2", "required": true}, {"type":
+  "double", "name": "wdir_max_2", "required": true}, {"type": "double", "name": "wspd_max_2",
+  "required": true}, {"type": "double", "name": "dc_max_2", "required": true}, {"type":
+  "double", "name": "ffmc_max_2", "required": true}, {"type": "double", "name": "dmc_max_2",
+  "required": true}, {"type": "double", "name": "nesterov_max_2", "required": true},
+  {"type": "double", "name": "munger_max_2", "required": true}, {"type": "double",
+  "name": "kbdi_max_2", "required": true}, {"type": "double", "name": "isi_max_2",
+  "required": true}, {"type": "double", "name": "angstroem_max_2", "required": true},
+  {"type": "double", "name": "bui_max_2", "required": true}, {"type": "double", "name":
+  "fwi_max_2", "required": true}, {"type": "double", "name": "dailySeverityRating_max_2",
+  "required": true}, {"type": "double", "name": "temp16_max_2", "required": true},
+  {"type": "double", "name": "dwpt16_max_2", "required": true}, {"type": "double",
+  "name": "rhum16_max_2", "required": true}, {"type": "double", "name": "wdir16_max_2",
+  "required": true}, {"type": "double", "name": "wspd16_max_2", "required": true},
+  {"type": "double", "name": "O3_max_2", "required": true}, {"type": "double", "name":
+  "NO2_max_2", "required": true}, {"type": "double", "name": "PM10_max_2", "required":
+  true}, {"type": "double", "name": "PM25_max_2", "required": true}, {"type": "double",
+  "name": "month_max_2", "required": true}, {"type": "double", "name": "dayofyear_max_2",
+  "required": true}, {"type": "double", "name": "dayofweek_max_2", "required": true},
+  {"type": "double", "name": "isweekend_max_2", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_2", "required": true}, {"type": "double", "name": "confinemenent_max_2",
+  "required": true}, {"type": "double", "name": "ramadan_max_2", "required": true},
+  {"type": "double", "name": "bankHolidays_max_2", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_2", "required": true}, {"type": "double", "name": "holidays_max_2",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_2", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_2", "required": true}, {"type":
+  "double", "name": "calendar_min_max_2", "required": true}, {"type": "double", "name":
+  "calendar_max_max_2", "required": true}, {"type": "double", "name": "calendar_sum_max_2",
+  "required": true}, {"type": "double", "name": "temp_std_2", "required": true}, {"type":
+  "double", "name": "dwpt_std_2", "required": true}, {"type": "double", "name": "rhum_std_2",
+  "required": true}, {"type": "double", "name": "wdir_std_2", "required": true}, {"type":
+  "double", "name": "wspd_std_2", "required": true}, {"type": "double", "name": "dc_std_2",
+  "required": true}, {"type": "double", "name": "ffmc_std_2", "required": true}, {"type":
+  "double", "name": "dmc_std_2", "required": true}, {"type": "double", "name": "nesterov_std_2",
+  "required": true}, {"type": "double", "name": "munger_std_2", "required": true},
+  {"type": "double", "name": "kbdi_std_2", "required": true}, {"type": "double", "name":
+  "isi_std_2", "required": true}, {"type": "double", "name": "angstroem_std_2", "required":
+  true}, {"type": "double", "name": "bui_std_2", "required": true}, {"type": "double",
+  "name": "fwi_std_2", "required": true}, {"type": "double", "name": "dailySeverityRating_std_2",
+  "required": true}, {"type": "double", "name": "temp16_std_2", "required": true},
+  {"type": "double", "name": "dwpt16_std_2", "required": true}, {"type": "double",
+  "name": "rhum16_std_2", "required": true}, {"type": "double", "name": "wdir16_std_2",
+  "required": true}, {"type": "double", "name": "wspd16_std_2", "required": true},
+  {"type": "double", "name": "O3_std_2", "required": true}, {"type": "double", "name":
+  "NO2_std_2", "required": true}, {"type": "double", "name": "PM10_std_2", "required":
+  true}, {"type": "double", "name": "PM25_std_2", "required": true}, {"type": "double",
+  "name": "month_std_2", "required": true}, {"type": "double", "name": "dayofyear_std_2",
+  "required": true}, {"type": "double", "name": "dayofweek_std_2", "required": true},
+  {"type": "double", "name": "isweekend_std_2", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_2", "required": true}, {"type": "double", "name": "confinemenent_std_2",
+  "required": true}, {"type": "double", "name": "ramadan_std_2", "required": true},
+  {"type": "double", "name": "bankHolidays_std_2", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_2", "required": true}, {"type": "double", "name": "holidays_std_2",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_2", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_2", "required": true}, {"type":
+  "double", "name": "calendar_min_std_2", "required": true}, {"type": "double", "name":
+  "calendar_max_std_2", "required": true}, {"type": "double", "name": "calendar_sum_std_2",
+  "required": true}, {"type": "double", "name": "temp_sum_2", "required": true}, {"type":
+  "double", "name": "dwpt_sum_2", "required": true}, {"type": "double", "name": "rhum_sum_2",
+  "required": true}, {"type": "double", "name": "wdir_sum_2", "required": true}, {"type":
+  "double", "name": "wspd_sum_2", "required": true}, {"type": "double", "name": "dc_sum_2",
+  "required": true}, {"type": "double", "name": "ffmc_sum_2", "required": true}, {"type":
+  "double", "name": "dmc_sum_2", "required": true}, {"type": "double", "name": "nesterov_sum_2",
+  "required": true}, {"type": "double", "name": "munger_sum_2", "required": true},
+  {"type": "double", "name": "kbdi_sum_2", "required": true}, {"type": "double", "name":
+  "isi_sum_2", "required": true}, {"type": "double", "name": "angstroem_sum_2", "required":
+  true}, {"type": "double", "name": "bui_sum_2", "required": true}, {"type": "double",
+  "name": "fwi_sum_2", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_2",
+  "required": true}, {"type": "double", "name": "temp16_sum_2", "required": true},
+  {"type": "double", "name": "dwpt16_sum_2", "required": true}, {"type": "double",
+  "name": "rhum16_sum_2", "required": true}, {"type": "double", "name": "wdir16_sum_2",
+  "required": true}, {"type": "double", "name": "wspd16_sum_2", "required": true},
+  {"type": "double", "name": "O3_sum_2", "required": true}, {"type": "double", "name":
+  "NO2_sum_2", "required": true}, {"type": "double", "name": "PM10_sum_2", "required":
+  true}, {"type": "double", "name": "PM25_sum_2", "required": true}, {"type": "double",
+  "name": "month_sum_2", "required": true}, {"type": "double", "name": "dayofyear_sum_2",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_2", "required": true},
+  {"type": "double", "name": "isweekend_sum_2", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_2", "required": true}, {"type": "double", "name": "confinemenent_sum_2",
+  "required": true}, {"type": "double", "name": "ramadan_sum_2", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_2", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_2", "required": true}, {"type": "double", "name": "holidays_sum_2",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_2", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_2", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_2", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_2", "required": true}, {"type": "double", "name": "calendar_sum_sum_2",
+  "required": true}, {"type": "double", "name": "temp_mean_3", "required": true},
+  {"type": "double", "name": "dwpt_mean_3", "required": true}, {"type": "double",
+  "name": "rhum_mean_3", "required": true}, {"type": "double", "name": "wdir_mean_3",
+  "required": true}, {"type": "double", "name": "wspd_mean_3", "required": true},
+  {"type": "double", "name": "dc_mean_3", "required": true}, {"type": "double", "name":
+  "ffmc_mean_3", "required": true}, {"type": "double", "name": "dmc_mean_3", "required":
+  true}, {"type": "double", "name": "nesterov_mean_3", "required": true}, {"type":
+  "double", "name": "munger_mean_3", "required": true}, {"type": "double", "name":
+  "kbdi_mean_3", "required": true}, {"type": "double", "name": "isi_mean_3", "required":
+  true}, {"type": "double", "name": "angstroem_mean_3", "required": true}, {"type":
+  "double", "name": "bui_mean_3", "required": true}, {"type": "double", "name": "fwi_mean_3",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_3", "required":
+  true}, {"type": "double", "name": "temp16_mean_3", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_3", "required": true}, {"type": "double", "name": "rhum16_mean_3",
+  "required": true}, {"type": "double", "name": "wdir16_mean_3", "required": true},
+  {"type": "double", "name": "wspd16_mean_3", "required": true}, {"type": "double",
+  "name": "O3_mean_3", "required": true}, {"type": "double", "name": "NO2_mean_3",
+  "required": true}, {"type": "double", "name": "PM10_mean_3", "required": true},
+  {"type": "double", "name": "PM25_mean_3", "required": true}, {"type": "double",
+  "name": "month_mean_3", "required": true}, {"type": "double", "name": "dayofyear_mean_3",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_3", "required": true},
+  {"type": "double", "name": "isweekend_mean_3", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_3", "required": true}, {"type": "double", "name": "confinemenent_mean_3",
+  "required": true}, {"type": "double", "name": "ramadan_mean_3", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_3", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_3", "required": true}, {"type": "double", "name":
+  "holidays_mean_3", "required": true}, {"type": "double", "name": "holidaysBorder_mean_3",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_3", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_3", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_3", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_3", "required": true}, {"type": "double", "name": "temp_min_3",
+  "required": true}, {"type": "double", "name": "dwpt_min_3", "required": true}, {"type":
+  "double", "name": "rhum_min_3", "required": true}, {"type": "double", "name": "wdir_min_3",
+  "required": true}, {"type": "double", "name": "wspd_min_3", "required": true}, {"type":
+  "double", "name": "dc_min_3", "required": true}, {"type": "double", "name": "ffmc_min_3",
+  "required": true}, {"type": "double", "name": "dmc_min_3", "required": true}, {"type":
+  "double", "name": "nesterov_min_3", "required": true}, {"type": "double", "name":
+  "munger_min_3", "required": true}, {"type": "double", "name": "kbdi_min_3", "required":
+  true}, {"type": "double", "name": "isi_min_3", "required": true}, {"type": "double",
+  "name": "angstroem_min_3", "required": true}, {"type": "double", "name": "bui_min_3",
+  "required": true}, {"type": "double", "name": "fwi_min_3", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_3", "required": true}, {"type": "double",
+  "name": "temp16_min_3", "required": true}, {"type": "double", "name": "dwpt16_min_3",
+  "required": true}, {"type": "double", "name": "rhum16_min_3", "required": true},
+  {"type": "double", "name": "wdir16_min_3", "required": true}, {"type": "double",
+  "name": "wspd16_min_3", "required": true}, {"type": "double", "name": "O3_min_3",
+  "required": true}, {"type": "double", "name": "NO2_min_3", "required": true}, {"type":
+  "double", "name": "PM10_min_3", "required": true}, {"type": "double", "name": "PM25_min_3",
+  "required": true}, {"type": "double", "name": "month_min_3", "required": true},
+  {"type": "double", "name": "dayofyear_min_3", "required": true}, {"type": "double",
+  "name": "dayofweek_min_3", "required": true}, {"type": "double", "name": "isweekend_min_3",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_3", "required": true},
+  {"type": "double", "name": "confinemenent_min_3", "required": true}, {"type": "double",
+  "name": "ramadan_min_3", "required": true}, {"type": "double", "name": "bankHolidays_min_3",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_3", "required":
+  true}, {"type": "double", "name": "holidays_min_3", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_3", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_3", "required": true}, {"type": "double", "name": "calendar_min_min_3",
+  "required": true}, {"type": "double", "name": "calendar_max_min_3", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_3", "required": true}, {"type":
+  "double", "name": "temp_max_3", "required": true}, {"type": "double", "name": "dwpt_max_3",
+  "required": true}, {"type": "double", "name": "rhum_max_3", "required": true}, {"type":
+  "double", "name": "wdir_max_3", "required": true}, {"type": "double", "name": "wspd_max_3",
+  "required": true}, {"type": "double", "name": "dc_max_3", "required": true}, {"type":
+  "double", "name": "ffmc_max_3", "required": true}, {"type": "double", "name": "dmc_max_3",
+  "required": true}, {"type": "double", "name": "nesterov_max_3", "required": true},
+  {"type": "double", "name": "munger_max_3", "required": true}, {"type": "double",
+  "name": "kbdi_max_3", "required": true}, {"type": "double", "name": "isi_max_3",
+  "required": true}, {"type": "double", "name": "angstroem_max_3", "required": true},
+  {"type": "double", "name": "bui_max_3", "required": true}, {"type": "double", "name":
+  "fwi_max_3", "required": true}, {"type": "double", "name": "dailySeverityRating_max_3",
+  "required": true}, {"type": "double", "name": "temp16_max_3", "required": true},
+  {"type": "double", "name": "dwpt16_max_3", "required": true}, {"type": "double",
+  "name": "rhum16_max_3", "required": true}, {"type": "double", "name": "wdir16_max_3",
+  "required": true}, {"type": "double", "name": "wspd16_max_3", "required": true},
+  {"type": "double", "name": "O3_max_3", "required": true}, {"type": "double", "name":
+  "NO2_max_3", "required": true}, {"type": "double", "name": "PM10_max_3", "required":
+  true}, {"type": "double", "name": "PM25_max_3", "required": true}, {"type": "double",
+  "name": "month_max_3", "required": true}, {"type": "double", "name": "dayofyear_max_3",
+  "required": true}, {"type": "double", "name": "dayofweek_max_3", "required": true},
+  {"type": "double", "name": "isweekend_max_3", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_3", "required": true}, {"type": "double", "name": "confinemenent_max_3",
+  "required": true}, {"type": "double", "name": "ramadan_max_3", "required": true},
+  {"type": "double", "name": "bankHolidays_max_3", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_3", "required": true}, {"type": "double", "name": "holidays_max_3",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_3", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_3", "required": true}, {"type":
+  "double", "name": "calendar_min_max_3", "required": true}, {"type": "double", "name":
+  "calendar_max_max_3", "required": true}, {"type": "double", "name": "calendar_sum_max_3",
+  "required": true}, {"type": "double", "name": "temp_std_3", "required": true}, {"type":
+  "double", "name": "dwpt_std_3", "required": true}, {"type": "double", "name": "rhum_std_3",
+  "required": true}, {"type": "double", "name": "wdir_std_3", "required": true}, {"type":
+  "double", "name": "wspd_std_3", "required": true}, {"type": "double", "name": "dc_std_3",
+  "required": true}, {"type": "double", "name": "ffmc_std_3", "required": true}, {"type":
+  "double", "name": "dmc_std_3", "required": true}, {"type": "double", "name": "nesterov_std_3",
+  "required": true}, {"type": "double", "name": "munger_std_3", "required": true},
+  {"type": "double", "name": "kbdi_std_3", "required": true}, {"type": "double", "name":
+  "isi_std_3", "required": true}, {"type": "double", "name": "angstroem_std_3", "required":
+  true}, {"type": "double", "name": "bui_std_3", "required": true}, {"type": "double",
+  "name": "fwi_std_3", "required": true}, {"type": "double", "name": "dailySeverityRating_std_3",
+  "required": true}, {"type": "double", "name": "temp16_std_3", "required": true},
+  {"type": "double", "name": "dwpt16_std_3", "required": true}, {"type": "double",
+  "name": "rhum16_std_3", "required": true}, {"type": "double", "name": "wdir16_std_3",
+  "required": true}, {"type": "double", "name": "wspd16_std_3", "required": true},
+  {"type": "double", "name": "O3_std_3", "required": true}, {"type": "double", "name":
+  "NO2_std_3", "required": true}, {"type": "double", "name": "PM10_std_3", "required":
+  true}, {"type": "double", "name": "PM25_std_3", "required": true}, {"type": "double",
+  "name": "month_std_3", "required": true}, {"type": "double", "name": "dayofyear_std_3",
+  "required": true}, {"type": "double", "name": "dayofweek_std_3", "required": true},
+  {"type": "double", "name": "isweekend_std_3", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_3", "required": true}, {"type": "double", "name": "confinemenent_std_3",
+  "required": true}, {"type": "double", "name": "ramadan_std_3", "required": true},
+  {"type": "double", "name": "bankHolidays_std_3", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_3", "required": true}, {"type": "double", "name": "holidays_std_3",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_3", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_3", "required": true}, {"type":
+  "double", "name": "calendar_min_std_3", "required": true}, {"type": "double", "name":
+  "calendar_max_std_3", "required": true}, {"type": "double", "name": "calendar_sum_std_3",
+  "required": true}, {"type": "double", "name": "temp_sum_3", "required": true}, {"type":
+  "double", "name": "dwpt_sum_3", "required": true}, {"type": "double", "name": "rhum_sum_3",
+  "required": true}, {"type": "double", "name": "wdir_sum_3", "required": true}, {"type":
+  "double", "name": "wspd_sum_3", "required": true}, {"type": "double", "name": "dc_sum_3",
+  "required": true}, {"type": "double", "name": "ffmc_sum_3", "required": true}, {"type":
+  "double", "name": "dmc_sum_3", "required": true}, {"type": "double", "name": "nesterov_sum_3",
+  "required": true}, {"type": "double", "name": "munger_sum_3", "required": true},
+  {"type": "double", "name": "kbdi_sum_3", "required": true}, {"type": "double", "name":
+  "isi_sum_3", "required": true}, {"type": "double", "name": "angstroem_sum_3", "required":
+  true}, {"type": "double", "name": "bui_sum_3", "required": true}, {"type": "double",
+  "name": "fwi_sum_3", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_3",
+  "required": true}, {"type": "double", "name": "temp16_sum_3", "required": true},
+  {"type": "double", "name": "dwpt16_sum_3", "required": true}, {"type": "double",
+  "name": "rhum16_sum_3", "required": true}, {"type": "double", "name": "wdir16_sum_3",
+  "required": true}, {"type": "double", "name": "wspd16_sum_3", "required": true},
+  {"type": "double", "name": "O3_sum_3", "required": true}, {"type": "double", "name":
+  "NO2_sum_3", "required": true}, {"type": "double", "name": "PM10_sum_3", "required":
+  true}, {"type": "double", "name": "PM25_sum_3", "required": true}, {"type": "double",
+  "name": "month_sum_3", "required": true}, {"type": "double", "name": "dayofyear_sum_3",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_3", "required": true},
+  {"type": "double", "name": "isweekend_sum_3", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_3", "required": true}, {"type": "double", "name": "confinemenent_sum_3",
+  "required": true}, {"type": "double", "name": "ramadan_sum_3", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_3", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_3", "required": true}, {"type": "double", "name": "holidays_sum_3",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_3", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_3", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_3", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_3", "required": true}, {"type": "double", "name": "calendar_sum_sum_3",
+  "required": true}, {"type": "double", "name": "temp_mean_4", "required": true},
+  {"type": "double", "name": "dwpt_mean_4", "required": true}, {"type": "double",
+  "name": "rhum_mean_4", "required": true}, {"type": "double", "name": "wdir_mean_4",
+  "required": true}, {"type": "double", "name": "wspd_mean_4", "required": true},
+  {"type": "double", "name": "dc_mean_4", "required": true}, {"type": "double", "name":
+  "ffmc_mean_4", "required": true}, {"type": "double", "name": "dmc_mean_4", "required":
+  true}, {"type": "double", "name": "nesterov_mean_4", "required": true}, {"type":
+  "double", "name": "munger_mean_4", "required": true}, {"type": "double", "name":
+  "kbdi_mean_4", "required": true}, {"type": "double", "name": "isi_mean_4", "required":
+  true}, {"type": "double", "name": "angstroem_mean_4", "required": true}, {"type":
+  "double", "name": "bui_mean_4", "required": true}, {"type": "double", "name": "fwi_mean_4",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_4", "required":
+  true}, {"type": "double", "name": "temp16_mean_4", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_4", "required": true}, {"type": "double", "name": "rhum16_mean_4",
+  "required": true}, {"type": "double", "name": "wdir16_mean_4", "required": true},
+  {"type": "double", "name": "wspd16_mean_4", "required": true}, {"type": "double",
+  "name": "O3_mean_4", "required": true}, {"type": "double", "name": "NO2_mean_4",
+  "required": true}, {"type": "double", "name": "PM10_mean_4", "required": true},
+  {"type": "double", "name": "PM25_mean_4", "required": true}, {"type": "double",
+  "name": "month_mean_4", "required": true}, {"type": "double", "name": "dayofyear_mean_4",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_4", "required": true},
+  {"type": "double", "name": "isweekend_mean_4", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_4", "required": true}, {"type": "double", "name": "confinemenent_mean_4",
+  "required": true}, {"type": "double", "name": "ramadan_mean_4", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_4", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_4", "required": true}, {"type": "double", "name":
+  "holidays_mean_4", "required": true}, {"type": "double", "name": "holidaysBorder_mean_4",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_4", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_4", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_4", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_4", "required": true}, {"type": "double", "name": "temp_min_4",
+  "required": true}, {"type": "double", "name": "dwpt_min_4", "required": true}, {"type":
+  "double", "name": "rhum_min_4", "required": true}, {"type": "double", "name": "wdir_min_4",
+  "required": true}, {"type": "double", "name": "wspd_min_4", "required": true}, {"type":
+  "double", "name": "dc_min_4", "required": true}, {"type": "double", "name": "ffmc_min_4",
+  "required": true}, {"type": "double", "name": "dmc_min_4", "required": true}, {"type":
+  "double", "name": "nesterov_min_4", "required": true}, {"type": "double", "name":
+  "munger_min_4", "required": true}, {"type": "double", "name": "kbdi_min_4", "required":
+  true}, {"type": "double", "name": "isi_min_4", "required": true}, {"type": "double",
+  "name": "angstroem_min_4", "required": true}, {"type": "double", "name": "bui_min_4",
+  "required": true}, {"type": "double", "name": "fwi_min_4", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_4", "required": true}, {"type": "double",
+  "name": "temp16_min_4", "required": true}, {"type": "double", "name": "dwpt16_min_4",
+  "required": true}, {"type": "double", "name": "rhum16_min_4", "required": true},
+  {"type": "double", "name": "wdir16_min_4", "required": true}, {"type": "double",
+  "name": "wspd16_min_4", "required": true}, {"type": "double", "name": "O3_min_4",
+  "required": true}, {"type": "double", "name": "NO2_min_4", "required": true}, {"type":
+  "double", "name": "PM10_min_4", "required": true}, {"type": "double", "name": "PM25_min_4",
+  "required": true}, {"type": "double", "name": "month_min_4", "required": true},
+  {"type": "double", "name": "dayofyear_min_4", "required": true}, {"type": "double",
+  "name": "dayofweek_min_4", "required": true}, {"type": "double", "name": "isweekend_min_4",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_4", "required": true},
+  {"type": "double", "name": "confinemenent_min_4", "required": true}, {"type": "double",
+  "name": "ramadan_min_4", "required": true}, {"type": "double", "name": "bankHolidays_min_4",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_4", "required":
+  true}, {"type": "double", "name": "holidays_min_4", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_4", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_4", "required": true}, {"type": "double", "name": "calendar_min_min_4",
+  "required": true}, {"type": "double", "name": "calendar_max_min_4", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_4", "required": true}, {"type":
+  "double", "name": "temp_max_4", "required": true}, {"type": "double", "name": "dwpt_max_4",
+  "required": true}, {"type": "double", "name": "rhum_max_4", "required": true}, {"type":
+  "double", "name": "wdir_max_4", "required": true}, {"type": "double", "name": "wspd_max_4",
+  "required": true}, {"type": "double", "name": "dc_max_4", "required": true}, {"type":
+  "double", "name": "ffmc_max_4", "required": true}, {"type": "double", "name": "dmc_max_4",
+  "required": true}, {"type": "double", "name": "nesterov_max_4", "required": true},
+  {"type": "double", "name": "munger_max_4", "required": true}, {"type": "double",
+  "name": "kbdi_max_4", "required": true}, {"type": "double", "name": "isi_max_4",
+  "required": true}, {"type": "double", "name": "angstroem_max_4", "required": true},
+  {"type": "double", "name": "bui_max_4", "required": true}, {"type": "double", "name":
+  "fwi_max_4", "required": true}, {"type": "double", "name": "dailySeverityRating_max_4",
+  "required": true}, {"type": "double", "name": "temp16_max_4", "required": true},
+  {"type": "double", "name": "dwpt16_max_4", "required": true}, {"type": "double",
+  "name": "rhum16_max_4", "required": true}, {"type": "double", "name": "wdir16_max_4",
+  "required": true}, {"type": "double", "name": "wspd16_max_4", "required": true},
+  {"type": "double", "name": "O3_max_4", "required": true}, {"type": "double", "name":
+  "NO2_max_4", "required": true}, {"type": "double", "name": "PM10_max_4", "required":
+  true}, {"type": "double", "name": "PM25_max_4", "required": true}, {"type": "double",
+  "name": "month_max_4", "required": true}, {"type": "double", "name": "dayofyear_max_4",
+  "required": true}, {"type": "double", "name": "dayofweek_max_4", "required": true},
+  {"type": "double", "name": "isweekend_max_4", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_4", "required": true}, {"type": "double", "name": "confinemenent_max_4",
+  "required": true}, {"type": "double", "name": "ramadan_max_4", "required": true},
+  {"type": "double", "name": "bankHolidays_max_4", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_4", "required": true}, {"type": "double", "name": "holidays_max_4",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_4", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_4", "required": true}, {"type":
+  "double", "name": "calendar_min_max_4", "required": true}, {"type": "double", "name":
+  "calendar_max_max_4", "required": true}, {"type": "double", "name": "calendar_sum_max_4",
+  "required": true}, {"type": "double", "name": "temp_std_4", "required": true}, {"type":
+  "double", "name": "dwpt_std_4", "required": true}, {"type": "double", "name": "rhum_std_4",
+  "required": true}, {"type": "double", "name": "wdir_std_4", "required": true}, {"type":
+  "double", "name": "wspd_std_4", "required": true}, {"type": "double", "name": "dc_std_4",
+  "required": true}, {"type": "double", "name": "ffmc_std_4", "required": true}, {"type":
+  "double", "name": "dmc_std_4", "required": true}, {"type": "double", "name": "nesterov_std_4",
+  "required": true}, {"type": "double", "name": "munger_std_4", "required": true},
+  {"type": "double", "name": "kbdi_std_4", "required": true}, {"type": "double", "name":
+  "isi_std_4", "required": true}, {"type": "double", "name": "angstroem_std_4", "required":
+  true}, {"type": "double", "name": "bui_std_4", "required": true}, {"type": "double",
+  "name": "fwi_std_4", "required": true}, {"type": "double", "name": "dailySeverityRating_std_4",
+  "required": true}, {"type": "double", "name": "temp16_std_4", "required": true},
+  {"type": "double", "name": "dwpt16_std_4", "required": true}, {"type": "double",
+  "name": "rhum16_std_4", "required": true}, {"type": "double", "name": "wdir16_std_4",
+  "required": true}, {"type": "double", "name": "wspd16_std_4", "required": true},
+  {"type": "double", "name": "O3_std_4", "required": true}, {"type": "double", "name":
+  "NO2_std_4", "required": true}, {"type": "double", "name": "PM10_std_4", "required":
+  true}, {"type": "double", "name": "PM25_std_4", "required": true}, {"type": "double",
+  "name": "month_std_4", "required": true}, {"type": "double", "name": "dayofyear_std_4",
+  "required": true}, {"type": "double", "name": "dayofweek_std_4", "required": true},
+  {"type": "double", "name": "isweekend_std_4", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_4", "required": true}, {"type": "double", "name": "confinemenent_std_4",
+  "required": true}, {"type": "double", "name": "ramadan_std_4", "required": true},
+  {"type": "double", "name": "bankHolidays_std_4", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_4", "required": true}, {"type": "double", "name": "holidays_std_4",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_4", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_4", "required": true}, {"type":
+  "double", "name": "calendar_min_std_4", "required": true}, {"type": "double", "name":
+  "calendar_max_std_4", "required": true}, {"type": "double", "name": "calendar_sum_std_4",
+  "required": true}, {"type": "double", "name": "temp_sum_4", "required": true}, {"type":
+  "double", "name": "dwpt_sum_4", "required": true}, {"type": "double", "name": "rhum_sum_4",
+  "required": true}, {"type": "double", "name": "wdir_sum_4", "required": true}, {"type":
+  "double", "name": "wspd_sum_4", "required": true}, {"type": "double", "name": "dc_sum_4",
+  "required": true}, {"type": "double", "name": "ffmc_sum_4", "required": true}, {"type":
+  "double", "name": "dmc_sum_4", "required": true}, {"type": "double", "name": "nesterov_sum_4",
+  "required": true}, {"type": "double", "name": "munger_sum_4", "required": true},
+  {"type": "double", "name": "kbdi_sum_4", "required": true}, {"type": "double", "name":
+  "isi_sum_4", "required": true}, {"type": "double", "name": "angstroem_sum_4", "required":
+  true}, {"type": "double", "name": "bui_sum_4", "required": true}, {"type": "double",
+  "name": "fwi_sum_4", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_4",
+  "required": true}, {"type": "double", "name": "temp16_sum_4", "required": true},
+  {"type": "double", "name": "dwpt16_sum_4", "required": true}, {"type": "double",
+  "name": "rhum16_sum_4", "required": true}, {"type": "double", "name": "wdir16_sum_4",
+  "required": true}, {"type": "double", "name": "wspd16_sum_4", "required": true},
+  {"type": "double", "name": "O3_sum_4", "required": true}, {"type": "double", "name":
+  "NO2_sum_4", "required": true}, {"type": "double", "name": "PM10_sum_4", "required":
+  true}, {"type": "double", "name": "PM25_sum_4", "required": true}, {"type": "double",
+  "name": "month_sum_4", "required": true}, {"type": "double", "name": "dayofyear_sum_4",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_4", "required": true},
+  {"type": "double", "name": "isweekend_sum_4", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_4", "required": true}, {"type": "double", "name": "confinemenent_sum_4",
+  "required": true}, {"type": "double", "name": "ramadan_sum_4", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_4", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_4", "required": true}, {"type": "double", "name": "holidays_sum_4",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_4", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_4", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_4", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_4", "required": true}, {"type": "double", "name": "calendar_sum_sum_4",
+  "required": true}, {"type": "double", "name": "temp_mean_5", "required": true},
+  {"type": "double", "name": "dwpt_mean_5", "required": true}, {"type": "double",
+  "name": "rhum_mean_5", "required": true}, {"type": "double", "name": "wdir_mean_5",
+  "required": true}, {"type": "double", "name": "wspd_mean_5", "required": true},
+  {"type": "double", "name": "dc_mean_5", "required": true}, {"type": "double", "name":
+  "ffmc_mean_5", "required": true}, {"type": "double", "name": "dmc_mean_5", "required":
+  true}, {"type": "double", "name": "nesterov_mean_5", "required": true}, {"type":
+  "double", "name": "munger_mean_5", "required": true}, {"type": "double", "name":
+  "kbdi_mean_5", "required": true}, {"type": "double", "name": "isi_mean_5", "required":
+  true}, {"type": "double", "name": "angstroem_mean_5", "required": true}, {"type":
+  "double", "name": "bui_mean_5", "required": true}, {"type": "double", "name": "fwi_mean_5",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_5", "required":
+  true}, {"type": "double", "name": "temp16_mean_5", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_5", "required": true}, {"type": "double", "name": "rhum16_mean_5",
+  "required": true}, {"type": "double", "name": "wdir16_mean_5", "required": true},
+  {"type": "double", "name": "wspd16_mean_5", "required": true}, {"type": "double",
+  "name": "O3_mean_5", "required": true}, {"type": "double", "name": "NO2_mean_5",
+  "required": true}, {"type": "double", "name": "PM10_mean_5", "required": true},
+  {"type": "double", "name": "PM25_mean_5", "required": true}, {"type": "double",
+  "name": "month_mean_5", "required": true}, {"type": "double", "name": "dayofyear_mean_5",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_5", "required": true},
+  {"type": "double", "name": "isweekend_mean_5", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_5", "required": true}, {"type": "double", "name": "confinemenent_mean_5",
+  "required": true}, {"type": "double", "name": "ramadan_mean_5", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_5", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_5", "required": true}, {"type": "double", "name":
+  "holidays_mean_5", "required": true}, {"type": "double", "name": "holidaysBorder_mean_5",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_5", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_5", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_5", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_5", "required": true}, {"type": "double", "name": "temp_min_5",
+  "required": true}, {"type": "double", "name": "dwpt_min_5", "required": true}, {"type":
+  "double", "name": "rhum_min_5", "required": true}, {"type": "double", "name": "wdir_min_5",
+  "required": true}, {"type": "double", "name": "wspd_min_5", "required": true}, {"type":
+  "double", "name": "dc_min_5", "required": true}, {"type": "double", "name": "ffmc_min_5",
+  "required": true}, {"type": "double", "name": "dmc_min_5", "required": true}, {"type":
+  "double", "name": "nesterov_min_5", "required": true}, {"type": "double", "name":
+  "munger_min_5", "required": true}, {"type": "double", "name": "kbdi_min_5", "required":
+  true}, {"type": "double", "name": "isi_min_5", "required": true}, {"type": "double",
+  "name": "angstroem_min_5", "required": true}, {"type": "double", "name": "bui_min_5",
+  "required": true}, {"type": "double", "name": "fwi_min_5", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_5", "required": true}, {"type": "double",
+  "name": "temp16_min_5", "required": true}, {"type": "double", "name": "dwpt16_min_5",
+  "required": true}, {"type": "double", "name": "rhum16_min_5", "required": true},
+  {"type": "double", "name": "wdir16_min_5", "required": true}, {"type": "double",
+  "name": "wspd16_min_5", "required": true}, {"type": "double", "name": "O3_min_5",
+  "required": true}, {"type": "double", "name": "NO2_min_5", "required": true}, {"type":
+  "double", "name": "PM10_min_5", "required": true}, {"type": "double", "name": "PM25_min_5",
+  "required": true}, {"type": "double", "name": "month_min_5", "required": true},
+  {"type": "double", "name": "dayofyear_min_5", "required": true}, {"type": "double",
+  "name": "dayofweek_min_5", "required": true}, {"type": "double", "name": "isweekend_min_5",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_5", "required": true},
+  {"type": "double", "name": "confinemenent_min_5", "required": true}, {"type": "double",
+  "name": "ramadan_min_5", "required": true}, {"type": "double", "name": "bankHolidays_min_5",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_5", "required":
+  true}, {"type": "double", "name": "holidays_min_5", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_5", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_5", "required": true}, {"type": "double", "name": "calendar_min_min_5",
+  "required": true}, {"type": "double", "name": "calendar_max_min_5", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_5", "required": true}, {"type":
+  "double", "name": "temp_max_5", "required": true}, {"type": "double", "name": "dwpt_max_5",
+  "required": true}, {"type": "double", "name": "rhum_max_5", "required": true}, {"type":
+  "double", "name": "wdir_max_5", "required": true}, {"type": "double", "name": "wspd_max_5",
+  "required": true}, {"type": "double", "name": "dc_max_5", "required": true}, {"type":
+  "double", "name": "ffmc_max_5", "required": true}, {"type": "double", "name": "dmc_max_5",
+  "required": true}, {"type": "double", "name": "nesterov_max_5", "required": true},
+  {"type": "double", "name": "munger_max_5", "required": true}, {"type": "double",
+  "name": "kbdi_max_5", "required": true}, {"type": "double", "name": "isi_max_5",
+  "required": true}, {"type": "double", "name": "angstroem_max_5", "required": true},
+  {"type": "double", "name": "bui_max_5", "required": true}, {"type": "double", "name":
+  "fwi_max_5", "required": true}, {"type": "double", "name": "dailySeverityRating_max_5",
+  "required": true}, {"type": "double", "name": "temp16_max_5", "required": true},
+  {"type": "double", "name": "dwpt16_max_5", "required": true}, {"type": "double",
+  "name": "rhum16_max_5", "required": true}, {"type": "double", "name": "wdir16_max_5",
+  "required": true}, {"type": "double", "name": "wspd16_max_5", "required": true},
+  {"type": "double", "name": "O3_max_5", "required": true}, {"type": "double", "name":
+  "NO2_max_5", "required": true}, {"type": "double", "name": "PM10_max_5", "required":
+  true}, {"type": "double", "name": "PM25_max_5", "required": true}, {"type": "double",
+  "name": "month_max_5", "required": true}, {"type": "double", "name": "dayofyear_max_5",
+  "required": true}, {"type": "double", "name": "dayofweek_max_5", "required": true},
+  {"type": "double", "name": "isweekend_max_5", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_5", "required": true}, {"type": "double", "name": "confinemenent_max_5",
+  "required": true}, {"type": "double", "name": "ramadan_max_5", "required": true},
+  {"type": "double", "name": "bankHolidays_max_5", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_5", "required": true}, {"type": "double", "name": "holidays_max_5",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_5", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_5", "required": true}, {"type":
+  "double", "name": "calendar_min_max_5", "required": true}, {"type": "double", "name":
+  "calendar_max_max_5", "required": true}, {"type": "double", "name": "calendar_sum_max_5",
+  "required": true}, {"type": "double", "name": "temp_std_5", "required": true}, {"type":
+  "double", "name": "dwpt_std_5", "required": true}, {"type": "double", "name": "rhum_std_5",
+  "required": true}, {"type": "double", "name": "wdir_std_5", "required": true}, {"type":
+  "double", "name": "wspd_std_5", "required": true}, {"type": "double", "name": "dc_std_5",
+  "required": true}, {"type": "double", "name": "ffmc_std_5", "required": true}, {"type":
+  "double", "name": "dmc_std_5", "required": true}, {"type": "double", "name": "nesterov_std_5",
+  "required": true}, {"type": "double", "name": "munger_std_5", "required": true},
+  {"type": "double", "name": "kbdi_std_5", "required": true}, {"type": "double", "name":
+  "isi_std_5", "required": true}, {"type": "double", "name": "angstroem_std_5", "required":
+  true}, {"type": "double", "name": "bui_std_5", "required": true}, {"type": "double",
+  "name": "fwi_std_5", "required": true}, {"type": "double", "name": "dailySeverityRating_std_5",
+  "required": true}, {"type": "double", "name": "temp16_std_5", "required": true},
+  {"type": "double", "name": "dwpt16_std_5", "required": true}, {"type": "double",
+  "name": "rhum16_std_5", "required": true}, {"type": "double", "name": "wdir16_std_5",
+  "required": true}, {"type": "double", "name": "wspd16_std_5", "required": true},
+  {"type": "double", "name": "O3_std_5", "required": true}, {"type": "double", "name":
+  "NO2_std_5", "required": true}, {"type": "double", "name": "PM10_std_5", "required":
+  true}, {"type": "double", "name": "PM25_std_5", "required": true}, {"type": "double",
+  "name": "month_std_5", "required": true}, {"type": "double", "name": "dayofyear_std_5",
+  "required": true}, {"type": "double", "name": "dayofweek_std_5", "required": true},
+  {"type": "double", "name": "isweekend_std_5", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_5", "required": true}, {"type": "double", "name": "confinemenent_std_5",
+  "required": true}, {"type": "double", "name": "ramadan_std_5", "required": true},
+  {"type": "double", "name": "bankHolidays_std_5", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_5", "required": true}, {"type": "double", "name": "holidays_std_5",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_5", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_5", "required": true}, {"type":
+  "double", "name": "calendar_min_std_5", "required": true}, {"type": "double", "name":
+  "calendar_max_std_5", "required": true}, {"type": "double", "name": "calendar_sum_std_5",
+  "required": true}, {"type": "double", "name": "temp_sum_5", "required": true}, {"type":
+  "double", "name": "dwpt_sum_5", "required": true}, {"type": "double", "name": "rhum_sum_5",
+  "required": true}, {"type": "double", "name": "wdir_sum_5", "required": true}, {"type":
+  "double", "name": "wspd_sum_5", "required": true}, {"type": "double", "name": "dc_sum_5",
+  "required": true}, {"type": "double", "name": "ffmc_sum_5", "required": true}, {"type":
+  "double", "name": "dmc_sum_5", "required": true}, {"type": "double", "name": "nesterov_sum_5",
+  "required": true}, {"type": "double", "name": "munger_sum_5", "required": true},
+  {"type": "double", "name": "kbdi_sum_5", "required": true}, {"type": "double", "name":
+  "isi_sum_5", "required": true}, {"type": "double", "name": "angstroem_sum_5", "required":
+  true}, {"type": "double", "name": "bui_sum_5", "required": true}, {"type": "double",
+  "name": "fwi_sum_5", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_5",
+  "required": true}, {"type": "double", "name": "temp16_sum_5", "required": true},
+  {"type": "double", "name": "dwpt16_sum_5", "required": true}, {"type": "double",
+  "name": "rhum16_sum_5", "required": true}, {"type": "double", "name": "wdir16_sum_5",
+  "required": true}, {"type": "double", "name": "wspd16_sum_5", "required": true},
+  {"type": "double", "name": "O3_sum_5", "required": true}, {"type": "double", "name":
+  "NO2_sum_5", "required": true}, {"type": "double", "name": "PM10_sum_5", "required":
+  true}, {"type": "double", "name": "PM25_sum_5", "required": true}, {"type": "double",
+  "name": "month_sum_5", "required": true}, {"type": "double", "name": "dayofyear_sum_5",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_5", "required": true},
+  {"type": "double", "name": "isweekend_sum_5", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_5", "required": true}, {"type": "double", "name": "confinemenent_sum_5",
+  "required": true}, {"type": "double", "name": "ramadan_sum_5", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_5", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_5", "required": true}, {"type": "double", "name": "holidays_sum_5",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_5", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_5", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_5", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_5", "required": true}, {"type": "double", "name": "calendar_sum_sum_5",
+  "required": true}, {"type": "double", "name": "temp_mean_6", "required": true},
+  {"type": "double", "name": "dwpt_mean_6", "required": true}, {"type": "double",
+  "name": "rhum_mean_6", "required": true}, {"type": "double", "name": "wdir_mean_6",
+  "required": true}, {"type": "double", "name": "wspd_mean_6", "required": true},
+  {"type": "double", "name": "dc_mean_6", "required": true}, {"type": "double", "name":
+  "ffmc_mean_6", "required": true}, {"type": "double", "name": "dmc_mean_6", "required":
+  true}, {"type": "double", "name": "nesterov_mean_6", "required": true}, {"type":
+  "double", "name": "munger_mean_6", "required": true}, {"type": "double", "name":
+  "kbdi_mean_6", "required": true}, {"type": "double", "name": "isi_mean_6", "required":
+  true}, {"type": "double", "name": "angstroem_mean_6", "required": true}, {"type":
+  "double", "name": "bui_mean_6", "required": true}, {"type": "double", "name": "fwi_mean_6",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_6", "required":
+  true}, {"type": "double", "name": "temp16_mean_6", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_6", "required": true}, {"type": "double", "name": "rhum16_mean_6",
+  "required": true}, {"type": "double", "name": "wdir16_mean_6", "required": true},
+  {"type": "double", "name": "wspd16_mean_6", "required": true}, {"type": "double",
+  "name": "O3_mean_6", "required": true}, {"type": "double", "name": "NO2_mean_6",
+  "required": true}, {"type": "double", "name": "PM10_mean_6", "required": true},
+  {"type": "double", "name": "PM25_mean_6", "required": true}, {"type": "double",
+  "name": "month_mean_6", "required": true}, {"type": "double", "name": "dayofyear_mean_6",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_6", "required": true},
+  {"type": "double", "name": "isweekend_mean_6", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_6", "required": true}, {"type": "double", "name": "confinemenent_mean_6",
+  "required": true}, {"type": "double", "name": "ramadan_mean_6", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_6", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_6", "required": true}, {"type": "double", "name":
+  "holidays_mean_6", "required": true}, {"type": "double", "name": "holidaysBorder_mean_6",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_6", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_6", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_6", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_6", "required": true}, {"type": "double", "name": "temp_min_6",
+  "required": true}, {"type": "double", "name": "dwpt_min_6", "required": true}, {"type":
+  "double", "name": "rhum_min_6", "required": true}, {"type": "double", "name": "wdir_min_6",
+  "required": true}, {"type": "double", "name": "wspd_min_6", "required": true}, {"type":
+  "double", "name": "dc_min_6", "required": true}, {"type": "double", "name": "ffmc_min_6",
+  "required": true}, {"type": "double", "name": "dmc_min_6", "required": true}, {"type":
+  "double", "name": "nesterov_min_6", "required": true}, {"type": "double", "name":
+  "munger_min_6", "required": true}, {"type": "double", "name": "kbdi_min_6", "required":
+  true}, {"type": "double", "name": "isi_min_6", "required": true}, {"type": "double",
+  "name": "angstroem_min_6", "required": true}, {"type": "double", "name": "bui_min_6",
+  "required": true}, {"type": "double", "name": "fwi_min_6", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_6", "required": true}, {"type": "double",
+  "name": "temp16_min_6", "required": true}, {"type": "double", "name": "dwpt16_min_6",
+  "required": true}, {"type": "double", "name": "rhum16_min_6", "required": true},
+  {"type": "double", "name": "wdir16_min_6", "required": true}, {"type": "double",
+  "name": "wspd16_min_6", "required": true}, {"type": "double", "name": "O3_min_6",
+  "required": true}, {"type": "double", "name": "NO2_min_6", "required": true}, {"type":
+  "double", "name": "PM10_min_6", "required": true}, {"type": "double", "name": "PM25_min_6",
+  "required": true}, {"type": "double", "name": "month_min_6", "required": true},
+  {"type": "double", "name": "dayofyear_min_6", "required": true}, {"type": "double",
+  "name": "dayofweek_min_6", "required": true}, {"type": "double", "name": "isweekend_min_6",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_6", "required": true},
+  {"type": "double", "name": "confinemenent_min_6", "required": true}, {"type": "double",
+  "name": "ramadan_min_6", "required": true}, {"type": "double", "name": "bankHolidays_min_6",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_6", "required":
+  true}, {"type": "double", "name": "holidays_min_6", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_6", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_6", "required": true}, {"type": "double", "name": "calendar_min_min_6",
+  "required": true}, {"type": "double", "name": "calendar_max_min_6", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_6", "required": true}, {"type":
+  "double", "name": "temp_max_6", "required": true}, {"type": "double", "name": "dwpt_max_6",
+  "required": true}, {"type": "double", "name": "rhum_max_6", "required": true}, {"type":
+  "double", "name": "wdir_max_6", "required": true}, {"type": "double", "name": "wspd_max_6",
+  "required": true}, {"type": "double", "name": "dc_max_6", "required": true}, {"type":
+  "double", "name": "ffmc_max_6", "required": true}, {"type": "double", "name": "dmc_max_6",
+  "required": true}, {"type": "double", "name": "nesterov_max_6", "required": true},
+  {"type": "double", "name": "munger_max_6", "required": true}, {"type": "double",
+  "name": "kbdi_max_6", "required": true}, {"type": "double", "name": "isi_max_6",
+  "required": true}, {"type": "double", "name": "angstroem_max_6", "required": true},
+  {"type": "double", "name": "bui_max_6", "required": true}, {"type": "double", "name":
+  "fwi_max_6", "required": true}, {"type": "double", "name": "dailySeverityRating_max_6",
+  "required": true}, {"type": "double", "name": "temp16_max_6", "required": true},
+  {"type": "double", "name": "dwpt16_max_6", "required": true}, {"type": "double",
+  "name": "rhum16_max_6", "required": true}, {"type": "double", "name": "wdir16_max_6",
+  "required": true}, {"type": "double", "name": "wspd16_max_6", "required": true},
+  {"type": "double", "name": "O3_max_6", "required": true}, {"type": "double", "name":
+  "NO2_max_6", "required": true}, {"type": "double", "name": "PM10_max_6", "required":
+  true}, {"type": "double", "name": "PM25_max_6", "required": true}, {"type": "double",
+  "name": "month_max_6", "required": true}, {"type": "double", "name": "dayofyear_max_6",
+  "required": true}, {"type": "double", "name": "dayofweek_max_6", "required": true},
+  {"type": "double", "name": "isweekend_max_6", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_6", "required": true}, {"type": "double", "name": "confinemenent_max_6",
+  "required": true}, {"type": "double", "name": "ramadan_max_6", "required": true},
+  {"type": "double", "name": "bankHolidays_max_6", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_6", "required": true}, {"type": "double", "name": "holidays_max_6",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_6", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_6", "required": true}, {"type":
+  "double", "name": "calendar_min_max_6", "required": true}, {"type": "double", "name":
+  "calendar_max_max_6", "required": true}, {"type": "double", "name": "calendar_sum_max_6",
+  "required": true}, {"type": "double", "name": "temp_std_6", "required": true}, {"type":
+  "double", "name": "dwpt_std_6", "required": true}, {"type": "double", "name": "rhum_std_6",
+  "required": true}, {"type": "double", "name": "wdir_std_6", "required": true}, {"type":
+  "double", "name": "wspd_std_6", "required": true}, {"type": "double", "name": "dc_std_6",
+  "required": true}, {"type": "double", "name": "ffmc_std_6", "required": true}, {"type":
+  "double", "name": "dmc_std_6", "required": true}, {"type": "double", "name": "nesterov_std_6",
+  "required": true}, {"type": "double", "name": "munger_std_6", "required": true},
+  {"type": "double", "name": "kbdi_std_6", "required": true}, {"type": "double", "name":
+  "isi_std_6", "required": true}, {"type": "double", "name": "angstroem_std_6", "required":
+  true}, {"type": "double", "name": "bui_std_6", "required": true}, {"type": "double",
+  "name": "fwi_std_6", "required": true}, {"type": "double", "name": "dailySeverityRating_std_6",
+  "required": true}, {"type": "double", "name": "temp16_std_6", "required": true},
+  {"type": "double", "name": "dwpt16_std_6", "required": true}, {"type": "double",
+  "name": "rhum16_std_6", "required": true}, {"type": "double", "name": "wdir16_std_6",
+  "required": true}, {"type": "double", "name": "wspd16_std_6", "required": true},
+  {"type": "double", "name": "O3_std_6", "required": true}, {"type": "double", "name":
+  "NO2_std_6", "required": true}, {"type": "double", "name": "PM10_std_6", "required":
+  true}, {"type": "double", "name": "PM25_std_6", "required": true}, {"type": "double",
+  "name": "month_std_6", "required": true}, {"type": "double", "name": "dayofyear_std_6",
+  "required": true}, {"type": "double", "name": "dayofweek_std_6", "required": true},
+  {"type": "double", "name": "isweekend_std_6", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_6", "required": true}, {"type": "double", "name": "confinemenent_std_6",
+  "required": true}, {"type": "double", "name": "ramadan_std_6", "required": true},
+  {"type": "double", "name": "bankHolidays_std_6", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_6", "required": true}, {"type": "double", "name": "holidays_std_6",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_6", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_6", "required": true}, {"type":
+  "double", "name": "calendar_min_std_6", "required": true}, {"type": "double", "name":
+  "calendar_max_std_6", "required": true}, {"type": "double", "name": "calendar_sum_std_6",
+  "required": true}, {"type": "double", "name": "temp_sum_6", "required": true}, {"type":
+  "double", "name": "dwpt_sum_6", "required": true}, {"type": "double", "name": "rhum_sum_6",
+  "required": true}, {"type": "double", "name": "wdir_sum_6", "required": true}, {"type":
+  "double", "name": "wspd_sum_6", "required": true}, {"type": "double", "name": "dc_sum_6",
+  "required": true}, {"type": "double", "name": "ffmc_sum_6", "required": true}, {"type":
+  "double", "name": "dmc_sum_6", "required": true}, {"type": "double", "name": "nesterov_sum_6",
+  "required": true}, {"type": "double", "name": "munger_sum_6", "required": true},
+  {"type": "double", "name": "kbdi_sum_6", "required": true}, {"type": "double", "name":
+  "isi_sum_6", "required": true}, {"type": "double", "name": "angstroem_sum_6", "required":
+  true}, {"type": "double", "name": "bui_sum_6", "required": true}, {"type": "double",
+  "name": "fwi_sum_6", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_6",
+  "required": true}, {"type": "double", "name": "temp16_sum_6", "required": true},
+  {"type": "double", "name": "dwpt16_sum_6", "required": true}, {"type": "double",
+  "name": "rhum16_sum_6", "required": true}, {"type": "double", "name": "wdir16_sum_6",
+  "required": true}, {"type": "double", "name": "wspd16_sum_6", "required": true},
+  {"type": "double", "name": "O3_sum_6", "required": true}, {"type": "double", "name":
+  "NO2_sum_6", "required": true}, {"type": "double", "name": "PM10_sum_6", "required":
+  true}, {"type": "double", "name": "PM25_sum_6", "required": true}, {"type": "double",
+  "name": "month_sum_6", "required": true}, {"type": "double", "name": "dayofyear_sum_6",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_6", "required": true},
+  {"type": "double", "name": "isweekend_sum_6", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_6", "required": true}, {"type": "double", "name": "confinemenent_sum_6",
+  "required": true}, {"type": "double", "name": "ramadan_sum_6", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_6", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_6", "required": true}, {"type": "double", "name": "holidays_sum_6",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_6", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_6", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_6", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_6", "required": true}, {"type": "double", "name": "calendar_sum_sum_6",
+  "required": true}, {"type": "double", "name": "temp_mean_7", "required": true},
+  {"type": "double", "name": "dwpt_mean_7", "required": true}, {"type": "double",
+  "name": "rhum_mean_7", "required": true}, {"type": "double", "name": "wdir_mean_7",
+  "required": true}, {"type": "double", "name": "wspd_mean_7", "required": true},
+  {"type": "double", "name": "dc_mean_7", "required": true}, {"type": "double", "name":
+  "ffmc_mean_7", "required": true}, {"type": "double", "name": "dmc_mean_7", "required":
+  true}, {"type": "double", "name": "nesterov_mean_7", "required": true}, {"type":
+  "double", "name": "munger_mean_7", "required": true}, {"type": "double", "name":
+  "kbdi_mean_7", "required": true}, {"type": "double", "name": "isi_mean_7", "required":
+  true}, {"type": "double", "name": "angstroem_mean_7", "required": true}, {"type":
+  "double", "name": "bui_mean_7", "required": true}, {"type": "double", "name": "fwi_mean_7",
+  "required": true}, {"type": "double", "name": "dailySeverityRating_mean_7", "required":
+  true}, {"type": "double", "name": "temp16_mean_7", "required": true}, {"type": "double",
+  "name": "dwpt16_mean_7", "required": true}, {"type": "double", "name": "rhum16_mean_7",
+  "required": true}, {"type": "double", "name": "wdir16_mean_7", "required": true},
+  {"type": "double", "name": "wspd16_mean_7", "required": true}, {"type": "double",
+  "name": "O3_mean_7", "required": true}, {"type": "double", "name": "NO2_mean_7",
+  "required": true}, {"type": "double", "name": "PM10_mean_7", "required": true},
+  {"type": "double", "name": "PM25_mean_7", "required": true}, {"type": "double",
+  "name": "month_mean_7", "required": true}, {"type": "double", "name": "dayofyear_mean_7",
+  "required": true}, {"type": "double", "name": "dayofweek_mean_7", "required": true},
+  {"type": "double", "name": "isweekend_mean_7", "required": true}, {"type": "double",
+  "name": "couvrefeux_mean_7", "required": true}, {"type": "double", "name": "confinemenent_mean_7",
+  "required": true}, {"type": "double", "name": "ramadan_mean_7", "required": true},
+  {"type": "double", "name": "bankHolidays_mean_7", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_mean_7", "required": true}, {"type": "double", "name":
+  "holidays_mean_7", "required": true}, {"type": "double", "name": "holidaysBorder_mean_7",
+  "required": true}, {"type": "double", "name": "calendar_mean_mean_7", "required":
+  true}, {"type": "double", "name": "calendar_min_mean_7", "required": true}, {"type":
+  "double", "name": "calendar_max_mean_7", "required": true}, {"type": "double", "name":
+  "calendar_sum_mean_7", "required": true}, {"type": "double", "name": "temp_min_7",
+  "required": true}, {"type": "double", "name": "dwpt_min_7", "required": true}, {"type":
+  "double", "name": "rhum_min_7", "required": true}, {"type": "double", "name": "wdir_min_7",
+  "required": true}, {"type": "double", "name": "wspd_min_7", "required": true}, {"type":
+  "double", "name": "dc_min_7", "required": true}, {"type": "double", "name": "ffmc_min_7",
+  "required": true}, {"type": "double", "name": "dmc_min_7", "required": true}, {"type":
+  "double", "name": "nesterov_min_7", "required": true}, {"type": "double", "name":
+  "munger_min_7", "required": true}, {"type": "double", "name": "kbdi_min_7", "required":
+  true}, {"type": "double", "name": "isi_min_7", "required": true}, {"type": "double",
+  "name": "angstroem_min_7", "required": true}, {"type": "double", "name": "bui_min_7",
+  "required": true}, {"type": "double", "name": "fwi_min_7", "required": true}, {"type":
+  "double", "name": "dailySeverityRating_min_7", "required": true}, {"type": "double",
+  "name": "temp16_min_7", "required": true}, {"type": "double", "name": "dwpt16_min_7",
+  "required": true}, {"type": "double", "name": "rhum16_min_7", "required": true},
+  {"type": "double", "name": "wdir16_min_7", "required": true}, {"type": "double",
+  "name": "wspd16_min_7", "required": true}, {"type": "double", "name": "O3_min_7",
+  "required": true}, {"type": "double", "name": "NO2_min_7", "required": true}, {"type":
+  "double", "name": "PM10_min_7", "required": true}, {"type": "double", "name": "PM25_min_7",
+  "required": true}, {"type": "double", "name": "month_min_7", "required": true},
+  {"type": "double", "name": "dayofyear_min_7", "required": true}, {"type": "double",
+  "name": "dayofweek_min_7", "required": true}, {"type": "double", "name": "isweekend_min_7",
+  "required": true}, {"type": "double", "name": "couvrefeux_min_7", "required": true},
+  {"type": "double", "name": "confinemenent_min_7", "required": true}, {"type": "double",
+  "name": "ramadan_min_7", "required": true}, {"type": "double", "name": "bankHolidays_min_7",
+  "required": true}, {"type": "double", "name": "bankHolidaysEve_min_7", "required":
+  true}, {"type": "double", "name": "holidays_min_7", "required": true}, {"type":
+  "double", "name": "holidaysBorder_min_7", "required": true}, {"type": "double",
+  "name": "calendar_mean_min_7", "required": true}, {"type": "double", "name": "calendar_min_min_7",
+  "required": true}, {"type": "double", "name": "calendar_max_min_7", "required":
+  true}, {"type": "double", "name": "calendar_sum_min_7", "required": true}, {"type":
+  "double", "name": "temp_max_7", "required": true}, {"type": "double", "name": "dwpt_max_7",
+  "required": true}, {"type": "double", "name": "rhum_max_7", "required": true}, {"type":
+  "double", "name": "wdir_max_7", "required": true}, {"type": "double", "name": "wspd_max_7",
+  "required": true}, {"type": "double", "name": "dc_max_7", "required": true}, {"type":
+  "double", "name": "ffmc_max_7", "required": true}, {"type": "double", "name": "dmc_max_7",
+  "required": true}, {"type": "double", "name": "nesterov_max_7", "required": true},
+  {"type": "double", "name": "munger_max_7", "required": true}, {"type": "double",
+  "name": "kbdi_max_7", "required": true}, {"type": "double", "name": "isi_max_7",
+  "required": true}, {"type": "double", "name": "angstroem_max_7", "required": true},
+  {"type": "double", "name": "bui_max_7", "required": true}, {"type": "double", "name":
+  "fwi_max_7", "required": true}, {"type": "double", "name": "dailySeverityRating_max_7",
+  "required": true}, {"type": "double", "name": "temp16_max_7", "required": true},
+  {"type": "double", "name": "dwpt16_max_7", "required": true}, {"type": "double",
+  "name": "rhum16_max_7", "required": true}, {"type": "double", "name": "wdir16_max_7",
+  "required": true}, {"type": "double", "name": "wspd16_max_7", "required": true},
+  {"type": "double", "name": "O3_max_7", "required": true}, {"type": "double", "name":
+  "NO2_max_7", "required": true}, {"type": "double", "name": "PM10_max_7", "required":
+  true}, {"type": "double", "name": "PM25_max_7", "required": true}, {"type": "double",
+  "name": "month_max_7", "required": true}, {"type": "double", "name": "dayofyear_max_7",
+  "required": true}, {"type": "double", "name": "dayofweek_max_7", "required": true},
+  {"type": "double", "name": "isweekend_max_7", "required": true}, {"type": "double",
+  "name": "couvrefeux_max_7", "required": true}, {"type": "double", "name": "confinemenent_max_7",
+  "required": true}, {"type": "double", "name": "ramadan_max_7", "required": true},
+  {"type": "double", "name": "bankHolidays_max_7", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_max_7", "required": true}, {"type": "double", "name": "holidays_max_7",
+  "required": true}, {"type": "double", "name": "holidaysBorder_max_7", "required":
+  true}, {"type": "double", "name": "calendar_mean_max_7", "required": true}, {"type":
+  "double", "name": "calendar_min_max_7", "required": true}, {"type": "double", "name":
+  "calendar_max_max_7", "required": true}, {"type": "double", "name": "calendar_sum_max_7",
+  "required": true}, {"type": "double", "name": "temp_std_7", "required": true}, {"type":
+  "double", "name": "dwpt_std_7", "required": true}, {"type": "double", "name": "rhum_std_7",
+  "required": true}, {"type": "double", "name": "wdir_std_7", "required": true}, {"type":
+  "double", "name": "wspd_std_7", "required": true}, {"type": "double", "name": "dc_std_7",
+  "required": true}, {"type": "double", "name": "ffmc_std_7", "required": true}, {"type":
+  "double", "name": "dmc_std_7", "required": true}, {"type": "double", "name": "nesterov_std_7",
+  "required": true}, {"type": "double", "name": "munger_std_7", "required": true},
+  {"type": "double", "name": "kbdi_std_7", "required": true}, {"type": "double", "name":
+  "isi_std_7", "required": true}, {"type": "double", "name": "angstroem_std_7", "required":
+  true}, {"type": "double", "name": "bui_std_7", "required": true}, {"type": "double",
+  "name": "fwi_std_7", "required": true}, {"type": "double", "name": "dailySeverityRating_std_7",
+  "required": true}, {"type": "double", "name": "temp16_std_7", "required": true},
+  {"type": "double", "name": "dwpt16_std_7", "required": true}, {"type": "double",
+  "name": "rhum16_std_7", "required": true}, {"type": "double", "name": "wdir16_std_7",
+  "required": true}, {"type": "double", "name": "wspd16_std_7", "required": true},
+  {"type": "double", "name": "O3_std_7", "required": true}, {"type": "double", "name":
+  "NO2_std_7", "required": true}, {"type": "double", "name": "PM10_std_7", "required":
+  true}, {"type": "double", "name": "PM25_std_7", "required": true}, {"type": "double",
+  "name": "month_std_7", "required": true}, {"type": "double", "name": "dayofyear_std_7",
+  "required": true}, {"type": "double", "name": "dayofweek_std_7", "required": true},
+  {"type": "double", "name": "isweekend_std_7", "required": true}, {"type": "double",
+  "name": "couvrefeux_std_7", "required": true}, {"type": "double", "name": "confinemenent_std_7",
+  "required": true}, {"type": "double", "name": "ramadan_std_7", "required": true},
+  {"type": "double", "name": "bankHolidays_std_7", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_std_7", "required": true}, {"type": "double", "name": "holidays_std_7",
+  "required": true}, {"type": "double", "name": "holidaysBorder_std_7", "required":
+  true}, {"type": "double", "name": "calendar_mean_std_7", "required": true}, {"type":
+  "double", "name": "calendar_min_std_7", "required": true}, {"type": "double", "name":
+  "calendar_max_std_7", "required": true}, {"type": "double", "name": "calendar_sum_std_7",
+  "required": true}, {"type": "double", "name": "temp_sum_7", "required": true}, {"type":
+  "double", "name": "dwpt_sum_7", "required": true}, {"type": "double", "name": "rhum_sum_7",
+  "required": true}, {"type": "double", "name": "wdir_sum_7", "required": true}, {"type":
+  "double", "name": "wspd_sum_7", "required": true}, {"type": "double", "name": "dc_sum_7",
+  "required": true}, {"type": "double", "name": "ffmc_sum_7", "required": true}, {"type":
+  "double", "name": "dmc_sum_7", "required": true}, {"type": "double", "name": "nesterov_sum_7",
+  "required": true}, {"type": "double", "name": "munger_sum_7", "required": true},
+  {"type": "double", "name": "kbdi_sum_7", "required": true}, {"type": "double", "name":
+  "isi_sum_7", "required": true}, {"type": "double", "name": "angstroem_sum_7", "required":
+  true}, {"type": "double", "name": "bui_sum_7", "required": true}, {"type": "double",
+  "name": "fwi_sum_7", "required": true}, {"type": "double", "name": "dailySeverityRating_sum_7",
+  "required": true}, {"type": "double", "name": "temp16_sum_7", "required": true},
+  {"type": "double", "name": "dwpt16_sum_7", "required": true}, {"type": "double",
+  "name": "rhum16_sum_7", "required": true}, {"type": "double", "name": "wdir16_sum_7",
+  "required": true}, {"type": "double", "name": "wspd16_sum_7", "required": true},
+  {"type": "double", "name": "O3_sum_7", "required": true}, {"type": "double", "name":
+  "NO2_sum_7", "required": true}, {"type": "double", "name": "PM10_sum_7", "required":
+  true}, {"type": "double", "name": "PM25_sum_7", "required": true}, {"type": "double",
+  "name": "month_sum_7", "required": true}, {"type": "double", "name": "dayofyear_sum_7",
+  "required": true}, {"type": "double", "name": "dayofweek_sum_7", "required": true},
+  {"type": "double", "name": "isweekend_sum_7", "required": true}, {"type": "double",
+  "name": "couvrefeux_sum_7", "required": true}, {"type": "double", "name": "confinemenent_sum_7",
+  "required": true}, {"type": "double", "name": "ramadan_sum_7", "required": true},
+  {"type": "double", "name": "bankHolidays_sum_7", "required": true}, {"type": "double",
+  "name": "bankHolidaysEve_sum_7", "required": true}, {"type": "double", "name": "holidays_sum_7",
+  "required": true}, {"type": "double", "name": "holidaysBorder_sum_7", "required":
+  true}, {"type": "double", "name": "calendar_mean_sum_7", "required": true}, {"type":
+  "double", "name": "calendar_min_sum_7", "required": true}, {"type": "double", "name":
+  "calendar_max_sum_7", "required": true}, {"type": "double", "name": "calendar_sum_sum_7",
+  "required": true}, {"type": "double", "name": "class_risk", "required": true}, {"type":
+  "double", "name": "nbsinister", "required": true}, {"type": "double", "name": "risk",
+  "required": true}]}'
+source: '{"tags": {"mlflow.user": "caron", "mlflow.source.name": "train_trees.py",
+  "mlflow.source.type": "LOCAL", "mlflow.source.git.commit": "772782227508a6e54373f3542f61caf07f80d94b"}}'
+source_type: code

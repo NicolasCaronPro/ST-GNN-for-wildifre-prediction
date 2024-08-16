@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/923380569075259843/1fee7360a8754256b47dc1b744637e1b/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '923380569075259843'
+lifecycle_stage: active
+run_id: 1fee7360a8754256b47dc1b744637e1b
+run_name: xgboost_risk_regression_rmse_features
+run_uuid: 1fee7360a8754256b47dc1b744637e1b
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1723786849111
+status: 1
+tags: []
+user_id: caron

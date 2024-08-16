@@ -397,8 +397,8 @@ class GraphStructure():
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
-            testloader = DataLoader(X, 1)
-            for i, data in enumerate(testloader, 0):
+            test_loader = DataLoader(X, 1)
+            for i, data in enumerate(test_loader, 0):
                 inputs, _, edges = data
                 output = self.model(inputs, edges)
                 return output

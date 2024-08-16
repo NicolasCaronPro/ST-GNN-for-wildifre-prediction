@@ -7,365 +7,256 @@ def find_spatial_date(x, firepoint):
 def find_temporal_date(dates):
     return sample(dates, k = 1)[0]
 
-def get_sub_nodes_feature_2D(graph, shape: int,
-                            Xset : np.array,
-                            scaling : str,
-                            features_name_1D : dict,
-                            departements : list,
-                            features : list,
-                            sinister : str,
-                            path : Path,
-                            prefix : str) -> tuple:
+def get_sub_nodes_feature_2D(graph, subNode: np.array,
+                        departements : list,
+                        features : list, sinister : str,
+                        path : Path,
+                        dir_train : Path,
+                        resolution : str, 
+                        graph_construct : str) -> tuple:
     
     # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
+
+    dir_output = dir_train / '2D_database'
+
     assert graph.nodes is not None
 
-    # Create output diretory
-    dir_output = path / '2D'
-    check_and_create_path(path)
-    check_and_create_path(path / '2D')
-    
-    # Define pixel size
-    n_pixel_y = 0.009
-    n_pixel_x = 0.012
+    logger.info('Load 2D nodes features')
 
-    # Define Features for 2D database
-    features_name, newShape = get_features_name_lists_2D(shape, features)
+    features_name, newShape = get_features_name_lists_2D(graph.scale, features)
 
-    # Load mask
-    dir_mask = path / 'raster' / '1x1'
+    dir_encoder = dir_train / 'Encoder'
 
-    doMeteo = 'temp' in features
-    doSent = 'sentinel' in features
-    doLand = 'landcover' in features
-    doForet = 'foret' in features
-    doEle = 'elevation' in features
-    doPop = 'population' in features
-    doHighway = 'highway' in features
-    doCalendar = 'Calendar' in features
-    doGeo = 'Geo' in features
-    doHistorical = 'Historical' in features
-    doAir = 'air' in features
-    doDW = 'dynamicWorld' in features
-    doNappes = 'nappes' in features
-    doVigi = 'vigicrues' in features
-    doHighway = 'highway' in features
-
-    dir_encoder = root_graph / path / 'Encoder'
-
-    if doLand:
+    if 'landcover' in features:
         encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
         encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
         encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
 
-    if doCalendar:
+    if 'Calendar' in features:
         size_calendar = len(calendar_variables)
+        encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
 
-    if doGeo:
-        size_geo = len(geo_variables)
-        
-    # For each departement
+    if 'Geo' in features:
+        encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
+
+    dir_mask = path / 'raster'
+
     for departement in departements:
+        check_and_create_path(dir_output / departement)
+        check_and_create_path(dir_output / departement / str(graph.scale))
         logger.info(departement)
-        # Define the directory for the data
-        dir_data = rootDisk / departement / 'data'
-        
-        # Loading the mask where each pixel value are nodes from graph
-        name = departement+'rasterScale'+str(graph.scale)+'.pkl'
-        mask = pickle.load(open(dir_mask / name, 'rb'))
 
-        # Get nodes from that department
-        nodeDepartementMask = np.argwhere(Xset[:,3] == str2int[departement.split('-')[-1]])
-        nodeDepartement = Xset[nodeDepartementMask].reshape(-1, Xset.shape[1])
-        if nodeDepartementMask.shape[0] == 0:
+        dir_data = root / 'csv' / departement / 'raster' / resolution
+        dir_target =  dir_train / 'influence'
+        dir_target_bin =  dir_train / 'bin'
+
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        mask = read_object(name, dir_mask)
+
+        Y_dept = read_object(f'{departement}InfluenceScale{graph.scale}.pkl', dir_target)
+        Y_dept_bin = read_object(f'{departement}binScale{graph.scale}.pkl', dir_target_bin)
+
+        nodeDepartementMask = np.argwhere(subNode[:,3] == str2int[departement.split('-')[-1]])
+        nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
+
+        logger.info(nodeDepartement.shape)
+
+        if nodeDepartement.shape[0] == 0:
             continue
 
-        # Load meteostat
-        if doMeteo:
-            #meteostat = pd.read_csv(rootDisk / departement / 'data' / 'meteostat' / 'meteostat.csv')
-            #for cem in cems_variables:
-            #    meteostat[cem] = scaler(meteostat[cem].values, x_train[:, features_name_1D[cem] + 2], concat=False)
-            pass
+        unDates = np.unique(nodeDepartement[:,4]).astype(int)
 
-        # Load elevation raster
-        if doEle:
-            elevation, _, _ = read_tif(dir_data / 'elevation' / 'elevation.tif') # Read the tif file
-            elevation = elevation[0]
-            elevation = resize_no_dim(elevation, mask.shape[0], mask.shape[1]).astype(int) # Resize to the current shape
-            save_object(elevation, 'elevation.pkl', dir_output)
+        if 'population' in features:
+            name = 'population.pkl'
+            arrayPop = read_object(name, dir_data)
 
-        if doForet:
-            check_and_create_path(dir_output / 'foret')
-            foret = gpd.read_file(dir_data / 'BDFORET' / 'foret.geojson')
-            foret, _, _ = rasterization(foret, n_pixel_y, n_pixel_x, 'code', defVal=0, dir_output=dir_output / 'foret')
-            foret = foret[-1]
-            foret = encoder_foret.transform(foret.reshape(-1,1)).values.reshape(foret.shape)
-            outputName = 'foret.pkl'
-            save_object(foret, outputName, dir_output)
+        if 'elevation' in features:
+            name = 'elevation.pkl'
+            arrayEl = read_object(name, dir_data)
 
-        geo = gpd.read_file(dir_data / 'spatial' / 'hexagones.geojson')
+        if 'highway' in features:
+            name = 'osmnx.pkl'
+            arrayOS = read_object(name, dir_data)
 
-         # Load population raster
-        if doPop:
-            check_and_create_path(dir_output / 'population') # Create temporal directory (nothign to do with meteo features)
-            population, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'population', dir_output / 'population') # Create a raster - > (1, H, W)
-            population = population[0] # Get first band - > (H, W)
-            save_object(population, 'population.pkl', dir_output)
+        if 'foret' in features:
+            name = 'foret.pkl'
+            arrayForet = read_object(name, dir_data)
 
-        # Load highway raster
-        if doHighway:
-            check_and_create_path(dir_output / 'osmnx') # Create temporal directory (nothign to do with meteo features)
-            osmnx, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'osmnx', dir_output / 'osmnx') # Create a raster - > (1, H, W)
-            osmnx = osmnx[0] # Get first band - > (H, W)
-            save_object(osmnx, 'osmnx.pkl', dir_output)
+        if 'landcover' in features:
+            if 'foret_encoder' in landcover_variables:
+                #logger.info('Foret landcover')
+                name = 'foret_landcover.pkl'
+                arrayForetLandcover = read_object(name, dir_data)
 
-        # Load landcover
-        if doLand:
-            landcover, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'landcover' / 'summer.tif')
-            landcover = landcover[-1]
-            landcover[~np.isnan(landcover)] = np.round(landcover[~np.isnan(landcover)])
-            landcover[np.isnan(landcover)] = -1
-            landcover = encoder_landcover.transform(landcover.reshape(-1,1)).values.reshape(landcover.shape)
-            landcover = (resize_no_dim(landcover, mask.shape[0], mask.shape[-1]))
-            save_object(landcover, 'landcover.pkl', dir_output)
+            if 'landcover_encoder' in landcover_variables:
+                #logger.info('Dynamic World landcover')
+                name = 'dynamic_world_landcover.pkl'
+                arrayLand = read_object(name, dir_data)
 
-        if doSent:
-            logger.info('Sentinel')
-
-            summer, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'sentinel' / 'summer.tif')
-            
-            for band in range(5):
-                summer[band, np.isnan(summer[band])] = np.nanmean(summer[band])
-
-            summer = resize(summer, mask.shape[0], mask.shape[-1], summer.shape[0])
-            save_object(summer, 'summer.pkl', dir_output)
-
-            winter, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'sentinel' / 'winter.tif')
-
-            for band in range(5):
-                winter[band, np.isnan(winter[band])] = np.nanmean(winter[band])
-
-            winter = resize(winter, mask.shape[0], mask.shape[-1], winter.shape[0])
-            save_object(winter, 'winter.pkl', dir_output)
-
-            autumn, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'sentinel' / 'autumn.tif')
-
-            for band in range(5):
-                autumn[band, np.isnan(autumn[band])] = np.nanmean(autumn[band])
-
-            autumn = resize(autumn, mask.shape[0], mask.shape[-1], autumn.shape[0])
-            save_object(autumn, 'autumn.pkl', dir_output)
-
-            spring, _, _ = read_tif(rootDisk / departement / 'data' / 'GEE' / 'sentinel' / 'spring.tif')
-
-            for band in range(5):
-                spring[band, np.isnan(spring[band])] = np.nanmean(spring[band])
-
-            spring = resize(spring, mask.shape[0], mask.shape[-1], spring.shape[0])
-            save_object(spring, 'spring.pkl', dir_output)
-
-            logger.info(summer.shape, winter.shape, spring.shape, autumn.shape)
-
-        Xk = list(zip(geo.longitude, geo.latitude))
-        geo['scale'] = graph._predict_node(Xk)
-
-        # This will take timmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmme
-        for i, node in enumerate(nodeDepartement):
-            if i % 500 == 0:
-                logger.info(f'Node {i} / {nodeDepartement.shape} : {(node[:5])}')
-
-            indD = (node[4]).astype(int)
-            index_1D = np.argwhere((Xset[:,0] == node[0]) & (Xset[:,4] == node[4]))
-    
-            spatioTemporalRaster = np.full((shape2D[0], shape2D[1], newShape), np.nan, dtype=float)
-            spatioTemporalRaster[:,:,0] = node[0]
-            spatioTemporalRaster[:,:,1] = node[1]
-            spatioTemporalRaster[:,:,2] = node[2]
-            spatioTemporalRaster[:,:,3] = node[3]
-            spatioTemporalRaster[:,:,4] = node[4]
-            spatioTemporalRaster[:,:,5] = node[5]
-
-            # Add historical
-            if doHistorical:
-                spatioTemporalRaster[:,:,features_name.index('Historical')] = Xset[index_1D, features_name_1D['Historical'] + 2]
-
-            # Add calendar
-            if doCalendar:
-                for iv in range(size_calendar):
-                    spatioTemporalRaster[:,:, features_name.index('Calendar') + iv] = Xset[index_1D, features_name_1D['Calendar'] + iv]
-
-            # Add geo
-            if doGeo:
-                for iv in range(size_geo):
-                    spatioTemporalRaster[:,:, features_name.index('Geo') + iv] = Xset[index_1D, features_name_1D['Geo'] + iv]
-
-            # Add meteorological
-            if doMeteo:
-                #meteostatDate = meteostat[meteostat['creneau'] == allDates[indD]]
-                #raster_meteo raster_meteo(spatioTemporalRaster, geo[geo['scale'] == node[0]], meteostatDate, \
-                #features_name.index('temp), n_pixel_x, n_pixel_y, dir_output)
-                for cems in cems_variables:
-                    spatioTemporalRaster[:,:, features_name.index(cems)] = Xset[index_1D, features_name_1D[cems]]
-
-            if doAir:
-                for iv, pol in enumerate(air_variables):
-                    spatioTemporalRaster[:,:, features_name.index('air') + iv] = Xset[index_1D, features_name_1D['air'] + iv ]
-
-            ########################################### This is time consuming ##########################################################
-            # Add sentinel
-            if doSent:
-                #raster_sentinel(spatioTemporalRaster, allDates[indD], node[0], mask, rootDisk / departement / 'data', features_name.index('sentinel'))
-                month = allDates[node[4].astype(int)].split('-')[1]
-                if month >= '3' and month <= '5':
-                    sent = spring
-                elif month >= '6' and month <= '8':
-                    sent = summer
-                elif month >= '9' and month <= '11':
-                    sent = autumn
-                else:
-                    sent = winter
-
-                raster_sentinel_2(spatioTemporalRaster, node[0], mask, sent, features_name.index('sentinel'))
-
-            # Add landcover
-            if doLand:
-                raster_landcover_2(spatioTemporalRaster, node[0], mask, landcover, features_name.index('landcover'), encoder_landcover)
-                raster_foret(spatioTemporalRaster, mask, node[0], foret, features_name.index('foret'), encoder_foret)
-                raster_osmnx(spatioTemporalRaster, mask, node[0], osmnx, features_name.index('highway'), encoder_osmnx)
-            ############################################################################################################################
-
-            # Add elevation
-            if doEle:
-                raster_elevation(spatioTemporalRaster, mask, node[0], elevation, features_name.index('elevation'))
-
-            # Add population
-            if doPop:
-                raster_population(spatioTemporalRaster, mask, node[0], population, n_pixel_x, n_pixel_y, features_name.index('population'))
-
-            if doForet:
-                pass
-
-            if doDW:
-                pass
-
-            if doHighway:
-                pass
-
-            if doNappes:
-                pass
-
-            if doVigi:
-                pass
+            if 'highway_encoder' in landcover_variables:
+                #logger.info('OSMNX landcover')
+                name = 'osmnx_landcover.pkl'
+                arrayOSLand = read_object(name, dir_data)
         
-            # Save ouptut file
-            save_object(spatioTemporalRaster, str(int(node[0]))+'_'+str(indD)+'.pkl', dir_output / prefix / 'data')
+        for unDate in unDates:
+            if unDate % 100 == 0:
+                logger.info(f'{allDates[unDate]}')
 
-    # Return original subnode
-    return features_name, newShape
+            Y = Y_dept[:, :, unDate]
+            save_object(Y, f'Y_{unDate}.pkl', dir_output / departement / str(graph.scale) / 'influence')
 
-if __name__ == '__main__':
+            Y = Y_dept_bin[:, :, unDate]
+            save_object(Y, f'Y_{unDate}.pkl', dir_output / departement / str(graph.scale) / 'binary')
 
-    dir_output = 'temp/'
-    check_and_create_path(dir_output)
+            X = np.empty((newShape, *mask.shape))
 
-    graph = read_object('graph_5.pkl', Path('train/'))
-    regions = gpd.read_file('regions.geojson')
+            if (dir_output / departement / f'X_{unDate}.pkl').is_file():
+                continue
 
-    n_pixel_y = 0.009
-    n_pixel_x = 0.012
+            if 'population' in features:
+                X[features_name.index('population'), :, :] = arrayPop
 
-    fp = []
-    nfp = []
+            if 'elevation' in features:
+                X[features_name.index('elevation'), :, :] = arrayEl
 
-    fp = pd.read_csv(dir_output / 'firepoints.csv')
-    nfp = pd.read_csv(dir_output / 'nonfirepoints.csv')
-    Xk = list(zip(fp.longitude, fp.latitude)) 
-    fp['scale'] = graph._predict_node(Xk)
+            if 'highway' in features:
+                X[features_name.index(osmnxint2str[osmnx_variables[0]]) : features_name.index(osmnxint2str[osmnx_variables[-1]]) + 1, :, :] = arrayOS
 
-    Xk = list(zip(nfp.longitude, nfp.latitude)) 
-    nfp['scale'] = graph._predict_node(Xk)
+            if 'foret' in features:
+                X[features_name.index(foretint2str[foret_variables[0]]) : features_name.index(foretint2str[foret_variables[-1]]) + 1, :, :] = arrayForet
 
-    for dept in departements:
-        code = int(dept.split('-')[1])
+            if 'landcover' in features:
+                if 'foret_encoder' in landcover_variables:
+                    #logger.info('Foret landcover')
+                    X[features_name.index('foret_encoder'), :, :] = encoder_foret.transform(arrayForetLandcover.reshape(-1,1)).values.reshape(arrayForetLandcover.shape)
 
-        regions.loc[regions[regions['departement'] == (dept.split('-')[-1][0].upper()) + dept.split('-')[-1][1:]].index, 'departement'] = code
-        sat0, lons, lats = rasterization(regions[regions['departement'] == code], n_pixel_y, n_pixel_x, 'scale', dir_output, dept+'_scale')
-        sat0 = sat0[0]
-        logger.info(sat0.shape)
-        #sat0 = read_object(dept+'rasterScale5.pkl', GNN_PATH / 'test/2023/raster/')
-        #sat0 = resize_no_dim(sat0, 104, 122).round(0)
-        logger.info(np.unique(sat0))
-        meteostat = pd.read_csv(rootDisk / dept / 'data' / 'meteostat' / 'meteostat.csv')
+                if 'landcover_encoder' in landcover_variables:
+                    #logger.info('Dynamic World landcover')
+                    X[features_name.index('landcover_encoder'), :, :] = encoder_landcover.transform(arrayLand.reshape(-1,1)).values.reshape(arrayLand.shape)
 
-        """firepoint = pd.read_csv(root / dept / 'firepoint' / 'NATURELSfire.csv')
-        firepoint['departement'] = code
+                if 'highway_encoder' in landcover_variables:
+                    #logger.info('OSMNX landcover')
+                    X[features_name.index('highway_encoder'), :, :] = encoder_osmnx.transform(arrayOSLand.reshape(-1,1)).values.reshape(arrayOSLand.shape)
 
-        nonfirepointSpatial = regions[regions['departement'] == code].copy(deep=True)
-        nonfirepointSpatial.drop(nonfirepointSpatial[nonfirepointSpatial['hex_id'].isin(firepoint['h3'])].index, inplace=True)
-        nonfirepointSpatial['date'] = nonfirepointSpatial.apply(lambda x : find_spatial_date(x['hex_id'], firepoint), axis=1)
-        nonfirepointSpatial['h3'] = nonfirepointSpatial['hex_id']
+            #logger.info('Calendar')
+            if 'Calendar' in features:
+                band = calendar_variables[0]
+                date = allDates[unDate]
+                ddate = dt.datetime.strptime(date, '%Y-%m-%d')
+                stop_calendar = 11
+                x = np.empty(stop_calendar + 4)
+                x[0] = int(date.split('-')[1]) # month
+                x[1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
+                x[2] = ddate.weekday() # dayofweek
+                x[3] = ddate.weekday() >= 5 # isweekend
+                x[4] = pendant_couvrefeux(ddate) # couvrefeux
+                x[5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+                x[6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
+                x[7] = 1 if ddate in jours_feries else 0 # bankHolidays
+                x[8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
+                x[9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 # holidays
+                x[10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 ) \
+                    or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
 
-        allDates = find_dates_between(datesDico[dept]['start'], datesDico[dept]['end'])
-        nonFireDates = [date  for date in allDates if date not in firepoint['date']]
-        nonfirepointTemporal = firepoint.copy(deep=True)
-        nonfirepointTemporal['date'] = nonfirepointTemporal.apply(lambda x : find_temporal_date(nonFireDates), axis=1)
+                x[:stop_calendar] = np.round(encoder_calendar.transform(x[:stop_calendar].reshape(-1, stop_calendar))).values
+                
+                for ir in range(stop_calendar, size_calendar):
+                    var_ir = calendar_variables[ir]
+                    if var_ir == 'calendar_mean':
+                        x[ir] = round(np.mean(x), 3)
+                    elif var_ir == 'calendar_max':
+                        x[ir] = round(np.max(x), 3)
+                    elif var_ir == 'calendar_min':
+                        x[ir] = round(np.min(x), 3)
+                    elif var_ir == 'calendar_sum':
+                        x[ir] = round(np.sum(x), 3)
+                    else:
+                        logger.info(f'Unknow operation {var_ir}')
+                        exit(1)
+                        
+                for band in range(x.shape[0]):
+                    X[features_name.index(calendar_variables[0]) + band, :, :] = x[band]
 
-        nonfirepoint = pd.concat((nonfirepointSpatial, nonfirepointTemporal)).reset_index(drop=True)
+            ### Geo spatial
+            #logger.info('Geo')
+            if 'Geo' in features:
+                X[features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[0] # departement
 
-        Xk = list(zip(firepoint.longitude, firepoint.latitude)) 
-        firepoint['scale'] = graph._predict_node(Xk)
+            #logger.info('Meteorological')
+            ### Meteo
+            for i, var in enumerate(cems_variables):
+                if var not in features:
+                    continue
+                #logger.info(var)
+                name = var +'raw.pkl'
+                array = read_object(name, dir_data)
+                X[features_name.index(var), :, :] = array[:, :, unDate]
+                del array
 
-        Xk = list(zip(nonfirepoint.longitude, nonfirepoint.latitude)) 
-        nonfirepoint['scale'] = graph._predict_node(Xk)
+            #logger.info('Air Quality')
+            if 'air' in features:
+                for i, var in enumerate(air_variables):
+                    #logger.info(var)
+                    name = var +'raw.pkl'
+                    array = read_object(name, dir_data)
+                    X[features_name.index(var), :, :] = array[:, :, unDate]
 
-        logger.info(len(nonfirepoint), len(firepoint))
+            #logger.info('Sentinel Dynamic World')
+            ### Sentinel
+            if 'sentinel' in features:
+                #logger.info('Sentinel')
+                name = 'sentinel.pkl'
+                arraySent = read_object(name, dir_data)
+                X[features_name.index(sentinel_variables[0]) : features_name.index(sentinel_variables[-1]) + 1, :, :] = arraySent[:, :, :, unDate]
+                del arraySent
 
-        firepoint.drop_duplicates(subset=('date', 'scale'), inplace=True)
-        nonfirepoint.drop_duplicates(subset=('date', 'scale'), inplace=True)
+            if 'dynamicWorld' in features:
+                arrayDW = read_object('dynamic_world.pkl', dir_data)
+                X[features_name.index(dynamic_world_variables[0]) : features_name.index(dynamic_world_variables[-1]) + 1, :, :] = arrayDW[:, :, :, unDate]
+                del arrayDW
 
-        firepoint.dropna(subset='scale', inplace=True)
-        nonfirepoint.dropna(subset='scale', inplace=True)
+            #logger.info('Historical')
+            if 'Historical' in features:
+                name = departement+'pastInfluence.pkl'
+                arrayInfluence = read_object(name, dir_target)
+                if arrayInfluence is not None:
+                    X[features_name.index(historical_variables[0]), :, :] = arrayInfluence[:, :, unDate]
+                    del arrayInfluence
 
+            #logger.info('AutoRegressionReg')
+            if 'AutoRegressionReg' in features:
+                dir_target_2 = dir_train / 'influence'
+                arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target_2)
+                if arrayInfluence is not None:
+                    for var in auto_regression_variable_reg:
+                        step = int(var.split('-')[-1])
+                        X[features_name.index(f'AutoRegressionReg_{var}'), :, :] = arrayInfluence[:, :, unDate - step]
+                    del arrayInfluence
+
+            #logger.info('AutoRegressionBin')
+            if 'AutoRegressionBin' in features:
+                dir_bin = dir_train / 'bin'
+                arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+                if arrayBin is not None:
+                    for var in auto_regression_variable_reg:
+                        step = int(var.split('-')[-1])
+                        X[features_name.index(f'AutoRegressionBin_{var}'), :, :] = arrayBin[:, :, unDate - step]
+                    del arrayBin
+
+            #logger.info('Vigicrues')
+            if 'vigicrues' in features:
+                for var in vigicrues_variables:
+                    array = read_object('vigicrues'+var+'.pkl', dir_data)
+                    X[features_name.index(var), :, :] = array[:, :, unDate]
+                    del array
+
+            #logger.info('nappes')
+            if 'nappes' in features:
+                for var in nappes_variables:
+                    array = read_object(var+'.pkl', dir_data)
+                    X[features_name.index(var), :, :] = array[:, :, unDate]
+                    del array
         
-        logger.info(len(nonfirepoint), len(firepoint))
+            save_object(X, f'X_{unDate}.pkl', dir_output / departement)
 
-        trainfp = firepoint[firepoint['date'] <= '2022-12-31']
-        trainnfp = nonfirepoint[nonfirepoint['date'] <= '2022-12-31']
-        
-        test_date = find_dates_between('2023-01-01', '2023-09-11')
-
-        iterables = [test_date, list(regions[regions['departement'] == code].hex_id)]
-        test = pd.DataFrame(index=pd.MultiIndex.from_product(iterables=iterables,  names=['date', 'h3'])).reset_index()
-        test['longitude'] = test['h3'].apply(lambda x : float(regions[regions['hex_id'] == x].latitude))
-        test['latitude'] = test['h3'].apply(lambda x : float(regions[regions['hex_id'] == x].longitude))
-
-        testfp = firepoint[firepoint['date'] > '2022-12-31']
-        for _, row in testfp.iterrows():
-            index = test[(test['h3'] == row['h3']) & (test['date'] == row['date'])].index
-            test.drop(index, inplace=True)"""
-        
-        fpp = fp[fp['departement'] == int(dept.split('-')[1])]
-        nfpp = nfp[nfp['departement'] == int(dept.split('-')[1])]
-
-        trainfp = fpp[fpp['date'] < '2023-01-01']
-        testfp = fpp[fpp['date'] >= '2023-01-01']
-        
-        trainnfp = nfpp[nfpp['date'] < '2023-01-01']
-        test = nfpp[nfpp['date'] > '2023-01-01']
-
-        logger.info(f'{len(trainfp)}')
-
-        get_sub_nodes_feature_2D(trainfp.values, 'X')
-        get_sub_nodes_feature_2D(trainnfp.values, 'X')
-
-        get_sub_nodes_feature_2D(testfp.values, 'test')
-        get_sub_nodes_feature_2D(test.values, 'test')
-
-        #fp.append(firepoint)
-        #nfp.append(nonfirepoint)
-
-    """fp = pd.concat(fp)
-    nfp = pd.concat(nfp)
-
-    fp.to_csv(dir_output / 'firepoints.csv', index=False)
-    nfp.to_csv(dir_output / 'nonfirepoints.csv', index=False)"""
+    return X, features_name

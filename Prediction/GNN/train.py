@@ -47,6 +47,54 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
     model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss)
     return model, fit_params
 
+def explore_features(model,
+                    features,
+                    df_train,
+                    df_val,
+                    df_test,
+                    weight_col,
+                    target):
+    
+    features_importance = []
+    selected_features_ = []
+    base_score = -math.inf
+    count_max = 70
+    c = 0
+    for i, fet in enumerate(features):
+        
+        selected_features_.append(fet)
+
+        X_train_single = df_train[selected_features_]
+
+        fitparams={
+                'eval_set':[(X_train_single, df_train[target]), (df_val[selected_features_], df_val[target])],
+                'sample_weight' : df_train[weight_col],
+                'verbose' : False
+                }
+
+        model.fit(X=X_train_single, y=df_train[target], fit_params=fitparams)
+
+        # Calculer le score avec cette seule caractéristique
+        single_feature_score = model.score(df_test[selected_features_], df_test[target], sample_weight=df_test[weight_col])
+
+        # Si le score ne s'améliore pas, on retire la variable de la liste
+        if single_feature_score <= base_score:
+            selected_features_.pop(-1)
+            c += 1
+        else:
+            logger.info(f'With {fet} number {i}: {base_score} -> {single_feature_score}')
+            if MLFLOW:
+                mlflow.log_metric(model.get_scorer(), single_feature_score, step=i)
+            base_score = single_feature_score
+            c = 0
+
+        if c > count_max:
+            logger.info(f'Score didn t improove for {count_max} features, we break')
+            break
+        features_importance.append(single_feature_score)
+
+    return selected_features_
+
 ############################################### SKLEARN ##################################################
 
 def fit(params):
@@ -73,6 +121,7 @@ def fit(params):
     grid_params = params['grid_params']
     dir_output = params['dir_output']
 
+
     save_object(features, 'features.pkl', dir_output / name)
     logger.info(f'Fitting model {name}')
     model.fit(X=df_train[features], y=df_train[target],
@@ -94,6 +143,29 @@ def fit(params):
 
     if isinstance(model, ModelTree):
         model.plot_tree(features_name=features, outname=name, dir_output= dir_output / name, figsize=(50,25))"""
+    
+    if MLFLOW:
+        existing_run = get_existing_run(name)
+        if existing_run:
+            mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+        else:
+            mlflow.start_run(run_name=name, nested=True)
+
+        signature = infer_signature(df_train[features], model.predict(df_train[features]))
+
+        mlflow.set_tag(f"Training", f"{name}")
+        mlflow.log_param(f'relevant_feature_name', features)
+        mlflow.log_params(model.get_params(deep=True))
+        model_info = mlflow.sklearn.log_model(
+        sk_model=model,
+        artifact_path=f'{name}',
+        signature=signature,
+        input_example=df_train[features],
+        registered_model_name=name,
+        )
+
+        save_object(model_info, f'mlflow_signature_{name}.pkl', dir_output)
+        mlflow.end_run()
 
 def train_sklearn_api_model(params):
 
@@ -169,7 +241,7 @@ def train_sklearn_api_model(params):
             relevant_features = features
     
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
-                                        features, f'{name}_features', model_type, task_type, 
+                                        relevant_features, f'{name}_features', model_type, task_type, 
                                         model_params, loss)
     
     fit_params_dict = {
@@ -177,7 +249,7 @@ def train_sklearn_api_model(params):
         'df_test': df_test,
         'weight_col' : weight_col,
         'target' : target,
-        'features': features,
+        'features': relevant_features,
         'name': f'{name}_features',
         'model': model,
         'fit_params': fit_params,
@@ -246,7 +318,7 @@ def train_xgboost(params):
             'min_child_weight': 1.0,
             'max_depth': 6,
             'max_delta_step': 1.0,
-            'subsample': 0.3,
+            'subsample': 0.8,
             'colsample_bytree': 0.8,
             'colsample_bylevel': 0.8,
             'reg_lambda': 1.0,
@@ -549,8 +621,8 @@ def wrapped_train_sklearn_api_fusion_model(train_dataset, val_dataset,
 
         model_name = model_list[i]
         dir_model = dir_model_list[i]
-
-        model_type, target, task_type, loss  = model_name.split('_')
+        vec = model_name.split('_')
+        model_type, target, task_type, loss = vec[0], vec[1], vec[2], vec[3]
         
         params = {
         'df_train': train_dataset_list[i],
@@ -901,14 +973,12 @@ def launch_loader(model, loader, model_type,
     for i, data in enumerate(loader, 0):
 
         inputs, labels, edges = data
-        
         if target_name == 'risk' or target_name == 'nbsinister':
-            target = labels[:,-1]
+            target = labels[:, -1, :]
         else:
-            target = (labels[:,-2] > 0).long()
+            target = (labels[:, -2, :] > 0).long()
 
-        weights = labels[:,-4]
-
+        weights = labels[:, -4, :]
         if autoRegression and model_type != 'train':
             inode = inputs[:, 0]
             idate = inputs[:, 4]
@@ -926,8 +996,8 @@ def launch_loader(model, loader, model_type,
             prev_input = torch.cat((prev_input, inputs))
 
         target = torch.masked_select(target, weights.gt(0))
+        output = torch.masked_select(output, weights.gt(0))
         weights = torch.masked_select(weights, weights.gt(0))
-
         if target_name == 'risk' or target_name == 'nbsinister':
             target = target.view(output.shape)
             weights = weights.view(output.shape)
@@ -942,22 +1012,22 @@ def launch_loader(model, loader, model_type,
 
     return loss
 
-def func_epoch(model, trainLoader, valLoader, features,
+def func_epoch(model, train_loader, val_loader, features,
                optimizer, criterion, binary,
                 autoRegression,
                 features_name):
     
-    launch_loader(model, trainLoader, 'train', features, binary, criterion, optimizer,  autoRegression,
+    launch_loader(model, train_loader, 'train', features, binary, criterion, optimizer,  autoRegression,
                   features_name)
 
     with torch.no_grad():
-        loss = launch_loader(model, valLoader, 'val', features, binary, criterion, optimizer,  autoRegression,
+        loss = launch_loader(model, val_loader, 'val', features, binary, criterion, optimizer,  autoRegression,
                   features_name)
 
     return loss
 
 def compute_optimisation_features(modelname, lr, scale, features_name,
-                                  trainLoader, valLoader, testLoader,
+                                  train_loader, val_loader, test_loader,
                                   criterion, target_name, epochs, PATIENCE_CNT,
                                 autoRegression):
     newFet = [features[0]]
@@ -973,9 +1043,9 @@ def compute_optimisation_features(modelname, lr, scale, features_name,
         BEST_MODEL_PARAMS = None
         patience_cnt = 0
         logger.info(f'Train {model} with')
-        log_features(features_name)()
+        log_features(features_name)
         for epoch in tqdm(range(epochs)):
-            loss = func_epoch(model, trainLoader, valLoader, testFet, optimizer, criterion, target_name,  autoRegression,
+            loss = func_epoch(model, train_loader, val_loader, testFet, optimizer, criterion, target_name,  autoRegression,
                   features_name)
             if loss.item() < BEST_VAL_LOSS:
                 BEST_VAL_LOSS = loss.item()
@@ -986,50 +1056,58 @@ def compute_optimisation_features(modelname, lr, scale, features_name,
                     logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {loss.item()}')
 
             with torch.no_grad():
-                loss = launch_loader(model, testLoader, 'test', features, target_name, criterion, optimizer,  autoRegression,
+                loss = launch_loader(model, test_loader, 'test', features, target_name, criterion, optimizer,  autoRegression,
                   features_name)
 
             if loss.item() < BEST_VAL_LOSS_FET:
                 logger.info(f'{fet} : {loss.item()} -> {BEST_VAL_LOSS_FET}')
                 BEST_VAL_LOSS_FET = loss.item()
                 newFet.append(fet)
-                patience_cnt_fet = 0
-            #else:
-            #    patience_cnt_fet += 1
-            #    if patience_cnt_fet >= 30:
-            #        logger.info('Loss has not increased for 30 epochs')
-            #    break
+
     return newFet
 
 def train(params):
     """
     Train neural network model
     """
-    trainLoader = params['trainLoader']
-    valLoader = params['valLoader']
-    testLoader = params['testLoader']
+    train_loader = params['train_loader']
+    val_loader = params['val_loader']
+    test_loader = params['test_loader']
     scale = params['scale']
     optimize_feature = params['optimize_feature']
     PATIENCE_CNT = params['PATIENCE_CNT']
     CHECKPOINT = params['CHECKPOINT']
     lr = params['lr']
     epochs = params['epochs']
-    criterion = params['criterion']
+    loss_name = params['loss_name']
     features_name = params['features_name']
     modelname = params['modelname']
     features = params['features']
     dir_output = params['dir_output']
     target_name = params['target_name']
     autoRegression = params['autoRegression']
+    k_days = params['k_days']
 
-    assert trainLoader is not None and valLoader is not None
+    if MLFLOW:
+        mlflow.start_run(run_name=modelname)
+        mlflow.log_params(params)
+
+    assert train_loader is not None and val_loader is not None
+
+    features_selected = [i for i in range(len(features_name)) if f'{features_name[i]}_mean' in features or features_name[i] in features]
 
     check_and_create_path(dir_output)
 
-    if optimize_feature:
-        features = compute_optimisation_features(modelname, lr, scale, features_name, trainLoader, valLoader, testLoader, criterion, target_name, epochs, PATIENCE_CNT, autoRegression)
+    criterions_dict = {'rmse': weighted_rmse_loss,
+                       'log_loss': weighted_cross_entropy}
 
-    dico_model = make_models(len(features), 52, 0.03, 'relu')
+    criterion = criterions_dict[loss_name]
+
+    if optimize_feature:
+        features = compute_optimisation_features(modelname, lr, scale, features_name, train_loader, val_loader, test_loader,
+                                                 criterion, target_name, epochs, PATIENCE_CNT, autoRegression)
+
+    dico_model = make_models(len(features), len(features_selected), scale, 0.03, 'relu', k_days, target_name == 'binary')
     model = dico_model[modelname]
     optimizer = optim.Adam(model.parameters(), lr=lr)
     BEST_VAL_LOSS = math.inf
@@ -1037,10 +1115,9 @@ def train(params):
     patience_cnt = 0
 
     logger.info('Train model with')
-    log_features(features_name)()
     save_object(features, 'features.pkl', dir_output)
     for epoch in tqdm(range(epochs)):
-        loss = func_epoch(model, trainLoader, valLoader, features, optimizer, criterion, target_name, autoRegression, features_name)
+        loss = func_epoch(model, train_loader, val_loader, features_selected, optimizer, criterion, target_name, autoRegression, features_name)
         if loss.item() < BEST_VAL_LOSS:
             BEST_VAL_LOSS = loss.item()
             BEST_MODEL_PARAMS = model.state_dict()
@@ -1052,11 +1129,13 @@ def train(params):
                 save_object_torch(model.state_dict(), 'last.pt', dir_output)
                 save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
                 return
+        if MLFLOW:
+            mlflow.log_metric('loss', loss.item(), step=epoch)
         if epoch % CHECKPOINT == 0:
             logger.info(f'epochs {epoch}, Val loss {loss.item()}')
             logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
             save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
-            
+
 #############################  PCA ###################################
 
 def train_pca(X, percent, dir_output, features_selected):

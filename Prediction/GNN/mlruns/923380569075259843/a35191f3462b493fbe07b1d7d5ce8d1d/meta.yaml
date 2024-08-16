@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/923380569075259843/a35191f3462b493fbe07b1d7d5ce8d1d/artifacts
+end_time: 1723786848667
+entry_point_name: ''
+experiment_id: '923380569075259843'
+lifecycle_stage: active
+run_id: a35191f3462b493fbe07b1d7d5ce8d1d
+run_name: xgboost_nbsinister_regression_rmse
+run_uuid: a35191f3462b493fbe07b1d7d5ce8d1d
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1723786819938
+status: 3
+tags: []
+user_id: caron

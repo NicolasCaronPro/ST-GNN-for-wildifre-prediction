@@ -10,6 +10,7 @@ from osgeo import gdal, ogr
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage import morphology
+from skimage import img_as_float
 from sklearn.preprocessing import normalize
 from scipy.signal import fftconvolve as scipy_fft_conv
 import random
@@ -47,6 +48,16 @@ import plotly.express as px
 import plotly.io as pio
 from forecasting_models.sklearn_api_models_config import *
 import warnings
+import mlflow
+from mlflow.models import infer_signature
+
+if MLFLOW:
+    try:
+        mlflow.set_tracking_uri(uri="http://127.0.0.1:8080")
+    except Exception as e:
+        logger.info(f'{e}')
+        exit(1)
+
 random.seed(42)
 
 # Suppress FutureWarning messages
@@ -220,7 +231,7 @@ def haversine(p1, p2, unit = 'kilometer'):
 
     meters = R * c  # output distance in meters
     km = meters / 1000.0  # output distance in kilometers
-    
+    print(p1, p2, meters)
     meters = round(meters)
     km = round(km, 3)
 
@@ -381,6 +392,24 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
 
 import pandas as pd
 import numpy as np
+
+def remove_nan_nodes_np(arr: np.array, target: np.array) -> np.ndarray:
+    """
+    Remove rows where any NaN values are present in the array.
+    """
+    if target is None:
+        return arr[~np.isnan(arr).any(axis=1)], None
+    return arr[~np.isnan(arr).any(axis=1)], target[~np.isnan(arr).any(axis=1)]
+
+def remove_none_target_np(arr: np.array, target: int) -> np.ndarray:
+    """
+    Remove rows where the target column has -1 or NaN values.
+    """
+    target_column = target[:, -1]
+    mask = (target_column != -1) & (~np.isnan(target_column))
+    if arr is None:
+        return None, target[mask]
+    return arr[mask], target[mask]
 
 def remove_nan_nodes(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -564,7 +593,7 @@ def construct_graph_set(graph, date, X, Y, ks):
     ks : size of the time series
     """
 
-    maskgraph = np.argwhere((X[:,4] == date) & (Y[:, -4] > 0))
+    maskgraph = np.argwhere((X[:,4] == date))
     x = X[maskgraph[:,0]]
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,4] < date) & (X[:,4] >= date - ks)))
@@ -638,9 +667,7 @@ def construct_graph_set(graph, date, X, Y, ks):
 
         edges = np.row_stack((src, target, time_delta)).astype(int)
 
-    if Y is not None:
-        return x, y, edges
-    return x, edges
+    return x, y, edges
 
 def concat_temporal_graph_into_time_series(array : np.array, ks : int, isY=False) -> np.array:
     uniqueNodes = np.unique(array[:,0])
@@ -657,6 +684,7 @@ def concat_temporal_graph_into_time_series(array : np.array, ks : int, isY=False
             return None
         res.append(arrayNode[:ks+1])
 
+    #print(res)
     res = np.asarray(res)
     res = np.moveaxis(res, 1,2)
     return res
@@ -717,71 +745,7 @@ def construct_graph_with_time_series(graph, date : int,
         target.append(i)
 
     edges = np.row_stack((src, target)).astype(int)
-    if Y is not None:
-        return x, y, edges
-    return x, edges
-
-def load_x_from_pickle(x : np.array, shape : tuple,
-                       path : Path,
-                       x_train : np.array, y_train : np.array,
-                       scaling : str,
-                       features_name : dict,
-                       features_name_2D : dict) -> np.array:
-
-    doCalendar = 'Calendar' in features
-    doGeo = 'Geo' in features
-    doAir = 'air' in features
-
-    if doCalendar:
-        size_calendar = len(calendar_variables)
-    if doGeo:
-        size_geo = len(geo_variables)
-    if doAir:
-        size_air = len(air_variables)
-
-    newx = np.empty((x.shape[0], shape[0], shape[1], shape[2], x.shape[-1]))
-    for i, node in enumerate(x):
-        id = int(node[0][0])
-        dates = node[4,:].astype(int)
-        for j, date in enumerate(dates):
-            array2D = read_object(str(id)+'_'+str(date)+'.pkl', path)
-            newx[i,:,:,:, j] = array2D[:,:,:]
-            if doCalendar:
-                for iv in range(size_calendar):
-                    newx[i,:,:,features_name_2D['Calendar'] + iv,j] = node[features_name.index('Calendar') + iv, j]
-            if doGeo:
-                for iv in range(size_geo):
-                    newx[i,:,:,features_name_2D['Geo'] + iv,j] = node[features_name.index('Geo') + iv, j]
-            if doAir:
-                for iv in range(size_air):
-                    newx[i,:,:,features_name_2D['air'] + iv,j] = node[features_name.index('air') + iv, j]
-
-    if scaling == 'MinMax':
-        scaler = min_max_scaler
-    elif scaling == 'z-score':
-        scaler = standart_scaler
-    elif scaling == "robust":
-        scaler = robust_scaler
-    else:
-        ValueError('Unknow')
-        exit(1)
-
-    if 'sentinel' in features:
-        size_sent = len(sentinel_variables)
-
-    for feature in features:
-        if feature == 'Calendar' or feature == 'Geo' or features == 'air':
-            continue
-        if feature == 'sentinel':
-            for i in range(size_sent):
-                index2D = features_name_2D[feature]
-                index1D = features_name.index(feature) + (4 * i)
-                newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D + i,:], x_train[:, index1D + 2], concat=False)
-        else:
-            index2D = features_name_2D[feature]
-            index1D = features_name.index(feature) + 2
-            newx[:,:,:,index2D,:] = scaler(newx[:,:,:,index2D,:], x_train[:, index1D], concat=False)
-    return newx
+    return x, y, edges
 
 def order_class(predictor, pred, min_values=0):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
@@ -919,8 +883,9 @@ def add_metrics(methods : list, i : int,
                     ytrue[:,band] = (ytrue[:,band] > 0).astype(int)
            
             mett = met(ypred[:,0], ytrue[:,band], ytrue[:,-4])
+            
             if torch.is_tensor(mett):
-                mett = mett.detach().cpu().numpy()
+                mett = np.mean(mett.detach().cpu().numpy())
 
             res[name] = mett
 
@@ -930,7 +895,7 @@ def add_metrics(methods : list, i : int,
                     continue
                 mett = met(ypred[mask, 0], ytrue[mask,band], ytrue[mask,-4])
                 if torch.is_tensor(mett):
-                    mett = mett.detach().cpu().numpy()
+                    mett = np.mean(mett.detach().cpu().numpy())
 
                 res[name+'_'+season] = mett
 
@@ -1056,12 +1021,16 @@ def add_metrics(methods : list, i : int,
 
     return res
 
-def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int, isBin : bool):
+def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int, isBin : bool, graph_construct):
     predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
     logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-    predictor = Predictor(5, name=nameDep+'Binary', binary=isBin)
+    predictor = Predictor(min(5, np.unique(ypred[:,0]).shape[0]), name=nameDep+'Binary', binary=isBin)
     predictor.fit(np.unique(ypred[:,0]))
-    save_object(predictor, nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
+
+    if scale == 'Departement':
+        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}.pkl', dir_predictor)
+    else:
+        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}_{graph_construct}.pkl', dir_predictor)
 
 def my_mean_absolute_error(input, target, weights = None):
     return mean_absolute_error(y_true=target, y_pred=input, sample_weight=weights)
@@ -1136,8 +1105,9 @@ def my_f1_score(Y : np.array, ypred : np.array, target : str, weights : np.array
 
     ydep = np.unique(Y[:, 3])
 
+    res = {}
     for d in ydep:
-
+        res[int2name[d]] = {}
         mask_dep = np.argwhere(Y[:, 3] == d)[:, 0]
 
         if target == 'binary':
@@ -1184,19 +1154,13 @@ def my_f1_score(Y : np.array, ypred : np.array, target : str, weights : np.array
             prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
             rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
 
-        bestScores.append(bestScore)
-        precs.append(prec)
-        recs.append(rec)
-        bestBounds.append(bestBound)
-        values.append(bestBound * maxi)
+        res[int2name[d]]['f1'] = bestScore
+        res[int2name[d]]['precision'] = prec
+        res[int2name[d]]['recall'] = rec
+        res[int2name[d]]['threshold'] = bestScore
+        res[int2name[d]]['value'] = bestBound * maxi
 
-    bestScore = np.mean(bestScore)
-    prec = np.mean(precs)
-    rec = np.mean(recs)
-    bestBound = np.mean(bestBounds)
-    value = np.mean(values)
-
-    return (bestScore, prec, rec, bestBound, value)
+    return res
 
 def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
     if torch.is_tensor(ypred):
@@ -1211,21 +1175,26 @@ def class_risk(ypred, ytrue, departements : list, dir : Path, weights = None, to
         mask = np.argwhere(ydep == name2int[nameDep])
         if mask.shape[0] == 0:
             continue
-            
-        yclass = ypred[mask, 1]
-        uniqueClass = np.unique(yclass)
+        
+        uniqueClass = [0,1,2,3,4]
         res[nameDep] = {}
-        for c in uniqueClass:
-            classIndex = np.argwhere(yclass == c)[:,0]
-            classPred = ypred[classIndex, 1]
-            classTrue = ytrue[classIndex,-3]
-            error = abs(classPred - classTrue)
-            classBin = ytrue[classIndex,-2] > 0
-            meanF = round(np.mean(classBin), 3)
-            meanP = round(np.mean(classPred), 3)
-            meanT = round(np.mean(classTrue), 3)
-            error = round(np.mean(error))
-            res[nameDep][c] = (meanP, meanT, error, meanF)
+
+        nbsinisteriny = []
+        nbsinisterinpred = []
+
+        for cls in uniqueClass:
+            mask2 = np.argwhere(ytrue[mask, -3] == cls)[:, 0]
+            if mask.shape[0] == 0:
+                nbsinisteriny.append(0)
+            nbsinisteriny.append(frequency_ratio(ytrue[:, -2], mask2))
+            
+            mask2 = np.argwhere(ypred == cls)[:, 0]
+            nbsinisterinpred.append(frequency_ratio(ytrue[:, -2], mask2))
+
+            res[nameDep][cls] = nbsinisteriny[-1] - nbsinisterinpred[-1]
+
+        res[nameDep]['mean'] = np.mean(np.asarray(nbsinisteriny) - np.asarray(nbsinisterinpred))
+
     return res
 
 def class_accuracy(ypred, ytrue, departements : list, dir : Path, weights = None, top=None) -> dict:
@@ -1378,49 +1347,49 @@ def get_features_name_lists_2D(shape, features):
     features_name = []
     for var in features:
         if var == 'Calendar':
-            features_name += calendar_variables
+            features_name.extend(calendar_variables)
         elif var == 'air':
-            features_name += air_variables
+            features_name.extend(air_variables)
         elif var == 'landcover':
-            features_name += landcover_variables
+            features_name.extend(landcover_variables)
         elif var == 'sentinel':
-            features_name += sentinel_variables
+            features_name.extend(sentinel_variables)
         elif var == "foret":
-            features_name += foret_variables
+            features_name.extend([foretint2str[fv] for fv in foret_variables])
         elif var == 'dynamicWorld':
-            features_name += dynamic_world_variables
+            features_name.extend(dynamic_world_variables)
         elif var == 'highway':
-            features_name += osmnx_variables
+            features_name.extend([osmnxint2str[fv] for fv in osmnx_variables])
         elif var == 'Geo':
-            features_name += geo_variables
+            features_name.extend(geo_variables)
         elif var == 'vigicrues':
-            features_name += vigicrues_variables
+            features_name.extend(vigicrues_variables)
         elif var == 'nappes':
-            features_name += nappes_variables
+            features_name.extend(nappes_variables)
         elif var == 'Historical':
-            features_name += historical_variables
+            features_name.extend(historical_variables)
         elif var == 'elevation':
-            features_name += elevation_variables
+            features_name.extend(elevation_variables)
         elif var == 'population':
-            features_name += population_variabes
+            features_name.extend(population_variabes)
         elif var == 'AutoRegressionReg':
-            features_name += auto_regression_variable_reg
+            features_name.extend([f'AutoRegressionReg_{v}' for v in auto_regression_variable_reg])
         elif var == 'AutoRegressionBin':
-            features_name += auto_regression_variable_reg
+            features_name.extend([f'AutoRegressionBin_{v}' for v in auto_regression_variable_bin])
         elif True in [tv in var for tv in varying_time_variables]:
             k = var.split('_')[-1]
             if 'Calendar' in var:
-                features_name += [f'{v}_{k}' for v in calendar_variables]
+                features_name.extend([f'{v}_{k}' for v in calendar_variables])
             elif 'air' in var:
-                features_name += [f'{v}_{k}' for v in air_variables]
+                features_name.extend([f'{v}_{k}' for v in air_variables])
             else:
-                features_name += var
+                features_name.extend([var])
         elif var == 'temporal_prediction' or var == 'spatial_prediction':
-            features_name += [var]
+            features_name.extend([var])
         else:
-            features_name += var
+            features_name.extend([var])
 
-    return features_name, len(features_name) + shape
+    return features_name, len(features_name)
 
 def min_max_scaler(array : np.array, array_train: np.array, concat : bool) -> np.array:
     if concat:
@@ -1663,14 +1632,14 @@ def features_selection(doFet, df, dir_output, features_name, NbFeatures, target)
     features_selected = features_importance[:,0]
     return features_selected
 
-def shapiro_wilk(ypred, ytrue, dir_output):
+def shapiro_wilk(ypred, ytrue, dir_output, outputname):
     diff = ytrue - ypred
     swtest = scipy.stats.shapiro(diff)
     try:
         logger.info(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
         plt.hist(diff)
         plt.title(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
-        plt.savefig(dir_output / 'shapiro_wilk_test.png')
+        plt.savefig(dir_output / f'{outputname}.png')
         plt.close('all')
     except Exception as e:
         logger.info(e)
@@ -1709,6 +1678,38 @@ def check_class(influence, bin):
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
+def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break_point, dir_log, sinister):
+    y_dates = np.unique([date_limit - dt.timedelta(days=df.date.values.max() - k) for k in df.date.values])
+    unodes = df.id.unique() 
+
+    check_and_create_path(dir_log / 'kmeans_feature')
+    for fet in features_selected:
+        logger.info(f'############## {fet} #################')
+
+        fig, axs = plt.subplots(unodes.shape[0], figsize=(15,10))
+        
+        for i, node in enumerate(unodes):
+            values = df[df['id'] == node][fet].values
+            predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
+            predclass = order_class(predictor, predictor.predict(values))
+            ax1 = axs[i]
+            ax1.set_title(f'{node}')
+            ax1.plot(y_dates, predclass, c='b', label=f'{fet}')
+            ax1.set_xlabel('Date')
+            ax1.set_ylabel('Class')
+            ax1.set_ylim([0, 4])
+
+            ax2 = ax1.twinx()
+
+            ax2.plot(y_dates, df[df['id'] == node]['AutoRegressionBin_B-1'].shift(1), label=f'{sinister}', c='r')
+            ax2.set_ylabel(f'Number of {sinister}', color='r')
+            ax2.set_ylim([0, 4])
+            
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(dir_log / 'kmeans_feature' / f'{fet}_{date_limit}.png')
+        plt.close('all')
+
 def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target : str, tresh : int, features_selected, new_val : int):
     dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
     values_risk = df[target].values
@@ -1724,6 +1725,8 @@ def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target
         previous_class = -1
         for c in cls:
             mask = predclass == c
+            if int(c) not in dico_correlation[fet].keys():
+                continue
             if dico_correlation[fet][int(c)] < tresh:
                 low = True
                 previous_class = c
@@ -1866,3 +1869,49 @@ def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_dail
             if target_name == 'binary':
                 res[:, features_name.index('temporal_prediction')] = (res[:, features_name.index('temporal_prediction')] > 0).astype(int)
     return res
+
+def log_metrics_recursively(metrics_dict, prefix=""):
+    for key, value in metrics_dict.items():
+        # Créer la clé composée pour les métriques
+        full_key = f"{prefix}_{key}" if prefix else key
+        if isinstance(value, dict):
+            # Appel récursif pour les sous-dictionnaires
+            log_metrics_recursively(value, full_key)
+        elif isinstance(value, (int, float)):
+            # Enregistrement de la métrique
+            mlflow.log_metric(full_key, value)
+        else:
+            mlflow.log_metric(full_key, value)
+            # Gérer d'autres types si nécessaire (par exemple, des listes)
+            #raise ValueError(f"Unsupported metric type: {type(value)} for key: {full_key}")
+
+def get_existing_run(run_name):
+    # Récupère tous les runs avec le nom spécifié
+    client = mlflow.tracking.MlflowClient()
+    runs = client.search_runs(
+        experiment_ids=['0'],  # Spécifiez ici l'ID de l'expérience si nécessaire
+        filter_string=f"tags.mlflow.runName = '{run_name}'",
+        run_view_type=mlflow.entities.ViewType.ACTIVE_ONLY  # On ne cherche que les runs actifs
+    )
+    
+    # Si un run est trouvé, le retourner
+    if runs:
+        return runs[0]  # retourne le premier run trouvé
+    return None
+
+def frequency_ratio(values: np.array, mask : np.array):
+    FF_t = np.sum(values)
+    Area_t = len(values)
+    FF_i = np.sum(values[mask])
+    
+    # Calculer Area_i (le nombre total de pixels pour la classe c)
+    Area_i = mask.shape[0]
+    
+    # Calculer FireOcc et Area pour la classe c
+    FireOcc = FF_i / FF_t
+    Area = Area_i / Area_t
+    
+    # Calculer le ratio de fréquence (FR) pour la classe c
+    FR = FireOcc / Area
+
+    return round(FR, 3)

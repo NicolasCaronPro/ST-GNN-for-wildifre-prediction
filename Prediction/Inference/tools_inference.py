@@ -1,6 +1,5 @@
 from tools import *
-from dataloader import *
-from forecasting_models.models import *
+#from forecasting_models.models import *
 import geopandas as gpd
 import convertdate
 import copy
@@ -223,7 +222,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     logger.info('Historical')
     if 'Historical' in features:
         name = departement+'pastInfluence.pkl'
-        arrayInfluence = read_object(name, Path('./log/'+resolution))
+        arrayInfluence = read_object(name, Path(__file__).absolute().parent.resolve()/ 'log' / resolution)
         if arrayInfluence is not None:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -257,7 +256,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 step = int(var.split('-')[-1])
                 maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4] - step)].index
                 save_value(geo[f'AutoRegressionBin'].values, f'AutoRegressionBin_{var}', index, maskNode)
-            
+ 
     logger.info('Vigicrues')
     if 'vigicrues' in features:
         for var in vigicrues_variables:

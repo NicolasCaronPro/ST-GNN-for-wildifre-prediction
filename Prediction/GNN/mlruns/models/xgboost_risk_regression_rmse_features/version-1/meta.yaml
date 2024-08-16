@@ -1,0 +1,14 @@
+aliases: []
+creation_timestamp: 1723786789538
+current_stage: None
+description: ''
+last_updated_timestamp: 1723786789538
+name: xgboost_risk_regression_rmse_features
+run_id: 8070e8b6f2e140deb69f7e45582a9137
+run_link: ''
+source: mlflow-artifacts:/923380569075259843/8070e8b6f2e140deb69f7e45582a9137/artifacts/xgboost_risk_regression_rmse_features
+status: READY
+status_message: null
+storage_location: mlflow-artifacts:/923380569075259843/8070e8b6f2e140deb69f7e45582a9137/artifacts/xgboost_risk_regression_rmse_features
+user_id: null
+version: 1

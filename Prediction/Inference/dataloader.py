@@ -168,10 +168,9 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
     ncluster = int(args.ncluster)
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
     days_in_futur = int(args.days_in_futur) # The target time validation
+    scaling = args.scaling
 
-    dir_output =  dir_output / spec
-
-    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS)
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
 
     save_object(features, 'features.pkl', dir_output)
     save_object(train_features, 'train_features.pkl', dir_output)
@@ -182,26 +181,28 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
         prefix += '_'+futur_met
 
     df = df[ids_columns + features_name + targets_columns]
-    logger.info(np.nanmax(df[features_name]))
-    logger.info(np.unique(df['id']))
+    logger.info(f'Ids in dataset {np.unique(df["id"])}')
 
     # Preprocess
-    train_dataset, val_dataset, test_dataset = preprocess(df=df, scaling=scaling, maxDate=maxDate,
+    train_dataset, val_dataset, test_dataset, test_dataset_unscale = preprocess(df=df, scaling=scaling, maxDate=maxDate,
                                                     trainDate=trainDate, train_departements=train_departements,
                                                     departements = departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
-                                                    futur_met=futur_met)
+                                                    futur_met=futur_met, doKMEANS=doKMEANS, ncluster=ncluster, scale=scale)
     
     realVspredict(test_dataset['risk'].values, test_dataset[ids_columns + targets_columns].values, -1, dir_output / prefix, 'raw')
 
     realVspredict(test_dataset['class_risk'].values, test_dataset[ids_columns +targets_columns].values, -3, dir_output / prefix, 'class')
 
-    sinister_distribution_in_class(test_dataset['class_risk'].values, test_dataset[ids_columns + targets_columns].values, dir_output / prefix)
+    sinister_distribution_in_class(test_dataset['class_risk'].values, test_dataset[ids_columns + targets_columns].values, dir_output / prefix, 'mean_fire')
 
     features_selected = features_selection(doFet, train_dataset, dir_output / prefix, features_name, nbfeatures, 'risk')
 
     prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+
+    if doKMEANS:
+        prefix += '_kmeans'
 
     if days_in_futur > 1:
         prefix += '_'+str(days_in_futur)
@@ -215,28 +216,13 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
         val_dataset = apply_pca(val_dataset[0], pca, components, features_selected)
         test_dataset = apply_pca(test_dataset[0], pca, components, features_selected)
         train_features = ['pca_'+str(i) for i in range(components)]
-        features_name, _ = get_features_name_list(0, train_features, [])
+        features_name, _ = get_features_name_list(0, train_features, METHODS_SPATIAL_TRAIN)
         features_selected = features_name
-        kmeans_features = train_features
-
-    if doKMEANS:
-        prefix += f'_kmeans_{str(ncluster)}'
-        train_break_point(train_dataset, features_selected, kmeansFeatures, dir_output / 'varOnValue' / prefix, features_name, scale, ncluster)
-
-        train_dataset = apply_kmeans_class_on_target(train_dataset, dir_output / 'varOnValue' / prefix, True)
-        val_dataset = apply_kmeans_class_on_target(val_dataset, dir_output / 'varOnValue' / prefix, True)
-        test_dataset = apply_kmeans_class_on_target(test_dataset, dir_output / 'varOnValue' / prefix, True)
-
-        realVspredict(test_dataset['risk'], test_dataset[ids_columns + targets_columns], -1, dir_output / prefix, 'raw')
-
-        realVspredict(test_dataset['class_risk'], test_dataset[ids_columns +targets_columns], -3, dir_output / prefix, 'class')
-
-        sinister_distribution_in_class(test_dataset['class_risk'], test_dataset[ids_columns + targets_columns], dir_output / prefix)
         
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
 
-    return train_dataset, val_dataset, test_dataset, features_selected
+    return train_dataset, val_dataset, test_dataset, test_dataset_unscale, prefix, features_selected
 
 #########################################################################################################
 #                                                                                                       #
@@ -245,22 +231,9 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
 #########################################################################################################
 
 def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, train_departements: list, departements: list, ks: int,
-               dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str):
-    """
-    Preprocess the input features:
-        df: combined dataframe of features and target
-        scaling: scale method
-        maxDate: maximum date for validation set
-        trainDate: date to split training and validation
-        train_departements: list of departments for training
-        departements: list of all departments
-        ks: offset for validation and test sets
-        dir_output: directory to save the outputs
-        prefix: prefix for the saved files
-        features_name: list of feature names
-        days_in_futur: days in future for the target
-        futur_met: future metric for the target
-    """
+               dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, doKMEANS: bool, ncluster: int, scale : int,
+               save = True):
+
 
     global features
 
@@ -288,7 +261,19 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
     test_mask = ((df['date'] >= allDates.index(maxDate) + ks) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
 
-    save_object(df[train_mask], 'df_train_'+prefix+'.pkl', dir_output)
+    if doKMEANS:
+        features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS)
+        train_break_point(df[train_mask], features_selected_kmeans, dir_output / 'check_none' / prefix / 'kmeans', ncluster)
+        df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'risk', tresh_kmeans, features_selected_kmeans, new_val=0)
+        df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'class_risk', tresh_kmeans, features_selected_kmeans, new_val=0)
+        #df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'nbsinister', tresh_kmeans, features_selected_kmeans, new_val=0)
+        df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'weight', tresh_kmeans, features_selected_kmeans, new_val=0)
+        test_dataset_unscale = df[test_mask].reset_index(drop=True).copy(deep=True)
+    else:
+        test_dataset_unscale = None
+
+    if save:
+        save_object(df[train_mask], 'df_train_'+prefix+'.pkl', dir_output)
 
     # Define the scale method
     if scaling == 'MinMax':
@@ -307,6 +292,8 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     else:
         autoregressiveBand = -1
 
+    df_no_scale = df.copy(deep=True)
+
     if scaler is not None:
         # Scale Features
         for feature in features_name:
@@ -315,13 +302,18 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
                 continue
             df[feature] = scaler(df[feature].values, df[train_mask][feature].values, concat=False)
 
-    logger.info(f'Max of the train set: {df[train_mask][features_name].max()}, Max of the val set: {df[val_mask][features_name].max()}, Max of the test set: {df[test_mask][features_name].max()}')
+    logger.info(f'Max of the train set: {df[train_mask][features_name].max().max(), df[train_mask][features_name].max().idxmax()}, before scale : {df_no_scale[train_mask][features_name].max().max(), df_no_scale[train_mask][features_name].max().idxmax()}')
+    logger.info(f'Max of the val set: {df[val_mask][features_name].max().max(), df[val_mask][features_name].max().idxmax()}, before scale : {df_no_scale[val_mask][features_name].max().max(), df_no_scale[val_mask][features_name].max().idxmax()}')
+    logger.info(f'Max of the test set: {df[test_mask][features_name].max().max(), df[test_mask][features_name].max().idxmax()}, before scale : {df_no_scale[test_mask][features_name].max().max(), df_no_scale[test_mask][features_name].max().idxmax()}')
+    logger.info(f'Min of the train set: {df[train_mask][features_name].min().min(), df[train_mask][features_name].min().idxmin()}, before scale : {df_no_scale[train_mask][features_name].min().min(), df_no_scale[train_mask][features_name].min().idxmin()}')
+    logger.info(f'Min of the val set: {df[val_mask][features_name].max().min(), df[val_mask][features_name].max().idxmin()}, before scale : {df_no_scale[val_mask][features_name].min().min(), df_no_scale[val_mask][features_name].min().idxmin()}')
+    logger.info(f'Min of the test set: {df[test_mask][features_name].min().min(), df[test_mask][features_name].min().idxmin()}, before scale : {df_no_scale[test_mask][features_name].min().min(), df_no_scale[test_mask][features_name].min().idxmin()}')
     logger.info(f'Size of the train set: {df[train_mask].shape[0]}, size of the val set: {df[val_mask].shape[0]}, size of the test set: {df[test_mask].shape[0]}')
     logger.info(f'Unique train dates: {np.unique(df[train_mask]["date"]).shape[0]}, val dates: {np.unique(df[val_mask]["date"]).shape[0]}, test dates: {np.unique(df[test_mask]["date"]).shape[0]}')
 
-    return df[train_mask], df[val_mask], df[test_mask]
+    return df[train_mask].reset_index(drop=True), df[val_mask].reset_index(drop=True), df[test_mask].reset_index(drop=True), test_dataset_unscale
 
-def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFrame, scaling: str):
+def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFrame, scaling: str,):
     df_XY = df_X.join(df_Y)
 
     df_XY_clean = remove_nan_nodes(df_XY)
@@ -348,22 +340,23 @@ def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFram
     return df_XY_clean
 
 def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str, features_name : list, fire_feature : list, apply_break_point : bool, 
-                         scale, kmeans_features, dir_break_point):
+                         scale, kmeans_features, dir_break_point, dir_log, date_limit, sinister):
     df_X_clean = remove_nan_nodes(df_X)
 
     logger.info(f'DataFrame shape before removal of NaNs: {df_X.shape}, after removal: {df_X_clean.shape}')
-
+    
     logger.info(f'Nan columns : {df_X.columns[df_X.isna().any()].tolist()}')
+
+    if df_X_clean.shape[0] == 0:
+        return None
 
     df_X_clean[fire_feature] = np.nan
 
     if apply_break_point:
         logger.info('Apply Kmeans to remove useless node')
         features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_SPATIAL_TRAIN)
-        df_X_clean['fire_prediction_raw'] = apply_kmeans_class_on_target(df_X_clean.copy(deep=True), dir_break_point, 'fire_prediction_raw', 0.15, features_selected_kmeans, new_val=0)['fire_prediction_raw'].values
-
-    if df_X_clean.shape[0] == 0:
-        return None
+        plot_kmeans_class_for_inference(df_X_clean.copy(deep=True), date_limit, features_selected_kmeans, dir_break_point, dir_log, sinister)
+        df_X_clean['fire_prediction_raw'] = apply_kmeans_class_on_target(df_X_clean.copy(deep=True), dir_break_point, 'fire_prediction_raw', 0.2, features_selected_kmeans, new_val=0)['fire_prediction_raw'].values
 
     if scaling == 'MinMax':
         scaler = min_max_scaler
@@ -403,17 +396,18 @@ def create_dataset(graph,
                     train,
                     val,
                     test,
+                    features_name,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int):
     """
     """
 
-    x_train, y_train = train
+    x_train, y_train = train[ids_columns + features_name].values, train[ids_columns + targets_columns]
     
-    x_val, y_val = val
+    x_val, y_val = val[ids_columns + features_name].values, val[ids_columns + targets_columns]
 
-    x_test, y_test = test
+    x_test, y_test = test[ids_columns + features_name].values, test[ids_columns + targets_columns]
 
     dateTrain = np.unique(x_train[np.argwhere(x_train[:, 5] > 0),4])
     dateVal = np.unique(x_val[np.argwhere(x_val[:, 5] > 0),4])
@@ -483,6 +477,7 @@ def train_val_data_loader(graph,
                           train,
                           val,
                           test,
+                          features_name,
                         use_temporal_as_edges : bool,
                         batch_size,
                         device,
@@ -491,13 +486,15 @@ def train_val_data_loader(graph,
     train_dataset, val_dataset, test_dataset = create_dataset(graph,
                                 train,
                                 val,
-                                test, use_temporal_as_edges,
+                                test,
+                                features_name,
+                                use_temporal_as_edges,
                                 device, ks)
 
-    trainLoader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
-    return trainLoader, valLoader, testLoader
+    train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+    val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    return train_loader, val_loader, test_loader
 
 
 def train_val_data_loader_2D(graph,
@@ -597,10 +594,10 @@ def train_val_data_loader_2D(graph,
     val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path  / scaling)
     test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path  / scaling)
     
-    trainLoader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
-    valLoader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
-    testLoader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
-    return trainLoader, valLoader, testLoader
+    train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+    val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
+    return train_loader, valLoader, test_loader
 
 #########################################################################################################
 #                                                                                                       #
@@ -761,7 +758,6 @@ def load_loader_test(use_temporal_as_edges, graphScale, dir_output,
 
     return loader
 
-
 def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, x_train, y_train, device,
                      k_days, test, features_name, scaling, encoding, prefix,
@@ -805,8 +801,85 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
 
     return loader
 
+def evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, testname, dir_output):
+    metrics = {}
+    dir_predictor = root_graph / dir_train / '../influenceClustering'
+    for nameDep in test_departement:
+        mask = np.argwhere(y[:, 3] == name2int[nameDep])
+        if mask.shape[0] == 0:
+            continue
+        if target_name == 'risk':
+            predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
+        else:
+            create_predictor(pred, name, nameDep, dir_predictor, scale, target_name == 'binary')
+            predictor = read_object(nameDep+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
+
+        pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 0]))
+
+    metrics = add_metrics(methods, i, pred, y, test_departement, target_name, scale, name, dir_train)
+
+    if target_name == 'binary':
+        y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
+
+    realVspredict(pred[:, 0], y, -1,
+                dir_output / name, f'raw_{scale}')
+            
+    realVspredict(pred[:, 1], y, -3,
+                dir_output / name, f'class_{scale}')
+    
+    realVspredict(pred[:, 0], y, -2,
+                dir_output / name, f'nbfire_{scale}')
+
+    sinister_distribution_in_class(pred[:, 1], y, dir_output / name, f'mean_fire_{scale}')
+
+    if target_name == 'binary':
+        y_test = (y[:, -2] > 0).astype(int)
+    elif target_name == 'nbsinister':
+        y_test = y[:, -2]
+    elif target_name == 'risk':
+        y_test = y[:, -1]
+    else:
+        raise ValueError(f'Unknow {target_name}')
+
+    #model.plot_features_importance(Xset[:, features_selected], y_test, [features_name[int(i)] for i in list(features_selected)], 'test', dir_output / n, mode='bar')
+    res = pd.DataFrame(columns=ids_columns + targets_columns + ['prediction', 'class', 'mae', 'rmse'], index=np.arange(pred.shape[0]))
+    res[ids_columns + targets_columns] = y
+    res['prediction'] = pred[:, 0]
+    res['class'] = pred[:, 1]
+    res['mae'] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
+    res['rmse'] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
+
+    if testname == '69':
+        start = '2018-01-01'
+        stop = '2022-09-30'
+    else:
+        start = '2023-06-01'
+        stop = '2023-09-30'
+    
+    """for departement in testd_departement:
+        susectibility_map(departement, sinister,
+                    dir_train, dir_output, k_days,
+                    target_name, scale, name, res, n,
+                    start, stop, resolution)"""
+
+    shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
+
+    """
+    realVspredict2d(pred,
+        y,
+        target_name,
+        name,
+        scale,
+        dir_output / n,
+        dir_train,
+        geo,
+        testd_departement,
+        graphScale)"""
+    return metrics, res
+
 def test_sklearn_api_model(graphScale,
                           test_dataset_dept,
+                          test_dataset_unscale_dept,
                            methods,
                            testname,
                            prefix_train,
@@ -815,10 +888,10 @@ def test_sklearn_api_model(graphScale,
                            device,
                            encoding,
                            scaling,
-                           testd_departement,
+                           test_departement,
                            dir_train,
-                           features_name):
-    
+                           dir_break_point,
+                           doKMEANS):
     
     scale = graphScale.scale
     metrics = {}
@@ -828,18 +901,17 @@ def test_sklearn_api_model(graphScale,
     logger.info(f'       GT              ')
     logger.info('#########################')
 
-    y = test_dataset_dept[test_dataset_dept['weight'] > 0][[ids_columns + targets_columns]].values
+    y = test_dataset_dept[ids_columns + targets_columns].values
     pred = np.empty((y.shape[0], 2))
-    pred[:, 0] = test_dataset_dept[test_dataset_dept['weight'] > 0]['risk'].values
-    pred[:, 1] = test_dataset_dept[test_dataset_dept['weight'] > 0]['class_risk'].values
-    metrics['GT'] = add_metrics(methods, 0, pred, y, testd_departement, 'risk', scale, 'gt', dir_train)
+    pred[:, 0] = test_dataset_dept['risk'].values
+    pred[:, 1] = test_dataset_dept['class_risk'].values
+    metrics['GT'] = add_metrics(methods, 0, pred, y, test_departement, 'risk', scale, 'gt', dir_train)
     i = 1
 
     #################################### Traditionnal ##################################################
 
     for name, target_name, autoRegression in models:
-        y = test_dataset_dept[test_dataset_dept['weight'] > 0][[ids_columns + targets_columns]].values
-        n = name
+        y = test_dataset_dept[ids_columns + targets_columns].values
         model_dir = dir_train / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
         
         logger.info('#########################')
@@ -854,94 +926,55 @@ def test_sklearn_api_model(graphScale,
         graphScale._set_model(model)
 
         features_selected = read_object('features.pkl', model_dir)
-        logger.info(f'{features_selected}')
         
         pred = np.empty((y.shape[0], 2))
 
-        pred[:, 0] = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name == 'binary', autoRegression, features_name)
+        pred[:, 0] = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name == 'binary', autoRegression)
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
+        if doKMEANS:
+            df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
+            df[ids_columns] = test_dataset_dept[ids_columns]
+            features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
+            df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
+            df[target_name] = pred[:, 0]
+            df = apply_kmeans_class_on_target(df, dir_break_point=dir_break_point, target=target_name, tresh=tresh_kmeans,
+                                              features_selected=features_selected_kmeans, new_val=0)
+            
+            pred[:, 0] = df[target_name]
+
+        metrics[name], res = evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, testname, dir_output)
+        # Analyse departement prediction
+        res_dept = res.groupby(['departement', 'date'])['risk'].sum().reset_index()
+        res_dept['id'] = res_dept['departement']
+        res_dept['latitude'] = res.groupby(['departement'])['latitude'].mean().reset_index()['latitude']
+        res_dept['longitude'] = res.groupby(['departement'])['longitude'].mean().reset_index()['longitude']
+        res_dept['nbsinister'] = res.groupby(['departement', 'date'])['nbsinister'].sum().reset_index()['nbsinister']
+
         dir_predictor = root_graph / dir_train / '../influenceClustering'
-        for nameDep in departements:
+        for nameDep in test_departement:
             mask = np.argwhere(y[:, 3] == name2int[nameDep])
             if mask.shape[0] == 0:
                 continue
-            if target_name == 'risk':
-                predictor = read_object(nameDep+'Predictor'+str(scale)+'.pkl', dir_predictor)
-            else:
-                create_predictor(pred, name, nameDep, dir_predictor, scale, target_name == 'binary')
-                predictor = read_object(nameDep+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
+            predictor = read_object(nameDep+'PredictorDepartement.pkl', dir_predictor)
 
-            pred[mask[:,0], 1] = order_class(predictor, predictor.predict(pred[mask[:, 0], 0]))
-
-        metrics[name] = add_metrics(methods, i, pred, y, testd_departement, target_name, scale, name, dir_train)
+        res_dept['class_risk'] = order_class(predictor, predictor.predict(res_dept['risk'].values, 0))
+        res_dept['weight'] =  predictor.weight_array(predictor.predict(res_dept['risk'].values, 0).astype(int)).reshape(-1)
 
         if target_name == 'binary':
-            y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
-
-        realVspredict(pred[:, 0], y, -1,
-                      dir_output / n, 'raw')
-                
-        realVspredict(pred[:, 1], y, -3,
-                      dir_output / n, 'class')
-        
-        realVspredict(pred[:, 0], y, -2,
-                      dir_output / n, 'nbfire')
-
-        sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
-
-        if target_name == 'binary':
-            y_test = (y[:, -2] > 0).astype(int)
-        elif target_name == 'nbsinister':
-            y_test = y[:, -2]
-        elif target_name == 'risk':
-            y_test = y[:, -1]
+            res_dept['prediction'] = res.groupby(['departement', 'date']).apply(group_probability).reset_index()['prediction']
         else:
-            raise ValueError(f'Unknow {target_name}')
+            res_dept['prediction'] = res.groupby(['departement', 'date']).sum().reset_index()['prediction']
 
-        #model.plot_features_importance(Xset[:, features_selected], y_test, [features_name[int(i)] for i in list(features_selected)], 'test', dir_output / n, mode='bar')
+        metrics[f'{name}_departement'], res = evaluate_pipeline(dir_train, res_dept[['prediction', 'class_risk']].values,
+                                                                res_dept[ids_columns + targets_columns].values, 'Departement',
+                                                                methods, i, test_departement, target_name, name, testname,
+                                                                dir_output)
 
-        res = np.empty((pred.shape[0], y.shape[1] + 4))
-        res[:, :y.shape[1]] = y
-        res[:,y.shape[1]] = pred[:, 0]
-        res[:,y.shape[1] + 1] = pred[:, 1]
-        res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
-        res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / name)
 
-        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
-
-        if testname == '69':
-            start = '2018-01-01'
-            stop = '2022-09-30'
-        else:
-            start = '2023-06-01'
-            stop = '2023-09-30'
-        
-        """for departement in testd_departement:
-            susectibility_map(departement, sinister,
-                        dir_train, dir_output, k_days,
-                        target_name, scale, name, res, n,
-                        start, stop, resolution)"""
-
-        shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
-
-        """
-        realVspredict2d(pred,
-            y,
-            target_name,
-            name,
-            scale,
-            dir_output / n,
-            dir_train,
-            geo,
-            testd_departement,
-            graphScale)"""
-        try:
-            pred[:, 0] = apply_kmeans_class_on_target(test_dataset_dept, pred, dir_train / 'varOnValue' / prefix_train, False).reshape(-1)
-            metrics[name+'_kmeans_preprocessing'] = add_metrics(methods, i, pred, y, testd_departement, target_name, scale, name, dir_train)
-        except:
-            pass
         i += 1
+        return res
 
     ########################################## Save metrics ################################ 
     outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
@@ -953,21 +986,17 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
                            features_name,
                            prefix,
                            prefix_train,
-                           dummy,
                            models,
                            dir_output,
                            device,
                            k_days,
-                           Rewrite,
                            encoding,
                            scaling,
                            testd_departement,
                            dir_train,
                            dico_model,
                            features_name_2D,
-                           shape2D,
-                           sinister,
-                           resolution):
+                           shape2D):
     
     scale = graphScale.scale
     metrics = {}
@@ -1162,7 +1191,7 @@ def test_simple_model(graphScale, Xset, Yset,
         outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_metrics.pkl'
         save_object(metrics, outname, dir_output)
 
-def test_break_points_model(Xset, Yset,
+def test_break_points_model(test_dataset_dept,
                            methods,
                            testname,
                            prefix_train,
@@ -1172,54 +1201,28 @@ def test_break_points_model(Xset, Yset,
                            testd_departement,
                            scale,
                            dir_train,
-                           sinister,
-                           resolution):
+                           features):    
+    metrics = {}
     
-    #n = 'break_point'+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
     n = 'break_point'
     name = 'break_point'
-    dir_break_point = dir_train / 'varOnValue' / prefix_train
-    features_selected = read_object('features.pkl', dir_break_point)
-    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
-    metrics = {}
+    dir_break_point = dir_train / 'check_none' / prefix_train / 'kmeans'
 
-    y = Yset[Yset[:,-4] > 0]
-    x = Xset[Yset[:,-4] > 0]
-    pred = np.zeros((Xset.shape[0], 2))
-    leni = 0
-    for fet in features_selected:
-        if 'name' not in dico_correlation[fet].keys():
-            continue
-        on = dico_correlation[fet]['name']+'.pkl'
-        predictor = read_object(on, dir_break_point / dico_correlation[fet]['fet'])
-        predclass = order_class(predictor, predictor.predict(x[:, fet]))
-        leni += 1
-        if abs(dico_correlation[fet]['correlation']) > 0.7:
-            # If negative linearity, inverse class
-            if dico_correlation[fet]['correlation'] < 0:
-                new_class = np.flip(np.arange(predictor.n_clusters))
-                for i, nc in enumerate(new_class):
-                    mask = np.argwhere(predclass == i)
-                    predclass[mask] = nc
-            cls = np.unique(predclass)
-            for c in cls:
-                mask = np.argwhere(predclass == c)
-                pred[mask, 1] += dico_correlation[fet][int(c)]
-            pred[:,0] += predclass
+    pred = np.zeros((len(test_dataset_dept), 2))
+    pred[:, 0] = test_dataset_dept['risk']
+    pred[:, 1] = test_dataset_dept['class_risk']
+    y = test_dataset_dept[ids_columns + targets_columns].values
             
-    logger.info(f'{leni, len(features_selected)}')
-    pred /= leni
-    y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
     metrics['break_point'] = add_metrics(methods, 0, pred, y, testd_departement, True, scale, name, dir_train)
     
-    realVspredict(pred[:, 1], y, -1,
+    realVspredict(pred[:, 0], y, -1,
                       dir_output / n, 'raw')
     
-    realVspredict(pred[:, 0], y, -3,
+    realVspredict(pred[:, 1], y, -3,
                       dir_output / n, 'class')
     
-    sinister_distribution_in_class(predclass, y, dir_output / n)
-        
+    sinister_distribution_in_class(pred[:, 1], y, dir_output / n)
+
     res = np.empty((pred.shape[0], y.shape[1] + 3))
     res[:, :y.shape[1]] = y
     res[:,y.shape[1]] = pred[:,1]
@@ -1242,7 +1245,7 @@ def test_break_points_model(Xset, Yset,
                     False, scale, name, res, n,
                     start, stop, resolution)"""
 
-    shapiro_wilk(pred[:,1], y[:,-1], dir_output / n)
+    shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
 
     """
     realVspredict2d(pred,
@@ -1299,8 +1302,6 @@ def test_fusion_prediction(models,
         # Prediction
         if args1['model_type'] == 'traditionnal':
             features_selected = read_object('features.pkl', args1['dir_model'] / args1['model_name'])
-            logger.info(features_selected)
-            logger.info(XsetDaily.shape)
             graph1._set_model(model1)
             pred1 = np.empty((XsetDaily.shape[0], y.shape[1]))
             pred1[:, :6] = XsetDaily[:, :6]
@@ -1355,7 +1356,6 @@ def test_fusion_prediction(models,
         graphScale._set_model(model)
 
         features_selected = read_object('features.pkl', model_dir)
-        logger.info(f'{features_selected}')
 
         pred = np.empty((Xset[:, features_selected].shape[0], 2))
 
@@ -1421,7 +1421,7 @@ def test_fusion_prediction(models,
             name,
             scale,
             dir_output / n,
-            train_dir,
+            dir_train,
             geo,
             testd_departement,
             graphScale)"""

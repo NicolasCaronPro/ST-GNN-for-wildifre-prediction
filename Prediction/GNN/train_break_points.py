@@ -91,7 +91,7 @@ if autoRegression:
 
 ####################### INIT ################################
 
-df, graphScale, prefix, _ = init(args, dir_output, True)
+df, graphScale, prefix = init(args, dir_output, True)
 dir_output = dir_output / spec
 
 ############################# Train, Val, test ###########################
@@ -99,12 +99,16 @@ features_selected, newshape = get_features_name_list(graphScale.scale, kmeans_fe
 
 df = df[ids_columns + features_selected + targets_columns]
 
-train_dataset, val_dataset, test_dataset = preprocess(df=df, scaling=scaling, maxDate=maxDate,
+train_dataset, val_dataset, test_dataset, test_dataset_unscale = preprocess(df=df, scaling=scaling, maxDate=maxDate,
                                                 trainDate=trainDate, train_departements=train_departements,
                                                 departements = departements,
                                                 ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_selected,
                                                 days_in_futur=days_in_futur,
                                                 futur_met=futur_met, doKMEANS=doKMEANS | doTrain, ncluster=ncluster, scale=scale, save=False)
+
+if days_in_futur > 1:
+    prefix += '_'+str(days_in_futur)
+    prefix += '_'+futur_met
 
 if doTest:
     logger.info('############################# TEST ###############################')

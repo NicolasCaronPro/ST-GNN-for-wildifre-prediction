@@ -80,12 +80,12 @@ class GenerateDatabase():
 
     def add_spatial(self):
         logger.info('Add spatial')
-        raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
+        #raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
-        raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
-        raster_elevation(self.h3tif, self.dir_raster, self.elevation)
-        raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
-        raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
+        #raster_population(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        #raster_elevation(self.h3tif, self.dir_raster, self.elevation)
+        #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'])
+        #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
     def add_air_qualite(self):
         assert RASTER == True
@@ -224,7 +224,7 @@ class GenerateDatabase():
         #########################################################################
 
         START = dt.datetime.strptime(self.vigicrueParams['start'], '%Y-%m-%d') 
-        STOP = dt.datetime.strptime(self.vigicrueParams['stop'], '%Y-%m-%d')
+        STOP = dt.datetime.strptime(self.vigicrueParams['end'], '%Y-%m-%d')
 
         rname = 'stations_'+self.departement.split('-')[1]+'_full.csv'
         fic_name = dir_hydroreel / rname
@@ -243,8 +243,8 @@ class GenerateDatabase():
 
         stations_a_ignorer = []
         for station in sorted(list(stations_hydroreel.station)):
-            if not (dir_hydroreel / f"{station}.csv").is_file():
-            #if False:
+            #if not (dir_hydroreel / f"{station}.csv").is_file():
+            if True:
                 logger.info(f"On collecte l'archive de {station}")
                 df = pd.DataFrame()
                 for annee in range(START.year, STOP.year):
@@ -272,6 +272,7 @@ class GenerateDatabase():
                         logger.info(f" -> Erreur : code {r.status_code} pour la station {station}")
                         stations_a_ignorer.append(station)
                         break
+
                 if station not in stations_a_ignorer:
                     df['latitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['latitude'].values[0]
                     df['longitude'] = stations_hydroreel[stations_hydroreel['station'] == station]['longitude'].values[0]

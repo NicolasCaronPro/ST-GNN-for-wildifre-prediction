@@ -198,7 +198,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         dir_train = dir_input / Path(sinister + '/' + resolution + '/train/' + expe + '/check_z-score/' + label + '/baseline' )
         dir_test = dir_input / Path(sinister + '/' + resolution + '/test/' + expe + '/' + test_name + '/' + label + '/')
         vec = label.split('_')
-        values_per_class, kdays, scale, nf = vec[0], vec[1], vec[2], vec[3]
+        values_per_class, k_days, scale, nf = vec[0], vec[1], vec[2], vec[3]
         label = expe + ' ' + str(index) + ' : ' + label 
         name = 'metrics_'+prefix+'.pkl'
         metrics = read_object(name, dir_test)
@@ -226,9 +226,9 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
                 fet = read_object(filename2, dir_train / dir)
                 if fet is None:
                     continue
-                sub_features_name.extend(fet[indices])
+                sub_features_name.extend(fet)
         
-        if len(sub_features_importance_test) > 0:
+        """if len(sub_features_importance_test) > 0:
             sub_features_importance_test_df = pd.DataFrame(index=np.arange(0, len(sub_features_importance_test)))
             sub_features_importance_test_df['Permutation_importance'] = sub_features_importance_test
             sub_features_importance_test_df['features_name'] = sub_features_name
@@ -236,7 +236,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
             sub_features_importance_test_df['index'] = index
             sub_features_importance_test_df['label'] = label
             sub_features_importance_test_df['values_per_class'] = values_per_class
-            sub_features_importance_test_df['kdays'] = kdays
+            sub_features_importance_test_df['k_days'] = k_days
             sub_features_importance_test_df['scale'] = scale
             sub_features_importance_test_df['nf'] = nf
             features_importance_test.append(sub_features_importance_test_df)
@@ -257,7 +257,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
                 if fet is None:
                     continue
 
-                sub_features_name.extend(fet[indices])
+                sub_features_name.extend(fet)
 
         if len(sub_features_importance_train) > 0:
             sub_features_importance_train_df = pd.DataFrame(index=np.arange(0, len(sub_features_importance_train)))
@@ -267,12 +267,12 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
             sub_features_importance_train_df['index'] = index
             sub_features_importance_train_df['label'] = label
             sub_features_importance_train_df['values_per_class'] = values_per_class
-            sub_features_importance_train_df['kdays'] = kdays
+            sub_features_importance_train_df['k_days'] = k_days
             sub_features_importance_train_df['scale'] = scale
             sub_features_importance_train_df['nf'] = nf
             features_importance_train.append(sub_features_importance_train_df)
         else:
-            logger.info('No file found for train permutation importance')
+            logger.info('No file found for train permutation importance')"""
 
         # F1 score
         f1 = evaluate_f1(metrics, 'f1')
@@ -283,7 +283,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         f1['index'] = index
         f1['label'] = label
         f1['values_per_class'] = values_per_class
-        f1['kdays'] = kdays
+        f1['k_days'] = k_days
         f1['scale'] = scale
         f1['nf'] = nf
 
@@ -366,7 +366,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         #mae['mae_top_5_cluster_unweighted'] = evaluate_met(metrics, 'mae_top_5_cluster_unweighted')['mae_top_5_cluster_unweighted']
 
         mae['values_per_class'] = values_per_class
-        mae['kdays'] = kdays
+        mae['k_days'] = k_days
         mae['scale'] = scale
         mae['nf'] = nf
 
@@ -379,7 +379,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         maetop10['index'] = index
         maetop10['label'] = label
         maetop10['values_per_class'] = values_per_class
-        maetop10['kdays'] = kdays
+        maetop10['k_days'] = k_days
         maetop10['scale'] = scale
         maetop10['nf'] = nf
         maetop10s.append(maetop10)
@@ -398,7 +398,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         bca['bca_top_5_cluster'] = evaluate_ca(metrics, 'bca_top_5_cluster')['bca_top_5_cluster']
         bca['bca_top_5_cluster_unweighted'] = evaluate_ca(metrics, 'bca_top_5_cluster_unweighted')['bca_top_5_cluster_unweighted']
         bca['values_per_class'] = values_per_class
-        bca['kdays'] = kdays
+        bca['k_days'] = k_days
         bca['scale'] = scale
         bca['nf'] = nf
         bcas.append(bca)
@@ -417,7 +417,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         rmse['rmse_top_5_cluster'] = evaluate_met(metrics, 'rmse_top_5_cluster')['rmse_top_5_cluster']
         #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
         rmse['values_per_class'] = values_per_class
-        rmse['kdays'] = kdays
+        rmse['k_days'] = k_days
         rmse['scale'] = scale
         rmse['nf'] = nf
         rmses.append(rmse)
@@ -437,7 +437,7 @@ def load_and_evaluate(experiments, test_name, dir_output, dir_input, sinister):
         cal['cal_top_5_cluster'] = evaluate_met(metrics, 'cal_top_5_cluster')['cal_top_5_cluster']
         #rmse['rmse_top_5_cluster_unweighted'] = evaluate_met(metrics, 'rmse_top_5_cluster_unweighted')['rmse_top_5_cluster_unweighted']
         cal['values_per_class'] = values_per_class
-        cal['kdays'] = kdays
+        cal['k_days'] = k_days
         cal['scale'] = scale
         cal['nf'] = nf
         cals.append(cal)
@@ -745,12 +745,17 @@ if __name__ == "__main__":
                              #(spec, 4, 'full_0_35_100', 'full_0_35_100_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 6, 'full_0_40_100', 'full_0_40_100_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 7, 'full_7_60_700', 'full_7_60_700_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 8, 'full_7_30_300', 'full_7_30_300_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 9, 'full_7_60_300', 'full_7_60_300_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 9, 'full_7_60_300', 'full_7_60_300_none_Catboost_'+test_name+'_bp'),
-                             (spec, 8, 'full_7_30_300', 'full_7_30_300_none_Catboost_'+test_name+'_bp'),
-                             (spec, 10, 'full_7_30_300_kmeans', 'full_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
-                             (spec, 12, 'full_7_60_300_kmeans', 'full_7_60_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 8, '100_7_30_300_kmeans', '100_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 9, '200_7_30_300_kmeans', '200_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 13, '50_7_30_300_kmeans', '50_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 10, '500_7_30_300_kmeans', '500_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             (spec, 12, 'binary_7_30_300', 'binary_7_30_300_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 9, 'full_7_30_300', 'full_7_30_300_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 9, 'full_7_60_300', 'full_7_60_300_z-score_Catboost_'+test_name+'_tree'),
+                             #(spec, 9, 'full_7_60_300', 'full_7_60_300_none_Catboost_'+test_name+'_bp'),
+                             #(spec, 8, 'full_7_30_300', 'full_7_30_300_none_Catboost_'+test_name+'_bp'),
+                             (spec, 11, 'full_7_30_300_kmeans', 'full_7_30_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
+                             #(#spec, 12, 'full_7_60_300_kmeans', 'full_7_60_300_kmeans_z-score_Catboost_'+test_name+'_tree'),
                              #(spec, 4, 'full_0_10_100_fusion', 'full_0_10_100_fusion_10_z-score_Catboost_'+test_name+'_fusion'),
                             ]
     

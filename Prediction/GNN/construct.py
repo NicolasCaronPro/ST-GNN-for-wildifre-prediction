@@ -70,16 +70,16 @@ def look_for_information(path : Path, departements : list,
     name = 'points.csv'
     points.to_csv(dir / sinister / name, index=False)
 
-def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution):
+def construct_graph(scale, maxDist, sinister, geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct):
     graphScale = GraphStructure(scale, geo, maxDist, nmax)
-    graphScale._train_kmeans(doRaster=doRaster, path=dir_output, sinister=sinister, resolution=resolution)
+    graphScale._train_clustering(base=graph_construct, doRaster=doRaster, path=dir_output, sinister=sinister, resolution=resolution)
     graphScale._create_nodes_list()
     graphScale._create_edges_list()
     graphScale._create_temporal_edges_list(allDates, k_days=k_days)
     graphScale.nodes = graphScale._assign_department(graphScale.nodes)
     if doEdgesFeatures:
-        graphScale.edges = get_edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
-    save_object(graphScale, 'graph_'+str(scale)+'.pkl', dir_output)
+        graphScale.edges = edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
+    save_object(graphScale, f'graph_{scale}_{graph_construct}.pkl', dir_output)
     return graphScale
 
 def construct_database(graphScale : GraphStructure,
@@ -95,7 +95,8 @@ def construct_database(graphScale : GraphStructure,
                        values_per_class : int,
                        mode : str,
                        resolution : str,
-                       maxDate : str):
+                       maxDate : str,
+                       graph_construct : str):
     
     trainCode = [name2int[d] for d in train_departements]
     X_kmeans = list(zip(ps.longitude, ps.latitude))
@@ -116,27 +117,23 @@ def construct_database(graphScale : GraphStructure,
 
     subNode = graphScale._assign_latitude_longitude(subNode)
 
-    print(subNode)
-
     subNode = graphScale._assign_department(subNode)
-
-    print(np.unique(subNode[:,3]))
 
     graphScale._info_on_graph(subNode, Path('log'))
 
-    n = 'Y_full_'+str(scale)+'.pkl'
+    n = f'Y_full_{scale}_{graph_construct}.pkl'
     if not (dir_output / n).is_file():
     #if True:
-        Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output, dir_train, resolution)
-        save_object(Y, 'Y_full_'+str(scale)+'.pkl', dir_output)
+        Y = get_sub_nodes_ground_truth(graphScale, subNode, departements, orinode, dir_output, dir_train, resolution, graph_construct)
+        save_object(Y, n, dir_output)
     else:
-        Y = read_object('Y_full_'+str(scale)+'.pkl', dir_output)
+        Y = read_object(n, dir_output)
 
-    n = 'X_full_'+str(scale)+'.pkl'
+    n = f'X_full_{scale}_{graph_construct}.pkl'
     #if False:
     if (dir_output / n).is_file():
         features_name, _ = get_features_name_list(scale, features, METHODS_SPATIAL)
-        X = read_object('X_full_'+str(scale)+'.pkl', dir_output)
+        X = read_object(n, dir_output)
     else:
         X = None
 
@@ -150,22 +147,42 @@ def construct_database(graphScale : GraphStructure,
     
             x_train = X[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
 
-        values_per_class = int(values_per_class)
-        new_Y = []
-        new_X = []
-        for dept in departements:
-            maskdept = np.argwhere(y_train[:, 3] == name2int[dept])
-            if maskdept.shape[0] == 0:
-                continue
-            classs = np.unique(y_train[maskdept, -3])
-            new_Y_index = []
-            for cls in classs:
-                Y_class_index = np.argwhere(y_train[maskdept, -3] == cls)[:, 0]
-                choices = np.random.choice(Y_class_index, min(Y_class_index.shape[0], values_per_class), replace=False)
+        # binary selection (same number of non fire than fire)
+        if values_per_class == 'binary':
+            new_Y = []
+            new_X = []
+            for dept in departements:
+                maskdept = np.argwhere(y_train[:, 3] == name2int[dept])
+                if maskdept.shape[0] == 0:
+                    continue
+                mask_non_sinister = np.argwhere(y_train[maskdept, -2] == 0)[:, 0]
+                mask_sinister = np.argwhere(y_train[maskdept, -2] > 0)[:, 0]
+                number_of_samples = np.argwhere(y_train[maskdept, -2] > 0).shape[0]
+                new_Y_index = []
+                choices = np.random.choice(mask_non_sinister, min(mask_non_sinister.shape[0], number_of_samples), replace=False)
                 new_Y_index += list(choices)
-            new_Y += list(y_train[maskdept][new_Y_index])
-            if X is not None:
-                new_X += list(x_train[maskdept][new_Y_index])
+                new_Y_index += list(mask_sinister)
+                new_Y += list(y_train[maskdept][new_Y_index])
+                if X is not None:
+                    new_X += list(x_train[maskdept][new_Y_index])
+
+        # Class selction sample (specify of number maximum of samples per class)
+        else:
+            new_Y = []
+            new_X = []
+            for dept in departements:
+                maskdept = np.argwhere(y_train[:, 3] == name2int[dept])
+                if maskdept.shape[0] == 0:
+                    continue
+                classs = np.unique(y_train[maskdept, -3])
+                new_Y_index = []
+                for cls in classs:
+                    Y_class_index = np.argwhere(y_train[maskdept, -3] == cls)[:, 0]
+                    choices = np.random.choice(Y_class_index, min(Y_class_index.shape[0], int(values_per_class)), replace=False)
+                    new_Y_index += list(choices)
+                new_Y += list(y_train[maskdept][new_Y_index])
+                if X is not None:
+                    new_X += list(x_train[maskdept][new_Y_index])
 
         new_Y = np.asarray(new_Y).reshape(-1, y_train.shape[-1])
         mask_days = np.zeros(y_train.shape[0], dtype=bool)
@@ -178,22 +195,25 @@ def construct_database(graphScale : GraphStructure,
             new_X = np.asarray(new_X).reshape(-1, x_train.shape[-1])
             new_X_neighboor = x_train[mask_days]
             X = np.concatenate((new_X, new_X_neighboor, x_test), casting='no')
-            X[:, features_name.index('vigicrues'): features_name.index('vigicrues') + 4] = -1
+            X[:, features_name.index(f'{vigicrues_variables[0]}_mean'): features_name.index(f'{vigicrues_variables[-1]}_std') + 1] = -1 # To much nan values
 
         Y = np.concatenate((new_Y, new_Y_neighboor, y_test), casting='no')
-        X, Y = remove_nan_nodes(X, Y)
-        X, Y = remove_none_target(X, Y)
-        X = np.unique(X, axis=0)
+        """X, Y = remove_nan_nodes_np(X, Y)
+        X, Y = remove_none_target_np(X, Y)
+        if X is not None:
+            X = np.unique(X, axis=0)
+            print(X.shape, Y.shape)
+
         Y = np.unique(Y, axis=0)
-        y_train = Y[(Y[:,4] < allDates.index(maxDate)) & (np.isin(Y[:,3], trainCode))]
+        print(X.shape, Y.shape)"""
 
     if X is None:
-        X, features_name = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution)
+        print(np.unique(Y[:, 0]))
+        X, features_name = get_sub_nodes_feature(graphScale, Y[:, :6], departements, features, sinister, dir_output, dir_train, resolution, graph_construct)
 
     ind = np.lexsort([Y[:, 4], Y[:, 0]])
     Y = Y[ind]
     if X is not None:
-        ind = np.lexsort([Y[:, 4], Y[:, 0]])
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
@@ -277,6 +297,8 @@ def init(args, dir_output, add_time_varying):
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
     days_in_futur = int(args.days_in_futur) # The target time validation
     dir_output = dir_output
+    scaling = args.scaling
+    graph_construct = args.graphConstruct
 
     ######################## CONFIG ################################
 
@@ -288,9 +310,11 @@ def init(args, dir_output, add_time_varying):
     minDate = '2017-06-12' # Starting point
 
     if values_per_class == 'full':
-        prefix = f'{values_per_class}_{scale}'
+        prefix = f'{values_per_class}'
     else:
-        prefix = f'{values_per_class}_{k_days}_{scale}'
+        prefix = f'{values_per_class}_{k_days}'
+
+    prefix += f'_{scale}_{graph_construct}'
 
     autoRegression = 'AutoRegressionReg' in train_features
     if spec == '' and autoRegression:
@@ -322,6 +346,7 @@ def init(args, dir_output, add_time_varying):
         logger.info('#################################')
         logger.info('#      Construct   Graph        #')
         logger.info('#################################')
+
         graphScale = construct_graph(scale,
                                     maxDist[scale],
                                     sinister,
@@ -329,10 +354,12 @@ def init(args, dir_output, add_time_varying):
                                     dir_output,
                                     True,
                                     False,
-                                    resolution)
+                                    resolution,
+                                    graph_construct)
+        
         graphScale._create_predictor(minDate, maxDate, dir_output, sinister, resolution)
     else:
-        graphScale = read_object('graph_'+str(scale)+'.pkl', dir_output)
+        graphScale = read_object(f'graph_{scale}_{graph_construct}.pkl', dir_output)
 
     graphScale._plot(graphScale.nodes, dir_output=dir_output)
 
@@ -373,7 +400,8 @@ def init(args, dir_output, add_time_varying):
                                             values_per_class,
                                             'train',
                                             resolution,
-                                            trainDate)
+                                            trainDate,
+                                            graph_construct)
         
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
@@ -383,30 +411,26 @@ def init(args, dir_output, add_time_varying):
         features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
     if newFeatures != []:
-        X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution)
+        X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution, graph_construct)
         for fet in newFeatures:
             start , maxi, _, _ = calculate_feature_range(fet, scale, METHODS_SPATIAL)
             X[:, features_name.index(start): features_name.index(start) + maxi] = X2[:, features_name_.index(start): features_name_.index(start) + maxi]
 
     ################################# 2D Database ###################################
-
+    
     if do2D:
-        subnode = X[:,:6]
-        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale,
-                                                    subnode.shape[1],
-                                                    X,
-                                                    scaling,
-                                                    features_name,
-                                                    train_departements,
-                                                    features,
-                                                    sinister,
-                                                    dir_output,
-                                                    prefix)
+        subnode = Y[:,:6]
+        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, subnode, departements, features, sinister, dir_output, dir_output, resolution, graph_construct)
     else:
-        subnode = X[:,:6]
+        subnode = Y[:,:6]
         features_name_2D, newShape2D = get_features_name_lists_2D(subnode.shape[1], features)
 
-    prefix = f'{str(values_per_class)}_{str(k_days)}_{str(scale)}_{str(nbfeatures)}'
+    prefix = f'{values_per_class}_{k_days}'
+
+    if graph_construct == 'geometry':
+        prefix += f'_{scale}_{graph_construct}'
+    else:
+        prefix += f'_{graph_construct}'
 
     ############################## Add varying time features #############################
     if k_days > 0 and add_time_varying:
@@ -431,6 +455,8 @@ def init(args, dir_output, add_time_varying):
     df[features_name] = X
     df[ids_columns + targets_columns] = Y
 
+    df.drop_duplicates(inplace=True)
+
     save_object(df, 'df_'+prefix+'.pkl', dir_output)
 
-    return df, graphScale, prefix, features_name_2D
+    return df, graphScale, prefix

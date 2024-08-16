@@ -1,0 +1,15 @@
+artifact_uri: mlflow-artifacts:/923380569075259843/1a221420acdd4adabcac7e9724eab654/artifacts
+end_time: 1723785979422
+entry_point_name: ''
+experiment_id: '923380569075259843'
+lifecycle_stage: active
+run_id: 1a221420acdd4adabcac7e9724eab654
+run_name: Preprocessing
+run_uuid: 1a221420acdd4adabcac7e9724eab654
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1723785893681
+status: 3
+tags: []
+user_id: caron

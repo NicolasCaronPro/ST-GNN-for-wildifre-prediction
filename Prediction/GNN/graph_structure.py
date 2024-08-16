@@ -1,5 +1,7 @@
 import numpy as np
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, SpectralClustering
+from sklearn.neighbors import NearestNeighbors, KNeighborsRegressor
+from sklearn import pipeline
 import math
 import geopandas as gpd 
 from shapely import unary_union
@@ -8,6 +10,13 @@ from forecasting_models.models import *
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 from features_2D import *
+from skimage import io, color, filters, measure, morphology
+from scipy import ndimage as ndi
+from skimage.morphology import disk
+from skimage.segmentation import watershed
+from skimage import data
+from skimage.filters import rank
+from skimage.util import img_as_ubyte
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -32,53 +41,232 @@ class GraphStructure():
         self.oriLongitude = geo.longitude # all original longitude of interest
         self.oriLen = self.oriLatitues.shape[0] # len of data
         self.oriGeometry = geo['geometry'].values # original geometry
+        self.oriIds = geo['scale0'].values
         self.departements = geo.departement # original dept of each geometry
         self.maxDist = maxDist # max dist to link two nodes
         self.numNei = numNei # max connect neighbor a node can have
-        self.kmeans = {}
+        self.clusterer = {}
 
-    def _train_kmeans(self, doRaster: bool, path : Path, sinister : str, resolution) -> None:
-        self.train_kmeans = True
-        logger.info('Create node via KMEANS')
+    def _train_clustering(self, base : str, doRaster: bool, path : Path, sinister : str, resolution) -> None:
         udept = np.unique(self.departements)
-        node_already_predicted = 0
-        self.ids = np.empty(self.oriLatitues.shape[0], dtype=int)
-        self.numCluster = 0
-        for dept in udept:
-            self.kmeans[dept] = {}
-            mask = self.departements == dept
-            X = list(zip(self.oriLongitude[mask], self.oriLatitues[mask]))
-            leni = len(X)
-            if self.scale != 0:
-                current_cluster = leni // (self.scale * 6)
-            else:
-               current_cluster += leni
-            logger.info(f'Constructing {dept}, {leni} divide by {self.scale * 6} hexagones give a graph with {current_cluster} nodes')
-            self.numCluster += current_cluster
-            self.kmeans[dept]['kmeans'] = KMeans(current_cluster, random_state=42, n_init=10)
-            self.kmeans[dept]['node_already_predicted'] = node_already_predicted
-            self.ids[mask] = self.kmeans[dept]['kmeans'].fit_predict(X) + node_already_predicted
-            node_already_predicted += current_cluster
+        self.base = base
+        self.train_kmeans = True
+        if base == 'geometry':
+            logger.info('Create node via KMEANS')
+            node_already_predicted = 0
+            self.ids = np.empty(self.oriLatitues.shape[0], dtype=int)
+            self.numCluster = 0
+            for dept in udept:
+                self.clusterer[dept] = {}
+                mask = self.departements == dept
+                X = list(zip(self.oriLongitude[mask], self.oriLatitues[mask]))
+                leni = len(X)
+                if self.scale != 0:
+                    current_cluster = leni // (self.scale * 6)
+                else:
+                    current_cluster += leni
+                logger.info(f'Constructing {dept}, {leni} divide by {self.scale * 6} hexagones give a graph with {current_cluster} nodes')
+                self.numCluster += current_cluster
+                self.clusterer[dept]['algo'] = KMeans(current_cluster, random_state=42, n_init=10)
+                self.clusterer[dept]['node_already_predicted'] = node_already_predicted
+                self.ids[mask] = self.clusterer[dept]['algo'].fit_predict(X) + node_already_predicted
+                node_already_predicted += current_cluster
+
+        elif base == 'risk':
+            logger.info(f'Create node via DBSCAN on {base}')
+
+            dir_raster = root_target / sinister / 'raster' / resolution
+            dir_target = root_target / sinister / 'log' / resolution
+
+            self.numCluster = 0
+            node_already_predicted = 0
+            self.ids = np.empty(self.oriLatitues.shape[0], dtype=int)
+            for dept in udept:
+                mask = self.departements == dept
+                leni = mask.shape[0]
+                self.clusterer[dept] = {}
+
+                data = read_object(f'{dept}Influence.pkl', dir_target)
+                data = np.nansum(data, axis=2)
+
+                pred = np.empty(data.shape, dtype=int)
+                coords = np.indices((data.shape[0], data.shape[1]))[:, ~np.isnan(data)].reshape(2, -1).T
+                values = np.concatenate([coords, data[~np.isnan(data)].reshape(-1,1)], axis=1)
+                scaler = StandardScaler()
+                normalized_values = scaler.fit_transform(values)
+
+                leni = len(mask)
+
+                if self.scale != 0:
+                    current_cluster = leni // (self.scale * 6)
+                else:
+                    current_cluster += leni
+
+                #dbscan = DBSCAN(eps=eps[dept][base], min_samples=self.scale * 6, metric=metric[base])
+                #self.clusterer[dept]['node_already_predicted'] = node_already_predicted
+                #pred[~np.isnan(data)] = dbscan.fit_predict(normalized_values)
+                #pred = np.copy(data)
+
+                if -1 in np.unique(pred):
+
+                    valid_mask = pred != -1
+                    invalid_mask = pred == -1
+
+                    valid_coords = np.column_stack(np.where(valid_mask))
+                    valid_values = pred[valid_mask]
+
+                    # Coordonnées des pixels à remplacer
+                    invalid_coords = np.column_stack(np.where(invalid_mask))
+
+                    # Utilisation de KNeighbors pour prédire les valeurs manquantes
+                    knn = KNeighborsRegressor(n_neighbors=5, weights='distance')
+                    knn.fit(valid_coords, valid_values)
+
+                    predicted_values = knn.predict(invalid_coords)
+
+                    pred[invalid_mask] = predicted_values
+
+                logger.info(f'DBSCAN Unique cluster : {np.unique(pred)}, {np.unique(pred).shape}')
+
+                kmeans = KMeans(n_clusters=min(self.scale, np.unique(pred).shape[0]), random_state=42, n_init=10)
+                pred[~np.isnan(data)] = kmeans.fit_predict(normalized_values)
+
+                #self.clusterer[dept]['algo'] = pipeline.Pipeline([('dbscan', dbscan), ('kmeans', kmeans)])
+                self.clusterer[dept]['algo'] = kmeans
+                #self.clusterer[dept]['algo'] = dbscan
+
+                pred += node_already_predicted
+
+                raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)[0]
+                X = np.unique(raster)
+                for node in X:
+                    mask_node = self.oriIds == node
+                    mask2 = raster == node
+                    self.ids[mask_node] = pred[mask2]
+
+                current_cluster = np.unique(pred[~np.isnan(data)]).shape[0]
+                logger.info(f'Unique cluster : {np.unique(pred)}, {current_cluster}')
+                node_already_predicted += current_cluster
+                self.numCluster += current_cluster
+
+        elif base == 'population' or base == 'elevation' or base == 'foret_landcover' or base == 'dynamic_world_landcover':
+                
+            logger.info(f'Create node via DBSCAN on {base}')
+            dir_raster = root_target / sinister / 'raster' / resolution
+            dir_encoder = path / 'Encoder'
+            self.numCluster = 0
+            node_already_predicted = 0
+            udept = np.unique(self.departements)
+            self.ids = np.empty(self.oriLatitues.shape[0], dtype=int)
+            for dept in udept:
+                mask = self.departements == dept
+                leni = mask.shape[0]
+                self.clusterer[dept] = {}
+
+                dir_data = root / 'csv' / dept / 'raster' / resolution
+                data = read_object(f'{base}.pkl', dir_data)
+
+                if base == 'foret_landcover':
+                    encoder = read_object('encoder_foret.pkl', dir_encoder)
+                elif base == 'dynamic_world_landcover':
+                    encoder = read_object('encoder_landcover.pkl', dir_encoder)
+                else:
+                    encoder = None
+
+                if encoder is not None:
+                    values = data[~np.isnan(data)].reshape(-1)
+                    data[~np.isnan(data)] = encoder.transform(values).values.reshape(-1)
+
+                pred = np.empty(data.shape, dtype=int)
+                coords = np.indices((data.shape[0], data.shape[1])).reshape(2, -1).T
+
+                #dbscan = DBSCAN(eps=eps[base], min_samples=leni // (self.scale * 6), metric=metric[base])
+                self.clusterer[dept]['node_already_predicted'] = node_already_predicted
+                #pred[~np.isnan(data)] = dbscan.fit_predict(data.reshape(-1,1))
+                pred = np.copy(data)
+
+                if -1 in np.unique(pred):
+
+                    valid_mask = pred != -1
+                    invalid_mask = pred == -1
+
+                    valid_coords = np.column_stack(np.where(valid_mask))
+                    valid_values = pred[valid_mask]
+
+                    # Coordonnées des pixels à remplacer
+                    invalid_coords = np.column_stack(np.where(invalid_mask))
+
+                    # Utilisation de KNeighbors pour prédire les valeurs manquantes
+                    knn = KNeighborsRegressor(n_neighbors=5, weights='distance')
+                    knn.fit(valid_coords, valid_values)
+
+                    predicted_values = knn.predict(invalid_coords)
+
+                    pred[invalid_mask] = predicted_values
+
+                logger.info(f'DBSCAN Unique cluster : {np.unique(pred)}, {np.unique(pred).shape}')
+
+                kmeans = KMeans(n_clusters=min(5, np.unique(pred).shape[0]), random_state=42, n_init=10)
+
+                pred[~np.isnan(data)] = kmeans.fit_predict(pred[~np.isnan(data)].reshape(-1,1))
+
+                #self.clusterer[dept]['algo'] = pipeline.Pipeline([('dbscan', dbscan), ('kmeans', kmeans)])
+                self.clusterer[dept]['algo'] = kmeans
+                
+                pred += node_already_predicted
+
+                raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)[0]
+                X = np.unique(raster)
+                for node in X:
+                    mask_node = self.oriIds == node
+                    mask2 = raster == node
+                    self.ids[mask_node] = pred[mask2]
+
+                current_cluster = np.unique(pred[~np.isnan(data)]).shape[0]
+                logger.info(f'Unique cluster : {np.unique(pred)}, {current_cluster}')
+                node_already_predicted += current_cluster
+                self.numCluster += current_cluster
+        else:
+                logger.info('WTF')
+                exit(1)
+
         if doRaster:
-            self._raster(path=path, sinister=sinister, resolution=resolution)
+            self._raster(path=path, sinister=sinister, base=base, resolution=resolution)
 
     def _predict_node(self, array : list, depts = None) -> np.array:
-        assert self.kmeans is not None
+        assert self.clusterer is not None
         if depts is None:
             array2 = np.empty((np.asarray(array).shape[0], 4))
             array2[:, 1:3] = np.asarray(array).reshape(-1,2)
             depts = self._assign_department(array2)[:, -1]
+
+        array = np.asarray(array)
         udept = np.unique(depts)
         res = np.empty(len(array))
         for dept in udept:
             if dept is None:
                 continue
             mask = np.argwhere(depts == dept)[:, 0]
-            x = np.asarray(array)[mask]
-            res[mask] = self.kmeans[int2name[dept]]['kmeans'].predict(x) + self.kmeans[int2name[dept]]['node_already_predicted']
+            x = array[mask]
+            if self.base == 'geometry' or self.base == 'risk':
+                res[mask] = self.clusterer[int2name[dept]]['algo'].predict(x) + self.clusterer[int2name[dept]]['node_already_predicted']
+            else:
+                mask_ori = self.nodes[:, 3] == dept
+                existing_data = list(zip(self.nodes[mask_ori, 1], self.nodes[mask_ori, 2]))
+                existing_ids = self.nodes[mask_ori, 0]
+                nbrs = NearestNeighbors(n_neighbors=1).fit(existing_data)
+                ux = np.unique(x, axis=0)
+                neighbours = nbrs.kneighbors(ux, return_distance=False)
+                for i, xx in enumerate(ux):
+                    neighbours_x = neighbours[i][0]
+                    mask_x = np.argwhere((array[:, 0] == xx[0]) & (array[:, 1] == xx[1]))[:, 0]
+                    m1 = self.nodes[mask_ori, 1] == existing_data[neighbours_x][0]
+                    m2 = self.nodes[mask_ori, 2] == existing_data[neighbours_x][1]
+                    m3 = m1 & m2
+                    res[mask_x] = existing_ids[m3]
         return res
 
-    def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, sinister):
+    def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister):
 
         dir_bin = root_target / sinister / 'bin' / resStr
         dir_target = root_target / sinister / 'log' / resStr
@@ -89,14 +277,21 @@ class GraphStructure():
             maskDept = np.argwhere(self.departements == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
             geo['scale'+str(self.scale)] = self.ids[maskDept]
-            mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, 'scale'+str(self.scale), Path('log'), 'ori')
+            mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
             mask = mask[0]
             outputName = dept+'rasterScale0.pkl'
             raster = read_object(outputName, dir_raster)[0]
             logger.info(f'{dept, mask.shape, raster.shape}')
             mask[np.isnan(raster)] = np.nan
 
-            save_object(mask, dept+'rasterScale'+str(self.scale)+'.pkl', path / 'raster')
+            save_object(mask, f'{dept}rasterScale{self.scale}_{base}.pkl', path / 'raster')
+
+            plt.figure(figsize=(15,5))
+            plt.imshow(mask, label='ID')
+            plt.legend()
+            plt.savefig(path / 'raster' / f'{dept}_{self.base}.png')
+            plt.title(dept)
+            plt.close('all')
 
             if doBin:
                 outputName = dept+'binScale0.pkl'
@@ -107,12 +302,13 @@ class GraphStructure():
                 influence = read_object(outputName, dir_target)
 
                 binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence, raster)
-                save_object(binImageScale, dept+'binScale'+str(self.scale)+'.pkl', path / 'bin')
-                save_object(influenceImageScale, dept+'InfluenceScale'+str(self.scale)+'.pkl', path / 'influence')
+                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}.pkl', path / 'bin')
+                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}.pkl', path / 'influence')
 
     def _raster(self, path : Path,
                 sinister : str,
-                resolution : str) -> None:
+                resolution : str,
+                base: str) -> None:
         """"
         Create new raster mask
         """
@@ -124,7 +320,7 @@ class GraphStructure():
 
         # 1 pixel = 1 Hexagone (2km) use for 1D process
 
-        self._raster2(path, resolutions[resolution]['y'], resolutions[resolution]['x'], resolution, True, sinister)
+        self._raster2(path, resolutions[resolution]['y'], resolutions[resolution]['x'], resolution, True, base, sinister)
 
         """# 1 pixel = 1 km, use for 2D process Not suitable for now
         n_pixel_y = 0.009
@@ -138,8 +334,8 @@ class GraphStructure():
         name = 'kmeans'+str(self.scale)+'.pkl'
         self.numCluster = self.oriLen // (self.scale * 6)
         X = list(zip(self.oriLongitude, self.oriLatitues))
-        self.kmeans = pickle.load(open(path / name, 'rb'))
-        self.ids = self.kmeans.predict(X)
+        self.clusterer = pickle.load(open(path / name, 'rb'))
+        self.ids = self.clusterer.predict(X)
 
     def _create_predictor(self, start, end, dir, sinister, resolution):
         dir_influence = root_graph / dir / 'influence'
@@ -149,8 +345,8 @@ class GraphStructure():
         # Scale Shape
         logger.info(f'######### {self.scale} scale ##########')
         for dep in np.unique(self.departements):
-            influence = read_object(dep+'InfluenceScale'+str(self.scale)+'.pkl', dir_influence)
-            binValues = read_object(dep+'binScale'+str(self.scale)+'.pkl', dir_bin)
+            influence = read_object(f'{dep}InfluenceScale{self.scale}_{self.base}.pkl', dir_influence)
+            binValues = read_object(f'{dep}binScale{self.scale}_{self.base}.pkl', dir_bin)
             if influence is None:
                 continue
             influence = influence[:,:,allDates.index(start):allDates.index(end)]
@@ -164,11 +360,13 @@ class GraphStructure():
                 predictor.fit(np.asarray(values))
             predictor.log(logger)
             check_class(influence, binValues)
-            save_object(predictor, dep+'Predictor'+str(self.scale)+'.pkl', path=dir_predictor)
+            save_object(predictor, f'{dep}Predictor{self.scale}_{self.base}.pkl', path=dir_predictor)
 
         logger.info('######### Departement Scale ##########')
         dir_target = root_target / sinister / 'log' / resolution
         dir_bin = root_target / sinister / 'bin' / resolution
+        if (dir_predictor / f'{dep}PredictorDepartement.pkl').is_file():
+            return
         # Departement
         for dep in np.unique(self.departements):
             binValues = read_object(dep+'binScale0.pkl', dir_bin)
@@ -190,7 +388,7 @@ class GraphStructure():
                 predictor.fit(np.asarray(influence))
             check_class(influence, binValues)
             predictor.log(logger)
-            save_object(predictor, dep+'PredictorDepartement.pkl', path=dir_predictor)
+            save_object(predictor, f'{dep}PredictorDepartement.pkl', path=dir_predictor)
         
     def _create_nodes_list(self) -> None:
         """
@@ -199,7 +397,6 @@ class GraphStructure():
         logger.info('Creating node list')
         self.nodes = np.full((self.numCluster, 5), np.nan) # [id, longitude, latitude]
         self.uniqueIDS = np.unique(self.ids)
-        print(self.uniqueIDS.shape, self.nodes.shape)
         for id in self.uniqueIDS:
             mask = np.argwhere(id == self.ids)
             if self.scale != 0:
@@ -210,7 +407,7 @@ class GraphStructure():
             valuesDep, counts = np.unique(self.departements[mask[:,0]], return_counts=True)
             ind = np.argmax(counts)
             self.nodes[id] = np.asarray([id, float(nodeGeometry.x), float(nodeGeometry.y), name2int[valuesDep[ind]], -1])
-
+        
     def _create_edges_list(self) -> None:
         """
         Create edges list
@@ -360,7 +557,7 @@ class GraphStructure():
             ax.set_xlabel('Longitude')
             ax.set_ylabel('Latitude')
         if dir_output is not None:
-            name = 'graph_'+str(self.scale)+'.png'
+            name = f'graph_{self.scale}_{self.base}.png'
             plt.savefig(dir_output / name)
 
     def _set_model(self, model) -> None:
@@ -393,8 +590,8 @@ class GraphStructure():
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
-            testloader = DataLoader(X, 1)
-            for i, data in enumerate(testloader, 0):
+            test_loader = DataLoader(X, 1)
+            for i, data in enumerate(test_loader, 0):
                 inputs, _, edges = data
                 output = self.model(inputs, edges)
                 return output

@@ -1794,6 +1794,37 @@ def check_class(influence, bin):
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
+def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break_point, dir_log, sinister):
+    y_dates = np.unique([date_limit - dt.timedelta(days=df.date.values.max() - k) for k in df.date.values])
+    unodes = df.id.unique() 
+
+    check_and_create_path(dir_log / 'kmeans_feature')
+    for fet in features_selected:
+        logger.info(f'############## {fet} #################')
+
+        fig, axs = plt.subplots(unodes.shape[0], figsize=(15,10))
+        
+        for i, node in enumerate(unodes):
+            values = df[df['id'] == node][fet].values
+            predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
+            predclass = order_class(predictor, predictor.predict(values))
+            ax1 = axs[i]
+            ax1.set_title(f'{node}')
+            ax1.plot(y_dates, predclass, c='b', label=f'{fet}')
+            ax1.set_xlabel('Date')
+            ax1.set_ylabel('Class')
+            ax1.set_ylim([0, 4])
+
+            ax2 = ax1.twinx()
+
+            ax2.plot(y_dates, df[df['id'] == node]['AutoRegressionBin_B-1'].shift(1), label=f'{sinister}', c='r')
+            ax2.set_ylabel(f'Number of {sinister}', color='r')
+            ax2.set_ylim([0, 4])
+            
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(dir_log / 'kmeans_feature' / f'{fet}_{date_limit}.png')
+        plt.close('all')
 
 def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target : str, tresh : int, features_selected, new_val : int):
     dico_correlation = read_object('break_point_dict.pkl', dir_break_point)

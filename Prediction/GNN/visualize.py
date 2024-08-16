@@ -12,7 +12,7 @@ def realVspredict(ypred, y, band, dir_output, on):
         mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
         ids = np.unique(y[mask, 0])
         if ids.shape[0] == 1:
-            _, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
+            fig, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
             ax.plot(ypred[mask], color='red', label='predict')
             ax.plot(ytrue[mask], color='blue', label='real', alpha=0.5)
             for class_value in classes:
@@ -20,7 +20,7 @@ def realVspredict(ypred, y, band, dir_output, on):
                 ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
             ax.set_ylim(ymin=mini, ymax=maxi)
         else:
-            _, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
+            fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
                 mask2 = np.argwhere(y[:, 0] == id)
                 ax[i].plot(ypred[mask2], color='red', label='predict')
@@ -31,7 +31,10 @@ def realVspredict(ypred, y, band, dir_output, on):
                 ax[i].set_ylim(ymin=mini, ymax=maxi)
         plt.legend()
         outn = str(d) + '_' + on + '.png'
+        if MLFLOW:
+            mlflow.log_figure(fig, outn)
         plt.savefig(dir_output / outn)
+        plt.close('all')
 
     uids = np.unique(y[:, 0])
     if uids.shape[0] < 5:
@@ -58,54 +61,106 @@ def realVspredict(ypred, y, band, dir_output, on):
 
     plt.tight_layout()
     outn = 'top_5' + on + '.png'
-    plt.savefig(dir_output / outn)
-
-def sinister_distribution_in_class(ypredclass, y, dir_output):
-    check_and_create_path(dir_output)
-    nbclass = np.unique(y[:, -3])
-
-    meansinisterinpred = []
-    meansinisteriny = []
-
-    nbsinisterinpred = []
-    nbsinisteriny = []
-
-    for cls in nbclass:
-        mask = np.argwhere(y[:, -3] == cls)[:, 0]
-        if mask.shape[0] == 0:
-            nbsinisteriny.append(-1)
-            meansinisteriny.append(-1)
-
-        if np.nansum(y[:, -2]) == 0:
-            nbsinisteriny.append(0)
-        else:
-            nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
-        meansinisteriny.append(np.nanmean((y[mask, -2] > 0).astype(int)))
-
-        mask = np.argwhere(ypredclass == cls)[:, 0]
-        if np.nansum(y[:, -2]) == 0:
-            nbsinisterinpred.append(0)
-        else:
-            nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
-        meansinisterinpred.append(np.nanmean((y[mask, -2] > 0).astype(int)))
-
-    fig, ax = plt.subplots(2, figsize=(15,10))
-    ax[0].plot(nbclass, meansinisteriny, label='GT')
-    ax[0].plot(nbclass, meansinisterinpred, label='Prediction')
-    ax[0].set_xlabel('Class')
-    ax[0].set_ylabel('Mean of sinister')
-    ax[0].set_title('Mean per class')
-
-    ax[1].plot(nbclass, nbsinisteriny, label='GT')
-    ax[1].plot(nbclass, nbsinisterinpred, label='Prediction')
-    ax[1].set_xlabel('Class')
-    ax[1].set_ylabel('Nb of sinister')
-    ax[1].set_title('Number per class')
     
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(dir_output / 'mean_fire.png')
+    if MLFLOW:
+        mlflow.log_figure(fig, dir_output / outn)
+
+    plt.savefig(dir_output / outn)
     plt.close('all')
+
+def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname):
+    check_and_create_path(dir_output)
+    udept = np.unique(ytrue[:, 3])
+
+    for dept in udept:
+        y = ytrue[ytrue[:, 3] == dept]
+        ypredclass = ypredclassfull[ytrue[:, 3] == dept] 
+        nbclass = np.unique(y[:, -3])
+
+        meansinisterinpred = []
+        meansinisteriny = []
+
+        nbsinisterinpred = []
+        nbsinisteriny = []
+
+        frequency_ratio_pred = []
+        frequency_ratio_y = []
+
+        for cls in nbclass:
+            mask = np.argwhere(y[:, -3] == cls)[:, 0]
+
+            if mask.shape[0] == 0:
+                nbsinisteriny.append(-1)
+                meansinisteriny.append(-1)
+                frequency_ratio_y.append(0)
+                frequency_ratio_pred.append(0)
+
+            if np.nansum(y[:, -2]) == 0:
+                nbsinisteriny.append(0)
+            else:
+                nbsinisteriny.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
+            meansinisteriny.append(np.nanmean((y[mask, -2] > 0).astype(int)))
+
+            frequency_ratio_y.append(frequency_ratio(y[:, -2], mask))
+
+            mask = np.argwhere(ypredclass == cls)[:, 0]
+            if np.nansum(y[:, -2]) == 0:
+                nbsinisterinpred.append(0)
+            else:
+                nbsinisterinpred.append(round(100 * np.nansum(y[mask, -2]) / np.nansum(y[:, -2])))
+            meansinisterinpred.append(np.nanmean((y[mask, -2] > 0).astype(int)))
+
+            frequency_ratio_pred.append(frequency_ratio(y[:, -2], mask))
+
+        fig, ax = plt.subplots(5, figsize=(25,10))
+        ax[0].plot(nbclass, meansinisteriny, label='GT')
+        ax[0].plot(nbclass, meansinisterinpred, label='Prediction')
+        ax[0].set_xlabel('Class')
+        ax[0].set_ylabel('Mean of sinister')
+        ax[0].set_title('Mean per class')
+        ax[0].legend()
+
+        ax[1].plot(nbclass, nbsinisteriny, label='GT')
+        ax[1].plot(nbclass, nbsinisterinpred, label='Prediction')
+        ax[1].set_xlabel('Class')
+        ax[1].set_ylabel('Nb of sinister')
+        ax[1].set_title('Number per class')
+        ax[1].legend()
+
+
+        ax[2].plot(nbclass, frequency_ratio_y, label='GT')
+        ax[2].plot(nbclass, frequency_ratio_pred, label='Prediction')
+        ax[2].set_xlabel('Class')
+        ax[2].set_ylabel('Frequency ratio')
+        ax[2].set_title('Frequency ratio')
+        ax[2].legend()
+
+
+        for c in np.unique(y[:, -3]).astype(int):
+            mask = np.argwhere(y[:, -3] == c)[:,0]
+            ax[3].scatter(y[mask, -1], y[mask, -2], label=f'{c} : {frequency_ratio_y[c]}')
+
+        ax[3].set_title('Frequency ratio of GT')
+        ax[3].set_xlabel('Risk')
+        ax[3].set_ylabel('nbsinister')
+        ax[3].legend()
+
+
+        for c in np.unique(y[:, -3]).astype(int):
+            mask = np.argwhere(ypredclass == c)[:,0]
+            ax[4].scatter(y[mask, -1], y[mask, -2], label=f'{c} : {frequency_ratio_pred[c]}')
+
+        ax[4].set_title('Frequency ratio of Prediction')
+        ax[4].set_xlabel('Risk')
+        ax[4].set_ylabel('nbsinister')
+        ax[4].legend()
+
+        
+        plt.tight_layout()
+        plt.savefig(dir_output / f'{int2name[dept]}_{outputname}.png')
+        if MLFLOW:
+            mlflow.log_figure(fig, dir_output/f'{int2name[dept]}_{outputname}.png')
+        plt.close('all')
 
 def realVspredict2d(ypred : np.array,
                     ytrue : np.array,

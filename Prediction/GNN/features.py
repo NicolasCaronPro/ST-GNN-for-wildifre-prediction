@@ -10,7 +10,8 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                            departements : list,
                            oriNode : np.array, path : Path,
                            dir_train : Path,
-                           resolution  : str) -> np.array:
+                           resolution  : str,
+                           graph_construct : str) -> np.array:
 
         assert graph.nodes is not None
         
@@ -32,15 +33,15 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
             codes.append(str2int[departement.split('-')[-1]])
 
-            mask = read_object(departement+'rasterScale'+str(graph.scale)+'.pkl', dir_mask)
-            array = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_proba)
-            arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+            mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl', dir_mask)
+            array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_proba)
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
 
             if array is None:
                 Y[nodeDepartementMask, -4:] = -1
                 continue
 
-            predictor = read_object(departement+'Predictor'+str(graph.scale)+'.pkl', dir_predictor)
+            predictor = read_object(f'{departement}Predictor{graph.scale}_{graph_construct}.pkl', dir_predictor)
 
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -83,7 +84,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         features : list, sinister : str,
                         path : Path,
                         dir_train : Path,
-                        resolution : str) -> np.array:
+                        resolution : str, 
+                        graph_construct : str) -> np.array:
     
     assert graph.nodes is not None
 
@@ -177,8 +179,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         dir_data = root / 'csv' / departement / 'raster' / resolution
         dir_target = root_target / sinister / 'log' / resolution
 
-        name = departement+'rasterScale'+str(graph.scale)+'.pkl'
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
         mask = read_object(name, dir_mask)
+        print(np.unique(mask))
         
         nodeDepartementMask = np.argwhere(subNode[:,3] == str2int[departement.split('-')[-1]])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
@@ -212,8 +215,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
                 
                 
-
-
                 for ir in range(stop_calendar, size_calendar):
                     var_ir = calendar_variables[ir]
                     if var_ir == 'calendar_mean':
@@ -381,7 +382,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         logger.info('AutoRegressionReg')
         if 'AutoRegressionReg' in features:
             dir_target = dir_train / 'influence'
-            arrayInfluence = read_object(departement+'InfluenceScale'+str(graph.scale)+'.pkl', dir_target)
+            arrayInfluence = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_target)
             if arrayInfluence is not None:
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -398,7 +399,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         logger.info('AutoRegressionBin')
         if 'AutoRegressionBin' in features:
             dir_bin = dir_train / 'bin'
-            arrayBin = read_object(departement+'binScale'+str(graph.scale)+'.pkl', dir_bin)
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
             if arrayBin is not None:
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
@@ -498,7 +499,7 @@ def add_varying_time_features(X : np.array, Y : np.array, newShape : int, featur
 
     return res
 
-def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFrame) -> np.array:
+def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFrame, graph_structure : str) -> np.array:
 
         assert graph.edges is not None
         assert graph.nodes is not None
@@ -527,7 +528,7 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
                 dir_data = root / 'csv' / departement / 'raster'
                 dir_mask = root_graph / path / 'raster' / '2x2'
 
-                mask = read_object(departement+'rasterScale'+str(graph.scale)+'.pkl', dir_mask)
+                mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_structure}.pkl', dir_mask)
                 elevation = read_object('elevation.pkl', dir_data)
 
                 edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[0] == node[0]])]
