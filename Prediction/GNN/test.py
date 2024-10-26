@@ -31,7 +31,7 @@ do2D = args.database2D == "True"
 scale = int(args.scale)
 nbfeatures = int(args.NbFeatures) if args.NbFeatures != 'all' else args.NbFeatures
 sinister = args.sinister
-spec = args.spec
+dataset_name= args.spec
 minPoint = args.nbpoint
 
 newFeatures = []
@@ -204,7 +204,7 @@ def process_test(testname, testDate, pss, geo, testd_departement, dir_output, fe
     logger.info(features_name)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-    if spec != '':
+    if datatset_name!= '':
         prefix_train += '_'+spec
         prefix += '_'+spec
 

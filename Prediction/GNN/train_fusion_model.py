@@ -54,7 +54,7 @@ nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 values_per_class = args.nbpoint
 scale = int(args.scale)
-spec = args.spec
+datatset_name= args.spec
 resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
@@ -69,7 +69,7 @@ scaling = args.scaling
 
 dir_target = root_target / sinister / 'log' / resolution
 
-geo = gpd.read_file('regions/regions.geojson')
+geo = gpd.read_file(f'regions/{dataset_name}/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
 name_dir = name_exp + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
@@ -78,15 +78,15 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-if spec == '':
-    spec = 'default'
+if datatset_name== '':
+    datatset_name= 'default'
 
 if dummy:
-    spec += '_dummy'
+    datatset_name+= '_dummy'
 
 autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
-    spec = '_AutoRegressionReg'
+    datatset_name= '_AutoRegressionReg'
 
 ####################### INIT ################################
 
@@ -94,7 +94,7 @@ df, graphScale, prefix = init(args, dir_output, True)
 save_object(df.columns, 'features_name.pkl', dir_output)
 
 if MLFLOW:
-    mlflow.set_experiment(f"{prefix}")
+    exp_name = f"{dataset_name}_train"
     existing_run = get_existing_run('Preprocessing')
     if existing_run:
         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)

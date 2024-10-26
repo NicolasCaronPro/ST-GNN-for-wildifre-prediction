@@ -1,13 +1,27 @@
-from construct import *
+from matplotlib import axis, markers
+from sqlalchemy import column
+from torch import ge
+from GNN.encoding import *
+import matplotlib.cm as cm
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
-def realVspredict(ypred, y, band, dir_output, on):
+def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
     check_and_create_path(dir_output)
+    
     ytrue = y[:, band]
+
+    if band == -3:
+        band = -1
+    elif band == -1 or band == -2:
+        band = 0
+
     dept = np.unique(y[:, 3])
     classes = np.unique(y[:, -3])
     colors = plt.cm.get_cmap('jet', 5)
+    
     for d in dept:
-        mask = np.argwhere(y[:, 3] == d)
+        mask = np.argwhere(y[:, 3] == d)[:, 0]
         maxi = max(np.nanmax(ypred[mask]), np.nanmax(ytrue[mask]))
         mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
         ids = np.unique(y[mask, 0])
@@ -15,19 +29,36 @@ def realVspredict(ypred, y, band, dir_output, on):
             fig, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
             ax.plot(ypred[mask], color='red', label='predict')
             ax.plot(ytrue[mask], color='blue', label='real', alpha=0.5)
+
+            # Ajout des courbes et bandes si pred_min et pred_max ne sont pas None
+            if pred_min is not None and pred_max is not None:
+                ax.plot(pred_min[mask, band], color='green', linestyle='--', label='pred_min')
+                ax.plot(pred_max[mask, band], color='purple', linestyle='--', label='pred_max')
+                ax.fill_between(np.arange(len(mask)), pred_min[mask, band], pred_max[mask, band], color='lightcoral', alpha=0.5, label='prediction range')
+
+            ax.set_title(f'{ids[0]}')
             for class_value in classes:
                 class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
-                ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
+                ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, marker='x', s=50)
             ax.set_ylim(ymin=mini, ymax=maxi)
         else:
             fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
-                mask2 = np.argwhere(y[:, 0] == id)
+                mask2 = np.argwhere(y[:, 0] == id)[:, 0]
                 ax[i].plot(ypred[mask2], color='red', label='predict')
                 ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
+
+                # Ajout des courbes et bandes si pred_min et pred_max ne sont pas None
+                if pred_min is not None and pred_max is not None:
+                    ax[i].plot(pred_min[mask2, band], color='green', linestyle='--', label='pred_min')
+                    ax[i].plot(pred_max[mask2, band], color='purple', linestyle='--', label='pred_max')
+                    ax[i].fill_between(np.arange(len(mask2)), pred_min[mask2, band], pred_max[mask2, band], color='lightcoral', alpha=0.5, label='prediction range')
+
+                ax[i].set_title(f'{id}')
                 for class_value in classes:
                     class_mask = np.argwhere((y[mask2, -3] == class_value) & (y[mask2,-2] > 0))[:, 0]
-                    ax[i].scatter(class_mask, ypred[mask2][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
+                    #ax[i].scatter(class_mask, ypred[mask2][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, linewidths=5, marker='x', s=200)
+                    ax[i].scatter(class_mask, ypred[mask2][class_mask], color='black', label=f'Fire', alpha=1, linewidths=5, marker='x', s=200)
                 ax[i].set_ylim(ymin=mini, ymax=maxi)
         plt.legend()
         outn = str(d) + '_' + on + '.png'
@@ -45,28 +76,36 @@ def realVspredict(ypred, y, band, dir_output, on):
         ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, 0] == id)[:, 0], -2])
 
     ind = np.lexsort([ysum[:, 1]])
-    ymax = np.flip(ysum[ind, 0])[:5]
+    ymax = np.flip(ysum[ind, 0])[:2]
     _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50, 25))
     for i, idtop in enumerate(ymax):
-        mask = np.argwhere(y[:, 0] == idtop)
+        mask = np.argwhere(y[:, 0] == idtop)[:, 0]
         dept = np.unique(y[mask, 3])[0]
         ids = np.unique(y[mask, 0])
         ax[i].plot(ypred[mask], color='red', label='predict')
         ax[i].plot(ytrue[mask], color='blue', label='real', alpha=0.5)
+
+        # Ajout des courbes et bandes si pred_min et pred_max ne sont pas None
+        if pred_min is not None and pred_max is not None:
+            ax[i].plot(pred_min[mask, band], color='green', linestyle='--', label='pred_min')
+            ax[i].plot(pred_max[mask, band], color='purple', linestyle='--', label='pred_max')
+            ax[i].fill_between(np.arange(len(mask)), pred_min[mask, band], pred_max[mask, band], color='lightcoral', alpha=0.5, label='prediction range')
+
         for class_value in classes:
             class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
-            ax[i].scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1)
+            ax[i].scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, linewidths=5, marker='x', s=200)
         ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
-        ax[i].set_title(str(dept) + '_' + str(idtop))
+        ax[i].set_title(f'{dept}_{idtop}')
 
     plt.tight_layout()
-    outn = 'top_5' + on + '.png'
+    outn = 'top_2' + on + '.png'
     
     if MLFLOW:
         mlflow.log_figure(fig, dir_output / outn)
 
     plt.savefig(dir_output / outn)
     plt.close('all')
+
 
 def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname):
     check_and_create_path(dir_output)
@@ -75,7 +114,7 @@ def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname
     for dept in udept:
         y = ytrue[ytrue[:, 3] == dept]
         ypredclass = ypredclassfull[ytrue[:, 3] == dept] 
-        nbclass = np.unique(y[:, -3])
+        nbclass = [0,1,2,3,4]
 
         meansinisterinpred = []
         meansinisteriny = []
@@ -94,6 +133,7 @@ def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname
                 meansinisteriny.append(-1)
                 frequency_ratio_y.append(0)
                 frequency_ratio_pred.append(0)
+                continue
 
             if np.nansum(y[:, -2]) == 0:
                 nbsinisteriny.append(0)
@@ -112,7 +152,7 @@ def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname
 
             frequency_ratio_pred.append(frequency_ratio(y[:, -2], mask))
 
-        fig, ax = plt.subplots(5, figsize=(25,10))
+        fig, ax = plt.subplots(5, figsize=(50,30))
         ax[0].plot(nbclass, meansinisteriny, label='GT')
         ax[0].plot(nbclass, meansinisterinpred, label='Prediction')
         ax[0].set_xlabel('Class')
@@ -127,14 +167,12 @@ def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname
         ax[1].set_title('Number per class')
         ax[1].legend()
 
-
         ax[2].plot(nbclass, frequency_ratio_y, label='GT')
         ax[2].plot(nbclass, frequency_ratio_pred, label='Prediction')
         ax[2].set_xlabel('Class')
         ax[2].set_ylabel('Frequency ratio')
         ax[2].set_title('Frequency ratio')
         ax[2].legend()
-
 
         for c in np.unique(y[:, -3]).astype(int):
             mask = np.argwhere(y[:, -3] == c)[:,0]
@@ -145,22 +183,76 @@ def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname
         ax[3].set_ylabel('nbsinister')
         ax[3].legend()
 
-
         for c in np.unique(y[:, -3]).astype(int):
             mask = np.argwhere(ypredclass == c)[:,0]
-            ax[4].scatter(y[mask, -1], y[mask, -2], label=f'{c} : {frequency_ratio_pred[c]}')
+            ax[4].scatter(ypredclass[mask], y[mask, -2], label=f'{c} : {frequency_ratio_pred[c]}')
 
         ax[4].set_title('Frequency ratio of Prediction')
         ax[4].set_xlabel('Risk')
         ax[4].set_ylabel('nbsinister')
         ax[4].legend()
 
-        
         plt.tight_layout()
         plt.savefig(dir_output / f'{int2name[dept]}_{outputname}.png')
         if MLFLOW:
             mlflow.log_figure(fig, dir_output/f'{int2name[dept]}_{outputname}.png')
         plt.close('all')
+
+def plot_custom_confusion_matrix(y_true, y_pred, labels, dir_output, figsize=(10, 8), title='Confusion Matrix', filename='confusion_matrix', normalize=None):
+    """
+    Generates a custom confusion matrix with specific colors and annotations, 
+    and saves the image to the specified directory.
+    
+    :param y_true: List of true classes
+    :param y_pred: List of predicted classes
+    :param labels: List of class labels
+    :param dir_output: Output directory to save the image
+    :param figsize: Size of the matplotlib figure (width, height)
+    :param title: Title of the chart
+    :param filename: Name of the image file to save
+    :param mlflow_enabled: Boolean to determine if mlflow should log the figure
+    """
+    # Create the confusion matrix
+    cm = confusion_matrix(y_true, y_pred, labels=labels, normalize=normalize)
+
+    cm = np.append(cm, cm.sum(axis=0).reshape(1, -1), axis=0)
+    cm = np.append(cm, cm.sum(axis=1).reshape(-1, 1), axis=1)
+
+    # Configure the figure
+    fig, ax = plt.subplots(figsize=figsize)
+
+    # Create a heatmap with seaborn
+    sns.heatmap(cm, annot=True, fmt='.2f', cmap="Blues", cbar=False,
+                xticklabels=labels + ['TOTAL'], yticklabels=labels + ['TOTAL'],
+                linewidths=1, linecolor='black', square=True, ax=ax)
+
+    # Personnalisation des couleurs
+    for i in range(len(cm)):
+        for j in range(len(cm[0])):
+            if i == len(cm) - 1 or j == len(cm[0]) - 1:  # Ligne ou colonne des totaux
+                plt.gca().add_patch(plt.Rectangle((j, i), 1, 1, fill=False, edgecolor='magenta', lw=3))
+            elif i == j:  # Diagonale principale
+                plt.gca().add_patch(plt.Rectangle((j, i), 1, 1, fill=False, edgecolor='blue', lw=3))
+
+    # Add labels
+    ax.set_xlabel('PREDICTION', fontsize=14)
+    ax.set_ylabel('REAL', fontsize=14)
+    ax.set_title(title, fontsize=16)
+    plt.xticks(rotation=0)
+    plt.yticks(rotation=0)
+
+    # Ensure the output directory exists
+    Path(dir_output).mkdir(parents=True, exist_ok=True)
+
+    # Save the image to the specified directory
+    output_path = Path(dir_output) / f'{filename}_{normalize}.png'
+    plt.savefig(output_path)
+    
+    # If mlflow is enabled, log the figure
+    if MLFLOW:
+        mlflow.log_figure(fig, str(output_path))
+        
+    plt.close(fig)
 
 def realVspredict2d(ypred : np.array,
                     ytrue : np.array,
@@ -171,7 +263,7 @@ def realVspredict2d(ypred : np.array,
                     dir : Path,
                     Geo : gpd.GeoDataFrame,
                     testd_departement : list,
-                    graph : GraphStructure):
+                    graph):
 
     dir_predictor = root_graph / dir / 'influenceClustering'
 
@@ -193,7 +285,7 @@ def realVspredict2d(ypred : np.array,
 
     x = list(zip(geo.longitude, geo.latitude))
 
-    geo['id'] = graph._predict_node(x)
+    geo['id'] = graph._predict_node_with_position(x)
 
     def add_value_from_array(date, x, array, index):
         try:
@@ -265,70 +357,209 @@ def realVspredict2d(ypred : np.array,
     plt.savefig(dir_output / name)
     plt.close('all')
 
-def susectibility_map(dept : str, sinister : str,
-                      dir_train : Path, dir_output : Path, k_days : int,
-                      isBin : bool, scale : int, name : str, res : np.array, n : str,
-                      minDate : str, maxDate : str, resolution : str):
+def calibrated_curve(ypred, y, dir_output, on):
+    # Créer la figure
+    plt.figure(figsize=(15, 10))
+    plt.title('Calibration Curve')
+
+    # Trier ypred et y selon la deuxième dernière colonne de y
+    ind = np.lexsort((y[:, -2],))  # On ajoute une virgule pour garantir un tuple à un seul élément
+    Y_axis = y[ind][:, -2]
+    X_axis = ypred[ind]
+
+    # Afficher les dimensions des données après tri pour débogage
+    print("Taille après tri de Y_axis :", Y_axis.shape)
     
-    # Wildfire susceptibility map
-    dir_predictor = root_graph / dir_train / 'influenceClustering'
-    dir_mask = root_graph / dir_train / 'raster'
-    name_0 = dept + 'rasterScale0.pkl'
-    sinister_file = sinister+'.csv' 
-    sinister_df = pd.read_csv(root_graph / 'sinister' / sinister_file)
-    sinister_df = sinister_df[sinister_df['departement'] == dept]
-    if not (dir_mask / name_0).is_file():
-        geo = gpd.read_file(root_graph / 'regions' / 'regions.geojson')
-        graphScale = construct_graph(0,
-                                maxDist[scale],
-                                sinister,
-                                geo, 6, k_days,
-                                dir_train,
-                                True,
-                                False, 
-                                resolution)
-    else:
-        graphScale = read_object('graph_0.pkl', dir_train)
-        
-    X_kmeans = list(zip(sinister_df.longitude, sinister_df.latitude))
-    sinister_df['scale'+str(scale)] = graphScale._predict_node(X_kmeans)
-    sinister_df['label'] = 1
-    sinister_df = sinister_df.groupby(by=['scale0', 'date'])['label'].sum().reset_index()
+    # Tracer la courbe de prédiction
+    plt.scatter(X_axis, Y_axis, label='Prediction curve')
 
-    sinisterNode = np.full((len(sinister_df), 6), -1.0, dtype=float)
-    sinisterNode[:,0] = sinister_df['scale0'].values
-    sinisterNode[:,4] = [allDates.index(d) for d in sinister_df['date']]
-    sinisterNode[:,-1] = sinister_df['label']
+    # Ajouter des labels aux axes
+    plt.xlabel('Prediction')
+    plt.ylabel('Number of sinister')
 
-    res = res[(res[:, 4] >= allDates.index(minDate)) & (res[:, 4] < allDates.index(maxDate))]
-    sinisterNode = sinisterNode[(sinisterNode[:, 4] >= allDates.index(minDate)) & (sinisterNode[:, 4] < allDates.index(maxDate))]
-    logger.info(f'{dept}, nb sinister :{sinisterNode.shape}')
+    # Ajouter une légende
+    plt.legend()
 
-    if isBin:
-        predictor = read_object(dept+'Predictor'+name+str(scale)+'.pkl', dir_predictor)
-    else:
-        predictor = read_object(dept+'Predictor'+str(scale)+'.pkl', dir_predictor)
-        
-    class_risk = np.copy(res)
-
-    class_risk[:, -3] = predictor.predict(res[:, -3])
-    class_risk[:, -4] = predictor.predict(res[:, -4])
-
-    resSum = array2image(class_risk, dir_mask, scale, dept, 'mean', -3, dir_output / n, dept+'_prediction.pkl')
-    ySum = array2image(class_risk, dir_mask, scale, dept, 'mean', -4, dir_output / n, dept+'_gt.pkl')
-    fireSum = array2image(sinisterNode, dir_mask, 0, dept, 'sum', -1, dir_output / n, dept+'_fire.pkl')
-
-    fig, ax = plt.subplots(1, 2, figsize=(10,5))
-    im = ax[0].imshow(resSum, vmin=1, vmax=6,  cmap='jet')
-    ax[0].set_title('Sum of Prediction')
-    fig.colorbar(im, ax=ax[0], orientation='vertical')
-    im = ax[1].imshow(ySum, vmin=1, vmax=6,  cmap='jet')
-    ax[1].set_title('Sum of Target')
-    fig.colorbar(im, ax=ax[1], orientation='vertical')
-    x = np.argwhere((fireSum > 0) & (~np.isnan(fireSum)))
-    ax[0].scatter(x[:,1], x[:,0], color='black', label='fire', alpha=0.5)
-    ax[1].scatter(x[:,1], x[:,0], color='black', label='fire', alpha=0.5)
-    susec = dept+'_susecptibility.png'
-    plt.tight_layout()
-    plt.savefig(dir_output / n / susec)
+    # Sauvegarder le graphique
+    print(dir_output / f'{on}.png')
+    plt.savefig(dir_output / f'{on}.png')
     plt.close('all')
+
+def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates, band,
+                                           outname, dir_output, vmax_band, dept_reg, sinister,
+                                           sinister_point):
+
+    sinister_point['departement'] = np.nan
+    sinister_point['id'] = np.nan
+    values = graph._assign_department(sinister_point[['id', 'longitude', 'latitude', 'departement']].values)
+    sinister_point['departement'] = values[:, 3]
+
+    regions_france['departement'] = np.nan
+    regions_france['id'] = np.nan
+    values = graph._assign_department(regions_france[['id', 'longitude', 'latitude', 'departement']].values)
+    regions_france['departement'] = values[:, 3]
+
+    for date_index in dates:
+        date = allDates[date_index]
+        sinister_point_date = sinister_point[sinister_point['date'] == date]
+        logger.info(f'susectibility_map_france_daily for {date}')
+        df_res_daily = df_res[df_res['date'] == date_index]
+        regions_france['id'] = -1
+        regions_france_in_graph = regions_france[regions_france['departement'].isin(df_res.departement.unique())]
+        sinister_point_date = sinister_point_date[sinister_point_date['departement'].isin(df_res.departement.unique())]
+        
+        if not dept_reg:
+            array = regions_france_in_graph[['longitude', 'latitude']].values
+            values = graph._predict_node_with_position(array)
+            regions_france.loc[regions_france_in_graph.index, 'id'] = values
+        else:
+            regions_france['id'] = regions_france['departement'].values
+
+        for col in ['risk', 'nbsinister', 'prediction', 'class']:
+            if col in regions_france.columns:
+                regions_france.drop(col, inplace=True, axis=1)
+
+        regions_france = regions_france.set_index('id').join(df_res_daily.set_index('id')[['risk', 'nbsinister', 'prediction', 'class']], on='id').reset_index()
+        regions_france['latitude'] = regions_france['geometry'].apply(lambda x : float(x.centroid.y))
+        regions_france['longitude'] = regions_france['geometry'].apply(lambda x : float(x.centroid.x))
+        # Vérification des valeurs manquantes dans 'time_series_risk'
+        missing_mask = regions_france[band].isna()
+        # Si des valeurs manquantes existent, on les interpole
+        """if missing_mask.any():
+            # Récupérer les points non nuls (valides) pour l'interpolation
+            valid_points = ~missing_mask
+            points = regions_france.loc[valid_points, ['longitude', 'latitude']].values
+            values = regions_france.loc[valid_points, band].values
+            
+            # Points où les valeurs sont manquantes
+            missing_points = regions_france.loc[missing_mask, ['longitude', 'latitude']].values
+
+            # Interpolation 2D avec griddata
+            interpolated_values = griddata(points, values, missing_points, method='linear', fill_value=0)
+
+            # Remplir les valeurs manquantes dans 'time_series_class'
+            regions_france.loc[missing_mask, band] = interpolated_values.astype(int)"""
+
+        #for dept_code in regions_france.departement.unique():
+        #    if dept_code == np.nan:
+        #        continue
+        #    dir_data = rootDisk / 'csv' / int2name[dept_code] / 'data' / 'spatial'
+        #    geo_spa = gpd.read_file(f'{dir_data}/hexagones.geojson')
+            #non_sinister_h3 = geo_spa[geo_spa['sinister'] == 0]['hex_id']
+            #regions_france[regions_france['hex_id'].isin(non_sinister_h3)][band] = 0
+        
+        regions_france.loc[regions_france[~regions_france['departement'].isin(df_res.departement.unique())].index, band] = 0
+        fig, ax = plt.subplots(1, figsize=(30,30))
+        ax.set_title(date)
+        regions_france.plot(column=band, vmin=0, vmax=vmax_band, cmap='jet', ax=ax)
+        sm = plt.cm.ScalarMappable(cmap='jet', norm=plt.Normalize(vmin=0, vmax=vmax_band))
+        sm.set_array([])
+        fig.colorbar(sm, ax=ax, orientation="vertical", label=band)
+        if len(sinister_point_date) > 0:
+            sinister_point_date = gpd.GeoDataFrame(sinister_point_date, geometry=gpd.points_from_xy(sinister_point_date.longitude, sinister_point_date.latitude))
+            sinister_point_date.plot(ax=ax, marker='X', color='red', edgecolor='black', markersize=100)
+        plt.xlabel('Longitude')
+        plt.ylabel('Latitude')
+        plt.savefig(dir_output / f'susectibility_map_daily_{outname}_{band}_{date}.png')
+        plt.close('all')
+
+def find_pixel(lats, lons, lat, lon):
+
+    lonIndex = (np.abs(lons - lon)).argmin()
+    latIndex = (np.abs(lats - lat)).argmin()
+
+    lonValues = lons.reshape(-1,1)[lonIndex]
+    latValues = lats.reshape(-1,1)[latIndex]
+
+    return np.where((lons == lonValues) & (lats == latValues))
+
+def susectibility_map_france_daily_image(df, vmax, graph, departement, dates, resolution, region_dept, column,
+                                         dir_output, predictor, sinister_point):
+    for date in dates.astype(int):
+        df_date = df[(df['date'] == date) & (df['departement'] == name2int[departement])]
+        #print(sinister_point.departement.unique())
+        #print(df.departement.unique())
+        sinister_point_date = sinister_point[(sinister_point['departement'].isin(df.departement.unique())) & (sinister_point['date'] == allDates[date])]
+        n_pixel_x = resolutions[resolution]['x']
+        n_pixel_y = resolutions[resolution]['y']
+        array = region_dept[['longitude', 'latitude']].values
+        values = graph._predict_node_with_position(array)
+        region_dept['id'] = values
+
+        if column in region_dept.columns:
+            region_dept.drop(column, axis=1, inplace=True)
+        regions_dept = region_dept.set_index('id').join(df_date.set_index('id')[column], on='id').reset_index()
+        
+        high_scale_mask, longs, lats = rasterization(regions_dept, n_pixel_y, n_pixel_x, 'id',
+                                                  dir_output, outputname=f'{departement}_{allDates[date]}_mask', defVal = np.nan)
+            
+        high_scale_pred, _, _ = rasterization(regions_dept, n_pixel_y, n_pixel_x, column,
+                                              dir_output, outputname=f'{departement}_{allDates[date]}_{column}', defVal = np.nan)
+        
+        os.remove(dir_output / f'{departement}_{allDates[date]}_{column}.geojson')
+        os.remove(dir_output / f'{departement}_{allDates[date]}_mask.geojson')
+        os.remove(dir_output / f'{departement}_{allDates[date]}_{column}.tif')
+        os.remove(dir_output / f'{departement}_{allDates[date]}_mask.tif')
+
+        high_scale_pred = high_scale_pred[0]
+        high_scale_mask = high_scale_mask[0]
+
+        # Assign no fire pixel
+        dir_data = rootDisk / 'csv' / departement / 'data' / 'GEE' / 'landcover'
+        dir_data_2 = rootDisk / 'csv' / departement / 'data' / 'GEE' / 'sentinel'
+        sentinel, _, _ = read_tif(dir_data_2  / 'summer.tif')
+        landcover, _, _ = read_tif(dir_data  / 'summer.tif')
+        sentinel = sentinel[0]
+        landcover = landcover[0]
+        if landcover.shape != high_scale_pred.shape:
+            landcover = resize_no_dim(landcover, high_scale_pred.shape[0], high_scale_pred.shape[1])
+            longs = resize_no_dim(longs, high_scale_pred.shape[0], high_scale_pred.shape[1])
+            lats = resize_no_dim(lats, high_scale_pred.shape[0], high_scale_pred.shape[1])
+            sentinel = resize_no_dim(sentinel, high_scale_pred.shape[0], high_scale_pred.shape[1])
+
+        # 0 is water
+        # 6 is building
+        # 8 is snow
+        non_fire_pixel = np.isin(landcover, [0,5,6,7,8])
+        high_scale_pred[non_fire_pixel] = 0
+        high_scale_pred[np.isnan(sentinel)] = np.nan
+        longs[np.isnan(high_scale_pred)] = -math.inf
+        lats[np.isnan(high_scale_pred)] = -math.inf
+
+        label_positions = np.sort(predictor.cluster_centers.reshape(-1))
+
+        labels = ['Very Low', 'Low', 'Medium', 'High', 'Very High']
+
+        plt.figure(figsize=(15,15))
+
+        plt.title(f'30m fire susecptibility {departement} {allDates[date]}')
+        fp = list(zip(sinister_point_date.latitude, sinister_point_date.longitude))
+        if len(fp) > 0:
+            # Conversion des latitudes/longitudes des points en indices de la grille de l'image
+            i = 0
+            for lat, lon in fp:
+                # Trouver l'indice le plus proche dans l'image en fonction des latitudes/longitudes
+                pos = find_pixel(lats, longs, lat, lon)
+                if i == 0:
+                    plt.scatter(pos[1], pos[0], color='red', s=100, label='Fire points', edgecolor='black', marker='X')
+                    i = 1
+                else:
+                    plt.scatter(pos[1], pos[0], color='red', s=100, edgecolor='black', marker='X')
+                    
+            # Ajouter la légende pour les points de feux
+            plt.legend(loc='upper right')
+
+        img = plt.imshow(high_scale_pred, cmap='jet', vmin=0, vmax=vmax)
+        # Add color bar
+        cbar = plt.colorbar(img)
+        # Set the positions and labels for the color bar
+        cbar.set_ticks(label_positions)
+        #cbar.set_ticklabels(labels)
+        plt.savefig(dir_output / f'{departement}_{allDates[date]}_{column}.png')
+        plt.close('all')
+
+        plt.figure(figsize=(15,15))
+        img = plt.imshow(high_scale_mask)
+        plt.title(f'30m raster {departement}')
+        plt.savefig(dir_output / f'{departement}_raster.png')
+        plt.close('all')

@@ -695,8 +695,8 @@ if __name__ == "__main__":
     test_name = args.name
     sinister = args.sinister
     resolution = args.resolution
-    spec = args.spec
-    dir_output = Path(args.output + '/' + spec + '/' + test_name)
+    datatset_name= args.spec
+    dir_output = Path(args.output + '/' + datatset_name+ '/' + test_name)
     dir_input = Path(args.input)
 
     # features

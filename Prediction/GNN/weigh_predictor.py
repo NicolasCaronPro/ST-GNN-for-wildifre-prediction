@@ -2,7 +2,7 @@ from sklearn.cluster import KMeans, DBSCAN
 import numpy as np
 
 class Predictor():
-    def __init__(self, n_clusters, name, type='kmeans', eps=0.5, binary=False):
+    def __init__(self, n_clusters, name='', type='kmeans', eps=0.5, binary=False):
         if type == 'kmeans':
             self.model = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
         elif type == 'dbscan':
@@ -20,10 +20,17 @@ class Predictor():
             self.cluster_centers = np.asarray([0.0,0.2,0.4,0.6,0.8])
             Xpre = np.full(X.shape[0], fill_value=0, dtype=int)
             for c, bound in enumerate(self.cluster_centers):
-                if bound == self.cluster_centers[-1]:
-                    mask = np.argwhere((X > bound))[:, 0]
-                else:
-                    mask = np.argwhere((X >= bound) & (X < self.cluster_centers[c + 1]))[:, 0]
+                if c == 0:
+                    mask = np.argwhere((X < 0.1))[:, 0]
+                elif c == 1:
+                    mask = np.argwhere(((X >= 0.1) & (X < 0.25)))[:, 0]
+                elif c == 2:
+                    mask = np.argwhere(((X >= 0.25) & (X < 0.64)))[:, 0]
+                elif c == 3:
+                    mask = np.argwhere(((X >= 0.65) & (X < 0.95)))[:, 0]
+                elif c == 4:
+                    mask = np.argwhere(((X >= 0.95)))[:, 0]
+
                 if mask.shape[0] == 0:
                     continue
                 else:
@@ -54,10 +61,17 @@ class Predictor():
             pred = np.full(X.shape[0], fill_value=0, dtype=int)
             assert self.cluster_centers is not None
             for c, bound in enumerate(self.cluster_centers):
-                if bound == self.cluster_centers[-1]:
-                    mask = np.argwhere((X > bound))[:, 0]
-                else:
-                    mask = np.argwhere((X >= bound) & (X < self.cluster_centers[c + 1]))[:, 0]
+                if c == 0:
+                    mask = np.argwhere((X < 0.1))[:, 0]
+                elif c == 1:
+                    mask = np.argwhere(((X >= 0.1) & (X < 0.25)))[:, 0]
+                elif c == 2:
+                    mask = np.argwhere(((X >= 0.25) & (X < 0.65)))[:, 0]
+                elif c == 3:
+                    mask = np.argwhere(((X >= 0.65) & (X < 0.95)))[:, 0]
+                elif c == 4:
+                    mask = np.argwhere(((X >= 0.95)))[:, 0]
+
                 if mask.shape[0] == 0:
                     continue
                 else:

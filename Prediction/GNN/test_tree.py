@@ -31,7 +31,7 @@ if __name__ == '__main__':
     scale = int(args.scale)
     sinister = args.sinister
     nbfeatures = args.NbFeatures
-    spec = args.spec
+    datatset_name= args.spec
     minPoint = args.nbpoint
 
     geo = gpd.read_file('regions/regions.geojson')
@@ -209,7 +209,7 @@ def process_test(testname, testDate, pss, geo, testd_departement, dir_output, fe
     logger.info(features_name)
     prefix = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
     prefix_train = str(minPoint)+'_'+str(k_days)+'_'+str(scale)+'_'+str(nbfeatures)
-    if spec != '':
+    if datatset_name!= '':
         prefix_train += '_'+spec
         prefix += '_'+spec
 

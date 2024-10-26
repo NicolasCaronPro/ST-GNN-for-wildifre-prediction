@@ -9,7 +9,6 @@ parent_dir = os.path.dirname(current_dir)
 
 # Insert the parent directory into sys.path
 sys.path.insert(0, parent_dir)
-
 from GNN.construct import *
 import geopandas as gpd
 import argparse
@@ -32,7 +31,7 @@ parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date'
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-dataset', '--dataset', type=str, help='spec')
+parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
 parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
@@ -85,11 +84,13 @@ sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 
+assert k_days == 0
+
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
 
-features, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
+features, train_features, kmeasn_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
 
 ######################## Get departments and train departments #######################
 
@@ -102,6 +103,7 @@ name_exp = f'{sinister_encoding}_{name_exp}'
 dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
 geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
 name_dir = dataset_name + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
@@ -111,18 +113,18 @@ check_and_create_path(dir_output)
 minDate = '2017-06-12' # Starting point
 
 if dataset_name== '':
-    dataset_name= 'firemen'
+    dataset_name= 'default'
 
 if dummy:
     dataset_name+= '_dummy'
 
 autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
-    dataset_name= '_AutoRegressionReg'
+    name_exp += '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_cnn')
+df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_gnn')
 save_object(df.columns, 'features_name.pkl', dir_output)
 
 if MLFLOW:
@@ -145,68 +147,74 @@ if MLFLOW:
 
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
-
 train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_name, train_departements,
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
+features_selected = list(features_selected)
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
-    
-_, varying_time_variables_2 = add_time_columns(varying_time_variables, k_days, train_dataset, train_features)
 
-features_name, newShape = get_features_name_list(6, train_features, ['mean'])
-features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
-features_selected_str = get_features_selected_for_time_series_for_2D(features_selected, features_name_2D, varying_time_variables_2, nbfeatures)
-features_selected_str = list(np.unique(features_selected_str))
+features_selected_str = features_selected
+print(features_selected_str)
 features_selected = np.arange(0, len(features_selected_str))
 
-logger.info(f'features_name_2D shape : {len(features_name_2D)}')
-
 if MLFLOW:
-
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
     test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
-
+    
+    mlflow.log_param('train_features', train_features)
+    mlflow.log_param('features', features)
+    mlflow.log_param('features_selected_str', features_selected_str)
     mlflow.log_input(train_dataset_ml_flow, context='trainig')
     mlflow.log_input(val_dataset_ml_flow, context='validation')
     mlflow.log_input(test_dataset_ml_flow, context='testing')
-    mlflow.log_param('train_features', train_features)
-    mlflow.log_param('features', features)
-    mlflow.log_param('features_selected', features_selected)
-    mlflow.log_param('features_name_2D', features_name_2D)
+
     mlflow.end_run()
 
 ############################# Training ##################################
 
 prefix += f'_{weights_version}'
+
 train_dataset['weight'] = train_dataset[weights_version]
 val_dataset['weight'] = val_dataset[weights_version]
+train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
+val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
-train_dataset = train_dataset[train_dataset['weight'] > 0]
+test_dataset['weight'] = 1
+test_dataset['weight_nbsinister'] = 1
 
-cnn_models = [
-             #('Zhang', None, 'risk_regression_rmse', True, autoRegression),
-             #('ConvLSTM', None, 'nbsinister_regression_poisson', True, autoRegression),
-            ('Zhang', None, 'nbsinister_regression_poisson', True, autoRegression),
-             #('Unet', FalsNonee, 'risk_regression_rmse', False, autoRegression)
+#test_dataset = val_dataset
+
+models = [
+    #('KAN', 'risk_regression_rmse', autoRegression),
+    #('KAN', 'nbsinister_regression_rmse', autoRegression),
+    #('KAN', 'binary_classification_weightedcrossentropy', autoRegression),
             ]
+
+gnn_models = [
+    ('GAT', True, 'risk_regression_rmse', autoRegression),
+    ('GAT', True, 'nbsinister_regression_rmse', autoRegression),
+    #('GAT', True, 'binary_classification_weightedcrossentropy', autoRegression),
+
+    ('GCN', True, 'nbsinister_regression_rmse', autoRegression),
+    ('GCN', True, 'risk_regression_rmse', autoRegression),
+    #('GCN', True, 'binary_classification_weightedcrossentropy', autoRegression),
+]
 
 train_loader = None
 val_loader = None
 last_bool = None
 
-if is_pc:
-    temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
-else:
-    temp_dir = '.'
-
 params = {
     "graphScale": graphScale,
-    "val_dataset": val_dataset_unscale,
-    "test_dataset": test_dataset_unscale,
+    "train_dataset": train_dataset,
+    "val_dataset": val_dataset,
+    "test_dataset": test_dataset,
+    "features_selected": features_selected,
+    "features_selected_str": features_selected_str,
     "k_days": k_days,
     "device": device,
     "optimize_feature": optimize_feature,
@@ -221,26 +229,29 @@ params = {
     "dir_output": dir_output,
     "train_dataset_unscale": train_dataset_unscale,
     "scale": scale,
-    "features_name_1D": features_name,
-    "features_selected_2D": features_selected,
-    "features_name_2D": features_selected_str,
-    'features' : features,
-    "name_dir": rootDisk / temp_dir / name_dir,
+    "name_dir": name_dir,
     'k_days' : k_days,
 }
 
 if doTrain:
-    for cnn_model in cnn_models:
-        params['model'] = cnn_model[0]
-        params['use_temporal_as_edges'] = cnn_model[1]
-        params['infos'] = cnn_model[2]
-        params['image_per_node'] = cnn_model[3]
-        params['autoRegression'] = cnn_model[4]
+    for gnn_model in gnn_models:
+        params['model'] = gnn_model[0]
+        params['use_temporal_as_edges'] = gnn_model[1]
+        params['infos'] = gnn_model[2]
+        params['autoRegression'] = gnn_model[3]
 
-        wrapped_train_deep_learning_2D(params)
+        wrapped_train_deep_learning_1D(params)
+
+    for model in models:
+        params['model'] = model[0]
+        params['infos'] = model[1]
+        params['autoRegression'] = model[2]
+        params['use_temporal_as_edges'] = None
+        
+        wrapped_train_deep_learning_1D(params)
 
 if doTest:
-    
+
     host = 'pc'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -276,11 +287,11 @@ if doTest:
             ('cal', cal, 'cal'),
             ('fre', fre, 'cal'),
             ('binary', f1, 'bin'),
-            ('binary', bacc, 'bin'),
+            ('accuracy', bacc, 'bin'),
             ('class', ck, 'class'),
             #('poisson', po, 'proba'),
             ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
+            #('bca', bca, 'class'),
             ('maec', meac, 'class'),
             ('acc', acc, 'class'),
             ('c_index', c_i, 'class'),
@@ -290,12 +301,24 @@ if doTest:
             ('spearman', spearman_coefficient, 'correlation')
             ]
 
-    cnn_models = [('Zhang_nbsinister_regression_poisson', False, 'risk', autoRegression),
-                #('UNET_risk_regression_rmse', False, 'risk', autoRegression)
-                ]
+    models = [
+                #('KAN_nbsinister_regression_rmse', None, 'nbsinister', autoRegression),
+                #('KAN_risk_regression_rmse', None, 'risk', autoRegression),
+                #('KAN_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
+              #('KAN_binary_classification_weightedcrossentropy', False, 'binary', autoRegression),
+    ]
+
+    gnn_models = [
+        ('GAT_risk_regression_rmse', True, 'risk', autoRegression),
+        ('GAT_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
+        #('GAT_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
+
+        ('GCN_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
+        ('GCN_risk_regression_rmse', True, 'risk', autoRegression),
+        #('GCN_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
+    ]
 
     for dept in departements:
-
         if MLFLOW:
             exp_name = f"{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
             experiments = client.search_experiments()
@@ -319,33 +342,122 @@ if doTest:
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
-
         if host == 'pc':
-            test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept,
-                            test_dataset_unscale_dept=test_dataset_unscale_dept,
-                            train_dataset=train_dataset_unscale,
+            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+                            test_dataset_unscale_dept=test_dataset_unscale,
                             methods=methods,
                             test_name=dept,
-                            features_name=features_name,
+                            features_name=features_selected_str,
                             prefix=prefix,
                             prefix_train=prefix,
-                            models=cnn_models,
+                            models=gnn_models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
                             k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
-                            features=features,
                             test_departement=[dept],
                             dir_train=dir_train,
+                            features=features,
                             dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                             name_exp=name_exp,
                             doKMEANS=doKMEANS)
-        
         else:
-            for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
+            for name, use_temporal_as_edges, target_name, autoRegression in models:
                 res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
                 res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
             
             metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
             metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+
+        """if len(res) > 0:
+            res = pd.concat(res).reset_index(drop=True)
+            res_dept = pd.concat(res_dept).reset_index(drop=True)
+
+            ############## Plot ######################
+            for name, _, target_name, _ in gnn_models:
+                if name not in res.model.unique():
+                    continue
+                if target_name == 'risk':
+                    predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+                else:
+                    predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+
+                if target_name == 'binary':
+                    vmax_band = 1
+                else:
+                    vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
+                res_test = res[res['model'] == name]
+                res_test_dept = res_dept[res_dept['model'] == name]
+                regions_test = geo[geo['departement'] == dept]
+                #dates = res_test_dept[res_test_dept['nbsinister'] > 1]['date'].values
+                dates = res[res['nbsinister'] == res['nbsinister'].max()]['date']
+                
+                susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
+                                            scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                            dept_reg=False, sinister=sinister, sinister_point=fp)
+
+                susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
+                                resolution='0.03x0.03', region_dept=regions_test, column='prediction',
+                                dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)"""
+
+        metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+                        test_dataset_unscale_dept=test_dataset_unscale,
+                           methods=methods,
+                           test_name=dept,
+                           features_name=features_selected_str,
+                           prefix=prefix,
+                           prefix_train=prefix,
+                           models=models,
+                           dir_output=dir_output / dept / prefix,
+                           device=device,
+                           k_days=k_days,
+                           encoding=encoding,
+                           scaling=scaling,
+                           test_departement=[dept],
+                           dir_train=dir_train,
+                           features=features,
+                           dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                           name_exp=name_exp,
+                           doKMEANS=doKMEANS)
+        
+        """if len(res) > 0:
+            res = pd.concat(res).reset_index(drop=True)
+            res_dept = pd.concat(res_dept).reset_index(drop=True)
+
+            ############## Plot ######################
+            for name, _, target_name, _ in models:
+                if name not in res.model.unique():
+                    continue
+                if target_name == 'risk':
+                    predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+                else:
+                    predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+
+                if target_name == 'binary':
+                    vmax_band = 1
+                else:
+                    vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
+                    
+                res_test = res[res['model'] == name]
+                res_test_dept = res_dept[res_dept['model'] == name]
+                regions_test = geo[geo['departement'] == dept]
+                #dates = res[res['risk'] == res['risk'].max()]['date'].values
+                dates = res_test_dept[res_test_dept['nbsinister'] > 0]['date'].values
+                
+            susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
+                                            scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                            dept_reg=False, sinister=sinister, sinister_point=fp)
+
+                susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
+                                resolution='0.03x0.03', region_dept=regions_test, column='prediction',
+                                dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)
+
+                train_dataset_dept = train_dataset[train_dataset['departement'] == name2int[dept]].groupby(['departement', 'date'])[target_name].sum().reset_index()
+                vmax_band = np.nanmax(train_dataset_dept[target_name].values)
+
+                susectibility_map_france_daily_geojson(res_test_dept,
+                                            regions_test, graphScale, np.unique(dates).astype(int),
+                                            target_name, 'departement',
+                                            dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                            dept_reg=True, sinister=sinister, sinister_point=fp)"""

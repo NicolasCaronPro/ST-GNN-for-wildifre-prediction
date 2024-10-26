@@ -49,7 +49,6 @@ parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
 parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
 parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
-parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 
 args = parser.parse_args()
 
@@ -83,7 +82,6 @@ scaling = args.scaling
 graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
-top_cluster = args.top_cluster
 
 ######################## Get features and train features list ######################
 
@@ -110,15 +108,15 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-if dataset_name== '':
-    dataset_name= 'firemen'
+if dataset_name == '':
+    dataset_name = 'firemen'
 
 if dummy:
     dataset_name+= '_dummy'
 
 autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
-    dataset_name= '_AutoRegressionReg'
+    dataset_name += '_AutoRegressionReg'
 
 ####################### INIT ################################
 
@@ -146,26 +144,43 @@ if MLFLOW:
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+train_dataset, val_dataset, test_dataset, train_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_name, train_departements,
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
+
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
-    
-_, varying_time_variables_2 = add_time_columns(varying_time_variables, k_days, train_dataset, train_features)
+
+for k in range(1, k_days + 1):
+    new_fet = [f'{v}_{str(k)}' for v in varying_time_variables]
+    new_fet = [nf for nf in new_fet if nf.split('_')[0] in train_features]
+    new_fet_features_name, _ = get_features_name_list(graphScale.scale, new_fet, METHODS_TEMPORAL)
+    df.drop(new_fet_features_name, axis=1, inplace=True)
+    for nf in new_fet:
+        train_features.pop(train_features.index(nf))
+        features.pop(features.index(nf))
 
 features_name, newShape = get_features_name_list(6, train_features, ['mean'])
 features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
-features_selected_str = get_features_selected_for_time_series_for_2D(features_selected, features_name_2D, varying_time_variables_2, nbfeatures)
-features_selected_str = list(np.unique(features_selected_str))
-features_selected = np.arange(0, len(features_selected_str))
 
-logger.info(f'features_name_2D shape : {len(features_name_2D)}')
+features_selected_str_2D = get_features_selected_for_time_series_for_2D(features_selected, features_name_2D, varying_time_variables, nbfeatures)
+features_selected_str_2D = list(np.unique(features_selected_str_2D))
+features_selected_2D = np.arange(0, len(features_selected_str_2D))
+
+if k_days > 0:
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+    features_selected_str_1D = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables, nbfeatures)
+    features_selected_str_1D = list(features_selected_str_1D)
+    features_selected_1D = np.arange(0, len(features_selected_str_1D))
+else:
+    features_selected_str_1D = list(features_selected)[:nbfeatures]
+    features_selected_1D = np.arange(0, len(features_selected_str_1D))
+
+features_selected = (features_selected_1D, features_selected_2D)
 
 if MLFLOW:
-
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
     test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
@@ -185,28 +200,20 @@ prefix += f'_{weights_version}'
 train_dataset['weight'] = train_dataset[weights_version]
 val_dataset['weight'] = val_dataset[weights_version]
 
-train_dataset = train_dataset[train_dataset['weight'] > 0]
-
 cnn_models = [
-             #('Zhang', None, 'risk_regression_rmse', True, autoRegression),
-             #('ConvLSTM', None, 'nbsinister_regression_poisson', True, autoRegression),
-            ('Zhang', None, 'nbsinister_regression_poisson', True, autoRegression),
-             #('Unet', FalsNonee, 'risk_regression_rmse', False, autoRegression)
+             #('HybridConvGraphNet', False, 'risk_regression_rmse', True, autoRegression),
+              ('ConvGraphNet', False, 'risk_regression_rmse', True, autoRegression),
             ]
 
 train_loader = None
 val_loader = None
 last_bool = None
 
-if is_pc:
-    temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
-else:
-    temp_dir = '.'
-
 params = {
     "graphScale": graphScale,
-    "val_dataset": val_dataset_unscale,
-    "test_dataset": test_dataset_unscale,
+    "train_dataset": train_dataset,
+    "val_dataset": val_dataset,
+    "test_dataset": test_dataset,
     "k_days": k_days,
     "device": device,
     "optimize_feature": optimize_feature,
@@ -221,11 +228,12 @@ params = {
     "dir_output": dir_output,
     "train_dataset_unscale": train_dataset_unscale,
     "scale": scale,
-    "features_name_1D": features_name,
-    "features_selected_2D": features_selected,
-    "features_name_2D": features_selected_str,
-    'features' : features,
-    "name_dir": rootDisk / temp_dir / name_dir,
+    'features': features,
+    "features_name": features_name,
+    "features_selected": features_selected,
+    "features_selected_str_2D": features_selected_str_2D,
+    "features_selected_str_1D": features_selected_str_1D,
+    "name_dir": name_dir,
     'k_days' : k_days,
 }
 
@@ -237,13 +245,24 @@ if doTrain:
         params['image_per_node'] = cnn_model[3]
         params['autoRegression'] = cnn_model[4]
 
-        wrapped_train_deep_learning_2D(params)
+        wrapped_train_deep_learning_hybrid(params)
 
 if doTest:
     
-    host = 'pc'
+    if MLFLOW:
+        exp_name = f"{dataset_name}_{sinister}_{sinister_encoding}_test"
+        experiments = client.search_experiments()
+
+        if exp_name not in list(map(lambda x: x.name, experiments)):
+            tags = {
+                "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+            }
+
+            client.create_experiment(name=exp_name, tags=tags)
+
+        mlflow.set_experiment(exp_name)
     
-    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
+    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}'
 
     trainCode = [name2int[dept] for dept in train_departements]
 
@@ -290,24 +309,10 @@ if doTest:
             ('spearman', spearman_coefficient, 'correlation')
             ]
 
-    cnn_models = [('Zhang_nbsinister_regression_poisson', False, 'risk', autoRegression),
-                #('UNET_risk_regression_rmse', False, 'risk', autoRegression)
+    cnn_models = [('HybridConvGraphNet_risk_regression_rmse', False, 'risk', autoRegression),
                 ]
 
     for dept in departements:
-
-        if MLFLOW:
-            exp_name = f"{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
-            experiments = client.search_experiments()
-
-            if exp_name not in list(map(lambda x: x.name, experiments)):
-                tags = {
-                    "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
-                }
-
-                client.create_experiment(name=exp_name, tags=tags)
-
-            mlflow.set_experiment(exp_name)
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
         if test_dataset_unscale is not None:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
@@ -319,33 +324,23 @@ if doTest:
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
-
-        if host == 'pc':
-            test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept,
-                            test_dataset_unscale_dept=test_dataset_unscale_dept,
-                            train_dataset=train_dataset_unscale,
-                            methods=methods,
-                            test_name=dept,
-                            features_name=features_name,
-                            prefix=prefix,
-                            prefix_train=prefix,
-                            models=cnn_models,
-                            dir_output=dir_output / dept / prefix,
-                            device=device,
-                            k_days=k_days,
-                            encoding=encoding,
-                            scaling=scaling,
-                            features=features,
-                            test_departement=[dept],
-                            dir_train=dir_train,
-                            dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
-                            name_exp=name_exp,
-                            doKMEANS=doKMEANS)
-        
-        else:
-            for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-                res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
-            
-            metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+        test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept,
+                          test_dataset_unscale_dept=test_dataset_unscale_dept,
+                          train_dataset=train_dataset_unscale,
+                           methods=methods,
+                           test_name=dept,
+                           features_name=features_name,
+                           prefix=prefix,
+                           prefix_train=prefix,
+                           models=cnn_models,
+                           dir_output=dir_output / dept / prefix,
+                           device=device,
+                           k_days=k_days,
+                           encoding=encoding,
+                           features=features,
+                           scaling=scaling,
+                           test_departement=[dept],
+                           dir_train=dir_train,
+                           dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                           name_exp=name_exp,
+                           doKMEANS=doKMEANS)
