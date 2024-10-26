@@ -20,6 +20,7 @@ mlartifacts/
 *.png
 *.feather
 *.gpkg
+*.pt
 
 # Distribution / packaging
 .Python
