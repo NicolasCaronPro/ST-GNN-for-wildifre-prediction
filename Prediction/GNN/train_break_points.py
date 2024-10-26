@@ -21,7 +21,7 @@ parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date'
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-sp', '--spec', type=str, help='spec')
+parser.add_argument('-sp', '--dataset', type=str, help='spec')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
 parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
@@ -55,7 +55,7 @@ nbfeatures = int(args.NbFeatures)
 sinister = args.sinister
 values_per_class = args.nbpoint
 scale = int(args.scale)
-spec = args.spec
+dataset_name= args.dataset
 resolution = args.resolution
 doPCA = args.pca == 'True'
 doKMEANS = args.KMEANS == 'True'
@@ -68,7 +68,7 @@ scaling = args.scaling
 
 ############################# GLOBAL VARIABLES #############################
 
-dir_target = root_target / sinister / 'log' / resolution
+dir_target = root_target / dataset_name / sinister / 'log' / resolution
 
 geo = gpd.read_file('regions/regions.geojson')
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
@@ -79,15 +79,15 @@ check_and_create_path(dir_output)
 
 minDate = '2017-06-12' # Starting point
 
-if spec == '':
-    spec = 'default'
+if dataset_name== '':
+    dataset_name= 'default'
 
 if dummy:
-    spec += '_dummy'
+    dataset_name+= '_dummy'
 
 autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
-    spec = '_AutoRegressionReg'
+    dataset_name= '_AutoRegressionReg'
 
 ####################### INIT ################################
 
@@ -154,7 +154,7 @@ if doTest:
                            methods,
                            dept,
                            prefix,
-                           dir_output / spec / dept / prefix,
+                           dir_output / dataset_name/ dept / prefix,
                            encoding,
                            scaling,
                            [dept],

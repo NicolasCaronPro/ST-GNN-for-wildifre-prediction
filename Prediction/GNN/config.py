@@ -2,9 +2,35 @@ from pathlib import Path
 import vacances_scolaires_france
 import jours_feries_france
 import datetime as dt
-from forecasting_models.models import *
-from forecasting_models.models_2D import *
+from forecasting_models.pytorch.tools_2 import *
+from forecasting_models.pytorch.loss import *
+from forecasting_models.sklearn.sklearn_api_models_config import *
 import logging
+import socket
+
+def get_machine_info():
+    try:
+        # Obtenir le nom d'hôte de la machine
+        hostname = socket.gethostname()
+        print(f"Nom de l'hôte : {hostname}")
+
+        # Obtenir l'adresse IP locale
+        local_ip = socket.gethostbyname(hostname)
+        print(f"Adresse IP locale : {local_ip}")
+    except Exception as e:
+        print(f"Une erreur est survenue : {e}")
+
+    return hostname
+
+is_pc = get_machine_info() == 'caron-Precision-7780'
+
+MLFLOW = False
+if is_pc:
+    MLFLOW = True
+if MLFLOW:
+    import mlflow
+    from mlflow import MlflowClient
+    from mlflow.models import infer_signature
 
 # Setting see for reproductible results
 torch.manual_seed(42)
@@ -33,7 +59,7 @@ eps = {'departement-01-ain' : {'risk' : 0.4,
        'dynamicworld' : 1},
        }
 
-metric = {'risk' : 'l1',
+metric = {'risk' : 'euclidean',
        'population' : 'cosine',
        'elevation' : 'l1',
        'foret_landcover' : 'cosine',
@@ -41,231 +67,233 @@ metric = {'risk' : 'l1',
 
 ACADEMIES = {
     '1': 'Lyon',
-    '69': 'Lyon',
+    '2': 'Amiens',
+    '3': 'Clermont-Ferrand',
+    '4': 'Aix-Marseille',
+    '5': 'Aix-Marseille',
+    '6': 'Nice',
+    '7': 'Grenoble',
+    '8': 'Reims',
+    '9': 'Toulouse',
+    '10': 'Reims',
+    '11': 'Montpellier',
+    '12': 'Toulouse',
+    '13': 'Aix-Marseille',
+    '14': 'Caen',
+    '15': 'Clermont-Ferrand',
+    '16': 'Poitiers',
+    '17': 'Poitiers',
+    '18': 'Orléans-Tours',
+    '19': 'Limoges',
+    '21': 'Dijon',
+    '22': 'Rennes',
+    '23': 'Limoges',
+    '24': 'Bordeaux',
     '25': 'Besançon',
+    '26': 'Grenoble',
+    '27': 'Normandie',
+    '28': 'Orléans-Tours',
+    '29': 'Rennes',
+    '30': 'Montpellier',
+    '31': 'Toulouse',
+    '32': 'Toulouse',
+    '33': 'Bordeaux',
+    '34': 'Montpellier',
+    '35': 'Rennes',
+    '36': 'Orléans-Tours',
+    '37': 'Orléans-Tours',
+    '38': 'Grenoble',
+    '39': 'Besançon',
+    '40': 'Bordeaux',
+    '41': 'Orléans-Tours',
+    '42': 'Lyon',
+    '43': 'Clermont-Ferrand',
+    '44': 'Nantes',
+    '45': 'Orléans-Tours',
+    '46': 'Toulouse',
+    '47': 'Bordeaux',
+    '48': 'Montpellier',
+    '49': 'Nantes',
+    '50': 'Normandie',
+    '51': 'Reims',
+    '52': 'Reims',
+    '53': 'Nantes',
+    '54': 'Nancy-Metz',
+    '55': 'Nancy-Metz',
+    '56': 'Rennes',
+    '57': 'Nancy-Metz',
+    '58': 'Dijon',
+    '59': 'Lille',
+    '60': 'Amiens',
+    '61': 'Normandie',
+    '62': 'Lille',
+    '63': 'Clermont-Ferrand',
+    '64': 'Bordeaux',
+    '65': 'Toulouse',
+    '66': 'Montpellier',
+    '67': 'Strasbourg',
+    '68': 'Strasbourg',
+    '69': 'Lyon',
+    '70': 'Besançon',
+    '71': 'Dijon',
+    '72': 'Nantes',
+    '73': 'Grenoble',
+    '74': 'Grenoble',
+    '75': 'Paris',
+    '76': 'Normandie',
+    '77': 'Créteil',
     '78': 'Versailles',
+    '79': 'Poitiers',
+    '80': 'Amiens',
+    '81': 'Toulouse',
+    '82': 'Toulouse',
+    '83': 'Nice',
+    '84': 'Aix-Marseille',
+    '85': 'Nantes',
+    '86': 'Poitiers',
+    '87': 'Limoges',
+    '88': 'Nancy-Metz',
+    '89': 'Dijon',
+    '90': 'Besançon',
+    '91': 'Versailles',
+    '92': 'Versailles',
+    '93': 'Créteil',
+    '94': 'Créteil',
+    '95': 'Versailles',
+    '971': 'Guadeloupe',
+    '972': 'Martinique',
+    '973': 'Guyane',
+    '974': 'La Réunion',
+    '976': 'Mayotte',
 }
 
 foret = {
-'PasDeforet' : 0,
-'Châtaignier': 1,
- 'Chênes décidus': 2,
- 'Conifères': 3,
- 'Douglas': 4,
- 'Feuillus': 5,
- 'Hêtre': 6,
- 'Mixte': 7,
- 'Mélèze': 8,
- 'NC': 9,
- 'NR': 10,
- 'Peuplier': 11,
- 'Pin autre': 12,
- 'Pin laricio, pin noir': 13,
- 'Pin maritime': 14,
- 'Pin sylvestre': 15,
- 'Pins mélangés': 16,
- 'Robinier': 17,
- 'Sapin, épicéa': 18}
+    "Châtaignier": 1,
+    "Chênes décidus": 2,
+    "Chênes sempervirents": 3,
+    "Conifères": 4,
+    "Douglas": 5,
+    "Feuillus": 6,
+    "Hêtre": 7,
+    "Mélèze": 8,
+    "Mixtes": 9,
+    "NC": 10,
+    "NR": 11,
+    "Pin à crochets, pin cembro": 12,
+    "Pin autre": 13,
+    "Pin d'Alep": 14,
+    "Pin laricio, pin noir": 15,
+    "Pin maritime": 16,
+    "Pin sylvestre": 17,
+    "Pins mélangés": 18,
+    "Peuplier": 19,
+    "Robinier": 20,
+    "Sapin, épicéa": 21
+}
 
 foretint2str = {
-'0' : 'PasDeforet',
-'1':'Châtaignier',
- '2': 'Chênes décidus',
- '3': 'Conifères',
- '4': 'Douglas',
- '5': 'Feuillus',
- '6': 'Hêtre',
- '7': 'Mixte',
- '8': 'Mélèze',
- '9': 'NC',
- '10': 'NR',
- '11': 'Peuplier',
- '12': 'Pin autre',
- '13': 'Pin laricio, pin noir',
- '14': 'Pin maritime',
- '15': 'Pin sylvestre',
- '16': 'Pins mélangés',
- '17': 'Robinier',
- '18': 'Sapin, épicéa'}
+    '0': 'PasDeforet',
+    '1': 'Châtaignier',
+    '2': 'Chênes décidus',
+    '3': 'Chênes sempervirents',
+    '4': 'Conifères',
+    '5': 'Douglas',
+    '6': 'Feuillus',
+    '7': 'Hêtre',
+    '8': 'Mélèze',
+    '9': 'Mixtes',
+    '10': 'NC',
+    '11': 'NR',
+    '12': 'Pin à crochets, pin cembro',
+    '13': 'Pin autre',
+    '14': 'Pin d\'Alep',
+    '15': 'Pin laricio, pin noir',
+    '16': 'Pin maritime',
+    '17': 'Pin sylvestre',
+    '18': 'Pins mélangés',
+    '19': 'Peuplier',
+    '20': 'Robinier',
+    '21': 'Sapin, épicéa'
+}
 
 osmnxint2str = {
 '0' : 'PasDeRoute',
 '1':'motorway',
  '2': 'primary',
  '3': 'secondary',
- '4': 'tertiary',
+ '4': 'tertiary', 
  '5': 'path'}
-
-# Variables : 
-# mean max min and std for scale > 0 else value
-features = [
-            'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
-            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-            'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-            'days_since_rain', 'sum_consecutive_rainfall',
-            'sum_rain_last_7_days',
-            'sum_snow_last_7_days', 'snow24h', 'snow24h16',
-            'elevation',
-            'population',
-            'sentinel',
-            'landcover',
-            'vigicrues',
-            'foret',
-            'highway',
-            'dynamicWorld',
-            'Calendar',
-            'Historical',
-            'Geo',
-            'air',
-            'nappes',
-            'AutoRegressionReg',
-            'AutoRegressionBin'
-            ]
-
-# Train features 
-train_features = [
-                'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
-                'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-                'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-                'days_since_rain', 'sum_consecutive_rainfall',
-                'sum_rain_last_7_days',
-              'sum_snow_last_7_days', 'snow24h', 'snow24h16',
-                'elevation',
-                'population',
-                'sentinel',
-                'landcover',
-                #'vigicrues',
-                'foret',
-                'highway',
-                'dynamicWorld',
-                'Calendar',
-                'Historical',
-                'Geo',
-                'air',
-                'nappes',
-                #'AutoRegressionReg',
-                'AutoRegressionBin'
-                ]
 
 newFeatures = []
 
-kmeans_features = [
-            #'temp',
-            #'dwpt',
-            'rhum',
-            #'prcp',
-            #'wdir',
-            #'wspd',
-            'prec24h',
-            #'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-            #'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-            #'temp16',
-            #'dwpt16',
-            #'rhum16',
-            #'prcp16',
-            #'wdir16', 'wspd16',
-            #'prec24h16',
-            #'days_since_rain',
-            'sum_consecutive_rainfall',
-            #'sum_rain_last_7_days',
-            #'sum_snow_last_7_days',
-            #'snow24h', 'snow24h16',
-            #'elevation',
-            #'population',
-            #'sentinel',
-            #'landcover',
-            #'vigicrues',
-            #'foret',
-            #'highway',
-            #'dynamicWorld',
-            #'Calendar',
-            #'Historical',
-            #'Geo',
-            #'air',
-            #'nappes',
-            #'AutoRegressionReg',
-            #'AutoRegressionBin'
-            ]
-
-SAISON_FEUX = {
-    1: {'jour_debut': '01', 'mois_debut': '03',
-           'jour_fin': '01', 'mois_fin': '10'},
-    25: {'jour_debut': '01', 'mois_debut': '03',
-           'jour_fin': '01', 'mois_fin': '11'},
-    78: {'jour_debut': '01', 'mois_debut': '03',
-           'jour_fin': '01', 'mois_fin': '11'},
-    69: {'jour_debut': '01', 'mois_debut': '03',
-           'jour_fin': '01', 'mois_fin': '11'},
-}
-
-PERIODES_A_IGNORER = {
-    1: {'interventions': [(dt.datetime(2017, 6, 12), dt.datetime(2017, 12, 31)),
-                            (dt.datetime(2023, 7, 3), dt.datetime(2023, 7, 26)),
-                             (dt.datetime(2024, 3, 10), dt.datetime(2024,5,29)),],
-           'appels': [(dt.datetime(2023, 3, 5), dt.datetime(2023, 7, 19)),
-                      (dt.datetime(2024, 4, 1), dt.datetime(2024,5,24))]},
-    25: {'interventions': [],
-           'appels': []},
-    78: {'interventions': [],
-           'appels': []},
-    69: {'interventions': [#(dt.datetime(2023, 1, 1), dt.datetime(2024, 6, 26)),
-                            (dt.datetime(2017, 6, 12), dt.datetime(2017, 12, 31))],
-           'appels': []}       
-}
+import datetime as dt
 
 def get_academic_zone(name, date):
-        dict_zones = {
-            'Aix-Marseille': ('B', 'B'),
-            'Amiens': ('B', 'B'),
-            'Besançon': ('B', 'A'),
-            'Bordeaux': ('C', 'A'),
-            'Caen': ('A', 'B'),
-            'Clermont-Ferrand': ('A', 'A'),
-            'Créteil': ('C', 'C'),
-            'Dijon': ('B', 'A'),
-            'Grenoble': ('A', 'A'),
-            'Lille': ('B', 'B'),
-            'Limoges': ('B', 'A'),
-            'Lyon': ('A', 'A'),
-            'Montpellier': ('A', 'C'),
-            'Nancy-Metz': ('A', 'B'),
-            'Nantes': ('A', 'B'),
-            'Nice': ('B', 'B'),
-            'Orléans-Tours': ('B', 'B'),
-            'Paris': ('C', 'C'),
-            'Poitiers': ('B', 'A'),
-            'Reims': ('B', 'B'),
-            'Rennes': ('A', 'B'),
-            'Rouen ': ('B', 'B'),
-            'Strasbourg': ('B', 'B'),
-            'Toulouse': ('A', 'C'),
-            'Versailles': ('C', 'C')
-        }
-        if date < dt.datetime(2016, 1, 1):
-            return dict_zones[name][0]
-        return dict_zones[name][1]
+    dict_zones = {
+        'Aix-Marseille': ('B', 'B'),
+        'Amiens': ('B', 'B'),
+        'Besançon': ('B', 'A'),
+        'Bordeaux': ('C', 'A'),
+        'Caen': ('A', 'B'),
+        'Clermont-Ferrand': ('A', 'A'),
+        'Créteil': ('C', 'C'),
+        'Dijon': ('B', 'A'),
+        'Grenoble': ('A', 'A'),
+        'Lille': ('B', 'B'),
+        'Limoges': ('B', 'A'),
+        'Lyon': ('A', 'A'),
+        'Montpellier': ('A', 'C'),
+        'Nancy-Metz': ('A', 'B'),
+        'Nantes': ('A', 'B'),
+        'Nice': ('B', 'B'),
+        'Orléans-Tours': ('B', 'B'),
+        'Paris': ('C', 'C'),
+        'Poitiers': ('B', 'A'),
+        'Reims': ('B', 'B'),
+        'Rennes': ('A', 'B'),
+        'Rouen': ('B', 'B'),
+        'Strasbourg': ('B', 'B'),
+        'Toulouse': ('A', 'C'),
+        'Versailles': ('C', 'C'),
+        'Guadeloupe': ('C', 'C'),
+        'Martinique': ('C', 'C'),
+        'Guyane': ('C', 'C'),
+        'La Réunion': ('C', 'C'),
+        'Mayotte': ('C', 'C'),
+        'Normandie': ('A', 'B'),  # Choix arbitraire de zone pour l'académie Normandie après 2020
+    }
 
-# All department for which we have data
-departements = ['departement-01-ain',
-                'departement-25-doubs',
-                'departement-69-rhone',
-                'departement-78-yvelines'
-                ]
+    if name == 'Normandie':
+        if date < dt.datetime(2020, 1, 1):
+            if date < dt.datetime(2016, 1, 1):
+                # Avant 2016, on prend en compte l'ancienne académie de Caen ou Rouen
+                return 'A'  # Zone de Caen
+            return 'B'  # Zone de Rouen après 2016
+        else:
+            return dict_zones[name][1]  # Zone après la fusion en 2020
+    
+    # Cas général pour les autres académies
+    if date < dt.datetime(2016, 1, 1):
+        return dict_zones[name][0]
+    return dict_zones[name][1]
 
-# We trained only on those 3 departmenet
-train_departements = [
-                'departement-01-ain',
-                'departement-25-doubs',
-                'departement-69-rhone',
-                'departement-78-yvelines',
-                ]
-
-ids_columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight']
+ids_columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 targets_columns = ['class_risk', 'nbsinister', 'risk']
-
-MLFLOW = True
+weights_columns = ['weight_proportion_on_zero_class',
+                   'weight_class',
+                   'weight_one',
+                   'weight_normalize',
+                   'weight_nbsinister',
+                   'weight_proportion_on_zero_sinister',
+                   'weight_random',
+                   
+                   'weight_proportion_on_zero_class_nbsinister',
+                   'weight_class_nbsinister',
+                   'weight_proportion_on_zero_sinister_nbsinister',
+                   'weight_one_nbsinister',
+                   'weight_normalize_nbsinister',
+                   'weight_nbsinister_nbsinister',
+                   'weight_random_nbsinister']
 
 ############################ Logger ######################################
 
@@ -285,10 +313,20 @@ tresh_kmeans = 0.15
 
 FAST = False
 
+if MLFLOW:
+    try:
+       tracking_uri = "http://127.0.0.1:8080"
+       mlflow.set_tracking_uri(uri=tracking_uri)
+       client = MlflowClient(tracking_uri=tracking_uri)
+    except Exception as e:
+        logger.info(f'{e}')
+        exit(1)
+
+
 maxDist = {0 : 5,
            1 : 10,
            2 : 15,
-           3 : 15,
+           3 : 30,
         4 : 20,
         5 : 25,
         6 : 30,
@@ -306,7 +344,8 @@ maxDist = {0 : 5,
         70 : 55,
         80 : 60,
         100 : 75,
-        143 : 100
+        143 : 100,
+        'departement': 150,
         }
 
 resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
@@ -314,132 +353,72 @@ resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
                 '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
                 '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
 
-shape2D = {10: (9, 9),
-           30 : (30, 30)}
+shape2D = {10: (24, 24),
+           30 : (30, 30),
+           3 : (15,15),
+            8 : (30,30),
+            'departement' : (64,64)}
 
 jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
             in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
-#device = torch.device('cpu')
+device = torch.device('cpu')
 Rewrite = True
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used
 encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
-METHODS_TEMPORAL = ['mean', 'min', 'max', 'std',
-           'sum',
-           #'grad'
-           ] 
+epochs = 10000
+lr = 0.0000005
+PATIENCE_CNT = 50
+CHECKPOINT = 100
+batch_size = 64
 
-METHODS_SPATIAL = ['mean', 'min', 'max', 'std',
-           'sum',
+METHODS_TEMPORAL = ['mean', 'min', 'max',
+        # 'std',
+        #   'sum',
            #'grad'
-           ] 
+           ]
 
-METHODS_TEMPORAL_TRAIN = ['mean', 'min', 'max', 'std',
+METHODS_SPATIAL = ['mean', 'min', 'max',
+            'std',
            'sum',
            #'grad'
            ]
 
-METHODS_SPATIAL_TRAIN = ['mean', 'min', 'max', 'std',
+METHODS_TEMPORAL_TRAIN = ['mean', 'min', 'max',
+            #'std',
            #'sum',
            #'grad'
            ]
 
-METHODS_KMEANS = ['mean', 'min', 'max', 'std']
-METHODS_KMEANS_TRAIN = ['mean', 'min', 'max', 'std']
+METHODS_SPATIAL_TRAIN = ['mean', 'min', 'max',
+            #'std',
+           #'sum',
+           #'grad'
+           ]
 
-num_lstm_layers = 2
+METHODS_KMEANS = ['mean', 'min', 'max',
+                  #'std'
+                  ]
+METHODS_KMEANS_TRAIN = ['mean', 'min', 'max',
+                        #'std'
+                        ]
 
-def make_models(in_dim, in_dim_2D, scale, dropout, act_func, k_days, binary):
-    # Neural networks
-    dico_model = {'GAT': GAT(in_dim=[in_dim, 64, 64, 64],
-                            heads=[4, 4, 2],
-                            dropout=dropout,
-                            bias=True,
-                            device=device,
-                            act_func=act_func,
-                            n_sequences=k_days + 1,
-                            binary=binary),
+num_lstm_layers = 3
+dropout = 0.03
 
-                        'DST-GCN': DSTGCN(n_sequences=k_days+1,
-                                        in_channels=in_dim,
-                                        end_channels=64,
-                                        dilation_channels=[64],
-                                        dilations=[1],
-                                        dropout=dropout,
-                                        act_func=act_func,
-                                        device=device,
-                                        binary=binary),
-                                                                    
-                        'ST-GAT': STGAT(n_sequences=k_days + 1,
-                                    in_channels=in_dim,
-                                    hidden_channels=[64],
-                                    end_channels=64,
-                                    dropout=dropout, heads=6,
-                                    act_func=act_func, device=device,
-                                    binary=binary),
+sklearn_model_list = ['xgboost', 'lightgbm', 'svm', 'rf', 'dt', 'ngboost']
+models_2D = ['Zhang', 'Unet', 'ConvLSTM']
+models_hybrid = ['ConvGraphNet', 'ST-ConvGraphNet', 'HybridConvGraphNet']
+temporal_model_list = ['LSTM', 'DST-GCN', 'ST-GCN', 'ST-GAT', 'ATGCN', 'ST-GATLSTM']
+daily_model_list = ['GCN', 'GAT', 'KAN']
 
-                        'ST-GCN' : STGCN(n_sequences=k_days + 1,
-                                        in_channels=in_dim,
-                                        hidden_channels=[64],
-                                        end_channels=64,
-                                        dropout=dropout,
-                                        act_func=act_func,
-                                        device=device,
-                                        binary=binary),
-
-                        'SDT-GCN' : SDSTGCN(n_sequences=k_days + 1,
-                                    in_channels=in_dim,
-                                    hidden_channels_temporal=[64],
-                                    dilations=[1],
-                                    hidden_channels_spatial=[64],
-                                    end_channels=64,
-                                    dropout=dropout,
-                                    act_func=act_func,
-                                    device=device,
-                                    binary=binary),
-
-                        'ATGN' : TemporalGNN(in_channels=in_dim,
-                                            hidden_channels=64,
-                                            out_channels=64,
-                                            n_sequences=k_days + 1,
-                                            device=device,
-                                            act_func=act_func,
-                                            dropout=dropout,
-                                            binary=binary),
-
-                        'ST-GATLTSM' : ST_GATLSTM(in_channels=in_dim,
-                                                hidden_channels=64,
-                                                residual_channels=64,
-                                                end_channels=32,
-                                                n_sequences=k_days + 1,
-                                                num_layers=num_lstm_layers,
-                                                device=device, act_func=act_func, heads=6, dropout=dropout,
-                                                concat=False,
-                                                binary=binary),
-
-                        'LTSM' : LSTM(in_channels=in_dim, residual_channels=64,
-                                      hidden_channels=64,
-                                      end_channels=32, n_sequences=k_days + 1,
-                                      device=device, act_func=act_func, binary=binary,
-                                      dropout=dropout, num_layers=num_lstm_layers),
-
-                        'Zhang' : Zhang(in_channels=in_dim_2D, conv_channels=[64, 128, 256], fc_channels=[256 * 4 * 4, 128, 64, 32],
-                                        dropout=dropout, binary=binary, device=device, n_sequences=k_days),
-
-                        #'ConvLSTM' : ConvLSTM(input_dim=in_dim_2D,
-                        #                    hidden_dim=[256, 128, 64],
-                        #                    kernel_size=3,
-                        #                    num_layers=1,
-                        #                    batch_first=True,
-                        #                    bias=True,
-                        #                    return_all_layers=False,),
-
-                        'UNet': UNet(n_channels=in_dim_2D, n_classes=1, bilinear=False)
-                        
-                        }
-    return dico_model
+zhang_layer_conversion = {
+    8 : 15,
+    10 : 15,
+    9 : 15,
+    }
