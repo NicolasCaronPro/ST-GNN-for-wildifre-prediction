@@ -3,6 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+mlruns/
+mlartifacts/
+
+*.yaml
+
 # C extensions
 *.so
 
@@ -40,6 +45,7 @@ MANIFEST
 #  before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+*.text
 
 # Installer logs
 pip-log.txt
@@ -57,7 +63,7 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
-.pytest_cache/
+.py_test_cache/
 cover/
 
 # Translations
