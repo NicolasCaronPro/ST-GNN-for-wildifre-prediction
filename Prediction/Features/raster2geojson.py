@@ -86,22 +86,27 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-s', '--sinister', type=str, help='Sinister')
     parser.add_argument('-r', '--resolution', type=str, help='Resolution')
+    parser.add_argument('-d', '--database', type=str, help='Database')
+    parser.add_argument('-se', '--SinisterEncoding', type=str, help='SinisterEncoding')
 
     args = parser.parse_args()
 
     # Input config
     sinister = args.sinister
     resolution = args.resolution
+    database = args.database
+    sinister_encoding = args.SinisterEncoding
 
     departements = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
-    variables = ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' ,'foret', 'dynamic_world']
+    variables = ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' , 'foret', 'dynamic_world', 'sinister']
 
-    root_data = Path('/home/caron/Bureau/csv')
-    root_raster = Path('/home/caron/Bureau/csv')
-    dir_mask = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/raster/'+resolution)
-    dir_encoder = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/inference/'+sinister+'/'+resolution+'/train/Encoder/')
-
-    regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
+    root_data = Path(f'/home/caron/Bureau/csv')
+    root_data_disk = Path('/media/caron/X9 Pro/travaille/Thèse/csv')
+    root_raster = Path(f'/home/caron/Bureau/csv')
+    dir_mask = Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/{sinister}/{database}/{sinister_encoding}/raster/{resolution}')
+    dir_encoder = Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/inference/{sinister}/{resolution}/train/Encoder/')
+    dir_target = Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/{sinister}/{database}/{sinister_encoding}/bin/{resolution}')
+    regions = gpd.read_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{database}/regions.geojson')
     regions['scale0'] = regions.index
     regions.index = regions['hex_id']
     dico = regions['scale0'].to_dict()
@@ -113,12 +118,16 @@ if __name__ == "__main__":
     for departement in departements:
         print(departement)
         dir_data = root_data / departement / 'data'
+        dir_data_disk = root_data_disk / departement / 'data'
         dir_raster = root_raster / departement / 'raster' / resolution
         h3 = regions[regions['departement'] == departement][['geometry', 'hex_id', 'scale0']]
         mask = read_object(departement+'rasterScale0.pkl', dir_mask)[0]
         for var in variables:
             print(var)
-            data = read_object(var+'.pkl', dir_raster)
+            if var == 'sinister':
+                data = read_object(f'{departement}binScale0.pkl', dir_target)
+            else:
+                data = read_object(var+'.pkl', dir_raster)
             if var in ['dynamic_world_landcover', 'foret_landcover', 'osmnx_landcover']:
                 vv = var.split('_')[1]
                 encoder = read_object('encoder_'+vv+'.pkl', dir_encoder)
@@ -127,9 +136,15 @@ if __name__ == "__main__":
                 data = data[:,:,:, index]
             elif var  == 'dynamic_world':
                 data = data[:,:,:, index]
+            elif var == 'sinister':
+                data = np.nansum(data, axis=2)
 
             h3 = raster2geojson(data, mask, h3, var, encoder)
 
         outname = 'hexagones_'+sinister+'.geojson'
         h3.rename({'osmnx_landcover': 'highway_encoder', 'foret_landcover': 'foret_encoder'}, axis=1, inplace=True)
+        check_and_create_path(dir_data / 'spatial' / outname)
+        check_and_create_path(dir_data_disk / 'spatial' / outname)
         h3.to_file(dir_data / 'spatial' / outname, driver='GeoJSON')
+        h3.to_file(dir_data_disk / 'spatial' / outname, driver='GeoJSON')
+        

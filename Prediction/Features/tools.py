@@ -4,9 +4,12 @@ import meteostat
 import datetime as dt
 from pathlib import Path
 import random
+
+from sympy import EX
 random.seed(0)
 import pandas as pd
 import geopandas as gpd
+import os
 from sklearn.cluster import KMeans
 import skimage as ski
 import matplotlib.pyplot as plt
@@ -44,6 +47,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import GridSearchCV
 from scipy.interpolate import griddata
 import sys
+from dico_departements import *
 import time
 import requests
 
@@ -118,11 +122,11 @@ def compute_fire_indices(point, date_debut, date_fin, saison_feux):
     df.drop('creneau', axis=1, inplace=True)
     daily_max_temp = df.resample('D').max()
     daily_max_temp['temp24max'] = daily_max_temp['temp'].shift(1)
-    df = df.merge(daily_max_temp['temp24max'].asfreq('H', method='ffill'), left_index=True, right_index=True, how='left')    
+    df = df.merge(daily_max_temp['temp24max'].asfreq('h', method='ffill'), left_index=True, right_index=True, how='left')    
     # Précipitations de la veille, pour le KBDI
     daily_prec = df.resample('D').sum()
     daily_prec['prec24veille'] = daily_max_temp['prcp'].shift(1)
-    df = df.merge(daily_prec['prec24veille'].asfreq('H', method='ffill'), left_index=True, right_index=True, how='left')    
+    df = df.merge(daily_prec['prec24veille'].asfreq('h', method='ffill'), left_index=True, right_index=True, how='left')    
     # Somme des précipitations de la semaine écoulée, pour le KBDI
     df['sum_rain_last_7_days'] = df['prcp'].rolling('7D').sum()
     df['sum_snow_last_7_days'] = df['snow'].rolling('7D').sum()
@@ -308,18 +312,116 @@ def compute_fire_indices(point, date_debut, date_fin, saison_feux):
     df['angstroem'] = angstroem
     return df
 
-SAISON_FEUX = {
-    'departement-01-ain': {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 10},
-    'departement-25-doubs': {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 11},
-    'departement-78-yvelines': {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 11},
-    'departement-69-rhone': {'jour_debut': 1, 'mois_debut': 3,
-           'jour_fin': 1, 'mois_fin': 10},
-}
+def compute_flood_indices(point, date_debut, date_fin):
+    meteostat.Point.radius = 200000
+    meteostat.Point.alt_range = 1000
+    meteostat.Point.max_count = 5
+    location = meteostat.Point(point[0], point[1])
+    # logger.info(f"Calcul des indices incendie pour le point de coordonnées {point}")
+    df = meteostat.Hourly(location, date_debut-dt.timedelta(hours=24), date_fin)
+    df = df.normalize()
+    df = df.fetch()
+    assert len(df)>0
+    df.drop(['tsun', 'coco', 'wpgt'], axis=1, inplace=True)
+    df.ffill(inplace=True)
+    df.bfill(inplace=True)
+    df['snow'] = df['snow'].fillna(0)
+    df['prcp'] = df['prcp'].fillna(0)
+    df.reset_index(inplace=True)
+    df.rename({'time': 'creneau'}, axis=1, inplace=True)
+    # La vitesse du vent doit être en m/s
+    df['wspd'] =  df['wspd'] * 1000 / 3600
+    df.sort_values(by='creneau', inplace=True)
+    # Calculer la somme des précipitations des 24 heures précédentes
+    df['prec24h'] = df['prcp'].rolling(window=24, min_periods=1).sum()
+    df['snow24h'] = df['snow'].rolling(window=24, min_periods=1).sum()
+    # Pour s'assurer que prcp24 ne contient des valeurs calculées qu'à midi (12:00)
+    # mettre à NaN les lignes qui ne correspondent pas à midi, 
+    # puis utiliser ffill pour propager la dernière valeur calculée
+    df['hour'] = df['creneau'].dt.hour
+
+    df.drop('hour', axis=1, inplace=True)
+    # Température maximale de la veille, pour le KBDI
+    df.set_index(df['creneau'], inplace=True)
+    df.drop('creneau', axis=1, inplace=True)
+    daily_max_temp = df.resample('D').max()
+    daily_max_temp['temp24max'] = daily_max_temp['temp'].shift(1)
+    df = df.merge(daily_max_temp['temp24max'].asfreq('H', method='ffill'), left_index=True, right_index=True, how='left')    
+    # Précipitations de la veille, pour le KBDI
+    daily_prec = df.resample('D').sum()
+    daily_prec['prec24veille'] = daily_max_temp['prcp'].shift(1)
+    df = df.merge(daily_prec['prec24veille'].asfreq('H', method='ffill'), left_index=True, right_index=True, how='left')    
+    
+    df['sum_rain_last_7_days'] = df['prcp'].rolling('7D').sum()
+    df['sum_snow_last_7_days'] = df['snow'].rolling('7D').sum()
+    df.reset_index(inplace=True)    
+    # Somme des précipitations consécutives, toujours pour le KBDI
+    df['no_rain'] = df['prcp'] < 1.8 # Identifier les jours sans précipitations
+    df['consecutive_rain_group'] = (df['no_rain']).cumsum() # Calculer les groupes de jours consécutifs avec précipitations
+    df['sum_consecutive_rainfall'] = df.groupby('consecutive_rain_group')['prcp'].transform('sum') # Calculer la somme des précipitations pour chaque groupe de jours consécutifs
+    df.loc[df['no_rain'], 'sum_consecutive_rainfall'] = 0 # Réinitialiser la somme à 0 pour les jours sans pluie
+    df.drop(['no_rain', 'consecutive_rain_group'], axis=1, inplace=True)
+    # On peut maintenant calculer les indices
+    df = df.loc[df.creneau>=date_debut]
+    df.reset_index(inplace=True)
+    df.loc[0, 'dc'] = 15
+    t = time.time()
+    months = df['creneau'].dt.month
+    months += 1
+    months = months.to_numpy()
+    prcps = df['prcp'].to_numpy()
+    months = df['creneau'].dt.month.to_numpy() + 1
+
+    # hour since rain
+    treshPrec24 = 1.8
+    dsr = np.empty_like(prcps)
+    dsr[0] = int(prcps[0] > treshPrec24)
+    for i in range(1, len(prcps)):
+        dsr[i] = dsr[i - 1] + 1 if prcps[i] < treshPrec24 else 0
+    df['hour_since_rain'] = dsr
+
+        # Calculate daily values for the new columns
+    daily_df = df.resample('D', on='creneau').agg({
+        'prcp': 'sum',
+        'snow': 'sum'
+    })
+
+    # Day since rain
+    daily_df['day_since_rain'] = 0
+    day_since_rain = 0
+    for i in range(1, len(daily_df)):
+        if daily_df.iloc[i]['prcp'] < treshPrec24:
+            day_since_rain += 1
+        else:
+            day_since_rain = 0
+        daily_df.loc[daily_df.index[i], 'day_since_rain'] = day_since_rain
+
+    # Day since snow
+    daily_df['day_since_snow'] = 0
+    day_since_snow = 0
+    for i in range(1, len(daily_df)):
+        if daily_df.iloc[i]['snow'] == 0:
+            day_since_snow += 1
+        else:
+            day_since_snow = 0
+        daily_df.loc[daily_df.index[i], 'day_since_snow'] = day_since_snow
+
+    # Last 7-day snow cover
+    daily_df['last_7_day_snow_cover'] = daily_df['snow'].rolling(7, min_periods=1).sum()
+
+    # Merge daily columns back to the original hourly DataFrame
+    df = df.merge(daily_df[['day_since_rain', 'day_since_snow', 'last_7_day_snow_cover']], left_on=df['creneau'].dt.floor('D'), right_index=True, how='left')
+
+    return df
 
 def get_fire_indices(point, date_debut, date_fin, departement):
+    if departement not in SAISON_FEUX.keys():
+        SAISON_FEUX[departement] = {}
+        SAISON_FEUX[departement]['mois_debut'] = 3
+        SAISON_FEUX[departement]['jour_debut'] = 1
+        SAISON_FEUX[departement]['mois_fin'] = 11
+        SAISON_FEUX[departement]['jour_fin'] = 1
+
     for annee in range(date_debut.year, date_fin.year+1):
         debut = max(date_debut, dt.datetime(annee, 1, 1))
         fin = min(date_fin, dt.datetime(annee+1, 1, 1))
@@ -660,13 +762,13 @@ def create_grid_cems(df, time, delta, variables):
         return None
     return dff.reset_index(drop=True)
 
-def interpolate_gridd(var, grid, newx, newy, met):
+def interpolate_gridd(var, grid, newx, newy, met, fill_value=0):
     x = grid['longitude'].values
     y = grid["latitude"].values
     points = np.zeros((y.shape[0], 2))
     points[:,0] = x
     points[:,1] = y
-    return griddata(points, grid[var].values, (newx, newy), method=met)
+    return griddata(points, grid[var].values, (newx, newy), method=met, fill_value=0)
 
 def create_dict_from_arry(array):
     res = {}
@@ -740,12 +842,15 @@ def rasterise_vigicrues(h3, maskh3, cems, sh, dates, dir_output, name):
             print(date)
         #ddate = dt.datetime.strptime(date, "%Y-%m-%d")
         cems_grid = create_grid_cems(cems, date, 0, 'hauteur')
+
         if cems_grid is None:
             continue
-        if len(cems_grid) < 4:
-            continue
+
+        #if len(cems_grid) < 4:
+        #    continue
+
         cems_grid = cems_grid[cems_grid['hauteur'] >= 0]
-        h3['hauteur'] = interpolate_gridd('hauteur', cems_grid, h3.longitude.values, h3.latitude.values, 'nearest')
+        h3['hauteur'] = interpolate_gridd('hauteur', cems_grid, h3.longitude.values, h3.latitude.values, 'nearest', fill_value=0)
 
         rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, 'hauteur')
 
@@ -770,7 +875,9 @@ def rasterise_nappes(h3, maskh3, cems, sh, dates, dir_output, var):
         if cems_grid is None:
             continue
         cems_grid = cems_grid[cems_grid[var] >= 0]
-        h3[var] = interpolate_gridd(var, cems_grid, h3.longitude.values, h3.latitude.values, 'nearest')
+        if len(cems_grid) == 0:
+            continue
+        h3[var] = interpolate_gridd(var, cems_grid, h3.longitude.values, h3.latitude.values, 'nearest', fill_value=0)
 
         rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, var)
 
@@ -798,12 +905,14 @@ def rasterise_air_qualite(h3, maskh3, air, sh, dates, dir_output):
                 print(date)
             #ddate = dt.datetime.strptime(date, "%Y-%m-%d")
             air_grid = create_grid_cems(air, date, 0, var)
+            if air_grid is None:
+                continue
             air_grid.dropna(subset=var, inplace=True)
             if np.unique(air_grid[var].shape[0] != 0):
                 #try:
                 #    h3[var] = interpolate_gridd(var, air_grid, h3.longitude.values, h3.latitude.values, 'linear')
                 #except:
-                h3[var] = interpolate_gridd(var, air_grid, h3.longitude.values, h3.latitude.values, 'nearest')
+                h3[var] = interpolate_gridd(var, air_grid, h3.longitude.values, h3.latitude.values, 'nearest', fill_value=0)
 
                 rasterVar = myRasterization(h3, maskh3, None, maskh3.shape, var)
 
@@ -914,8 +1023,21 @@ def raster_population(tifFile, tifFile_high, dir_output, reslon, reslat, dir_dat
     f = open(dir_output / outputName,"wb")
     pickle.dump(population,f)
 
-def raster_elevation(tifFile, dir_output, elevation):
-    elevation = resize(elevation, tifFile.shape[0], tifFile.shape[1], 1)[0]
+def raster_elevation(tifFile, dir_output, reslon, reslat, dir_data, dept):
+    #elevation = gpd.read_file(dir_data / 'elevation' / 'elevation.geojson')
+    elevation = pd.read_csv(dir_data / 'elevation' / 'elevation.csv')
+    elevation['latitude'] = elevation['latitude'].apply(lambda x : round(x, 3))
+    elevation['longitude'] = elevation['longitude'].apply(lambda x : round(x, 3))
+
+    elevation = elevation.groupby(['longitude', 'latitude'], as_index=False)['altitude'].mean()
+
+    try:
+        elevation = gpd.GeoDataFrame(elevation, geometry=gpd.points_from_xy(elevation.longitude, elevation.latitude))
+        elevation = rasterisation(elevation, reslat, reslon, 'altitude', defval=0, name=dept)
+        elevation = resize_no_dim(elevation, tifFile.shape[0], tifFile.shape[1])
+    except Exception as e:
+        print(e)
+        elevation = np.zeros(tifFile.shape)
     minusMask = np.argwhere(tifFile == -1)
     minusMask = np.argwhere(np.isnan(tifFile))
     elevation[minusMask[:,0], minusMask[:,1]] = np.nan
@@ -923,12 +1045,200 @@ def raster_elevation(tifFile, dir_output, elevation):
     f = open(dir_output / outputName,"wb")
     pickle.dump(elevation,f)
 
+valeurs_foret_attribut = {
+    "Châtaignier": 1,
+    "Chênes décidus": 2,
+    "Chênes sempervirents": 3,
+    "Conifères": 4,
+    "Douglas": 5,
+    "Feuillus": 6,
+    "Hêtre": 7,
+    "Mélèze": 8,
+    "Mixte": 9,
+    "NC": 10,
+    "NR": 11,
+    "Pin à crochets, pin cembro": 12,
+    "Pin autre": 13,
+    "Pin d'Alep": 14,
+    "Pin laricio, pin noir": 15,
+    "Pin maritime": 16,
+    "Pin sylvestre": 17,
+    "Pins mélangés": 18,
+    "Peuplier": 19,
+    "Robinier": 20,
+    "Sapin, épicéa": 21
+}
+
+valeurs_cosia_couverture = {
+    'Building': 1,
+    'Bare soil': 2,
+    'Water surface': 3,
+    'Conifer': 4,
+    'Deciduous': 5,
+    'Shrubland': 6,
+    'Lawn': 7,
+    'Crop': 8,
+}
+
+valeurs_tourbiere_couverture = {
+    'Marais': 1,
+    'Haute': 2,
+}
+
+def arrondir_avec_seuil(array, seuil):
+    """
+    Arrondit les éléments d'un tableau NumPy en fonction d'un seuil décimal.
+    Si la partie décimale est supérieure ou égale au seuil, l'élément est arrondi au supérieur.
+    Sinon, il est arrondi à l'inférieur.
+
+    :param array: Le tableau NumPy à arrondir.
+    :param seuil: Le seuil décimal pour l'arrondi (entre 0 et 1).
+    :return: Le tableau NumPy arrondi en fonction du seuil.
+    """
+    # Séparer la partie entière et la partie décimale
+    partie_entière = np.floor(array)
+    partie_décimale = array - partie_entière
+
+    # Condition pour arrondir au supérieur
+    arrondir_au_sup = partie_décimale >= seuil
+
+    # Ajouter 1 à la partie entière là où on doit arrondir au supérieur
+    partie_entière[arrondir_au_sup] += 1
+
+    # Retourner la partie entière comme résultat arrondi
+    return partie_entière
+
+def raster_argile(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, dept):
+    argile = gpd.read_file(dir_data / 'argile' / 'argile.geojson')
+    #argile = create_geocube(argile, ['NIVEAU'], -reslon, reslat)
+    try:
+        argile = rasterisation(argile, reslat, reslon, 'NIVEAU', defval=0, name=dept)
+    except:
+        argile = np.zeros(tifFile.shape)
+    argile = resize_no_dim(argile, tifFile.shape[0], tifFile.shape[1])
+    argile = arrondir_avec_seuil(argile, 0.2)
+    argile[np.isnan(tifFile)] = np.nan
+
+    outputName = 'argile.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(argile,f)
+
+def raster_tourbiere(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, region):
+    ZonesTourbeuses = gpd.read_file(dir_data / 'tourbiere' / 'ZonesTourbeuses.geojson')
+
+    ZonesTourbeuses = rasterisation(ZonesTourbeuses, reslat, reslon, 'classe', defval=0, name=dept)
+    ZonesTourbeuses = resize_no_dim(ZonesTourbeuses, tifFile_high.shape[0], tifFile_high.shape[1])
+    bands = valeurs_tourbiere_couverture.values()
+    bands = np.asarray(list(bands))
+    res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+
+    unodes = np.unique(tifFile)
+    ZonesTourbeuses_2 = np.empty((np.max(bands) + 1,*ZonesTourbeuses.shape))
+    
+    for band in bands:
+        ZonesTourbeuses_2[band] = influence_index(ZonesTourbeuses == band, np.isnan(ZonesTourbeuses))
+
+    for node in unodes:
+        if node not in tifFile_high:
+            continue
+
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+
+        for band in bands:
+            res[band, mask1] = (np.argwhere(ZonesTourbeuses[mask2] == band).shape[0] / ZonesTourbeuses[mask2].shape[0]) * 100
+            res3[band, mask1] = np.nanmean(ZonesTourbeuses_2[band, mask2])
+
+        if res[:, mask1].shape[1] == 1:
+            res2[mask1] = np.nanargmax(res[:, mask1])
+        else:
+            res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
+    
+    outputName = 'ZonesTourbeuses.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+
+    outputName = 'ZonesTourbeuses_landcover.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res2,f)
+
+    outputName = 'ZonesTourbeuses_influence.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res3,f)
+
+
+def raster_cosia(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, region):
+    cosia = gpd.read_file(dir_data / 'cosia' / 'cosia.geojson')
+    cosia = gpd.overlay(region, cosia)
+    # Modify the classes
+    cosia = cosia[(cosia['numero'] != 7)]
+    cosia.loc[cosia[cosia['numero'].isin([18, 2, 4])].index, 'numero'] = 1
+    cosia.loc[cosia[cosia['numero'].isin([3, 5])].index, 'numero'] = 2
+    cosia.loc[cosia[cosia['numero'].isin([6, 7])].index, 'numero'] = 3
+    cosia.loc[cosia[cosia['numero'] == 8].index, 'numero'] = 4
+    cosia.loc[cosia[cosia['numero'] == 10].index, 'numero'] = 5
+    cosia.loc[cosia[cosia['numero'] == 9].index, 'numero'] = 6
+    cosia.loc[cosia[cosia['numero'] == 15].index, 'numero'] = 7
+    cosia.loc[cosia[cosia['numero'].isin([14, 17])].index, 'numero'] = 8
+
+    cosia = rasterisation(cosia, reslat, reslon, 'numero', defval=0, name=dept)
+    cosia = resize_no_dim(cosia, tifFile_high.shape[0], tifFile_high.shape[1])
+    bands = valeurs_cosia_couverture.values()
+    bands = np.asarray(list(bands))
+    res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
+
+    unodes = np.unique(tifFile)
+    cosia_2 = np.empty((np.max(bands) + 1,*cosia.shape))
+    
+    for band in bands:
+        cosia_2[band] = influence_index(cosia == band, np.isnan(cosia))
+
+    for node in unodes:
+        if node not in tifFile_high:
+            continue
+
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+
+        for band in bands:
+            res[band, mask1] = (np.argwhere(cosia[mask2] == band).shape[0] / cosia[mask2].shape[0]) * 100
+            res3[band, mask1] = np.nanmean(cosia_2[band, mask2])
+
+        if res[:, mask1].shape[1] == 1:
+            res2[mask1] = np.nanargmax(res[:, mask1])
+        else:
+            res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
+    
+    outputName = 'cosia.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+
+    outputName = 'cosia_landcover.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res2,f)
+
+    outputName = 'cosia_influence.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res3,f)
+
 def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, dept):
     foret = gpd.read_file(dir_data / 'BDFORET' / 'foret.geojson')
-
     foret = rasterisation(foret, reslat, reslon, 'code', defval=0, name=dept)
     foret = resize_no_dim(foret, tifFile_high.shape[0], tifFile_high.shape[1])
-    bands = np.unique(foret).astype(int)
+    bands = valeurs_foret_attribut.values()
+    bands = np.asarray(list(bands))
     res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
     res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
     res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
@@ -971,15 +1281,15 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
     f = open(dir_output / outputName,"wb")
     pickle.dump(res3,f)
 
-def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data):
-    osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
-    osmnx = osmnx[0]
+def raster_osmnx(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, dept):
+    #osmnx, _, _ = read_tif(dir_data / 'osmnx' / 'osmnx.tif')
+    osmnx = gpd.read_file(dir_data / 'osmnx' / 'osmnx.geojson')
+    osmnx = rasterisation(osmnx, reslat, reslon, 'label', defval=0, name=dept)
 
     mask = np.isnan(tifFile_high)
     osmnx = resize_no_dim(osmnx, tifFile_high.shape[0], tifFile_high.shape[1])
     osmnx[mask] = np.nan
-    print(np.unique(osmnx))
-    bands = np.unique(osmnx)
+    bands = np.asarray([0,1,2,3,4,5])
     bands = bands[~np.isnan(bands)].astype(int)
     res = np.zeros(((np.nanmax(bands) + 1), tifFile.shape[0], tifFile.shape[1]), dtype=float)
     res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
@@ -1157,13 +1467,13 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
     f = open(dir_output / outputName,"wb")
     pickle.dump(res3,f)
 
-def rasterisation(h3, lats, longs, column='cluster', defval = np.nan, name='default'):
+def rasterisation(h3, lats, longs, column='cluster', defval = 0, name='default', dir_output='/media/caron/X9 Pro/corbeille'):
     #h3['cluster'] = h3.index
 
-    h3.to_file(name+'.geojson', driver='GeoJSON')
+    h3.to_file(dir_output + '/' + name+'.geojson', driver='GeoJSON')
 
-    input_geojson = name+'.geojson'
-    output_raster = name+'.tif'
+    input_geojson = dir_output + '/' + name+'.geojson'
+    output_raster = dir_output + '/' + name+'.tif'
 
     # Si on veut rasteriser en fonction de la valeur d'un attribut du vecteur, mettre son nom ici 
     attribute_name = column
@@ -1205,7 +1515,8 @@ def rasterisation(h3, lats, longs, column='cluster', defval = np.nan, name='defa
     output_ds = None
     source_ds = None
 
-    res, _, _ = read_tif(name+'.tif')
+    res, _, _ = read_tif(dir_output + '/' + name+'.tif')
+    os.remove(dir_output + '/' + name+'.tif')
     return res[0]
 
 def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214):
