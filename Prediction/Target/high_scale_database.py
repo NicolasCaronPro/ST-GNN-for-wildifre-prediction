@@ -1,68 +1,174 @@
 from probabilistic import *
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import argparse
-
-int2str = {
-    1 : 'ain',
-    25 : 'doubs',
-    69 : 'rhone',
-    78 : 'yvelines'
-}
-
-int2strMaj = {
-    1 : 'Ain',
-    25 : 'Doubs',
-    69 : 'Rhone',
-    78 : 'Yvelines'
-}
-
-int2name = {
-    1 : 'departement-01-ain',
-    25 : 'departement-25-doubs',
-    69 : 'departement-69-rhone',
-    78 : 'departement-78-yvelines'
-}
-
-str2int = {
-    'ain': 1,
-    'doubs' : 25,
-    'rhone' : 69,
-    'yvelines' : 78
-}
-
-str2intMaj = {
-    'Ain': 1,
-    'Doubs' : 25,
-    'Rhone' : 69,
-    'Yvelines' : 78
-}
-
-str2name = {
-    'Ain': 'departement-01-ain',
-    'Doubs' : 'departement-25-doubs',
-    'Rhone' : 'departement-69-rhone',
-    'Yvelines' : 'departement-78-yvelines'
-}
-
-name2str = {
-    'departement-01-ain': 'Ain',
-    'departement-25-doubs' : 'Doubs',
-    'departement-69-rhone' : 'Rhone',
-    'departement-78-yvelines' : 'Yvelines'
-}
-
-name2int = {
-    'departement-01-ain': 1,
-    'departement-25-doubs' : 25,
-    'departement-69-rhone' : 69,
-    'departement-78-yvelines' : 78
-}
+import datetime as dt
+from dico_departements import *
+from geopy.distance import geodesic
 
 ############################################################## 
 
 ##########          My class  
 
 ##############################################################
+
+# Fonction pour regrouper les points proches d'une même date
+def group_close_points(points, distance_threshold=20):
+    """
+    Regroupe les points géographiques qui sont à une distance inférieure à distance_threshold km.
+    points est une liste de tuples (latitude, longitude).
+    Renvoie une liste de groupes (clusters).
+    """
+    groups = []
+
+    for i, point in enumerate(points):
+        # Créer un nouveau groupe
+        group = [point]
+        
+        # Comparer ce point avec tous les autres points
+        for j, other_point in enumerate(points):
+            p1 = Point(point[1], point[0])
+            p2 = Point(other_point[1], other_point[0])
+            if haversine(p1, p2) < distance_threshold:
+                if other_point not in group:
+                    group.append(other_point)
+        
+        groups.append(group)
+    
+    return groups
+
+# Fonction pour vérifier si un point est proche de tous les points d'un cluster
+def are_points_close(cluster, new_points, distance_threshold=20):
+    """
+    Vérifie si tous les points dans 'new_points' sont proches (moins de distance_threshold km)
+    de tous les points dans 'cluster'.
+    """
+    for point in cluster:
+        for new_point in new_points:
+            p1 = Point(point[1], point[0])
+            p2 = Point(new_point[1], new_point[0])
+            if haversine(p1, p2) >= distance_threshold:
+                return False
+    return True
+
+# Fonction pour vérifier si un point est proche de tous les points d'un cluster
+def are_point_close(point, new_points, distance_threshold=20):
+    """
+    Vérifie si tous les points dans 'new_points' sont proches (moins de distance_threshold km)
+    de tous les points dans 'cluster'.
+    """
+    for new_point in new_points:
+        p1 = Point(point[1], point[0])
+        p2 = Point(new_point[1], new_point[0])
+        if haversine(p1, p2) <= distance_threshold:
+            return True, new_point
+    return False, None
+
+# Fonction pour calculer les séquences continues pour les groupes de points
+def calculate_sequences(df):
+    """
+    Calcule la taille des séquences continues sans interruption de date pour les points proches.
+    Renvoie une liste des tailles de séquences.
+    """
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values(by='date')
+    sequences = []
+    td = 1
+    
+    # Grouper les données par date
+    for date, group in df.groupby('date'):
+        points = list(zip(group['latitude'], group['longitude']))
+        
+        # Regrouper les points proches
+        grouped_points = group_close_points(points)
+        
+        # Pour chaque groupe, créer ou étendre les séquences
+        for cluster in grouped_points:
+            
+            if not sequences:
+                # Créer la première séquence si elle n'existe pas
+                sequences.append({'dates': [date], 'points': cluster})
+            else:
+                find_seq = False
+                for sei, seq in enumerate(sequences):
+                    i = 1
+                    while (date - seq['dates'][-i]).days <= td and (date != seq['dates'][-i]):
+                        is_close, p = are_point_close(seq['points'][-i], cluster, 20)
+                        if date in seq['dates'] and p in seq['points']:
+                            continue
+                        if is_close:
+                            seq['dates'].append(date)
+                            seq['points'].append(p)
+                            find_seq = True
+                            break
+                        i -= 1
+                        if i < 0:
+                            break
+                    sequences[sei] = seq
+                    
+                if not find_seq:
+                    # Sinon, commencer une nouvelle séquence
+                    sequences.append({'dates': [date], 'points': cluster})
+    
+    # Retourner la taille de chaque séquence
+    sequence_lengths = [len(np.unique(seq['dates'])) for seq in sequences]
+    return sequence_lengths
+
+def find_kernel_size(dept, months, dataset_name):
+
+    sequences = {}
+    if dataset_name == 'firemen':
+        if sinister == 'firepoint':
+            name = 'NATURELSfire.csv'
+        else:
+            name = 'inondation.csv'
+        try:
+            fp = pd.read_csv(root / dept / sinister / name)
+        except:
+            for i, month in enumerate(months):
+                sequences[i] = {}
+                sequences[i]['seq'] = [0]
+                sequences[i]['ndays'] = [0]
+            return sequences, 0
+
+    elif dataset_name == 'bdiff' or dataset_name == 'vigicrues' or dataset_name == 'georisques':
+        fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv')
+        code_dept_str = name2int[dept]
+        if code_dept_str < 10:
+            code_dept_str = f'0{code_dept_str}'
+        else:
+            code_dept_str = f'{code_dept_str}'
+        fp = fp[fp['Département'] == code_dept_str]
+
+    def dt_2_str(x):
+        try:
+            return x.strftime('%Y-%m-%d')
+        except:
+            return x
+    
+    fp['date'] = fp['date'].apply(lambda x: dt_2_str(x))
+    fp = fp[fp['date'] >= sdate]
+
+    if 'month' not in fp.columns:
+        fp['month'] = fp['date'].apply(lambda x : int(x.split('-')[1]))
+
+    if 'coef' not in fp.columns:
+        fp['coef'] = 1
+
+    for i, month in enumerate(months):
+
+        sequences[i] = {}
+        fpp = fp[fp['month'].isin(month)].reset_index(drop=True)
+        if len(fpp) == 0:
+            sequences[i]['seq'] = [0]
+            sequences[i]['ndays'] = [0]
+            continue
+
+        temp = fpp.groupby(['date', 'longitude', 'latitude'])['coef'].sum().reset_index()
+        temp = temp.sort_values('date')
+        
+        sequences[i]['seq'] =  calculate_sequences(temp)
+
+    return sequences, len(fp)
 
 def create_larger_scale_image(input, proba, bin):
     probaImageScale = np.full(proba.shape, np.nan)
@@ -95,6 +201,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         code = int2strMaj[int(dept.split('-')[1])]
 
         if not read:
+            print(regions[regions['departement'] == dept], dept)
             sat0, _, _ = rasterization(regions[regions['departement'] == dept], n_pixel_y, n_pixel_x, 'scale0', dir_output, dept+'_scale0')
             uniques_ids = np.unique(sat0[~np.isnan(sat0)])
             additionnal_pixel_x = []
@@ -111,34 +218,49 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         else:
             sat0 = read_object(dept+'rasterScale0.pkl', dir_output / 'raster' / resolution)
         
-        if sinister == 'firepoint':
-            name = 'NATURELSfire.csv'
-        else:
-            name = 'inondation.csv'
-
         try:
-            sp = pd.read_csv(root / dept / sinister / name)
-        except Exception as e:
-            print(e)
+            if dataset_name == 'firemen':
+                if sinister == 'firepoint':
+                    name = 'NATURELSfire.csv'
+                else:
+                    name = 'inondation.csv'
+                fp = pd.read_csv(root / dept / sinister / name)
+        except:
+                print('Return a full zero image')
+                inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
+                inputDep[np.isnan(sat0[0])] = np.nan
+                input.append(inputDep)
+                save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
+                continue
+        
+        if dataset_name == 'bdiff' or dataset_name == 'vigicrues' or dataset_name == 'georisques':
+            fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv', dtype={'Département': str})
+            code_dept_str = name2int[dept]
+            if code_dept_str < 10:
+                code_dept_str = f'0{code_dept_str}'
+            else:
+                code_dept_str = f'{code_dept_str}'
+            fp = fp[fp['Département'] == code_dept_str]
+
+        fp = fp[fp['date'] > sdate]
+
+        if len(fp) == 0:
             print('Return a full zero image')
             inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
             inputDep[np.isnan(sat0[0])] = np.nan
             input.append(inputDep)
             save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
             continue
-
-        sp = sp[(sp['date'] >= sdate) & (sp['date'] < edate)]
-        #sp['hour'] = sp['date_debut'].apply(lambda x : int(x.split(' ')[1].split(':')[0]))
-        #sp['date'] = sp.apply(lambda x : add_hour(x['date'], x['hour']), axis=1)
+        
+        sp = fp[(fp['date'] >= sdate) & (fp['date'] < edate)]
         sp['departement'] = dept
 
-        #regions.loc[regions[regions['departement'] == dept].index, 'departement'] = dept
         sp['scale0'] = sp['h3'].replace(dico)
 
         sat0 = sat0[0]
         if not read:
             inputDep = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
-                                                             creneaux, sat0, sinister, n_pixel_y, n_pixel_x, dir_output, dept)
+                                                             creneaux, sat0, sinister, sinister_encoding, n_pixel_y, n_pixel_x, dir_output, dept)
             inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0
             save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
@@ -161,6 +283,8 @@ if __name__ == "__main__":
     parser.add_argument('-p', '--past', type=str, help='Past convolution')
     parser.add_argument('-re', '--resolution', type=str, help='Resolution')
     parser.add_argument('-am', '--addMean', type=str, help='Add mean kernel')
+    parser.add_argument('-d', '--dataset', type=str, help='Dataset to Use')
+    parser.add_argument('-se', '--sinisterEncoding', type=str, help='Value to use for sinister encoding')
 
     args = parser.parse_args()
 
@@ -169,29 +293,53 @@ if __name__ == "__main__":
     doPast = args.past == 'True'
     addMean = args.addMean == 'True'
     resolution = args.resolution
+    dataset_name = args.dataset
+    sinister_encoding = args.sinisterEncoding
 
     ###################################### Data loading ###################################
-    root = Path('/home/caron/Bureau/csv')
-    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister)
+    #root = Path('/home/caron/Bureau/csv')
+    root = Path('/media/caron/X9 Pro/travaille/Thèse/csv')
+    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+dataset_name + '/' + sinister_encoding)
 
-    if sinister == "firepoint":
-        departements = ['departement-01-ain',
-                        'departement-25-doubs',
-                        'departement-69-rhone', 
-                        'departement-78-yvelines'
-                        ]
-        
-    elif sinister == "inondation":
-        departements = ['departement-01-ain',
-                        'departement-25-doubs',
-                        'departement-69-rhone', 
-                        'departement-78-yvelines'
-                        ]
+    """if dataset_name == 'firemen':
+        spa = 3
+        if sinister == "firepoint":
+            departements = ['departement-01-ain',
+                            'departement-25-doubs',
+                            'departement-69-rhone', 
+                            'departement-78-yvelines',
+                            ]
+            pass
+        elif sinister == "inondation":
+            #departements = ['departement-25-doubs']
+            pass
+    elif dataset_name == 'vigicrues':
+        spa = 3
+        if sinister == 'firepoint':
+            exit(1)
+        elif sinister == 'inondation':
+            departements = ['departement-01-ain']
+    elif dataset_name == 'bdiff':
+        if sinister != 'firepoint':
+            exit(1)
+        spa = 3
+        departements = [f'departement-{dept}' for dept in departements]
+    elif dataset_name == 'georisques':
+        spa = 3
+        departements = [f'departement-{dept}' for dept in departements]
+    else:
+        print(f'Unknow dataset name {dataset_name}')
+        exit(1)"""
 
+    departements = [f'departement-{dept}' for dept in departements]
+    spa = 3
     #regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions = []
 
-    for dept in departements:
+    for i, dept in enumerate(departements):
+        if not (root / dept / 'data' / 'spatial/hexagones.geojson').is_file():
+            departements.pop(departements.index(dept))
+            continue
         h3 = gpd.read_file(root / dept / 'data' / 'spatial/hexagones.geojson')
         h3['latitude'] = h3['geometry'].apply(lambda x : float(x.centroid.y))
         h3['longitude'] = h3['geometry'].apply(lambda x : float(x.centroid.x))
@@ -203,7 +351,9 @@ if __name__ == "__main__":
     regions.index = regions['hex_id']
     dico = regions['scale0'].to_dict()
     regions.reset_index(drop=True, inplace=True)
-    regions.to_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson', driver='GeoJSON')
+    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}'))
+    print(regions.departement.unique())
+    regions.to_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}/regions.geojson', driver='GeoJSON')
 
     ################################### Create output directory ###########################
     check_and_create_path(dir_output / 'mask' / 'geo' / resolution)
@@ -231,21 +381,21 @@ if __name__ == "__main__":
     logistic = LogisticRegression(random_state=42, solver='liblinear', penalty='l2', C=0.5,
                                 intercept_scaling=0.5, fit_intercept=True, class_weight={0: 1, 1 : 1})
     
-    spa = 3
-
-    if sinister == "firepoint":
-        dims = [[(spa,spa,5), (spa,spa,9), (spa,spa,3)],
-                [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
-                [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
-                [(spa,spa,3), (spa,spa,7), (spa,spa,3)]]
-        
-    elif sinister == "inondation":
-        dims = [(spa,spa,5),
-                (spa,spa,5),
-                (spa,spa,5),
-                (spa,spa,5)]
-    else:
-        exit(2)
+    dims = {}
+    months = []
+    months = [[2, 3, 4, 5], [6, 7, 8, 9], [10, 11, 12, 1]]
+    for dept in departements:
+        if dept == 'departement-2A-corse-du-sud' or dept == 'departement-2B-haute-corsse':
+            departements.pop(departements.index(dept))
+            continue
+        seq_dept, leni = find_kernel_size(dept, months, dataset_name)
+        dim_med = round(np.nanmean(seq_dept[0]['seq'])) * 2 + 1
+        dim_high = round(np.nanmean(seq_dept[1]['seq'])) * 2 + 1
+        dim_low = round(np.nanmean(seq_dept[2]['seq'])) * 2 + 1
+        dims[dept] = ((spa, spa, dim_med), (spa, spa, dim_high), (spa, spa, dim_low))
+        print(dept, leni, (dim_med, dim_high, dim_low))
+    
+    save_object(dims, 'dimension.pkl', Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}/{sinister_encoding}'))
 
     ################################## Process #################################
 
@@ -253,7 +403,11 @@ if __name__ == "__main__":
                                     n_pixel_y=n_pixel_y, n_pixel_x=n_pixel_x, read=read)
 
     fp = pd.concat(fp).reset_index(drop=True)
-    fp.to_csv('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/'+sinister+'.csv', index=False)
+    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{dataset_name}'))
+    fp.to_csv(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{dataset_name}/{sinister}.csv', index=False)
 
     model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
     model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements, False)
+
+    #if not doPast:
+    #    remove_0_risk_pixel(dir_output, resolution, departements)

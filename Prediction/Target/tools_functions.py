@@ -315,26 +315,31 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
-def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
+def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False, semi2=False):
     dimX, dimY, dimZ = dimS
+    if dimX == 0 or dimY == 0 or dimZ == 0:
+        return res
     if dim[-1] == 1:
         dimZ = 1
     else:
         dimZ = np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1)[0] - np.linspace(dim[-1]//2, 0, num=(dim[-1] // 2) + 1)[1]
     if mode == "laplace":
         kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
-        kernel = dimZ / kernel 
+        kernel = dimZ / kernel
+    elif mode == 'inverse_laplace':
+        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
+        kernel = dimZ / kernel
+        kernel = (np.max(kernel) - kernel) + np.min(kernel)
     else:
         kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
-        #kernel[:, :, dim[2]//2] = 0
 
     if semi:
-        kernel[:,:,:(dim[2]//2)] = 0.0
-
-    print(dim[-1], np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1), kernel[1,1])
-
+        if dim[2] != 1:
+            kernel[:,:,:(dim[2]//2)] = 0.0
+    if semi2:
+        if dim[2] != 1:
+            kernel[:,:,(dim[2]//2):] = 0.0
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
-    #res = scipy_fft_conv(raster, kernel, mode='same')
     return res
 
 def rasterization(ori : gpd.GeoDataFrame,
@@ -429,10 +434,12 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
                                           dates : list,
                                           mask : np.array,
                                           sinisterType : str,
+                                          sinister_encoding : str,
                                           n_pixel_y : float, 
                                           n_pixel_x : float,
                                           dir_output : Path,
                                           dept : str):
+    firepoints = firepoints.copy(deep=True)
     
     nonNanMask = np.argwhere(~np.isnan(mask))
     fdate = firepoints['date'].unique()
@@ -450,14 +457,24 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
             continue
 
         hexaFire = regions.copy(deep=True)
-        hexaFire['is'+sinisterType] = 0
-        hexaFire['nb'+sinisterType] = 0
+        if sinister_encoding == 'occurence':
+            hexaFire['is'+sinisterType] = 0
+            hexaFire['nb'+sinisterType] = 0
 
-        for _, row in fdataset.iterrows():
-            hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'is'+sinisterType] = 1
-            hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'nb'+sinisterType] += 1
+            for _, row in fdataset.iterrows():
+                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'is'+sinisterType] = 1
+                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'nb'+sinisterType] += 1
 
-        rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
+            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
+            
+        elif sinister_encoding == 'burned_area':
+            hexaFire['Surface parcourue (m2)'] = 0
+
+            for _, row in fdataset.iterrows():
+                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'Surface parcourue (m2)'] += row['Surface parcourue (m2)']
+            
+            hexaFire['Surface parcourue (h)'] = hexaFire['Surface parcourue (m2)'] * 0.0001
+            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x,  'Surface parcourue (m2)', dir_output, dept+'_bin0')
 
         spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
 
