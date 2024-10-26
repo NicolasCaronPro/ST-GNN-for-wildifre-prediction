@@ -19,6 +19,7 @@ mlartifacts/
 *.tif
 *.png
 *.feather
+*.gpkg
 
 # Distribution / packaging
 .Python
