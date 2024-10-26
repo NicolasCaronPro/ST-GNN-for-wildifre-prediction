@@ -11,7 +11,7 @@ import firedanger
 import jours_feries_france
 import vacances_scolaires_france
 
-def get_sub_nodes_feature(graph, subNode: np.array,
+def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
                         features : list,
                         path : Path,
                         geo : gpd.GeoDataFrame,
@@ -103,9 +103,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     dir_mask = path / 'raster'
     logger.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
 
-    name = departement+'rasterScale'+str(graph.scale)+'.pkl'
+    name = f'{departement}rasterScale{graph.scale}_{graph.base}.pkl'
     mask = read_object(name, dir_mask)
-    
+    print(np.unique(mask))
     logger.info('Calendar')
     if 'Calendar' in features:
         unDate = np.unique(subNode[:,4]).astype(int)
@@ -731,9 +731,537 @@ def get_academic_zone(name, date):
             return dict_zones[name][0]
         return dict_zones[name][1]
 
-ACADEMIES = {
-    '1': 'Lyon',
-    '69': 'Lyon',
-    '25': 'Besançon',
-    '78': 'Versailles',
-}
+def raster2geojson(data, mask, h3, var, encoder):
+    if var == 'sentinel':
+        h3[sentinel_variables] = np.nan
+    else:
+        h3[var] = np.nan
+    if data is None:
+        return h3
+    else:
+        unode = np.unique(mask)
+        for node in unode:
+            if var == 'sentinel':
+                for band, v2 in enumerate(sentinel_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode) 
+            elif var == 'foret':
+                for band, v2 in enumerate(foret_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, foretint2str[v2]] = np.mean(dataNode) 
+            elif var == "osmnx":
+                for band, v2 in enumerate(osmnx_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, osmnxint2str[v2]] = np.mean(dataNode)
+            elif var == 'dynamic_world':
+                for band, v2 in enumerate(dynamic_world_variables):
+                    dataNode = data[band, (mask == node) & ~(np.isnan(data[band]))]
+                    h3.loc[h3[h3['scale0'] == node].index, v2] = np.mean(dataNode)
+            else:
+                dataNode = data[(mask == node) & ~(np.isnan(data))]
+                if encoder is not None:
+                    dataNode = encoder.transform(dataNode.reshape(-1,1))
+                h3.loc[h3['scale0'] == node, var] = np.mean(dataNode)
+
+    return h3
+
+def get_sub_nodes_feature_with_images(graph, subNode: np.array,
+                        departements : list,
+                        features : list, sinister : str,
+                        dir_mask : Path,
+                        dir_data : Path,
+                        dir_train : Path,
+                        resolution : str,
+                        dates : np.array,
+                        graph_construct : str) -> np.array:
+    
+    assert graph.nodes is not None
+
+    logger.info('Load nodes features')
+
+    methods = METHODS_SPATIAL
+
+    features_name, newShape = get_features_name_list(graph.scale, features, methods)
+
+    def save_values(array, band, indexNode, mask):
+
+        indexVar = features_name.index(f'{band}_mean')
+
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+
+        values = array[mask].reshape(-1,1)
+        if graph.scale > 0:
+            for imet, metstr in enumerate(methods):
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
+        else:
+            X[indexNode[:, 0], indexVar] = np.nanmean(values)
+
+    def save_value(array, band, indexNode, mask):
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+
+        indexVar = features_name.index(f'{band}')
+        
+        X[indexNode[:, 0], indexVar] = np.nanmean(array[mask])
+
+    def save_value_with_encoding(array, band, indexNode, mask, encoder):
+        values = array[mask].reshape(-1,1)
+        encode_values = encoder.transform(values).values
+        indexVar = features_name.index(f'{band}_mean')
+        if graph.scale > 0:
+            for imet, metstr in enumerate(methods):
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(encode_values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(encode_values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(encode_values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(encode_values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(encode_values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(encode_values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
+        else:
+            X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
+
+    X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
+
+    X[:,:subNode.shape[1]] = subNode
+
+    dir_encoder = dir_train / 'Encoder'
+
+    if 'landcover' in features:
+        encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
+        encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
+        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
+
+    if 'Calendar' in features:
+        size_calendar = len(calendar_variables)
+        encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
+        
+    if 'Geo' in features:
+        encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
+
+    logging.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
+    for departement in departements:
+        logger.info(departement)
+
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        mask = read_object(name, dir_mask)
+        print(np.unique(mask))
+        
+        nodeDepartementMask = np.argwhere(subNode[:,3] == str2int[departement.split('-')[-1]])
+        nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
+        logger.info(nodeDepartement.shape)
+        if nodeDepartement.shape[0] == 0:
+            continue
+        logger.info('Calendar')
+        if 'Calendar' in features:
+            unDate = np.unique(nodeDepartement[:,4]).astype(int)
+            band = calendar_variables[0]
+            for unDate in unDate:
+                date = dates[unDate]
+                ddate = dt.datetime.strptime(date, '%Y-%m-%d')
+                index = np.argwhere((subNode[:,4] == unDate))
+                X[index, features_name.index(band)] = int(date.split('-')[1]) # month
+                X[index, features_name.index(band) + 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
+                X[index, features_name.index(band) + 2] = ddate.weekday() # dayofweek
+                X[index, features_name.index(band) + 3] = ddate.weekday() >= 5 # isweekend
+                X[index, features_name.index(band) + 4] = pendant_couvrefeux(ddate) # couvrefeux
+                X[index, features_name.index(band) + 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+                X[index, features_name.index(band) + 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
+                X[index, features_name.index(band) + 7] = 1 if ddate in jours_feries else 0 # bankHolidays
+                X[index, features_name.index(band) + 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
+                X[index, features_name.index(band) + 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 # holidays
+                X[index, features_name.index(band) + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 ) \
+                    or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
+
+                stop_calendar = 11
+
+                X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = \
+                        np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
+                
+                for ir in range(stop_calendar, size_calendar):
+                    var_ir = calendar_variables[ir]
+                    if var_ir == 'calendar_mean':
+                        X[index, features_name.index(band) + ir] = round(np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                    elif var_ir == 'calendar_max':
+                        X[index, features_name.index(band) + ir] = round(np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                    elif var_ir == 'calendar_min':
+                        X[index, features_name.index(band) + ir] = round(np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                    elif var_ir == 'calendar_sum':
+                        X[index, features_name.index(band) + ir] = round(np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                    else:
+                        logger.info(f'Unknow operation {var_ir}')
+                        exit(1)
+        ### Geo spatial
+        logger.info('Geo')
+        if 'Geo' in features:
+            X[nodeDepartementMask, features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[0] # departement
+
+        logger.info('Meteorological')
+        array = None
+        ### Meteo
+        for i, var in enumerate(cems_variables):
+            if var not in features:
+                continue
+            logger.info(var)
+            name = var +'raw.pkl'
+            array = read_object(name, dir_data)
+            for node in nodeDepartement:
+                maskNode = mask == node[0]
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                save_values(array[:,:,int(node[4])], var, index, maskNode)
+
+        del array
+
+        logger.info('Air Quality')
+        if 'air' in features:
+            for i, var in enumerate(air_variables):
+                logger.info(var)
+                name = var +'raw.pkl'
+                array = read_object(name, dir_data)
+                for node in nodeDepartement:
+                    maskNode = mask == node[0]
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    save_value(array[:,:,int(node[4])], var, index, maskNode)
+
+        logger.info('Population elevation Highway Sentinel Foret')
+
+        arrayPop = None
+        arrayEl = None
+        arrayOS = None
+        arrayLand = None
+        arraySent = None
+        arrayForet = None
+
+        ### Population
+        if 'population' in features:
+            name = 'population.pkl'
+            arrayPop = read_object(name, dir_data)
+            if arrayPop is None:
+                arrayPop = np.full(mask.shape, fill_value=-1)
+
+        ### Elevation
+        if 'elevation' in features:
+            name = 'elevation.pkl'
+            arrayEl = read_object(name, dir_data)
+
+        ### OSMNX
+        if 'highway' in features:
+            name = 'osmnx.pkl'
+            arrayOS = read_object(name, dir_data)
+
+        if 'foret' in features:
+            logger.info('Foret')
+            name = 'foret.pkl'
+            arrayForet = read_object(name, dir_data)
+
+        if 'landcover' in features:
+            if 'foret_encoder' in landcover_variables:
+                logger.info('Foret landcover')
+                name = 'foret_landcover.pkl'
+                arrayForetLandcover = read_object(name, dir_data)
+
+            if 'landcover_encoder' in landcover_variables:
+                logger.info('Dynamic World landcover')
+                name = 'dynamic_world_landcover.pkl'
+                arrayLand = read_object(name, dir_data)
+
+            if 'highway_encoder' in landcover_variables:
+                logger.info('OSMNX landcover')
+                name = 'osmnx_landcover.pkl'
+                arrayOSLand = read_object(name, dir_data)
+
+        if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
+            unode = np.unique(nodeDepartement[:,0])
+            for node in unode:
+                maskNode = mask == node
+                index = np.argwhere(subNode[:,0] == node)
+                if 'population' in features:
+                    if arrayPop is None:
+                        continue
+                    save_values(arrayPop, 'population', index, maskNode)
+
+                if 'elevation' in features:
+                    if arrayEl is None:
+                        continue
+                    save_values(arrayEl, 'elevation', index, maskNode)
+
+                if 'highway' in features:
+                    if arrayOS is None:
+                        continue
+                    for var in osmnx_variables:
+                        save_values(arrayOS[int(var), :, :], osmnxint2str[var], index, maskNode)
+
+                if 'foret' in features:
+                    if arrayForet is None:
+                        continue
+                    for var in foret_variables:
+                        save_values(arrayForet[int(var), :, :], foretint2str[var], index, maskNode)
+
+                if 'landcover' in features:
+                    if 'foret_encoder' in landcover_variables:
+                        if arrayForetLandcover is None:
+                            continue
+                        save_value_with_encoding(arrayForetLandcover, 'foret_encoder', index, maskNode, encoder_foret)
+                    if 'highway_encoder' in landcover_variables:
+                        if arrayOSLand is None:
+                            continue
+                        save_value_with_encoding(arrayOSLand, 'highway_encoder', index, maskNode, encoder_osmnx)
+
+        logger.info('Sentinel Dynamic World')
+        ### Sentinel
+        if 'sentinel' in features:
+            logger.info('Sentinel')
+            name = 'sentinel.pkl'
+            arraySent = read_object(name, dir_data)
+
+        if 'dynamicWorld' in features:
+            arrayDW = read_object('dynamic_world.pkl', dir_data)
+        else:
+            arrayDW = None
+
+        if arraySent is not None or arrayLand is not None or arrayDW is not None:
+            for node in nodeDepartement:
+                maskNode = mask == node[0]
+                if True not in np.unique(maskNode):
+                    continue
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+
+                if 'sentinel' in features:
+                    if arraySent is None:
+                        continue
+                    for band, var in enumerate(sentinel_variables):
+                        save_values(arraySent[band,:, :,int(node[4])], var , index, maskNode)
+                
+                if 'landcover' in features:
+                    if arrayLand is None:
+                        continue
+                    if 'landcover_encoder' in landcover_variables:
+                        save_value_with_encoding(arrayLand[:,:], 'landcover_encoder', index, maskNode, encoder_landcover)
+
+                if 'dynamicWorld' in features:
+                    if arrayDW is None:
+                        continue
+                    for band, var in enumerate(dynamic_world_variables):
+                        save_values(arrayDW[band, :, :, int(node[4])], var, index, maskNode)
+
+        del arrayPop
+        del arrayEl
+        del arrayOS
+        del arraySent
+        del arrayLand
+
+        logger.info('Historical')
+        if 'Historical' in features:
+            name = departement+'pastInfluence.pkl'
+            arrayInfluence = read_object(name, Path(__file__).absolute().parent.resolve()/ 'log' / resolution)
+            if arrayInfluence is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+
+                    save_values(arrayInfluence[:,:, int(node[4] - 1)], historical_variables[0], index, maskNode)
+                del arrayInfluence
+
+        logger.info('AutoRegressionReg')
+        if 'AutoRegressionReg' in features:
+            dir_target_2 = dir_train / 'influence'
+            arrayInfluence = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_target_2)
+            if arrayInfluence is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
+
+                    for var in auto_regression_variable_reg:
+                        step = int(var.split('-')[-1])
+                        save_value(arrayInfluence[:,:, int(node[4] - step)], f'AutoRegressionReg_{var}', index, maskNode)
+
+                del arrayInfluence
+
+        logger.info('AutoRegressionBin')
+        if 'AutoRegressionBin' in features:
+            dir_bin = dir_train / 'bin'
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
+            if arrayBin is not None:
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] - 1 < 0:
+                        continue
+
+                    for var in auto_regression_variable_bin:
+                        step = int(var.split('-')[-1])
+                        save_value(arrayBin[:,:, int(node[4] - step)], f'AutoRegressionBin_{var}', index, maskNode)
+                del arrayBin
+
+        logger.info('Vigicrues')
+        if 'vigicrues' in features:
+            for var in vigicrues_variables:
+                array = read_object('vigicrues'+var+'.pkl', dir_data)
+                if array is None:
+                    continue
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    if node[4] >= array.shape[-1]:
+                        continue
+                    save_values(array[:,:, int(node[4])], var, index, maskNode)
+                del array
+
+        logger.info('nappes')
+        if 'nappes' in features:
+            for var in nappes_variables:
+                array = read_object(var+'.pkl', dir_data)
+                if array is None:
+                    continue
+                for node in nodeDepartement:
+                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                    maskNode = mask == node[0]
+                    
+                    save_values(array[:,:, int(node[4])], var, index, maskNode)
+                del array
+
+    return X, features_name
+
+def add_varying_time_features(X : np.array, Y : np.array, newShape : int, features : list, features_name : list, ks : int, scale : int, methods : list):
+    res = np.full((X.shape[0], newShape), fill_value=np.nan)
+    res[:, :X.shape[1]] = X
+
+    methods_dict = {'mean': np.nanmean,
+                    'max' : np.nanmax,
+                    'min' : np.nanmin,
+                    'std': np.nanstd,
+                    'sum' : np.nansum}
+    
+    unodes = np.unique(Y[: , 0])
+
+    for node in unodes:
+        index_node = np.argwhere((Y[:,0] == node))[:, 0]
+        res[index_node, X.shape[1]:] = 0
+
+        X_node_copy = []
+
+        for k in range(ks + 1):
+            roll_X = np.roll(res[index_node], shift=k, axis=0)
+            roll_X[:k] = np.nan
+            X_node_copy.append(roll_X)
+
+        X_node_copy = np.asarray(X_node_copy, dtype=float)
+
+        for feat in features:
+            vec = feat.split('_')
+            name = vec[0]
+
+            if feat.find('Calendar') != -1:
+                _, limit, _, _ = calculate_feature_range('Calendar', scale, methods)
+                index_feat = features_name.index(f'{calendar_variables[0]}')
+            elif feat.find('air') != -1:
+                _, limit, _, _ = calculate_feature_range('air', scale, methods)
+                index_feat = features_name.index(f'{air_variables[0]}')
+            elif feat.find('Historical') != -1:
+                _, limit, _, _ = calculate_feature_range('Historical', scale, methods)
+                index_feat = features_name.index(f'{historical_variables[0]}_mean')
+            else:
+                index_feat = features_name.index(f'{name}_mean')
+                limit = 1
+
+            for method in methods:
+                try:
+                    func = methods_dict[method]
+                except:
+                    raise ValueError(f'{method} unknow method, {feat}')
+                
+                if feat.find('Calendar') != -1:
+                    index_new_feat = features_name.index(f'{calendar_variables[0]}_{method}_{ks}')
+                elif feat.find('air') != -1:
+                    index_new_feat = features_name.index(f'{air_variables[0]}_{method}_{ks}')
+                elif feat.find('Historical') != -1:
+                    index_new_feat = features_name.index(f'{historical_variables[0]}_{method}_{ks}')
+                else:
+                    index_new_feat = features_name.index(feat)
+                
+                
+                if False not in np.isnan(X_node_copy[:, :, index_feat:index_feat+limit]):
+                    continue
+
+                res[index_node, index_new_feat:index_new_feat+limit] = \
+                            func(X_node_copy[:, :, index_feat:index_feat+limit], axis=0)
+
+    return res
+
+def process_department(root_data: Path, root_raster: Path, dir_mask: Path, dir_encoder: Path, 
+                        h3: gpd.GeoDataFrame, sinister: str, departement : str, resolution: str, variables: list):
+    """
+    Processes data for each department and generates a GeoJSON file with hexagonal grid features.
+
+    :param root_data: Path to the root directory where department data is stored.
+    :param root_raster: Path to the root directory where raster data is stored.
+    :param dir_mask: Path to the directory containing mask data.
+    :param dir_encoder: Path to the directory containing encoder data.
+    :param regions: GeoDataFrame containing region geometries and associated data.
+    :param sinister: The name of the disaster or event being processed.
+    :param departements: List of departments to process.
+    :param resolution: The resolution level of the raster data.
+    :param variables: List of variables to process for each department.
+    """
+    # Prepare the regions data
+    h3['scale0'] = h3.index
+    h3.index = h3['hex_id']
+    dico = h3['scale0'].to_dict()
+    h3.reset_index(drop=True, inplace=True)
+
+    allDates = find_dates_between('2017-06-12', '2023-09-11')
+    date_to_choose = allDates[-1]
+    index = allDates.index(date_to_choose)
+
+    dir_data = root_data / departement / 'data'
+    dir_raster = root_raster / departement / 'raster' / resolution
+    mask = read_object(f'{departement}rasterScale0.pkl', dir_mask)
+    if mask is None:
+        mask,_,_  = rasterization(h3, resolutions[resolution]['y'], resolutions[resolution]['x'], f'scale0', Path('log'), 'ori')
+    mask = mask[0]
+
+    for var in variables:
+        logger.info(var)
+        data = read_object(var + '.pkl', dir_raster)
+        
+        # Determine the correct encoder if needed
+        encoder = None
+        if var in ['dynamic_world_landcover', 'foret_landcover', 'osmnx_landcover']:
+            vv = var.split('_')[1]
+            encoder = read_object('encoder_' + vv + '.pkl', dir_encoder)
+        
+        # Select the correct data slice based on variable
+        if var == 'sentinel' or var == 'dynamic_world':
+            data = data[:, :, :, index]
+
+        # Convert raster data to GeoJSON and add it to the h3 dataframe
+        h3 = raster2geojson(data, mask, h3, var, encoder)
+
+    # Save the results as a GeoJSON file
+    outname = 'hexagones_' + sinister + '.geojson'
+    h3.rename({'osmnx_landcover': 'highway_encoder', 'foret_landcover': 'foret_encoder'}, axis=1, inplace=True)
+    h3.to_file(dir_data / 'spatial' / outname, driver='GeoJSON')
+
+    return h3

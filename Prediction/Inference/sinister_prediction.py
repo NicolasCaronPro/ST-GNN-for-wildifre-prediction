@@ -5,6 +5,7 @@ from probabilistic import *
 import argparse
 import socket
 from array_fet import *
+from generate_database import GenerateDatabase, launch
 
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -15,7 +16,14 @@ warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning
 
 def create_ps(geo):
     X_kmeans = list(zip(geo.longitude, geo.latitude))
-    geo['id'] = graph._predict_node(X_kmeans)
+
+    if dept in graph.departements.unique():
+        geo['id'] = graph._predict_node_with_position(X_kmeans)
+    else:
+        geo['id'] = graph._predict_node_with_features(dept,  dir_script / 'log', resolution,
+                                                        dir_script / 'log', dir_target,
+                                                        dir_target_bin, dir_raster, dir_encoder,
+                                                        geo)
 
     logger.info(f'Unique id : {np.unique(geo["id"].values)}')
     logger.info(f'{len(geo)} point in the dataset. Constructing database')
@@ -29,10 +37,10 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     
     logger.info('Assign hexagon to graph nodes')
     geoDT = create_ps(interface.copy(deep=True))
-
+    geoDT.dropna(subset='id', inplace=True)
     logger.info(f'Fix missing features {air_variables, vigicrues_variables, nappes_variables}')
     # Add thoses variables in predictops
-    geoDT[air_variables] = 0
+    geoDT[air_variables] = df_train[air_variables].mean()
     geoDT[vigicrues_variables] = 0
     geoDT[nappes_variables] = 0
     geoDT[geo_variables] = int(departement.split('-')[1])
@@ -62,24 +70,35 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     if model not in traditionnal_models:
         name_model =  model + '/' + 'best.pt'
         dir = 'check_'+scaling + '/' + prefix_train + '/'
-        graph._load_model_from_path(dir_data / spec / dir / name_model, dico_model[model], device)
+        graph._load_model_from_path(dir_data / datatset_name/ dir / name_model, dico_model[model], device)
     else:
         dir = 'check_'+scaling + '/' + prefix_train + '/' + '/baseline'
-        model_ = read_object(f'{model_name}.pkl', dir_data / spec / dir / model_name)
+        model_ = read_object(f'{model_name}.pkl', dir_data / datatset_name/ dir / model_name)
         graph._set_model(model_)
 
     logger.info(f'Load features')
-    features_selected = read_object('features.pkl', dir_data / spec / dir / model_name)
+    features_selected = read_object('features.pkl', dir_data / datatset_name/ dir / model_name)
 
     logger.info('Generate X from dataframe -> could be improove')
-    X, _ = get_sub_nodes_feature(graph=graph,
-                              subNode=orinode,
-                              features=features,
-                              departement=departement,
-                              geo=geoDT,
-                              path=dir_data,
-                              dates=[d.strftime('%Y-%m-%d') for d in dates],
-                              resolution=resolution)
+    if USE_IMAGE:
+        X, _ = get_sub_nodes_feature_with_images(graph=graph,subNode=orinode,
+                        departements=[departement],
+                        features=features, sinister=sinister,
+                        dir_mask=dir_mask,
+                        dir_data=dir_raster,
+                        dir_train=dir_data,
+                        resolution=resolution,
+                        dates=[d.strftime('%Y-%m-%d') for d in dates],
+                        graph_construct=graphConstruct)
+    else:
+        X, _ = get_sub_nodes_feature_with_geodataframe(graph=graph,
+                                subNode=orinode,
+                                features=features,
+                                departement=departement,
+                                geo=geoDT,
+                                path=dir_data,
+                                dates=[d.strftime('%Y-%m-%d') for d in dates],
+                                resolution=resolution)
 
     if int(args.days) > 0:
         logger.info(f'Add time vayring features from 1 -> {args.days}')
@@ -93,7 +112,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     df = pd.DataFrame(columns=ids_columns + features_name, index=np.arange(0, X.shape[0]))
     df[features_name] = X
     df[ids_columns] = orinode
-    df.to_csv(f'log/{date_ks}.csv', index=False)
+    df.to_csv(f'{dir_log}/{date_limit}.csv', index=False)
     
     features_name, _ = get_features_name_list(graph.scale, train_features, METHODS_SPATIAL_TRAIN)
     
@@ -103,6 +122,8 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     df = df[ids_columns + features_name]
     logger.info(f'Select train feature : shape : {df_shape} -> {df.shape}')
     logger.info(f'Preprocess X (scale {scaling})')
+    print(df.date.unique(), k_limit)
+
     df = preprocess_inference(df, df_train, scaling, features_name, fire_feature,
                               apply_break_point,
                               scale, kmeans_features, dir_break_point, dir_log, date_limit,
@@ -115,7 +136,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     if df is None:
         return None
     
-    df.to_csv(f'log/{date_ks}_after_scale.csv', index=False)
+    df.to_csv(f'{dir_log}/{date_limit}_after_scale.csv', index=False)
 
     if df is not None:
         if model in traditionnal_models:
@@ -136,14 +157,15 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     else:
         Y = None
 
+    df['do_prediction']= False
     if index_to_predict.shape[0] != 0:
         df.loc[index_to_predict, 'fire_prediction_raw'] = Y
+        df.loc[index_to_predict, 'do_prediction'] = True
 
     df['fire_prediction'] = order_class(predictor, predictor.predict(df['fire_prediction_raw'].values), 1)
-    df = df[df['date'] == k_limit]
+    df = df[df['date'] == k_limit].reset_index(drop=True)
     risk = np.sum(df['fire_prediction_raw'].values)
-    df['fire_prediction_dept'] = order_class(predictorDept, predictorDept.predict(np.array(risk).reshape(-1,1)), 1)[0]
-
+    df['fire_prediction_dept'] = order_class(predictor_departement, predictor_departement.predict(np.array(risk).reshape(-1,1)), 1)[0]
     logger.info('Features importances')    
     if model in traditionnal_models:
         if date_limit == dt.datetime.now().date():
@@ -153,20 +175,24 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
         else:
             output = date_limit.strftime('%Y-%m-%d')
         if output == 'today' or output == 'tomorrow':
-            #graph.model.plot_features_importance(df[features_selected], df['fire_prediction_raw'], output,
-            #                                    dir_interface, mode = 'bar', figsize=(15,5))
-            graph.model.shapley_additive_explanation(df[features_selected], output, dir_interface, samples=None, figsize=(30,15))
-
+            check_and_create_path(dir_interface / 'features_importance_fire')
+            samples = df[df['do_prediction'] == True].index.values.astype(int)
+            samples_name = list(df.loc[samples, 'id'].values.astype(int))
+            samples_name += [f'{id}_today' for id in samples_name]
+            graph.model.shapley_additive_explanation(df[features_selected], output, dir_interface, mode='beeswarm', samples=samples, samples_name=samples_name, figsize=(30,15))
         else:
             check_and_create_path(dir_log / 'features_importance_fire')
-            #graph.model.plot_features_importance(df[features_selected], df['fire_prediction_raw'], output,
-                                                #dir_log / 'features_importance_fire', mode = 'bar', figsize=(15,5))
-            graph.model.shapley_additive_explanation(df[features_selected], output, dir_log / 'features_importance_fire', samples=None, figsize=(30,15))
+            check_and_create_path(dir_log / 'features_importance_fire' / 'sample')
+            samples = df[df['do_prediction'] == True].index.values.astype(int)
+            if len(samples) != 0:
+                samples_name = list(df.loc[samples, 'id'].values.astype(int))
+                samples_date = int(df.loc[samples, 'date'].values[0])
+                samples_name += [f'{id}_{dates[samples_date].strftime("%Y-%m-%d")}' for id in samples_name]
+                graph.model.shapley_additive_explanation(df[features_selected], output, dir_log / 'features_importance_fire', mode='beeswarm', samples=samples, samples_name=samples_name, figsize=(30,15))
     else:
         logger.info('No Features importances implemented for DL')
 
     logger.info('Saving in dataframes')
-
     geoDT = geoDT.set_index('id').join(df.set_index('id')[fire_feature], on='id').reset_index()
     return geoDT
 
@@ -193,11 +219,12 @@ if __name__ == "__main__":
     parser.add_argument('-nf', '--nbFeature', type=str, help='Number of feature')
     parser.add_argument('-dh', '--doHistorical', type=str, help='Do Historical')
     parser.add_argument('-r', '--resolution', type=str, help='Pixel resolution')
-    parser.add_argument('-spec', '--spec', type=str, help='Specifity')
+    parser.add_argument('-dataset', '--dataset', type=str, help='Specifity')
     parser.add_argument('-exp', '--experiment', type=str, help='Experiment')
     parser.add_argument('-su', '--suffix', type=str, help='Suffix of model name')
     parser.add_argument('-abp', '--applyBreakpoint', type=str, help='Apply Kmeans on target')
     parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='Apply Kmeans on target')
+    parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
     args = parser.parse_args()
 
     # Input config
@@ -214,17 +241,20 @@ if __name__ == "__main__":
     resolution = args.resolution
     doHistorical = args.doHistorical == 'True'
     scaling = 'z-score' # Scale to used
-    spec = args.spec
+    datatset_name= args.dataset
     suffix = args.suffix
     exp = args.experiment
     apply_break_point = args.applyBreakpoint == 'True'
     graphConstruct = args.graphConstruct
+    dataset_name = args.dataset
 
     prefix_train = f'{minPoint}_{k_days}_{nbFeature}_{scale}_{graphConstruct}'
-    #prefix_train = f'{minPoint}_{k_days}_{scale}_{nbFeature}'
+    prefix_df = f'{minPoint}_{k_days}_{scale}_{graphConstruct}'
+    prefix_kmeans = f'{minPoint}_{k_days}_{scale}_{graphConstruct}'
 
     # Arborescence
     if socket.gethostname() in MACHINES_DEPLOIEMENT:
+        USE_IMAGE = False
         root_dir = Path(__file__).absolute().parent.parent.parent.parent.resolve()
         dir_data = root_dir / 'data' / 'features' / 'incendies' / exp / sinister / resolution / 'train'
         dir_feather = root_dir / 'data' / 'dataframes' 
@@ -232,27 +262,47 @@ if __name__ == "__main__":
         dir_log = root_dir / 'scripts' / 'global' / 'sinister_prediction' / 'hexagones'
         dir_incendie = root_dir / 'data' / 'features' / 'incendies'
         dir_feather = root_dir / 'data' / 'dataframes'
+        dir_raster = dir_incendie / 'raster' / resolution
+        dir_mask = dir_data / 'raster'
     else:
-        dir_data = Path('../GNN/'+exp+'/' + sinister + '/' + resolution + '/train/')
+        dir_data = Path(f'../GNN/{exp}/{sinister}/{resolution}/train/')
         dir_feather = Path('interface')
-        dir_log = Path('interface') / dept
-        dir_incendie = Path('/home/caron/Bureau/csv/'+dept+'/data/')
+        dir_log = Path(f'interface/{dept}')
+        dir_incendie = Path(f'/home/caron/Bureau/csv/{dept}/data/')
+        dir_incendie_disk = Path(f'/media/caron/X9 Pro/travaille/Thèse/csv/{dept}/data')
         dir_interface = Path('interface')
         dir_feather = Path('interface')
+        dir_mask = dir_data /'raster'
+        dir_encoder = dir_data / 'Encoder'
+        dir_target = Path(f'../Target/{dataset_name}/{sinister}/log/{resolution}')
+        dir_target_bin = Path(f'../Target/{sinister}/bin/{resolution}')
+        dir_raster = dir_interface / 'raster'
 
     dir_output = dir_log / 'output'
-    dir_break_point = dir_data / spec / 'check_none' / prefix_train / 'kmeans'
+    dir_break_point = dir_data / datatset_name/ 'check_none' / prefix_kmeans / 'kmeans'
     check_and_create_path(dir_output)
     check_and_create_path(dir_log)
 
     graph = read_object(f'graph_{scale}_{graphConstruct}.pkl', dir_data)
-    predictor = read_object(f'{dept}Predictor{scale}.pkl', dir_data / 'influenceClustering')
-    predictorDept = read_object(f'{dept}PredictorDepartement.pkl', dir_data / 'influenceClustering')
-    df_train = read_object(f'df_train_{prefix_train}.pkl', dir_data / spec)
+    predictor = read_object(f'{dept}Predictor{scale}_{graphConstruct}.pkl', dir_data / 'influenceClustering')
+    predictor_departement = read_object(f'{dept}PredictorDepartement.pkl', dir_data / 'influenceClustering')
+
+    if predictor is None:
+        predictor = read_object(f'general_predictor_{scale}_{graphConstruct}.pkl', dir_data / 'influenceClustering')
+    if predictor_departement is None:
+        predictor_departement = read_object(f'general_predictor_departement_{graphConstruct}.pkl', dir_data / 'influenceClustering')
+
+    if predictor is None or predictor_departement is None:
+        logger.info(f'Couldn t load predictor')
+        exit(1)
+
+    df_train = read_object(f'df_train_{prefix_df}.pkl', dir_data / spec)
 
     assert df_train is not None
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    knowed_departement = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
 
     # mean max min std ans sum for scale > 0 else value
     features = [
@@ -292,25 +342,25 @@ if __name__ == "__main__":
                     'elevation',
                     'population',
                     #'sentinel',
-                    'landcover',
+                    #'landcover',
                     #'vigicrues',
-                    'foret',
+                    #'foret',
                     'highway',
-                    'dynamicWorld',
+                    #'dynamicWorld',
                     'Calendar',
-                    'Historical',
+                    #'Historical',
                     'Geo',
-                    #'air',
+                    'air',
                     #'nappes',
                     #'AutoRegressionReg',
-                    'AutoRegressionBin'
+                    #'AutoRegressionBin'
                     ]
     
     kmeans_features = [
             #'temp',
             #'dwpt',
             'rhum',
-            #'prcp',
+            #'prcp', 
             #'wdir',
             #'wspd',
             'prec24h',
@@ -356,13 +406,40 @@ if __name__ == "__main__":
     
     traditionnal_models = ['xgboost', 'lightgbm', 'ngboost']
 
-    # Load feather and spatial
-    name = 'hexagones_'+sinister+'.geojson'
-    spatialGeo = gpd.read_file(dir_incendie / 'spatial' / name)
-    if socket.gethostname() not in MACHINES_DEPLOIEMENT:
-        incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final_{name2str[dept]}.feather')
+    if socket.gethostname() in MACHINES_DEPLOIEMENT:
+        incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final.feather')
     else:
-        incendie_feather_ori = pd.read_feather(dir_feather / 'incendie_final.feather')
+        if (dir_feather / f'incendie_final_{name2str[dept]}.feather').is_file():
+            incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final_{name2str[dept]}.feather')
+            USE_IMAGE = False
+        else:
+            compute_meteostat_features = False
+            compute_temporal_features = False
+            compute_spatial_features= False
+            compute_air_features = False
+            compute_trafic_features = False
+            compute_vigicrues_features = False
+            compute_nappes_features = True
+            histo = 14
+            start = (dt.datetime.now() - dt.timedelta(days=histo)).date().strftime('%Y-%m-%d')
+            stop = (dt.datetime.now() + dt.timedelta(days=2)).date().strftime('%Y-%m-%d')
+            launch(dir_incendie, dir_incendie_disk, dir_raster,
+                   dept, resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features,
+                   start, stop)
+            USE_IMAGE = True
+
+    # Load feather and spatial
+    if (dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson').is_file():
+        spatialGeo = gpd.read_file(dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson')
+    else:
+        if not (dir_incendie / 'spatial' / f'hexagones.geojson').is_file():
+            logger.info(f'{dir_incendie}/spatial/hexagones_{sinister}.geojson doesn t exist, please provide hexagones !!')
+            exit(2)
+        spatialGeo = gpd.read_file(dir_incendie / 'geo' / f'hexagones.geojson')
+        if not USE_IMAGE:
+            spatialGeo = process_department(dir_data, dir_incendie, dir_mask, dir_encoder,
+                            spatialGeo, sinister, dept, resolution,
+                            ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' ,'foret', 'dynamic_world'])
     spa = 3
 
     if sinister == "firepoint":
@@ -378,6 +455,9 @@ if __name__ == "__main__":
         elif dept == 'departement-78-yvelines':
             dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)],
             k_days_conv = max(7, k_days)
+        else:
+            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
+            k_days_conv = max(9, k_days)
     elif sinister == "inondation":
         if dept == 'departement-01-ain':
             dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
@@ -398,8 +478,8 @@ if __name__ == "__main__":
         prefix_train += '_kmeans'
 
     if doHistorical:
-        sd = dt.datetime.now().date() - dt.timedelta(days=14)
-        ed = dt.datetime.now().date() + dt.timedelta(days=2)
+        sd = dt.datetime.now().date() - dt.timedelta(days=8)
+        ed = dt.datetime.now().date() - dt.timedelta(days=6)
     else:
         sd = dt.datetime.now().date()
         ed = dt.datetime.now().date() + dt.timedelta(days=2)
@@ -408,8 +488,13 @@ if __name__ == "__main__":
         # Date
         date_limit = d
         date_ks = (date_limit - dt.timedelta(days=k_days_conv))
-        incendie_feather = incendie_feather_ori[(incendie_feather_ori['date'] >= date_ks) & (incendie_feather_ori['date'] <= date_limit)]
-        dates = np.sort(incendie_feather.date.unique())
+
+        if 'incendie_feather_ori' in locals():
+            incendie_feather = incendie_feather_ori[(incendie_feather_ori['date'] >= date_ks) & (incendie_feather_ori['date'] <= date_limit)]
+            dates = np.sort(incendie_feather.date.unique())
+        else:
+            dates_str = find_dates_between(date_ks.strftime('%Y-%m-%d'), (d + dt.timedelta(days=1)).strftime('%Y-%m-%d'))
+            dates = [dt.datetime.strptime(d, '%Y-%m-%d').date() for d in dates_str]
         if date_limit not in dates:
             logger.info(f'No data for {date_limit}')
             d += dt.timedelta(days=1)
@@ -421,15 +506,15 @@ if __name__ == "__main__":
         ######################### Interface ##################################
         interface = []
 
-        for ks, date in enumerate(dates):
-
+        for ks, date in enumerate(dates):            
             geo_data = spatialGeo.copy(deep=True)
             geo_data.index = geo_data.hex_id
-            geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
+            if 'incendie_feather_ori' in locals():
+                geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
                                                     on='hex_id')
-            
-            geo_data.reset_index(inplace=True)
-            geo_data[spatialGeo['population'].isna()][features_in_feather[1:]] = np.nan
+                geo_data.reset_index(inplace=True)
+                geo_data[spatialGeo['population'].isna()][features_in_feather[1:]] = np.nan
+                
             geo_data['date'] = ks
             geo_data['date_str'] = date.strftime('%Y-%m-%d')
             geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
@@ -441,8 +526,11 @@ if __name__ == "__main__":
         k_limit = interface.date.max()
 
         if sinister == 'firepoint':
-            interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
-            interface['nbfirepoint'].fillna(0, inplace=True)
+            if 'feux' in interface.columns:
+                interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
+                interface['nbfirepoint'].fillna(0, inplace=True)
+            else:
+                interface['nbfirepoint'] = 0
 
         logger.info('Rename features to match with train fet')
         interface.rename({'temp12' : 'temp', 'dwpt12' : 'dwpt',
@@ -453,27 +541,33 @@ if __name__ == "__main__":
                         'osmnx' : 'highway'}, inplace=True, axis=1)
 
         ######################### Preprocess #################################
-        logger.info(f'Create past influence using convolution and PCA')
+
         n_pixel_x = 0.02875215641173088
         n_pixel_y = 0.020721094073767096
 
-        if socket.gethostname() in MACHINES_DEPLOIEMENT:
-            dir_script = Path('sinister_prediction')
-        else:
-            dir_script = Path('./')
+        dir_script = Path('./')
 
-        mask = read_object(f'{dept}rasterScale{scale}.pkl', dir_data / 'raster')
-        check_and_create_path(Path('log'))
-        inputDep = create_spatio_temporal_sinister_image(interface,
-                                                        mask,
-                                                        sinister,
-                                                        n_pixel_y,
-                                                        n_pixel_x,
-                                                        dir_script / 'log',
-                                                        dept)
+        mask = read_object(f'{dept}rasterScale{scale}_{graphConstruct}.pkl', dir_mask)
+        if mask is None:
+            geo = interface[interface['date'] == 0].reset_index()
+            geo[f'id_{scale}'] = graph._predict_node_with_features(dept,  dir_mask, resolution,
+                                                        dir_script / 'log', dir_target,
+                                                        dir_target_bin, dir_raster, dir_encoder,
+                                                        geo)
 
-        Probabilistic(n_pixel_x, n_pixel_y, 1, None, Path(__file__).absolute().parent / dir_script, resolution)._process_input_raster(dims, [inputDep], 1, True,
-                                                                                                 [dept], True, dates, [dept], True)
+        if dept in knowed_departement: 
+            logger.info(f'Create past influence using convolution and PCA')
+            inputDep = create_spatio_temporal_sinister_image(interface,
+                                                            mask,
+                                                            sinister,
+                                                            n_pixel_y,
+                                                            n_pixel_x,
+                                                            dir_script / 'log',
+                                                            dept)
+
+            Probabilistic(n_pixel_x, n_pixel_y, 1, None, Path(__file__).absolute().parent / dir_script, resolution)._process_input_raster(dims, [inputDep], 1, True,
+                                                                                                    [dept], True, dates, [dept], True)
+            
         
         ######################### Load autoregression ####################
         interface['AutoRegressionReg'] = 0
@@ -522,7 +616,10 @@ if __name__ == "__main__":
 
         fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
         
-        output_geojson = gpd.read_file(dir_interface / f'hexagones_{input}.geojson')
+        if (dir_interface / f'hexagones_{input}.geojson').is_file():
+            output_geojson = gpd.read_file(dir_interface / f'hexagones_{input}.geojson')
+        else:
+            output_geojson = interface[interface['date'] == 0].reset_index()
 
         for ff in fire_feature:
             if ff in output_geojson.columns:
@@ -541,17 +638,32 @@ if __name__ == "__main__":
             logger.info(f'Open {on} to save last recorded fires')
             if (dir_log / on).is_file():
                 previous_log_interface = gpd.read_file(dir_log / on)
-                previous_log_interface['nbfirepoint'] = interface[interface['date'] == k_limit - 1]['nbfirepoint'].values
-                previous_log_interface.to_file(dir_log / on, driver='GeoJSON')
+                previous_log_interface.drop('nbfirepoint', inplace=True, axis=1)
+                previous_log_interface = previous_log_interface.set_index('hex_id').join(interface[interface['date'] == k_limit - 1].set_index('hex_id')['nbfirepoint'], on='hex_id').reset_index()
+                previous_log_interface.to_file(dir_log / on, driver='GeoJSON')                    
                 try:
                     fig, ax = plt.subplots(2, 2, figsize=(15, 15))
                     previous_log_interface.plot(column='fire_prediction', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[0][0])
-                    previous_log_interface.plot(column='fire_prediction_raw', cmap='jet', vmin=0, vmax=20, ax=ax[0][1])
+                    previous_log_interface.plot(column='fire_prediction_raw', cmap='jet',  ax=ax[0][1])
                     previous_log_interface.plot(column='fire_prediction_dept', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[1][0])
-                    if previous_log_interface['nbfirepoint'].sum() > 0:
-                        previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='plasma', legend=True, ax=ax[0][0])
-                        previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='plasma', legend=True, ax=ax[0][1])
-                        previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='plasma', legend=True, ax=ax[1][0])
+                    previous_log_interface.plot(column='id', legend=True, categorical=True, ax=ax[1][1])
+                    logger.info(f'{previous_date}, {dept}')
+                    if previous_date == '2024-08-18' and dept == 'departement-34-herault':
+                        lats = [43.289746816650435, 43.48800209415416]
+                        longs = [3.0975390912695886, 3.753774492722863]
+                        fire_herault = pd.DataFrame(index=np.arange(2))
+                        fire_herault['latitude'] = lats
+                        fire_herault['longitude'] = longs
+                        fire_herault['nbfirepoint'] = 1
+                        fire_herault = gpd.GeoDataFrame(fire_herault, geometry=gpd.points_from_xy(fire_herault.longitude, fire_herault.latitude))
+                        fire_herault.plot(column='nbfirepoint', cmap='binary', ax=ax[0][0], vmin=0)
+                        fire_herault.plot(column='nbfirepoint', cmap='binary', ax=ax[0][1], vmin=0)
+                        fire_herault.plot(column='nbfirepoint', cmap='binary', ax=ax[1][0], vmin=0)
+                    else:
+                        if previous_log_interface['nbfirepoint'].sum() > 0:
+                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][0], vmin=0)
+                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][1], vmin=0)
+                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[1][0], vmin=0)
                     check_and_create_path(dir_log / 'image')
                     plt.savefig(dir_log / 'image' / f'hexagones_{previous_date}.png')
                 except Exception as e:

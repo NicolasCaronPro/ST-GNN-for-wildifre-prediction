@@ -162,7 +162,7 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
     nbfeatures = int(args.NbFeatures)
     values_per_class = args.nbpoint
     scale = int(args.scale)
-    spec = args.spec
+    datatset_name= args.spec
     doPCA = args.pca == 'True'
     doKMEANS = args.KMEANS == 'True'
     ncluster = int(args.ncluster)
@@ -357,7 +357,7 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
         features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_SPATIAL_TRAIN)
         plot_kmeans_class_for_inference(df_X_clean.copy(deep=True), date_limit, features_selected_kmeans, dir_break_point, dir_log, sinister)
         df_X_clean['fire_prediction_raw'] = apply_kmeans_class_on_target(df_X_clean.copy(deep=True), dir_break_point, 'fire_prediction_raw', 0.2, features_selected_kmeans, new_val=0)['fire_prediction_raw'].values
-
+    
     if scaling == 'MinMax':
         scaler = min_max_scaler
     elif scaling == 'z-score':
@@ -801,7 +801,7 @@ def load_loader_test_2D(use_temporal_as_edges, graphScale, dir_output,
 
     return loader
 
-def evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, testname, dir_output):
+def evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, test_name, dir_output):
     metrics = {}
     dir_predictor = root_graph / dir_train / '../influenceClustering'
     for nameDep in test_departement:
@@ -849,7 +849,7 @@ def evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, t
     res['mae'] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
     res['rmse'] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-    if testname == '69':
+    if test_name == '69':
         start = '2018-01-01'
         stop = '2022-09-30'
     else:
@@ -881,7 +881,7 @@ def test_sklearn_api_model(graphScale,
                           test_dataset_dept,
                           test_dataset_unscale_dept,
                            methods,
-                           testname,
+                           test_name,
                            prefix_train,
                            models,
                            dir_output,
@@ -943,7 +943,7 @@ def test_sklearn_api_model(graphScale,
             
             pred[:, 0] = df[target_name]
 
-        metrics[name], res = evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, testname, dir_output)
+        metrics[name], res = evaluate_pipeline(dir_train, pred, y, scale, methods, i, test_departement, target_name, name, test_name, dir_output)
         # Analyse departement prediction
         res_dept = res.groupby(['departement', 'date'])['risk'].sum().reset_index()
         res_dept['id'] = res_dept['departement']
@@ -968,21 +968,21 @@ def test_sklearn_api_model(graphScale,
 
         metrics[f'{name}_departement'], res = evaluate_pipeline(dir_train, res_dept[['prediction', 'class_risk']].values,
                                                                 res_dept[ids_columns + targets_columns].values, 'Departement',
-                                                                methods, i, test_departement, target_name, name, testname,
+                                                                methods, i, test_departement, target_name, name, test_name,
                                                                 dir_output)
 
-        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / name)
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
 
         i += 1
         return res
 
     ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_tree.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_tree.pkl'
     save_object(metrics, outname, dir_output)
 
 def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
                            methods,
-                           testname,
+                           test_name,
                            features_name,
                            prefix,
                            prefix_train,
@@ -1015,7 +1015,7 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
 
     #################################### GNN ###################################################
     for mddel, use_temporal_as_edges, target_name, is_2D_model, autoRegression in models:
-        #n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+testname
+        #n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling + '_' + encoding+'_'+test_name
         n = mddel
         model_dir = dir_train / Path('check_'+scaling+'/' + prefix_train + '/' + mddel +  '/')
         logger.info('#########################')
@@ -1025,13 +1025,13 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
         if not is_2D_model:
             test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
                                         X=Xset, Y=Yset, x_train=x_train, y_train=y_train,
-                                        device=device, k_days=k_days, test=testname, features_name=features_name,
+                                        device=device, k_days=k_days, test=test_name, features_name=features_name,
                                         scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=False)
 
         else:
             test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale,
                                               dir_output=dir_output / '2D' / prefix / 'data', X=Xset, Y=Yset,
-                                            x_train=x_train, y_train=y_train, device=device, k_days=k_days, test=testname,
+                                            x_train=x_train, y_train=y_train, device=device, k_days=k_days, test=test_name,
                                             features_name=features_name, scaling=scaling, prefix=prefix,
                                         shape=(shape2D[0], shape2D[1], shape2D[2]), features_name_2D=features_name_2D, encoding=encoding,
                                         Rewrite=False)
@@ -1079,9 +1079,9 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, mddel+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, mddel+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / n)
 
-        if testname == '69':
+        if test_name == '69':
             start = '2022-06-01'
             stop = '2022-09-30'
         else:
@@ -1096,7 +1096,7 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
 
         shapiro_wilk(pred[:,0], y[:,-1], dir_output / n)
 
-        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname
+        """n = mddel+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+test_name
         realVspredict2d(pred,
                     y,
                     target_name,
@@ -1111,12 +1111,12 @@ def test_dl_model(graphScale, Xset, Yset, x_train, y_train,
         i += 1
 
     ########################################## Save metrics ################################ 
-    outname = 'metrics'+'_'+prefix_train+'_'+'_'+scaling+'_'+encoding+'_'+testname+'_dl.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+'_'+scaling+'_'+encoding+'_'+test_name+'_dl.pkl'
     save_object(metrics, outname, dir_output / n)
 
 def test_simple_model(graphScale, Xset, Yset,
                            methods,
-                           testname,
+                           test_name,
                            features_name,
                            prefix_train,
                            dummy,
@@ -1134,7 +1134,7 @@ def test_simple_model(graphScale, Xset, Yset,
     if not dummy:
 
         ITensor = Yset[:,-4]
-        if testname != 'dummy':
+        if test_name != 'dummy':
 
             logger.info('#########################')
             logger.info(f'      perf_Y            ')
@@ -1151,7 +1151,7 @@ def test_simple_model(graphScale, Xset, Yset,
             res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
             res[:,y.shape[1]+2] = np.sqrt(((pred - Yset[:,-1]) ** 2))
 
-            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output)
             save_object(res, name+'_pred.pkl', dir_output)
 
             logger.info('#########################')
@@ -1169,7 +1169,7 @@ def test_simple_model(graphScale, Xset, Yset,
             res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
             res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+            #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output)
             save_object(res, name+'_pred.pkl', dir_output)
 
         logger.info('#########################')
@@ -1187,13 +1187,13 @@ def test_simple_model(graphScale, Xset, Yset,
         res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred - y[:,-1]) ** 2))
         res[:,y.shape[1]+2] = np.sqrt(((pred - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
-        outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_metrics.pkl'
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output)
+        outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_metrics.pkl'
         save_object(metrics, outname, dir_output)
 
 def test_break_points_model(test_dataset_dept,
                            methods,
-                           testname,
+                           test_name,
                            prefix_train,
                            dir_output,
                            encoding,
@@ -1229,10 +1229,10 @@ def test_break_points_model(test_dataset_dept,
     res[:,y.shape[1]+1] = np.sqrt((y[:,-4] * (pred[:,1] - y[:,-1]) ** 2))
     res[:,y.shape[1]+2] = np.sqrt(((pred[:,1] - y[:,-1]) ** 2))
 
-    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / n)
     save_object(res, name+'_pred.pkl', dir_output / n)
 
-    """if testname == '69':
+    """if test_name == '69':
         start = '2018-01-01'
         stop = '2022-09-30'
     else:
@@ -1259,9 +1259,9 @@ def test_break_points_model(test_dataset_dept,
         testd_departement,
         graphScale)"""
 
-    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output)
+    #save_object(res, name+'_'+prefix_train+'_'+str(scale)+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output)
     save_object(res, name+'_pred.pkl', dir_output)
-    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_bp.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_bp.pkl'
     save_object(metrics, outname, dir_output)
 
 def test_fusion_prediction(models,
@@ -1275,7 +1275,7 @@ def test_fusion_prediction(models,
                            dir_train,
                            graphScale,
                         testd_departement,
-                        testname,
+                        test_name,
                         methods,
                         prefix_train,
                         features_name,):
@@ -1397,9 +1397,9 @@ def test_fusion_prediction(models,
         res[:,y.shape[1]+2] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
         res[:,y.shape[1]+3] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_pred.pkl', dir_output / n)
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / n)
 
-        if testname == '69':
+        if test_name == '69':
             start = '2018-01-01'
             stop = '2022-09-30'
         else:
@@ -1428,7 +1428,7 @@ def test_fusion_prediction(models,
 
         i += 1
     #save_object(res, name+'_pred.pkl', dir_output)
-    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+testname+'_fusion.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_fusion.pkl'
     save_object(metrics, outname, dir_output)
 
 #########################################################################################################

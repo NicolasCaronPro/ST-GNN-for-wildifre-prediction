@@ -10,6 +10,7 @@ from osgeo import gdal, ogr
 import numpy as np
 import matplotlib.pyplot as plt
 from skimage import morphology
+from collections import Counter
 from sklearn.preprocessing import normalize
 from scipy.signal import fftconvolve as scipy_fft_conv
 import random
@@ -89,54 +90,62 @@ int2str = {
     1 : 'ain',
     25 : 'doubs',
     69 : 'rhone',
-    78 : 'yvelines'
+    78 : 'yvelines',
+    34 : 'herault'
 }
 
 int2strMaj = {
     1 : 'Ain',
     25 : 'Doubs',
     69 : 'Rhone',
-    78 : 'Yvelines'
+    78 : 'Yvelines',
+    34 : 'Herault'
 }
 
 int2name = {
     1 : 'departement-01-ain',
     25 : 'departement-25-doubs',
     69 : 'departement-69-rhone',
-    78 : 'departement-78-yvelines'
+    78 : 'departement-78-yvelines',
+    34 : 'departement-34-herault'
 }
 
 str2int = {
     'ain': 1,
     'doubs' : 25,
     'rhone' : 69,
-    'yvelines' : 78
+    'yvelines' : 78,
+    'herault' : 34
 }
 
 str2intMaj = {
     'Ain': 1,
     'Doubs' : 25,
     'Rhone' : 69,
-    'Yvelines' : 78
+    'Yvelines' : 78,
+    'Herault' : 34
 }
 
 str2name = {
     'Ain': 'departement-01-ain',
     'Doubs' : 'departement-25-doubs',
     'Rhone' : 'departement-69-rhone',
-    'Yvelines' : 'departement-78-yvelines'
+    'Yvelines' : 'departement-78-yvelines',
+    'Herault' : 'departement-34-herault'
 }
 
 name2str = {
     'departement-01-ain': 'Ain',
     'departement-25-doubs' : 'Doubs',
     'departement-69-rhone' : 'Rhone',
-    'departement-78-yvelines' : 'Yvelines'
+    'departement-78-yvelines' : 'Yvelines',
+    'departement-34-herault' : 'Herault'
 }
 
 name2int = {
     'departement-01-ain': 1,
     'departement-25-doubs' : 25,
+    'departement-34-herault' : 34,
     'departement-69-rhone' : 69,
     'departement-78-yvelines' : 78
 }
@@ -146,6 +155,7 @@ ACADEMIES = {
     '69': 'Lyon',
     '25': 'Besançon',
     '78': 'Versailles',
+    '34': 'Montpellier'
 }
 
 foret = {
@@ -197,6 +207,11 @@ osmnxint2str = {
  '3': 'secondary',
  '4': 'tertiary',
  '5': 'path'}
+
+resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
+                '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
+                '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
+                '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
 
 def create_larger_scale_image(input, proba, bin, raster):
     probaImageScale = np.full(proba.shape, np.nan)
@@ -1407,6 +1422,84 @@ def mean_absolute_error_class(ypred, ytrue, departements : list,
 
     return res
 
+def mode_filter(image, kernel_size=3):
+    # Assurez-vous que le kernel_size est impair pour avoir un centre
+    assert kernel_size % 2 == 1, "Le kernel_size doit être impair"
+    
+    # Obtenir le padding pour le centre du kernel
+    pad_width = kernel_size // 2
+    
+    # Padding de l'image pour gérer les bords
+    padded_image = np.pad(image, pad_width=pad_width, mode='edge')
+    
+    # Image de sortie
+    filtered_image = np.zeros_like(image)
+    
+    # Parcourir chaque pixel de l'image
+    for i in range(image.shape[0]):
+        for j in range(image.shape[1]):
+            # Extraire la fenêtre locale
+            local_window = padded_image[i:i + kernel_size, j:j + kernel_size]
+            local_window = local_window[local_window != -1]
+            # Trouver la valeur la plus fréquente dans la fenêtre
+            most_common_value = Counter(local_window.flatten()).most_common(1)[0][0]
+            if most_common_value == -1:
+                continue
+            
+            # Assigner cette valeur au pixel central
+            filtered_image[i, j] = most_common_value
+    
+    return filtered_image
+
+def most_frequent_neighbor(image, mask, i, j):
+    """
+    Retourne la valeur la plus fréquente des voisins d'un pixel, en tenant compte d'un masque.
+    """
+    neighbors = []
+    for di in [-1, 0, 1]:
+        for dj in [-1, 0, 1]:
+            if di == 0 and dj == 0:
+                continue
+            ni, nj = i + di, j + dj
+            if 0 <= ni < image.shape[0] and 0 <= nj < image.shape[1] and not mask[ni, nj]:
+                neighbors.append(image[ni, nj])
+    if neighbors:
+        return Counter(neighbors).most_common(1)[0][0]
+    else:
+        return image[i, j]  # En cas d'absence de voisins valides
+
+def merge_small_clusters(image, min_size):
+    """
+    Fusionne les petits clusters en remplaçant leurs pixels par la valeur la plus fréquente de leurs voisins.
+    """
+    output_image = np.copy(image)
+    unique_clusters, counts = np.unique(image, return_counts=True)
+    counts = counts[~np.isnan(unique_clusters)]
+    unique_clusters = unique_clusters[~np.isnan(unique_clusters)]
+    for cluster_id, count in zip(unique_clusters, counts):
+        if cluster_id == -1:
+            continue
+        if count < min_size:
+            # Trouver tous les pixels appartenant au cluster
+            mask = (image == cluster_id)
+            for i in range(image.shape[0]):
+                for j in range(image.shape[1]):
+                    if mask[i, j]:
+                        output_image[i, j] = most_frequent_neighbor(output_image, mask, i, j)
+    
+    return output_image
+
+def relabel_clusters(cluster_labels, started):
+    """
+    Réorganise les labels des clusters pour qu'ils soient séquentiels et croissants.
+    """
+    unique_labels = np.sort(np.unique(cluster_labels))
+
+    relabeled_image = np.copy(cluster_labels)
+    for ncl, cl in enumerate(unique_labels): 
+        relabeled_image[cluster_labels == cl] = ncl + started
+    return relabeled_image
+
 def get_features_name_list(scale, features, methods):
 
     features_name = []
@@ -1795,6 +1888,8 @@ def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
 def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break_point, dir_log, sinister):
+    if 'AutoRegressionBin_B-1' not in df.columns:
+        return
     y_dates = np.unique([date_limit - dt.timedelta(days=df.date.values.max() - k) for k in df.date.values])
     unodes = df.id.unique() 
 
@@ -1802,7 +1897,7 @@ def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break
     for fet in features_selected:
         logger.info(f'############## {fet} #################')
 
-        fig, axs = plt.subplots(unodes.shape[0], figsize=(15,10))
+        fig, axs = plt.subplots(unodes.shape[0], figsize=(25, 10))
         
         for i, node in enumerate(unodes):
             values = df[df['id'] == node][fet].values
@@ -1967,7 +2062,7 @@ def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_dail
     for node in unodes:
         lon = np.unique(res[res[:, 0] == node][:, 1])[0]
         lat = np.unique(res[res[:, 0] == node][:, 2])[0]
-        temporal_node_pred = graph_temporal._predict_node([[lon, lat]])
+        temporal_node_pred = graph_temporal._predict_node_with_position([[lon, lat]])
         for date in udates:
             mask = np.argwhere((res[:, 0] == node) & (res[:, 4] == date))[:, 0]
             mask_temporal = np.argwhere((Y_daily[:, 0] == temporal_node_pred) & (Y_daily[:, 4] == date))[:, 0]
