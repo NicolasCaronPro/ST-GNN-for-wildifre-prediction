@@ -126,6 +126,7 @@ autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     name_exp += '_AutoRegressionReg'
 
+
 ####################### INIT ################################
 
 df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_trees')
@@ -157,23 +158,6 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
                                                                                     dir_output,
                                                                                     ['mean'], args)
 
-features_selected = features_selected[:nbfeatures]
-
-if MLFLOW:
-    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
-    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
-    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
-
-    mlflow.log_param('train_features', train_features)
-    mlflow.log_param('features', features)
-    mlflow.log_param('features_selected', features_selected)
-    mlflow.log_input(train_dataset_ml_flow, context='trainig')
-    mlflow.log_input(val_dataset_ml_flow, context='validation')
-    mlflow.log_input(test_dataset_ml_flow, context='testing')
-    mlflow.end_run()
-
-######################## Training ##############################
-
 prefix += f'_{weights_version}'
 
 train_dataset['weight'] = train_dataset[weights_version]
@@ -183,87 +167,6 @@ val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
 test_dataset['weight'] = test_dataset[f'weight_normalize_nbsinister']
 test_dataset['weight_nbsinister'] = test_dataset['weight_normalize_nbsinister']
-
-name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
-
-models = [
-        ('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-        #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-        #('poisson_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-        #('xgboost_binary_classification_logloss', False, 'binary', autoRegression),
-        ]
-
-gam_models = [
-        #('gam_binary_classification_logloss', False, 'binary', autoRegression),
-        #('gam_risk_regression_rmse', False, 'binary', autoRegression),
-        #('gam_nbsinister_regression_rmse', False, 'binary', autoRegression),
-]
-
-voting_models = [
-                #('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-                #('xgboost_binary_classification_logloss', False, 'binary', autoRegression)
-                #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression)
-                ]
-
-voting_models_list = [
-                    #[('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-                    #   ('svm_risk_regression_rmse', False, 'risk', autoRegression),
-                    #   ('dt_risk_regresion_rmse', False, 'risk', autoRegression)]
-                    ]
-
-if doTrain:
-
-    for model in models:
-        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                dir_output=dir_output / name,
-                                device='cpu',
-                                autoRegression=autoRegression,
-                                features=features_selected,
-                                optimize_feature=optimize_feature,
-                                do_grid_search=do_grid_search,
-                                do_bayes_search=do_bayes_search,
-                                model=model)
-        
-    for model in voting_models:
-        wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                dir_output=dir_output / name,
-                                device='cpu',
-                                autoRegression=autoRegression,
-                                features=features_selected,
-                                optimize_feature=optimize_feature,
-                                do_grid_search=do_grid_search,
-                                do_bayes_search=do_bayes_search,
-                                model_name=model)
-        
-    for model in gam_models:
-         wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                dir_output=dir_output / name,
-                                device='cpu',
-                                autoRegression=autoRegression,
-                                features=features_selected,
-                                optimize_feature=optimize_feature,
-                                do_grid_search=do_grid_search,
-                                do_bayes_search=do_bayes_search,
-                                model=model)
-        
-    for model_list in voting_models_list:
-        wrapped_train_sklearn_api_voting_model_list(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                dir_output=dir_output / name,
-                                device='cpu',
-                                autoRegression=autoRegression,
-                                features=features_selected,
-                                optimize_feature=optimize_feature,
-                                do_grid_search=do_grid_search,
-                                do_bayes_search=do_bayes_search,
-                                models_list=model_list)
 
 if doTest:
 
@@ -316,42 +219,10 @@ if doTest:
             ('spearman', spearman_coefficient, 'correlation')
             ]
     
+    name_models = 'xgboost_5_7_risk'
     models = [
-        ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
-        #('xgboost_risk_regression_rmse_voting_10', 'risk', autoRegression),
-
-        #('xgboost_nbsinister_regression_poisson', 'nbsinister', autoRegression),
-        #('xgboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('xgboost_nbsinister_regression_rmse_voting_10', 'nbsinister', autoRegression),
-
-        #('xgboost_binary_classification_logloss_features', 'binary', autoRegression),
-        #('xgboost_binary_classification_logloss_voting_10', 'binary', autoRegression),
-
-        #('poisson_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        
-        #('gam_risk_regression_rmse_features', 'risk', autoRegression),
-        #('gam_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('gam_binary_classification_logloss_features', 'binary', autoRegression),
-
-        #('lightgbm_risk_regression_rmse_features', 'risk', autoRegression),
-        #('lightgbm_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('lightgbm_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('ngboost_risk_regression_rmse_features', 'risk', autoRegression),
-        #('ngboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('ngboost_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('rf_risk_regression_rmse_features', 'risk', autoRegression),
-        #('rf_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('rf_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('dt_risk_regression_mse_features', 'risk', autoRegression),
-        #('dt_nbsinister_regression_mse_features', 'nbsinister', autoRegression),
-        #('dt_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('svm_risk_regression_mse_features', 'risk', autoRegression),
-        #('svm_nbsinister_regression_mse_features', 'nbsinister', autoRegression),
-        #('svm_binary_classification_log_loss_features', 'binary', autoRegression),
+        #('full_0_100_5_risk-watershed_None_weight_normalize', 'xgboost_risk_regression_rmse_features', 'risk', False),
+        ('full_0_100_7_risk-watershed_None_weight_normalize', 'xgboost_risk_regression_rmse_features', 'risk', False),
         ]
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -389,7 +260,9 @@ if doTest:
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["id"].values)}')
 
-        metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset_dept,
+        metrics, metrics_dept, res, res_dept = test_sum_scale_model(vars(args),
+                               name_models,
+                                graphScale, test_dataset_dept,
                                test_dataset_unscale_dept,
                                 methods,
                                 dept,
@@ -410,7 +283,7 @@ if doTest:
         #res_dept = pd.concat(res_dept).reset_index(drop=True)
 
         ############## Prediction ######################
-        for name, target_name, _ in models:
+        for prefix_model, name, target_name, autoRegression in models:
             if name not in res.model.unique():
                 continue
             if target_name == 'risk':
@@ -467,7 +340,7 @@ if doTest:
 
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
 
-    for name, target_name, _ in models:
+    for prefix_model, name, target_name, autoRegression in models:
         band = 'prediction'
         if target_name == 'binary':
             vmax_band = 1

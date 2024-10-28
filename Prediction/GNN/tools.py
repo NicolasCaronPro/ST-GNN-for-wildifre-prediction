@@ -61,6 +61,7 @@ if is_pc:
     from torch import optim
     from xgboost import XGBClassifier, XGBRegressor
     import convertdate
+    from dtaidistance import dtw, similarity
 else:
     import datetime as dt
     import geopandas as gpd
@@ -977,10 +978,9 @@ def add_metrics(methods : list, i : int,
 
     modes = ['temporal',
              'spatial',
-             'spatio-temporal'
+             #'spatio-temporal'
              ]
     top = 2
-
     res = {}
     for mode in modes:
         if mode == 'temporal':
@@ -988,10 +988,11 @@ def add_metrics(methods : list, i : int,
             ypred_mode = np.copy(ypred)
 
         elif mode == 'spatial':
+            if graph.scale == 'departement':
+                continue
             dir_target = root_target
             raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl', dir / 'raster')
             assert raster is not None
-            #raster = raster[0]
             target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
             assert target_values is not None
             target_values = target_values[:, :, int(ytrue[0, 4]):int(ytrue[-1, 4])]
@@ -1012,12 +1013,14 @@ def add_metrics(methods : list, i : int,
 
                 ypred_mode[mask_node, 0] = np.nansum(ypred[ytrue[:, 0] == node, 0])
                 ypred_mode[mask_node, -1] = 1
-            
+
             ytrue_mode = ytrue_mode.reshape(-1, ytrue.shape[1])
             ypred_mode = ypred_mode.reshape(-1, ypred.shape[1])
             ypred_mode = ypred_mode[~np.isnan(ytrue_mode[:, -1])]
             ytrue_mode = ytrue_mode[~np.isnan(ytrue_mode[:, -1])]
         else:
+            if graph.scale == 'departement':
+                continue
             dir_target = root_target
             raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl', dir / 'raster')
             assert raster is not None
@@ -1068,8 +1071,6 @@ def add_metrics(methods : list, i : int,
                 band = -1
                 if target == 'nbsinister' or target == 'binary':
                     band = -2
-                    #if target == 'binary':
-                    #    ytrue[:,band] = (ytrue[:,band] > 0).astype(int)
             
                 mett = met(ypred_mode[:,0], ytrue_mode[:,band], ytrue_mode[:, ids_columns.index('weight')])
                 
@@ -1177,7 +1178,7 @@ def add_metrics(methods : list, i : int,
                     mett = mett.detach().cpu().numpy()
                 res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-                mett = met(ytrue[:], ypred_mode[:, 0], target, ytrue_mode[:, ids_columns.index('weight')], mask_top)
+                mett = met(ytrue_mode[:], ypred_mode[:, 0], target, ytrue_mode[:, ids_columns.index('weight')], mask_top)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster'] = mett
@@ -1350,7 +1351,9 @@ def kendall_coefficient(y_true, y_pred, mask=None):
     - Le coefficient de Kendall (float).
     """
     if mask is None:
-       return kendalltau(y_true, y_pred)[0]
+
+        return kendalltau(y_true, y_pred)[0]
+    
     
     mask = mask.reshape(-1)
     return kendalltau(y_true[mask], y_pred[mask])[0]
@@ -1368,7 +1371,7 @@ def pearson_coefficient(y_true, y_pred, mask=None):
     - Le coefficient de Pearson (float).
     """
     if mask is None:
-       return pearsonr(y_true, y_pred)[0]
+        return pearsonr(y_true, y_pred)[0]
 
     mask = mask.reshape(-1)
     return pearsonr(y_true[mask], y_pred[mask])[0]
@@ -1929,15 +1932,8 @@ def mode_filter(image, kernel_size=3):
     
     return filtered_image
 
-def merge_adjacent_clusters(image, size_threshold, oridata, exclude_label=None, background=-1):
+def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_size=math.inf, oridata=None, exclude_label=None, background=-1):
     labeled_image = np.copy(image)
-    
-    umarker = np.unique(image)
-    umarker = umarker[(umarker != 0) & ~(np.isnan(umarker))]
-    risk_image = np.full(oridata.shape, fill_value=np.nan)
-    for m in umarker:
-        mask = (image == m)  # Create a mask for each unique marker
-        risk_image[mask] = np.sum(oridata[mask])
 
     # Obtenir les propriétés des régions labellisées
     regions = measure.regionprops(labeled_image)
@@ -1946,11 +1942,9 @@ def merge_adjacent_clusters(image, size_threshold, oridata, exclude_label=None, 
     #mask = #np.zeros_like(labeled_image, dtype=labeled_image.dtype)
     mask = np.copy(labeled_image)
 
-    nb_attempt = 5
-    std_factor = 0.25
-    thresh = np.nanstd(np.unique(risk_image)) * std_factor
-
     changed_labels = []
+
+    nb_attempt = 3
 
     # Fusionner les clusters de petite taille
     for i, region in enumerate(regions):
@@ -1962,49 +1956,88 @@ def merge_adjacent_clusters(image, size_threshold, oridata, exclude_label=None, 
             mask[labeled_image == region.label] = region.label
             continue
         
-        if region.area < size_threshold:
-            ones = region.area
-            label = region.label
+        label = region.label
+        mask_label = mask == label
+        ones = np.argwhere(mask_label == 1).shape[0]
+        if ones < min_cluster_size:
             nb_test = 0
-            while ones < size_threshold and ones > 0 and nb_test < nb_attempt:
-                
+            find_neighbor = False
+            dilated_image = np.copy(mask)
+            while nb_test < nb_attempt:
+
                 # Obtenir les labels des voisins
-                mask_label = mask == label
+                mask_label = dilated_image == label
+                mask_label_ori = mask == label
                 neighbors = segmentation.find_boundaries(mask_label, connectivity=1, mode='outer', background=background)
-                neighbor_labels = np.unique(mask[neighbors])
+                neighbor_labels = np.unique(dilated_image[neighbors])
                 neighbor_labels = neighbor_labels[(neighbor_labels != exclude_label) & (neighbor_labels != background) & (neighbor_labels != label)]  # Exclure le fond et le label à exclure
                 dilate = True
 
-                if len(neighbor_labels) > 0: 
+                if len(neighbor_labels) > 0:
 
-                    risk_label = risk_image[mask == label][0]
-                    largest_neighbor_label = None
+                    neighbors_size = np.sort([[neighbor_label, np.sum(mask == neighbor_label)] for neighbor_label in neighbor_labels])
 
-                    # On vérifie la similarité avec le risque de chaque voisin
-                    best_simi = math.inf
-                    for neighbor_label in neighbor_labels:
-                        ori_labels = np.unique(labeled_image[mask == neighbor_label])
-                        if ori_labels.shape[0] > 1:
-                            for ori_neighbor_label in ori_labels:
-                                risk_neighbor_label = risk_image[labeled_image == ori_neighbor_label][0]
-                                diff = abs(risk_label - risk_neighbor_label)
-                                if diff < thresh and diff < best_simi:
-                                    largest_neighbor_label = neighbor_label
-                                    best_simi = diff
-                    
-                    # Si on a trouvé un voisin similaire
-                    if largest_neighbor_label is not None:
-                        dilate = False
-                        mask[mask_label] = largest_neighbor_label
-                        changed_labels.append(label)
-                        label = largest_neighbor_label
+                    if mode == 'size':
+                        for nei, neighbor in enumerate(neighbors_size):
+                            if neighbor[1] + np.sum(mask == label) > min_cluster_size or nei == len(neighbor) - 1:
+                                if neighbor[1] + np.sum(mask == label) < max_cluster_size:
+                                    dilate = False
+                                    mask[mask_label_ori] = neighbor[0]
+                                    changed_labels.append(label)
+                                    label = neighbor[0]
+                                find_neighbor = True
+                                break
 
-                # Si on a pas de voisin ou que les voisins sont différents
+                    elif mode == 'time_series_similarity':
+                        assert oridata is not None
+                        time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
+                        best_neighbord = None
+                        max_simi = -math.inf  # On cherche à maximiser la similarité
+                        simi_thresh = 0.5
+                        # Construire une matrice contenant le label et tous ses voisins
+                        all_series = [time_series_data]
+                        for neighbor in neighbors_size:
+                            time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
+                            all_series.append(time_series_data_neighbor)
+
+                        # Convertir la liste en numpy array pour utiliser la matrice de distance 
+                        all_series = np.asarray(all_series)
+
+                        # Calculer la matrice de distance (DTW) entre le label et tous les voisins
+                        distance_matrix = dtw.distance_matrix(all_series)
+                        
+                        # Convertir la matrice de distance en matrice de similarité
+                        similarity_matrix = similarity.distance_to_similarity(distance_matrix, method='exponential')
+                        
+                        # Debug: Afficher la matrice de similarité
+                        logger.info(f"Similarity matrix: {similarity_matrix}")
+                        
+                        # Parcourir les voisins pour trouver celui avec la similarité maximale
+                        for i, neighbor in enumerate(neighbors_size):
+                            simi = similarity_matrix[0, i+1]  # Similarité entre le label et ce voisin
+                            
+                            # Debug : Afficher la similarité avec ce voisin
+                            logger.info(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
+                            
+                            if simi > max_simi and simi > simi_thresh:
+                                best_neighbord = neighbor[0]
+                                max_simi = simi  # Mettre à jour le voisin le plus similaire et la similarité max
+                        
+                        # Si on a trouvé un voisin, on met à jour le label
+                        if best_neighbord is not None:
+                            dilate = False
+                            mask[mask_label_ori] = best_neighbord
+                            changed_labels.append(label)
+                            label = best_neighbord
+                            find_neighbor = True
+
+
+                # Si on a pas de voisin
                 if dilate:
                     mask_label = morphology.dilation(mask_label, morphology.square(3))
-                    mask[(mask_label)] = label
+                    dilated_image[(mask_label)] = label
                     nb_test += 1
-                            
+
                 mask_label = mask == label
                 ones = np.argwhere(mask_label == 1).shape[0]
 
@@ -2012,8 +2045,15 @@ def merge_adjacent_clusters(image, size_threshold, oridata, exclude_label=None, 
                     break
 
             # Si la taille est petite et qu'on a jamais trouvé de voisin -> région isolée.
-            if ones < size_threshold:
-                mask[mask == region.label] = 0
+            #if not find_neighbor:
+            if nb_test == nb_attempt and not find_neighbor:
+                if ones < min_cluster_size:
+                    mask_label = dilated_image == label
+                    ones = np.argwhere(mask_label == 1).shape[0]
+                    if ones < min_cluster_size:
+                        mask[mask == region.label] = 0
+                    else:
+                        mask[mask_label] = region.label
 
             regions = measure.regionprops(mask)
             
@@ -2093,8 +2133,9 @@ def split_large_clusters(image, size_threshold, min_cluster_size, background):
             
             # Appliquer K-means pour diviser en 2 clusters
             if len(coords) > 1:  # Assurez-vous qu'il y a suffisamment de points pour appliquer K-means
-                kmeans = KMeans(n_clusters=2, random_state=0).fit(coords)
-                labels = kmeans.labels_
+                clusterer = KMeans(n_clusters=2, random_state=0).fit(coords)
+                #clusterer = HDBSCAN(min_cluster_size=size_threshold).fit(coords)
+                labels = clusterer.labels_
                 
                 # Créer deux nouveaux labels
                 new_label_1 = new_labeled_image.max() + 1

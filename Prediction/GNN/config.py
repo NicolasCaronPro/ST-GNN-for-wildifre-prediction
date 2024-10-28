@@ -1,4 +1,5 @@
 from pathlib import Path
+from cycler import V
 import vacances_scolaires_france
 import jours_feries_france
 import datetime as dt
@@ -323,28 +324,28 @@ if MLFLOW:
         exit(1)
 
 
-maxDist = {0 : 5,
-           1 : 10,
-           2 : 15,
-           3 : 30,
-        4 : 20,
-        5 : 25,
-        6 : 30,
-        7 : 35,
-        8 : 35,
-        9 : 35,
-        10 : 35,
-        15 : 45,
-        20 : 45,
-        25 : 50,
-        30 : 50,
-        35 : 60,
-        40 : 60,
-        60 : 50,
-        70 : 55,
-        80 : 60,
-        100 : 75,
-        143 : 100,
+maxDist = {0 : math.inf,
+           1 : math.inf,
+           2 : math.inf,
+           3 : math.inf,
+        4 : math.inf,
+        5 : math.inf,
+        6 : math.inf,
+        7 : math.inf,
+        8 : math.inf,
+        9 : math.inf,
+        10 : math.inf,
+        15 : math.inf,
+        20 : math.inf,
+        25 : math.inf,
+        30 : math.inf,
+        35 : math.inf,
+        40 : math.inf,
+        60 : math.inf,
+        70 : math.inf,
+        80 : math.inf,
+        100 : math.inf,
+        143 : math.inf,
         'departement': 150,
         }
 

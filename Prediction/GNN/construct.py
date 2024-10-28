@@ -59,7 +59,9 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                        'name': 'mapper',
                                        'params' : None}
     
-    variables_for_susecptibilty_and_clustering = ['population', 'foret', 'osmnx', #'vigicrues', 'nappes',
+    variables_for_susecptibilty_and_clustering = ['population', 'foret', 'osmnx', 'elevation',
+                                                  #'vigicrues',
+                                                  #'nappes',
                                                   'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                                             'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                                             'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
@@ -68,12 +70,12 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             'sum_rain_last_7_days',
                                             'sum_snow_last_7_days', 'snow24h', 'snow24h16']
 
-    graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
+    """graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
                                         departements=train_departements,
                                         variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
                                         root_data=rootDisk / 'csv',
                                         root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                        dir_output=dir_output)
+                                        dir_output=dir_output)"""
 
     graphScale._create_sinister_region(base=graph_construct, doRaster=doRaster,
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
@@ -84,7 +86,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     graphScale._create_edges_list()
     graphScale._create_temporal_edges_list(allDates, k_days=k_days)
     graphScale.nodes = graphScale._assign_department(graphScale.nodes)
-    
+
     """graphScale._clusterize_node_with_target(departements=train_departements,
                                             variables=variables_for_susecptibilty_and_clustering,
                                             target='nbsinister', train_date=train_date,
@@ -772,7 +774,7 @@ def init(args, dir_output, script):
                                     train_date=trainDate,
                                     val_date=maxDate,
                                     )
-
+        graphScale._plot(graphScale.nodes, dir_output=dir_output)
         #graphScale._clusterize_node(train_departements, ['population', 'foret'], maxDate, dir_output, rootDisk / 'csv')
 
         """graphScale._plot_risk(mode='time_series_risk', dir_output=dir_output)
@@ -793,7 +795,6 @@ def init(args, dir_output, script):
     departements = [dept for dept in departements if dept not in graphScale.drop_department] 
     train_departements = [dept for dept in train_departements if dept not in graphScale.drop_department] 
 
-    graphScale._plot(graphScale.nodes, dir_output=dir_output)
 
     ########################### Create points ################################
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
@@ -820,7 +821,7 @@ def init(args, dir_output, script):
         logger.info('#####################################')
         encode(dir_target, trainDate, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
-    graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
+    #graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
 
     ########################## Do Database ####################################
 
@@ -887,19 +888,17 @@ def init(args, dir_output, script):
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
 
-    if True:
+    #if True:
+    else:
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X
         df[ids_columns[:-1] + targets_columns] = Y
         find_df = False
-
     print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
 
     ############################## Interpolate missing value #########################
 
     total_nan = df[features_name].isna().sum().sum()
-
-    print(total_nan)
 
     ####################### Create risk target throught time ##############################
 

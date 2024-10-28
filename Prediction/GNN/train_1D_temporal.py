@@ -188,8 +188,8 @@ test_dataset['weight'] = val_dataset['weight_class_nbsinister']
 test_dataset['weight_nbsinister'] = val_dataset['weight_class_nbsinister']
 
 models = [
-        ('LSTM', 'risk_regression_rmse', autoRegression),
-        ('LSTM', 'nbsinister_regression_rmse', autoRegression),
+        #('LSTM', 'risk_regression_rmse', autoRegression),
+        #('LSTM', 'nbsinister_regression_rmse', autoRegression),
           #('LSTM', 'binary_classification_weightedcrossentropy', autoRegression),
            # ('LSTM', 'risk_regression_rmse', autoRegression),
            # ('LSTM', 'risk_regression_rmsle', autoRegression),
@@ -202,12 +202,12 @@ models = [
 
 gnn_models = [
     #('DST-GCN', False, 'risk_regression_rmse', autoRegression),
-    ('LSTMGCN', False, 'risk_regression_rmse', autoRegression),
-    ('LSTMGCN', False, 'nbsinister_regression_rmse', autoRegression),
-    ('LSTMGAT', False, 'risk_regression_rmse', autoRegression),
-    ('LSTMGAT', False, 'nbsinister_regression_rmse', autoRegression),
+    #('LSTMGCN', False, 'risk_regression_rmse', autoRegression),
+    #('LSTMGCN', False, 'nbsinister_regression_rmse', autoRegression),
+    #('LSTMGAT', False, 'risk_regression_rmse', autoRegression),
+    #('LSTMGAT', False, 'nbsinister_regression_rmse', autoRegression),
     #('ST-GAT', False, 'risk_regression_rmse', autoRegression),
-    #('ST-GCN', False, 'risk_regression_rmse', autoRegression),
+    ('ST-GCN', False, 'risk_regression_rmse', autoRegression),
     #('SDT-GCN', False, 'risk_regression_rmse', autoRegression),
     #('ATGN', False, 'risk_regression_rmse', autoRegression),
     #('ST-GATLSTM', False, 'risk_regression_rmse', autoRegression),
@@ -310,8 +310,8 @@ if doTest:
             ('bca', bca, 'class'),
             ('maec', meac, 'class'),
             ('acc', acc, 'class'),
-            ('c_index', c_i, 'class'),
-            ('c_index_class', c_i_class, 'class'),
+            #('c_index', c_i, 'class'),
+            #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
             ('spearman', spearman_coefficient, 'correlation')

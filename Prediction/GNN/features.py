@@ -62,7 +62,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'foret_encoder',
                     'argile_encoder',
                     'id_encoder',
-                    'cluster_encoder'
+                    'cluster_encoder',
                     #'cosia_encoder',
                     'vigicrues',
                     'foret',
@@ -391,8 +391,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         nodeDepartementMask = np.argwhere(subNode[:,3] == name2int[departement])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
 
-        if (path / 'log' / f'X_{departement}_log.pkl').is_file():
-            X_dept = read_object(f'X_{departement}_log.pkl', path / 'log')
+        if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_log.pkl').is_file():
+            X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_log.pkl', path / 'log')
             assert X_dept is not None
             X[nodeDepartementMask] = X_dept.reshape(X[nodeDepartementMask].shape)
             continue    
@@ -711,8 +711,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[node]]).values[0]
                 #X[index, features_name.index('cluster_encoder')] = 0
 
-        #check_and_create_path(path / 'log')
-        #save_object(X[X[:, 3] == name2int[departement]], f'X_{departement}_log.pkl', path / 'log')
+        check_and_create_path(path / 'log')
+        save_object(X[nodeDepartementMask], f'X_{departement}_{graph.scale}_{graph.base}_log.pkl', path / 'log')
 
     return X, features_name[len(ids_columns)-1:]
 

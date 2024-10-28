@@ -1,3 +1,4 @@
+from genericpath import isfile
 from threading import local
 from numpy import dtype
 from sympy import use
@@ -8,6 +9,7 @@ from PIL import Image
 import torchvision.transforms.functional as TF
 from torchvision import transforms
 from GNN.train import *
+from feature_engine.selection import SmartCorrelatedSelection
 
 #########################################################################################################
 #                                                                                                       #
@@ -347,12 +349,12 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     columns = np.unique(ids_columns + weights_columns + features_name + kmeans_features_name + targets_columns)
     df = df[columns]
     # Preprocess
-    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(df=df, scaling=scaling, maxDate=maxDate,
+    features_name, train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(df=df, scaling=scaling, maxDate=maxDate,
                                                     trainDate=trainDate, train_departements=train_departements,
                                                     departements = departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
-                                                    futur_met=futur_met, ncluster=ncluster, scale=scale,
+                                                    futur_met=futur_met, ncluster=ncluster, graph=graphScale,
                                                     args=args)
     
     #col_names = train_dataset.columns
@@ -368,7 +370,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     #sinister_distribution_in_class(test_dataset['class_risk'].values, test_dataset[ids_columns + targets_columns].values, dir_output / prefix, 'mean_fire')
 
-    features_selected = features_selection(doFet, train_dataset, dir_output / prefix, features_name, len(features_name), 'nbsinister')
+    features_selected = features_selection(doFet, train_dataset, dir_output / prefix, features_name, len(features_name), 'risk')
 
     prefix = f'{values_per_class}_{k_days}_{nbfeatures}_{scale}_{args.graphConstruct}_{top_cluster}'
 
@@ -401,9 +403,11 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 #########################################################################################################
 
 def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, train_departements: list, departements: list, ks: int,
-               dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, scale : int,
+               dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
                args : dict,
                save = True):
+    
+    scale = graph.scale
 
     global features
 
@@ -429,6 +433,39 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     # Sort by date
     df = df.sort_values('date')
 
+    # Remove correlated Features
+    leni = len(features_name)
+
+    if (dir_output / 'features_correlation' / f'{scale}_{graph.base}_features_name_after_drop_correlated.pkl').is_file():
+        features_name = list(read_object(f'{scale}_{graph.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation'))
+        assert features_name is not None
+        df_features = df[features_name]
+    else:
+        df_features = df[features_name]
+        logger.info('Removing correlated feature')
+        tr = SmartCorrelatedSelection(
+                variables=None,
+                method="pearson",
+                threshold=0.8,
+                missing_values="raise",
+                selection_method="model_performance",
+                estimator=XGBRegressor(random_state=42),
+                scoring='neg_root_mean_squared_error'
+        )
+        
+        df_features = tr.fit_transform(df_features, df['risk'])
+        features_name = list(df_features.columns)
+        
+        check_and_create_path(dir_output / 'features_correlation')
+
+        save_object(features_name, f'{scale}_{graph.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+        save_object(tr.correlated_feature_dict_, f'{scale}_{graph.base}_correlated_group.pkl', dir_output  / 'features_correlation')
+
+    logger.info(f'Smart Correlated Selection {leni} -> {len(features_name)}')
+    df_features[targets_columns + ids_columns + weights_columns] = df[targets_columns + ids_columns + weights_columns]
+    df = df_features
+
+    # Apply days in future average
     if days_in_futur > 1:
         logger.info(f'{futur_met} target by {days_in_futur} days in future')
         df = target_by_day(df, days_in_futur, futur_met)
@@ -493,7 +530,7 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     if save:
         save_object(df[train_mask], 'df_train_'+prefix+'.pkl', dir_output)
 
-    return df[train_mask].reset_index(drop=True), df[val_mask].reset_index(drop=True), df[test_mask].reset_index(drop=True), train_dataset_unscale, val_dataset_unscale, test_dataset_unscale
+    return features_name, df[train_mask].reset_index(drop=True), df[val_mask].reset_index(drop=True), df[test_mask].reset_index(drop=True), train_dataset_unscale, val_dataset_unscale, test_dataset_unscale
 
 def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFrame, scaling: str):
     df_XY = df_X.join(df_Y)
@@ -1412,24 +1449,29 @@ def load_loader_test_2D(use_temporal_as_edges, image_per_node, scale, graphScale
     return loader
 
 def evaluate_pipeline(dir_train, pred, y, graph, methods, i, test_departement, target_name, name, test_name, dir_output,
-                      pred_min=None, pred_max=None):
+                      pred_min=None, pred_max=None, departement_scale = False):
     metrics = {}
+
     dir_predictor = dir_train / 'influenceClustering'
-    scale = graph.scale
+    if departement_scale:
+        scale = 'Departement'
+    else:
+        scale = graph.scale
+
     graph_structure = graph.base
     for nameDep in test_departement:
         mask = np.argwhere((y[:, 3] == name2int[nameDep]))
         if mask.shape[0] == 0:
             continue
-        if target_name == 'risk' and (dir_predictor / f'{nameDep}Predictor{scale}_{graph_structure}.pkl').is_file():
-            if scale == 'Departement':
-                predictor = read_object(f'{nameDep}Predictor{scale}.pkl', dir_predictor)
+        if target_name == 'risk':
+            if departement_scale:
+                predictor = read_object(f'{nameDep}PredictorDepartement.pkl', dir_predictor)
             else:
                 predictor = read_object(f'{nameDep}Predictor{scale}_{graph_structure}.pkl', dir_predictor)
         else:
             create_predictor(pred, name, nameDep, dir_predictor, scale, target_name == 'binary', graph_construct=graph_structure)
-            if scale == 'Departement':
-                predictor = read_object(f'{nameDep}Predictor{name}{scale}.pkl', dir_predictor)
+            if departement_scale:
+                predictor = read_object(f'{nameDep}Predictor{name}Departement.pkl', dir_predictor)
             else:
                 predictor = read_object(f'{nameDep}Predictor{name}{scale}_{graph_structure}.pkl', dir_predictor)
 
@@ -1463,24 +1505,13 @@ def evaluate_pipeline(dir_train, pred, y, graph, methods, i, test_departement, t
     realVspredict(pred[:, 1], y, -3,
                 dir_output / name, f'class_{scale}',
                 pred_min, pred_max)
-    
+
     realVspredict(pred[:, 0], y, -2,
                 dir_output / name, f'nbfire_{scale}',
                 pred_min, pred_max)
     
     calibrated_curve(pred[:, 0], y, dir_output / name, 'calibration')
     calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
-
-    #sinister_distribution_in_class(pred[:, 1], y, dir_output / name, f'mean_fire_{scale}')
-
-    if target_name == 'binary':
-        y_test = (y[:, -2] > 0).astype(int)
-    elif target_name == 'nbsinister':
-        y_test = y[:, -2]
-    elif target_name == 'risk':
-        y_test = y[:, -1]
-    else:
-        raise ValueError(f'Unknow {target_name}')
     
     res = pd.DataFrame(columns=ids_columns + targets_columns + ['prediction', 'class', 'mae', 'rmse'], index=np.arange(pred.shape[0]))
     res[ids_columns + targets_columns] = y
@@ -1489,20 +1520,13 @@ def evaluate_pipeline(dir_train, pred, y, graph, methods, i, test_departement, t
     res['mae'] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
     res['rmse'] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
 
-    if test_name == '69':
-        start = '2018-01-01'
-        stop = '2022-09-30'
-    else:
-        start = '2023-06-01'
-        stop = '2023-09-30'
-
     shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
 
     return metrics, res
 
 def test_fire_index_model(args,
                            graphScale,
-                          test_dataset_dept,
+                          test_dataset_dept,                                                                
                           test_dataset_unscale_dept,
                            methods,
                            test_name,
@@ -1537,7 +1561,7 @@ def test_fire_index_model(args,
         else:
             mlflow.start_run(run_name=f'{test_name}_GT_{prefix_train}', nested=True)
 
-    metrics['GT'], res = evaluate_pipeline(dir_train, pred, y, graph,
+    metrics['GT'], res = evaluate_pipeline(dir_train, pred, y, graphScale,
                                                methods, 0, test_departement, 'risk', 'GT', test_name,
                                                dir_output)
     i = 0
@@ -1632,6 +1656,7 @@ def test_fire_index_model(args,
             if mask.shape[0] == 0:
                 continue
             predictor = read_object(nameDep+'PredictorDepartement.pkl', dir_predictor)
+            break
 
         res_dept['class_risk'] = order_class(predictor, predictor.predict(res_dept['risk'].values, 0))
         res_dept['weight'] =  predictor.weight_array(predictor.predict(res_dept['risk'].values, 0).astype(int)).reshape(-1)
@@ -1694,31 +1719,6 @@ def test_sklearn_api_model(args,
     metrics = {}
     metrics_dept = {}
 
-    ################################ Ground Truth ############################################
-    """logger.info('#########################')
-    logger.info(f'       GT              ')
-    logger.info('#########################')
-
-    y = test_dataset_dept[ids_columns + targets_columns].values
-    pred = np.empty((y.shape[0], 2))
-    pred[:, 0] = test_dataset_dept['risk'].values
-    pred[:, 1] = test_dataset_dept['class_risk'].values
-
-    if MLFLOW:
-        existing_run = get_existing_run(f'{test_name}_GT_{prefix_train}')
-        if existing_run:
-            mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-        else:
-            mlflow.start_run(run_name=f'{test_name}_GT_{prefix_train}', nested=True)
-
-    metrics['GT'], res = evaluate_pipeline(dir_train, pred, y, scale, graphScale.base,
-                                               methods, 0, test_departement, 'risk', 'GT', test_name,
-                                               dir_output)
-                                
-    if MLFLOW:
-        log_metrics_recursively(metrics['GT'], prefix='')
-        mlflow.log_params(args)
-        mlflow.end_run()"""
     i = 0
 
     #test_dataset_dept.sort_values(by=['id', 'date'], inplace=True, axis=1)
@@ -1793,27 +1793,26 @@ def test_sklearn_api_model(args,
         metrics[name], res = evaluate_pipeline(dir_train, pred, y, graphScale,
                                                methods, i, test_departement, target_name, name, test_name,
                                                dir_output, pred_min = pred_min, pred_max = pred_max)
-        
+
         if MLFLOW:
             log_metrics_recursively(metrics[name], prefix='')
-        
+
         logger.info('Features importances')
         maxi = np.nanmax(test_dataset_dept['nbsinister'].values)
         samples = test_dataset_dept[test_dataset_dept['nbsinister'] == maxi].index
         samples_name = [
         f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
         ]
-        """if isinstance(model, ModelVoting):
+        if isinstance(model, ModelVoting):
              model.shapley_additive_explanation([test_dataset_dept[fet_i] for fet_i in features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
         else:
-            model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)"""
+            model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
         
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
     
-        #predict_and_plot_features(df_samples=test_dataset_unscale_dept[test_dataset_unscale_dept['nbsinister'] == maxi], variables=model.top_features_, dir_break_point=dir_break_point, dir_output=dir_output / name)
-
-        """if scale == 'departement':
+        if scale == 'departement':
             continue
+
         # Analyse departement prediction
         res_dept = res.groupby(['departement', 'date'])['risk'].sum().reset_index()
         res_dept['id'] = res_dept['departement']
@@ -1838,15 +1837,15 @@ def test_sklearn_api_model(args,
             res_dept['prediction'] = res.groupby(['departement', 'date']).sum().reset_index()['prediction']
 
         metrics_dept[f'{name}'], res_dept = evaluate_pipeline(dir_train, res_dept[['prediction', 'class_risk']].values,
-                                                                res_dept[ids_columns + targets_columns].values, 'Departement',
-                                                                graphScale.base,
+                                                                res_dept[ids_columns + targets_columns].values,
+                                                                graphScale,
                                                                 methods, i, test_departement, target_name, name, test_name,
-                                                                dir_output)
+                                                                dir_output, departement_scale=True)
 
         if MLFLOW:
             log_metrics_recursively(metrics_dept[name], prefix='departement')
             
-        save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred_dept.pkl', dir_output / name)"""
+        save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred_dept.pkl', dir_output / name)
         res['model'] = name
         #res_dept['model'] = name
 
@@ -1866,6 +1865,136 @@ def test_sklearn_api_model(args,
     save_object(metrics_dept, outname, dir_output)
 
     return metrics, metrics_dept, res_scale, res_departement
+
+def test_sum_scale_model(args,
+                         name_models,
+                           graphScale,
+                          test_dataset_dept,
+                          test_dataset_unscale_dept,
+                           methods,
+                           test_name,
+                           prefix_train,
+                           models,
+                           dir_output,
+                           device,
+                           encoding,
+                           scaling,
+                           test_departement,
+                           dir_train,
+                           name_exp,
+                           dir_break_point,
+                           doKMEANS):
+
+    res_scale = []
+    res_departement = []
+    
+    scale = graphScale.scale
+    metrics = {}
+    metrics_dept = {}
+
+    i = 0
+
+    raster_scale = read_object(f'{test_name}rasterScale{graphScale.scale}_{graphScale.base}.pkl', dir_train / 'raster')
+    assert raster_scale is not None
+    dates = np.sort(test_dataset_dept.date.unique())
+    pred_3d = np.full((*raster_scale.shape, dates.shape[0]), fill_value=np.nan)
+    pred_3d[~np.isnan(raster_scale)] = 0
+    y = test_dataset_dept[ids_columns + targets_columns].values
+    pred = np.zeros((y.shape[0], 2), dtype=np.float32)
+
+    if MLFLOW:
+            existing_run = get_existing_run(f'{test_name}_{name_models}_{prefix_train}')
+            if existing_run:
+                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+            else:
+                mlflow.start_run(run_name=f'{test_name}_{name_models}_{prefix_train}', nested=True)
+
+    for prefix_model, name, target_name, autoRegression in models:
+
+        logger.info('#########################')
+        logger.info(f'      {name}            ')
+        logger.info('#########################')
+
+        ############################### load prediction #############################################
+
+        config_model = prefix_model.split('_')
+        scale_model = config_model[3]
+        base_model = config_model[4]
+
+        predictions_model = read_object(f'{name}_{prefix_model}_{scaling}_{encoding}_{test_name}_pred.pkl', dir_output / '..' / prefix_model / name)
+        raster_scale_model = read_object(f'{test_name}rasterScale{scale_model}_{base_model}.pkl', dir_train / 'raster')
+        assert raster_scale_model is not None
+        assert predictions_model is not None
+
+        predictions_model = predictions_model.values
+
+        unodes = np.unique(raster_scale_model)
+        unodes = unodes[~np.isnan(unodes)]
+        for node in unodes:
+            mask_node = raster_scale_model == node
+            for i, date in enumerate(dates):
+                pred_3d[mask_node, i] += predictions_model[(predictions_model[:, 0] == int(node)) & (predictions_model[:, 4] == int(date))][0, -4]
+
+        pred_3d[~np.isnan(raster_scale)] = pred_3d[~np.isnan(raster_scale)] / len(models)
+
+    for i in range(y.shape[0]):
+        sample = y[i]
+        node = int(sample[0])
+        date = int(sample[4])
+        pred[i, 0] = pred_3d[raster_scale == node, dates == date][0]
+        pred[i, 1] = 1
+
+    if MLFLOW:
+        mlflow.log_params({'scale' : args['scale']})
+
+    logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
+
+    if doKMEANS:
+        _, _ , kmeans_features = get_features_for_sinister_prediction(dataset_name=args['dataset'], sinister=args['sinister'], isInference=args['name'] == 'inference')
+        df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
+        df[ids_columns] = test_dataset_dept[ids_columns]
+        features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
+        df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
+        df[target_name] = pred[:, 0]
+        df = apply_kmeans_class_on_target(df, dir_break_point=dir_break_point, target=target_name, tresh=tresh_kmeans,
+                                            features_selected=features_selected_kmeans, new_val=0)
+
+        pred[:, 0] = df[target_name]
+
+    metrics[name], res = evaluate_pipeline(dir_train, pred, y, graphScale,
+                                            methods, i, test_departement, target_name, name_models, test_name,
+                                            dir_output, pred_min = None, pred_max = None, departement_scale=False)
+    
+    if MLFLOW:
+        log_metrics_recursively(metrics[name], prefix='')
+    
+    logger.info('Features importances')
+    maxi = np.nanmax(test_dataset_dept['nbsinister'].values)
+    samples = test_dataset_dept[test_dataset_dept['nbsinister'] == maxi].index
+    samples_name = [
+    f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
+    ]
+
+    save_object(res, name_models+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name_models)
+
+    res['model'] = name_models
+
+    res_scale.append(res)
+
+    i += 1
+
+    if MLFLOW:
+        mlflow.end_run()
+
+    ########################################## Save metrics ################################ 
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_tree.pkl'
+    save_object(metrics, outname, dir_output)
+
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_dept_tree.pkl'
+    save_object(metrics_dept, outname, dir_output)
+
+    return metrics, metrics_dept, res_scale, res_departement
+    
 
 def test_dl_model(args,
                   graphScale, test_dataset_dept,
@@ -1922,7 +2051,6 @@ def test_dl_model(args,
     if MLFLOW:
         log_metrics_recursively(metrics['GT'], prefix='')
         mlflow.end_run()"""
-
 
     save_object(test_dataset_unscale_dept, f'test_dataset_unscale_{test_name}.pkl', dir_output)
     save_object(test_dataset_dept, f'test_dataset_{test_name}.pkl', dir_output)
@@ -2108,12 +2236,12 @@ def test_dl_model(args,
         else:
             res_dept['prediction'] = res.groupby(['departement', 'date']).sum().reset_index()['prediction']
 
-        metrics_dept[f'{name}_departement'], res = evaluate_pipeline(dir_train, res_dept[['prediction', 'class_risk']].values,
-                                                                res_dept[ids_columns + targets_columns].values, graphScale,
-
+        metrics_dept[f'{name}'], res_dept = evaluate_pipeline(dir_train, res_dept[['prediction', 'class_risk']].values,
+                                                                res_dept[ids_columns + targets_columns].values,
+                                                                graphScale,
                                                                 methods, i, test_departement, target_name, name, test_name,
-                                                                dir_output)
-
+                                                                dir_output, departement_scale=True)
+        
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
         save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_dept_pred.pkl', dir_output / name)
 

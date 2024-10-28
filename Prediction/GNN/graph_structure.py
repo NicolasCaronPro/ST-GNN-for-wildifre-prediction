@@ -114,6 +114,8 @@ class GraphStructure():
                     self.create_geometry_with_clustering(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date)
                 elif 'watershed' in vec_base:
                     self.create_geometry_with_watershed(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date)
+                elif 'regular' in vec_base:
+                    self.create_geometry_with_regular(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
 
             current_cluster = np.unique(self.ids[mask][~np.isnan(self.ids[mask])]).shape[0]
             logger.info(f'{dept} Unique cluster : {np.unique(self.ids[mask])}, {current_cluster}. {node_already_predicted}')
@@ -222,6 +224,8 @@ class GraphStructure():
         raster = raster[0]
         pred = np.full(raster.shape, fill_value=np.nan)
         valid_mask = (raster != -1) & (~np.isnan(raster))
+
+        mode = 'time_series_similarity'
         
         self.max_target_value = None
 
@@ -245,11 +249,9 @@ class GraphStructure():
             reducor.fit(data[valid_mask].reshape(-1,1))
             data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
             data[valid_mask] = order_class(reducor, data[valid_mask])
-            #data[valid_mask] = data[valid_mask] > 0.0
             data[~valid_mask] = 0
 
             data[valid_mask] = morphology.erosion(data, morphology.square(1))[valid_mask]
-            #data[valid_mask] = data[valid_mask] > 0
             self._save_feature_image(path, dept, f'{vb}', data, raster)
 
             # High Fire region
@@ -268,12 +270,9 @@ class GraphStructure():
             local_maxi = morphology.local_maxima(distance)
             markers, _ = ndi.label(local_maxi)
 
-            min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
-            max_cluster_size = (int)(min_cluster_size * 2.1)
-
             # Appliquer la segmentation Watershed
             pred = watershed(-data, markers, mask=data, connectivity=1)
-            self._save_feature_image(path, dept, 'pred_pp', pred, raster)
+            self._save_feature_image(path, dept, 'pred_watershed', pred, raster)
 
             # Merge and split clusters
             umarker = np.unique(pred)
@@ -284,25 +283,74 @@ class GraphStructure():
                 risk_image[mask_temp] = np.sum(oridata[mask_temp])
             self._save_feature_image(path, dept, 'pred_risk', risk_image, raster)
 
-            pred[~valid_mask] = -1
-            pred = merge_adjacent_clusters(pred, min_cluster_size, oridata, 0, -1)
-            valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
-            self._save_feature_image(path, dept, 'pred_plot', pred, raster)
+            min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
+            max_cluster_size = (int)(min_cluster_size * 2.1)
 
-            logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
-            
-            pred += 1
-            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, -1)
-            pred -= 1
-            pred = pred.astype(float)
-            pred[~valid_mask] = np.nan
-            self._save_feature_image(path, dept, 'pred', pred, raster)
+            if mode == 'size':
+                pred[~valid_mask] = -1
+                pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, oridata=None, mode=mode, exclude_label=0, background=-1)
+                valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
+                self._save_feature_image(path, dept, 'pred_merge', pred, raster)
+
+                bin_data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
+                assert bin_data is not None
+                logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
+                logger.info(f'Number of fire inside regions {np.nansum(bin_data[pred[~valid_mask & pred > 0]])}')
+                logger.info(f'Number of fire outside regions {np.nansum(bin_data[pred[pred == 0]])}')
+                
+                pred += 1
+                pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, 0)
+                pred -= 1
+
+                pred = pred.astype(float)
+                pred[~valid_mask] = np.nan
+                self._save_feature_image(path, dept, 'pred_split', pred, raster)
+
+            elif mode == 'time_series_similarity':
+                bin_data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
+                pred[~valid_mask] = -1
+                pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, oridata=bin_data, exclude_label=0, background=-1)
+                valid_cluster = find_clusters(pred, math.inf, 0, -1)
+                self._save_feature_image(path, dept, 'pred_merge', pred, raster)
+
+                pred += 1
+                pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, valid_cluster.append(0))
+                pred -= 1
 
             # Process post-watershed results
             self._post_process_result(pred, raster, mask, node_already_predicted)
             self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
             break
+
+    def create_geometry_with_regular(self, dept, vec_base, path, sinister, dataset_name,
+                                       sinister_encoding, resolution, mask, node_already_predicted):
+        
+        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+        dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
+        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
+        dir_target_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution
+        raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+        assert raster is not None
+        raster = raster[0]
+        pred = np.full(raster.shape, fill_value=1)
+        valid_mask = (raster != -1) & (~np.isnan(raster))
+        pred[~valid_mask] = -1
+        
+        self.max_target_value = None
+
+        min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
+        max_cluster_size = (int)(min_cluster_size * 2.1)
+        
+        pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, -1)
+        pred -= 1
+        pred = pred.astype(float)
+        pred[~valid_mask] = np.nan
+        self._save_feature_image(path, dept, 'pred', pred, raster)
+
+        # Process post-watershed results
+        self._post_process_result(pred, raster, mask, node_already_predicted)
+        self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
     def _process_base_data(self, vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path):
         if vb == 'risk':
@@ -753,7 +801,7 @@ class GraphStructure():
                 else:
                     set_type = 'test'
 
-                if dept == 'departement-78-yvelines':
+                if dept == 'departement-25-doubs':
                     set_type = 'test'
                     if sdate_year > train_date:
                         continue
@@ -1565,6 +1613,7 @@ class GraphStructure():
     def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name, sinister_encoding, train_date):
 
         dir_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resStr
+        dir_bin_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'bin' / resStr
         dir_target = root_target / sinister / dataset_name /  sinister_encoding / 'log' / resStr
         dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resStr
 
@@ -1612,7 +1661,10 @@ class GraphStructure():
 
             if doBin:
                 outputName = dept+'binScale0.pkl'
-                bin = read_object(outputName, dir_bin)
+                if dept not in ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines', 'departement-69-rhone'] and dataset_name == 'firemen':
+                    bin = read_object(outputName, dir_bin_bdiff)
+                else:
+                    bin = read_object(outputName, dir_bin)
                 if bin is None:
                     continue
                 outputName = dept+'Influence.pkl'
@@ -1702,7 +1754,7 @@ class GraphStructure():
         save_object(predictor, f'general_predictor_{self.scale}_{self.base}.pkl', path=dir_predictor)
 
         if self.scale == 'departement':
-            return
+            return dataset
         
         logger.info('######### Departement Scale ##########')
         all_values = []
