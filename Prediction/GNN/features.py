@@ -205,8 +205,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                            departements : list,
                            oriNode : np.array, path : Path,
                            dir_train : Path,
-                           resolution  : str,
-                           graph_construct : str) -> np.array:
+                           resolution  : str) -> np.array:
 
         assert graph.nodes is not None
         
@@ -232,9 +231,9 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             nodeDepartement = np.unique(nodeDepartement, axis=0)
             codes.append(name2int[departement])
 
-            mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl', dir_mask)
-            array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_proba)
-            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
+            mask = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_mask)
+            array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_proba)
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
 
             if array is None:
                 Y[nodeDepartementMask, :] = 0
@@ -278,10 +277,10 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         features : list, sinister : str, dataset_name: str, sinister_encoding :str,
                         path : Path,
                         dir_train : Path,
-                        resolution : str, 
-                        graph_construct : str) -> np.array:
+                        resolution : str) -> np.array:
     
     assert graph.nodes is not None
+    graph_construct = graph.base
 
     logger.info('Load nodes features')
 
@@ -323,7 +322,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             return
 
         indexVar = features_name.index(f'{band}')
-        
+
         X[indexNode[:, 0], indexVar] = np.nanmean(array[mask])
 
     def save_value_sum(array, band, indexNode, mask):
@@ -387,17 +386,17 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         #dir_data = root / 'csv' / departement / 'raster' / resolution
         dir_data = rootDisk / 'csv' / departement / 'raster' / resolution
 
-        name = f'{departement}rasterScale{graph.scale}_{graph_construct}_node.pkl'
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}_node.pkl'
         mask = read_object(name, dir_mask)
 
-        name_graph = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        name_graph = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl'
         mask_graph = read_object(name, dir_mask)
         
         nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
 
-        if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_log.pkl').is_file():
-            X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_log.pkl', path / 'log')
+        if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl').is_file():
+            X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
             assert X_dept is not None
             X[nodeDepartementMask] = X_dept.reshape(X[nodeDepartementMask].shape)
             continue    
@@ -669,7 +668,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         logger.info('AutoRegressionBin')
         if 'AutoRegressionBin' in features:
             dir_bin = dir_train / 'bin'
-            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl', dir_bin)
             if arrayBin is not None:
                 for node in nodeDepartement:
                     index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
@@ -711,13 +710,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         assert encoder_cluster is not None
         if 'cluster_encoder' in features:
             ugraph = np.unique(nodeDepartement[:, graph_id_index])
-            for graph in ugraph:
-                index = np.argwhere((subNode[:,graph_id_index] == graph))
-                X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[graph]]).values[0]
+            for graphid in ugraph:
+                index = np.argwhere((subNode[:,graph_id_index] == graphid))
+                X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[graphid]]).values[0]
                 #X[index, features_name.index('cluster_encoder')] = 0
 
         check_and_create_path(path / 'log')
-        save_object(X[nodeDepartementMask], f'X_{departement}_{graph.scale}_{graph.base}_log.pkl', path / 'log')
+        save_object(X[nodeDepartementMask], f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
 
     return X, features_name[len(ids_columns)-1:]
 
@@ -966,7 +965,7 @@ def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFr
                 dir_data = root / 'csv' / departement / 'raster'
                 dir_mask = root_graph / path / 'raster' / '2x2'
 
-                mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_structure}.pkl', dir_mask)
+                mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_structure}_{graph.graph_method}.pkl', dir_mask)
                 elevation = read_object('elevation.pkl', dir_data)
 
                 edgesNode = subNode[np.isin(subNode[:, 0], graph.edges[1][graph.edges[0] == node[0]])]

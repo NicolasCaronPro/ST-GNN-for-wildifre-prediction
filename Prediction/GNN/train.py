@@ -1426,7 +1426,7 @@ def train_break_point(df : pd.DataFrame, features : list, dir_output : Path, n_c
 
 ################################ DEEP LEARNING #########################################
 
-def compute_weights_and_target(target_name, labels, band, ids_columns):
+def compute_weights_and_target(target_name, labels, band, ids_columns, grap_or_node, graphs):
     weight_idx = ids_columns.index('weight')
     target_is_binary = target_name == 'binary'
 
@@ -1445,6 +1445,12 @@ def compute_weights_and_target(target_name, labels, band, ids_columns):
     else:
         weights = labels[:, weight_idx]
         target = (labels[:, band] > 0).long() if target_is_binary else labels[:, band]
+    
+    if grap_or_node == 'graph':
+        _, first_indices = torch.unique(tensor, return_inverse=False, return_counts=False, sorted=True, return_index=True)
+
+        weight = weights[first_indices]
+        target = target[first_indices]
 
     return target, weights
 
@@ -1468,7 +1474,10 @@ def launch_train_loader(model, loader,
         else:
             band = -1
 
-        target, weights = compute_weights_and_target(target_name, labels, band, ids_columns)
+        try:
+            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.graph_or_node, graphs)
+        except:
+            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, 'node')
 
         # Prepare inputs for the model
         if model_name in models_hybrid:
@@ -1487,6 +1496,7 @@ def launch_train_loader(model, loader,
 
         if target_name == 'risk' or target_name == 'nbsinister':
             #print(inputs.shape, labels.shape, target.shape, output.shape)
+
             target = target.view(output.shape)
             weights = weights.view(output.shape)
             
@@ -1655,7 +1665,7 @@ def train(params):
     train_loader = params['train_loader']
     val_loader = params['val_loader']
     test_loader = params['test_loader']
-    scale = params['scale']
+    graph = params['graph']
     optimize_feature = params['optimize_feature']
     PATIENCE_CNT = params['PATIENCE_CNT']
     CHECKPOINT = params['CHECKPOINT']
@@ -1688,10 +1698,20 @@ def train(params):
     criterion = get_loss_function(loss_name)
 
     if modelname in models_hybrid:
-        model, _ = make_model(modelname, len(features_selected[0]), len(features_selected[1]), scale, dropout, 'relu', k_days, target_name == 'binary', device, num_lstm_layers, custom_model_params)
+        model, _ = make_model(modelname, len(features_selected[0]), len(features_selected[1]),
+                              graph, dropout, 'relu',
+                              k_days,
+                              target_name == 'binary',
+                              device, num_lstm_layers,
+                              custom_model_params)
     else:
-        model, _ = make_model(modelname, len(features_selected), len(features_selected), scale, dropout, 'relu', k_days, target_name == 'binary', device, num_lstm_layers, custom_model_params)
-
+        model, _ = make_model(modelname, len(features_selected), len(features_selected),
+                              graph, dropout, 'relu',
+                              k_days,
+                              target_name == 'binary',
+                              device, num_lstm_layers,
+                              custom_model_params)
+        
     optimizer = optim.Adam(model.parameters(), lr=lr)
     BEST_VAL_LOSS = math.inf
     BEST_MODEL_PARAMS = None

@@ -159,7 +159,8 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
-
+if nbfeatures == 'all':
+    nbfeatures = len(features_selected)
 features_selected = features_selected[:nbfeatures]
 
 if MLFLOW:

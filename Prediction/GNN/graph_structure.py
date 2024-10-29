@@ -126,7 +126,7 @@ class GraphStructure():
             node_already_predicted += current_cluster
             self.numCluster += current_cluster
         
-        self.oriIds = self.graph_ids[~np.isnan(self.graph_ids)]
+        self.oriIds = self.oriIds[~np.isnan(self.graph_ids)]
         self.oriLatitudes = self.oriLatitudes[~np.isnan(self.graph_ids)].reset_index(drop=True)
         self.oriGeometry = self.oriGeometry[~np.isnan(self.graph_ids)]
         self.oriLongitude = self.oriLongitude[~np.isnan(self.graph_ids)].reset_index(drop=True)
@@ -524,37 +524,65 @@ class GraphStructure():
             mask[np.isnan(raster)] = np.nan
 
             if self.graph_method == 'graph':
-                """raster_node = np.full(mask.shape, fill_value=np.nan)
+                raster_node = np.full(mask.shape, fill_value=np.nan)
                 self.graph_node_dict = {}
                 uids = np.unique(mask)
                 uids = uids[~np.isnan(uids)]
                 graph_node_cluster = HDBSCAN(min_cluster_size=5)
+                #graph_node_cluster = KMeans(n_clusters=3, random_state=42)
+                num_cluster = 0
                 for id in uids:
                     mask_id = mask == id
                     coords = np.column_stack(np.nonzero(mask_id))
-                    raster_node[mask_id] = graph_node_cluster.fit_predict(coords)
-                
-                save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_node.pkl', path / 'raster')
+                    raster_node[(mask_id) & (np.isnan(raster_node))] = graph_node_cluster.fit_predict(coords)
+
+                    raster_node = np.where((raster_node == -1), np.nan, raster_node)
+
+                    # Exemple de tableau raster avec des valeurs -1 remplacées par NaN
+                    raster_node_with_nan = np.where((raster_node == -1) & (mask_id), np.nan, raster_node)
+
+                    # Calculer une carte de distance pour chaque NaN vers le point le plus proche non-NaN
+                    # Cette méthode remplit les NaN par les valeurs les plus proches
+
+                    nan_mask = np.isnan(raster_node_with_nan)  # Masque des NaN
+                    filled_raster = raster_node_with_nan.copy()  # Copie du tableau original
+
+                    nearest_indices = ndimage.distance_transform_edt(
+                        nan_mask,
+                        return_distances=False,
+                        return_indices=True
+                    )
+
+                    # Utiliser les indices pour remplir les NaN avec les valeurs les plus proches
+                    filled_raster = raster_node_with_nan.copy()
+                    filled_raster[nan_mask] = raster_node_with_nan[tuple(nearest_indices[:, nan_mask])]
+
+                    # Remettre à jour raster_node
+                    raster_node[mask_id] = filled_raster[mask_id]
+
+                    raster_node[mask_id] = raster_node[mask_id] + num_cluster
+                    num_cluster += np.unique(raster_node[mask_id]).shape[0]
+
+                    #plt.figure(figsize=(15,5))
+                    #plt.imshow(raster_node)
+                    #plt.show()
+
+                save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
 
                 if 'node_already_predicted' not in locals():
                     node_already_predicted = 0
-
                 self._post_process_result(raster_node, raster, self.departements == dept, node_already_predicted, 'graph')
                 current_nodes = np.unique(self.ids[self.departements == dept][~np.isnan(self.ids[self.departements == dept])]).shape[0]
                 logger.info(f'{dept} Unique node in graph : {np.unique(self.ids[self.departements == dept])}, {current_nodes}. {node_already_predicted}')
-                node_already_predicted += current_nodes"""
-
-                self.ids = np.copy(self.graph_ids)
-                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_node.pkl', path / 'raster')
+                node_already_predicted += current_nodes
             else:
                 self.ids = np.copy(self.graph_ids)
-                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_node.pkl', path / 'raster')
+                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
 
-            save_object(mask, f'{dept}rasterScale{self.scale}_{base}.pkl', path / 'raster')
+            save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
 
             unique_ids = np.unique(mask)
             unique_ids = unique_ids[~np.isnan(unique_ids)]
-
             plt.figure(figsize=(15, 5))
             plt.imshow(mask, label='ID')
 
@@ -570,16 +598,16 @@ class GraphStructure():
                 plt.text(center_x, center_y, f'{unique_id}', color='white', fontsize=12, ha='center', va='center')
 
             plt.title(dept)
-            plt.savefig(path / 'raster' / f'{dept}_{self.scale}_{self.base}.png')
+            plt.savefig(path / 'raster' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}.png')
             plt.close('all')
 
-            """if self.graph_method == 'graph':
+            if self.graph_method == 'graph':
                 plt.figure(figsize=(15, 5))
                 plt.imshow(raster_node, label='node')
 
                 plt.title(dept)
-                plt.savefig(path / 'raster' / f'{dept}_{self.scale}_{self.base}_node.png')
-                plt.close('all')"""
+                plt.savefig(path / 'raster' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}_node.png')
+                plt.close('all')
 
             if doBin:
                 outputName = dept+'binScale0.pkl'
@@ -593,8 +621,19 @@ class GraphStructure():
                 influence = read_object(outputName, dir_target)
 
                 binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence, raster)
-                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}.pkl', path / 'bin')
-                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}.pkl', path / 'influence')
+                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'bin')
+                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'influence')
+        
+        if self.graph_method == 'graph':
+            uids = np.unique(self.ids)
+            for id in uids:
+                graph_values = self.graph_ids[self.ids == id]
+                if np.unique(graph_values).shape[0] > 1:
+                    major_id = np.bincount(graph_values).argmax()
+                    # Remplacer tous les graph_ids minoritaires par le majoritaire
+                    self.graph_ids[self.ids == id] = major_id
+
+            self.numCluster = np.shape(np.unique(self.ids))[0]
         
     def _raster(self, path : Path,
                 sinister : str, 
@@ -677,9 +716,10 @@ class GraphStructure():
                 array[np.where(mask)[0][invalid_mask]] = predicted_values.astype(int)
 
         if graph_or_node == 'node': # graph = node
-            self.graph_ids[mask] = array[mask]
+            self.graph_ids[mask] = np.where(np.isnan(self.graph_ids[mask]), array[mask], self.graph_ids[mask])
         elif graph_or_node == 'graph': # nodes per graph
-            self.ids[mask] = array[mask]
+            #print(np.unique(self.ids[mask]), np.unique(self.graph_ids[mask]))
+            self.ids[mask] = np.where(np.isnan(self.ids[mask]), array[mask], self.ids[mask])
         else:
             logger.info(f'Unknow graph_or_node value {graph_or_node}')
             exit(1)
@@ -693,7 +733,7 @@ class GraphStructure():
             array2 = np.empty((np.asarray(array).shape[0], 5))
             array2[:, longitude_index:latitude_index+1] = np.asarray(array).reshape(-1,2)
             depts = self._assign_department(array2)[:, -1]
-
+            
         array = np.asarray(array)
         udept = np.unique(depts)
         res = np.full((len(array), 2), fill_value=np.nan)
@@ -1643,7 +1683,7 @@ class GraphStructure():
             target_value = target_value[:, :, allDates.index('2018-01-01'):allDates.index(train_date)]
 
             dir_data = root_data / dept / 'raster' / self.resolution
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}.pkl', dir_raster)
+            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', dir_raster)
             assert raster is not None
             nodes = np.sort(np.unique(raster[~np.isnan(raster)]))
 
@@ -1720,7 +1760,7 @@ class GraphStructure():
                 continue
 
             plt.figure(figsize=(15,5))
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}.pkl', path / 'raster')
+            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'raster')
             assert raster is not None
 
             time_series_image = np.full(raster.shape, fill_value=np.nan)
@@ -1729,10 +1769,10 @@ class GraphStructure():
                 time_series_image[raster == node] = self.node_cluster[node]
                 
             img = plt.imshow(time_series_image, vmin=0, vmax=2, cmap='jet')
-            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}.png')
-            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}.pkl', path / 'time_series_clustering')
+            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}.png')
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
             plt.close('all')
-            save_object(time_series_image, f'{dept}_{self.scale}.pkl', path / 'time_series_clustering')
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
 
         logger.info(f'Time series clustering {self.node_cluster}')
 
@@ -1752,7 +1792,7 @@ class GraphStructure():
 
             dir_data = root_data / dept / 'raster' / self.resolution
 
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}.pkl', path / 'raster')
+            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'raster')
             assert raster is not None
 
             nodes = np.unique(raster[~np.isnan(raster)])
@@ -1811,7 +1851,7 @@ class GraphStructure():
                 continue
 
             plt.figure(figsize=(15,5))
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}.pkl', path / 'raster')
+            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'raster')
             assert raster is not None
 
             time_series_image = np.full(raster.shape, fill_value=np.nan)
@@ -1820,11 +1860,10 @@ class GraphStructure():
                 time_series_image[raster == node] = self.node_cluster[node]
                 
             img = plt.imshow(time_series_image, vmin=0, vmax=4, cmap='jet')
-            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}.png')
-            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}.pkl', path / 'time_series_clustering')
+            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}.png')
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
             plt.close('all')
-            save_object(time_series_image, f'{dept}_{self.scale}.pkl', path / 'time_series_clustering')
-
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.graph_method}.pkl', path / 'time_series_clustering')
 
     def _read_kmeans(self, path : Path) -> None:
         assert self.scale != 0
@@ -1881,7 +1920,7 @@ class GraphStructure():
             
         predictor = Predictor(5, name=f'general_{self.scale}')
         predictor.fit(np.asarray(all_values))
-        save_object(predictor, f'general_predictor_{self.scale}_{self.base}.pkl', path=dir_predictor)
+        save_object(predictor, f'general_predictor_{self.scale}_{self.base}_{self.graph_method}.pkl', path=dir_predictor)
 
         if self.scale == 'departement':
             return dataset
@@ -1960,15 +1999,17 @@ class GraphStructure():
         Create nodes list in the form (N, 4) where N is the number of Nodes [ID, longitude, latitude, departement of centroid]
         """
         logger.info('Creating node list')
-        self.nodes = np.full((self.numCluster, 6), np.nan) # [id, longitude, latitude]
-        self.uniqueIDS = np.unique(self.ids)
+        self.nodes = np.full((self.numCluster, 6), np.nan)
+        self.uniqueIDS = np.sort(np.unique(self.ids).astype(int))
         for id in self.uniqueIDS:
             mask = np.argwhere(id == self.ids)
             graph_id = self.graph_ids[mask][:, 0][0]
+            print(np.unique(self.graph_ids[mask]))
             if self.scale != 0:
                 nodeGeometry = unary_union(self.oriGeometry[mask[:,0]]).centroid
             else:
                 nodeGeometry = self.oriGeometry[mask[:,0]].centroid
+
             dept_in_node = self.departements.values[mask[:,0]]
             valuesDep, counts = np.unique(dept_in_node, return_counts=True)
             ind = np.argmax(counts)
@@ -1986,8 +2027,11 @@ class GraphStructure():
         if self.uniqueIDS.shape[0] == 1:
             self.edges = np.asarray([[self.uniqueIDS[0], self.uniqueIDS[0]]])
         for id in self.uniqueIDS:
-            graph_id = np.unique(self.graph_ids[self.ids == id])[0]
-            closest = self._distances_from_node(self.nodes[id], self.nodes[(self.nodes[:,graph_id_index] == graph_id) & (self.nodes[:, id_index] != id)])
+            if self.graph_method == 'graph':
+                graph_id = np.unique(self.graph_ids[self.ids == id])[0]
+                closest = self._distances_from_node(self.nodes[id], self.nodes[(self.nodes[:, graph_id_index] == graph_id) & (self.nodes[:, id_index] != id)])
+            else:
+                closest = self._distances_from_node(self.nodes[id], self.nodes[(self.nodes[:, id_index] != id)])
             closest = closest[closest[:, 1].argsort()]
             for i in range(min(self.numNei, len(closest))):
                 if closest[i, 1] > self.maxDist:
@@ -2021,11 +2065,11 @@ class GraphStructure():
         Calculate the distance bewten node and all the other nodes
         """
         res = np.full((otherNodes.shape[0], 2), math.inf)
-        ignore = [node[0]]
+        ignore = [node[id_index]]
         for index, (_, id, lon, lat, _, _) in enumerate(otherNodes):
             if id in ignore:
                 continue
-            distance = haversine((node[1], node[2]), [lon, lat])
+            distance = haversine((node[longitude_index], node[latitude_index]), [lon, lat])
             res[index, 0] = id
             res[index, 1] = distance
             ignore.append(id)
@@ -2061,7 +2105,7 @@ class GraphStructure():
             maskNode = np.argwhere(nodes[:,0] == uN)
             if maskNode.shape[0] == 0:
                 continue
-            nodes[maskNode[:,id_index],longitude_index:latitude_index+1] = self.nodes[np.argwhere(self.nodes[:,id_index] == uN)[:,id_index]][id_index][longitude_index:latitude_index+1]
+            nodes[maskNode[:,0],longitude_index:latitude_index+1] = self.nodes[np.argwhere(self.nodes[:,id_index] == uN)[:,0]][0][longitude_index:latitude_index+1]
         return nodes
 
     def _plot(self, nodes : np.array, time=0, dir_output = None) -> None:
@@ -2076,7 +2120,7 @@ class GraphStructure():
         if self.edges is not None:
             uniqueIDS = np.unique(nodes[:,id_index]).astype(int)
             for id in uniqueIDS:
-                connection = self.edges[1][np.argwhere((self.edges[0] == id) & (np.isin(self.edges[1], nodes[:,0])))[:,0]]
+                connection = self.edges[1][np.argwhere((self.edges[0] == id) & (np.isin(self.edges[1], nodes[:,id_index])))[:,0]]
                 for target in connection:
                     target = int(target)
                     if target in uniqueIDS:
@@ -2084,7 +2128,7 @@ class GraphStructure():
                             for ti in range(time + 1):
                                 ax.plot([dis[ti], dis[ti]],
                                         [nodes[nodes[:,id_index] == id][0][longitude_index], nodes[nodes[:,id_index] == target][0][longitude_index]],
-                                        [nodes[nodes[:,id_index] == id][0][latitude_index], nodes[nodes[:,latitude_index] == target][0][latitude_index]],
+                                        [nodes[nodes[:,id_index] == id][0][latitude_index], nodes[nodes[:,id_index] == target][0][latitude_index]],
                                     color='black')
                         else:
                             ax.plot([nodes[nodes[:,id_index] == id][0][longitude_index], nodes[nodes[:,id_index] == target][0][longitude_index]],
@@ -2124,15 +2168,15 @@ class GraphStructure():
             ax.set_ylabel('Longitude')
             ax.set_zlabel('Latitude')
         else:
-            node_x = nodes[:,1]
-            node_y = nodes[:,2]
+            node_x = nodes[:,longitude_index]
+            node_y = nodes[:,latitude_index]
             for i, n in enumerate(nodes):
-                ax.annotate(str(n[0]), (n[1] + 0.001, n[2] + 0.001))
+                ax.annotate(str(n[id_index]), (n[longitude_index] + 0.001, n[latitude_index] + 0.001))
             ax.scatter(x=node_x, y=node_y, s=60)
             ax.set_xlabel('Longitude')
             ax.set_ylabel('Latitude')
         if dir_output is not None:
-            name = f'graph_{self.scale}_{self.base}.png'
+            name = f'graph_{self.scale}_{self.base}_{self.graph_method}.png'
             plt.savefig(dir_output / name)
             
     def _plot_risk(self, mode, dir_output, path=None):

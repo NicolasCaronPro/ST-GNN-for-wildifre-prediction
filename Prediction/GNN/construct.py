@@ -1,4 +1,5 @@
 import pickle
+from re import subn
 from nbconvert import export
 from sklearn.cluster import KMeans
 from copy import copy
@@ -107,7 +108,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
 
     if doEdgesFeatures:
         graphScale.edges = edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
-    save_object(graphScale, f'graph_{scale}_{graph_construct}.pkl', dir_output)
+    save_object(graphScale, f'graph_{scale}_{graph_construct}_{graphScale.graph_method}.pkl', dir_output)
     return graphScale
 
 def export_to_all_date(df, dataset_name, sinister, departements, maxDate):
@@ -184,7 +185,6 @@ def est_un_entier_chaine(variable):
 def construct_database(
     graphScale: GraphStructure,
     ps: pd.DataFrame,
-    scale: int,
     k_days: int,
     departements: list,
     features: list,
@@ -198,9 +198,11 @@ def construct_database(
     mode: str,
     resolution: str,
     maxDate: str,
-    graph_construct: str
 ):
     
+    scale = graphScale.scale
+    graph_construct = graphScale.base
+    graph_method = graphScale.graph_method
     
     ######################## Get departments and train departments #######################
     # Select the departments and training departments based on the dataset and sinister type
@@ -231,20 +233,17 @@ def construct_database(
     logger.info(f'{len(ps)} point in the dataset. Constructing database')
 
     # Initialize an array for original nodes with default values
-    orinode = np.full((len(ps), 6), -1.0, dtype=float)
+    orinode = np.full((len(ps), len(ids_columns) - 1), -1.0, dtype=float)
     orinode[:, graph_id_index] = ps[f'graph_{scale}'].values  # Assign node IDs
     orinode[:, id_index] = ps[f'scale{scale}'].values  # Assign node IDs
     orinode[:, departement_index] = ps['departement']
     orinode[:, date_index] = ps['date']  # Assign dates
-
     #orinode = generate_subgraph(graphScale, 0, 0, orinode)
 
     # Add temporal nodes based on the specified number of days (k_days)
     subNode = add_k_temporal_node(k_days=k_days, nodes=orinode)
-
     # Assign latitude and longitude to the sub-nodes
     subNode = graphScale._assign_latitude_longitude(subNode)
-
     # Assign departments to the sub-nodes
     #subNode = graphScale._assign_department(subNode)
 
@@ -253,7 +252,7 @@ def construct_database(
 
     ################################## Try loading Y database #############################
     # Define the filename for the ground truth data
-    n = f'Y_full_{scale}_{graph_construct}.pkl'
+    n = f'Y_full_{scale}_{graph_construct}_{graph_method}.pkl'
     #if True:
     if not (dir_output / n).is_file():
         # If the file doesn't exist, generate the ground truth data
@@ -265,7 +264,6 @@ def construct_database(
             dir_output,
             dir_train,
             resolution,
-            graph_construct
         )
         # Save the generated ground truth data
         save_object(Y, n, dir_output)
@@ -275,7 +273,7 @@ def construct_database(
 
     ################################## Try loading X database #############################
     # Define the filename for the features data
-    n = f'X_full_{scale}_{graph_construct}.pkl'
+    n = f'X_full_{scale}_{graph_construct}_{graph_method}.pkl'
     if (dir_output / n).is_file():
         # Get the list of feature names
         features_name, _ = get_features_name_list(scale, features, METHODS_SPATIAL)
@@ -290,23 +288,23 @@ def construct_database(
     ##################################### Not Using all nodes at all dates #########################
     # If we're not using all nodes at all dates, proceed with sampling
     # Split Y into training and testing sets based on the maxDate and trainCode
-    y_train = Y[(Y[:, 4] < allDates.index(maxDate)) & (np.isin(Y[:, 3], trainCode))]
+    y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
     y_test = Y[
-        ((Y[:, 4] >= allDates.index(maxDate)) & (np.isin(Y[:, 3], trainCode))) |
-        (~np.isin(Y[:, 3], trainCode))
+        ((Y[:, date_index] >= allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))) |
+        (~np.isin(Y[:, departement_index], trainCode))
     ]
 
     ################################# Class selection sample (specify maximum number of samples per class per node) #######################
     # Get the unique node IDs
-    unode = np.unique(Y[:, 0])
-    udetp = np.unique(Y[:, 3])
+    unode = np.unique(Y[:, id_index])
+    udetp = np.unique(Y[:, departement_index])
     if est_un_entier_chaine(values_per_class):
         # Initialize lists to store new Y and X samples
         new_Y = []
         sumi = 0  # Counter for total samples
         for node in udetp:
             # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, 3] == node, 3])[0])
+            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
             for year in years:
                 if sinister == 'firepoint':
                     # Define the fire season start and end dates for firepoints
@@ -335,17 +333,17 @@ def construct_database(
                     date_to_ignore =  np.asanyarray(date_to_ignore)
                     # Create a mask for the node within the date range and not in ignored dates
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied) &
-                        ~np.isin(y_train[:, 4], date_to_ignore)
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied) &
+                        ~np.isin(y_train[:, date_index], date_to_ignore)
                     )
                 else:
                     # Create a mask for the node within the date range
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied)
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied)
                     )
                 if masknode.shape[0] == 0:
                     continue  # Skip if no samples are found
@@ -395,7 +393,7 @@ def construct_database(
         sumi = 0  # Counter for total samples
         for node in udetp:
             # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, 3] == node, 3])[0])
+            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
             for year in years:
                 if sinister == 'firepoint':
                     # Define the fire season start and end dates for firepoints
@@ -424,24 +422,24 @@ def construct_database(
                     date_to_ignore = np.asanyarray(date_to_ignore)
                     # Create a mask for the node within the date range and not in ignored dates
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied) &
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied) &
                         (~np.isnan(y_train[:, -1])) &
-                        ~np.isin(y_train[:, 4], date_to_ignore)
+                        ~np.isin(y_train[:, date_index], date_to_ignore)
                     )
                 else:
                     # Create a mask for the node within the date range
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied) &
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied) &
                         (~np.isnan(y_train[:, -1]))
                     )
                 if masknode.shape[0] == 0:
                     continue  # Skip if no samples are found
                 # Find indices for non-sinister and sinister events
-                fire_dates = np.unique(y_train[masknode][y_train[masknode, -2] > 0][:, 4])
+                fire_dates = np.unique(y_train[masknode][y_train[masknode, -2] > 0][:, date_index])
                 td = 3
                 for udates in fire_dates:
                     urange = np.arange(udates-td, udates+td)
@@ -478,7 +476,7 @@ def construct_database(
         new_Y_index = []
         for node in udetp:
             # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, 3] == node, 3])[0])
+            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
             for year in years:
                 if sinister == 'firepoint':
                     # Define the fire season start and end dates for firepoints
@@ -507,17 +505,17 @@ def construct_database(
                     date_to_ignore = np.asanyarray(date_to_ignore)
                     # Create a mask for the node within the date range and not in ignored dates
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied) &
-                        ~np.isin(y_train[:, 4], date_to_ignore)
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied) &
+                        ~np.isin(y_train[:, date_index], date_to_ignore)
                     )
                 else:
                     # Create a mask for the node within the date range
                     masknode = np.argwhere(
-                        (y_train[:, 3] == node) &
-                        (y_train[:, 4] >= ifd) &
-                        (y_train[:, 4] <= ied)
+                        (y_train[:, departement_index] == node) &
+                        (y_train[:, date_index] >= ifd) &
+                        (y_train[:, date_index] <= ied)
                     )
                 new_Y += list(y_train[masknode])
 
@@ -526,7 +524,7 @@ def construct_database(
     # Create a mask to include neighboring days within k_days
     mask_days = np.zeros(y_train.shape[0], dtype=bool)
     for k in range(1, k_days + 2):
-        mask_days = mask_days | np.isin(y_train[:, 4], new_Y[:, 4] - k)
+        mask_days = mask_days | np.isin(y_train[:, date_index], new_Y[:, date_index] - k)
 
     # Get the neighboring samples
     new_Y_neighboor = y_train[mask_days]
@@ -539,7 +537,7 @@ def construct_database(
 
     # Remove intersection elements from both arrays
     new_Y_neighboor = np.asarray([sub_arr for sub_arr in new_Y_neighboor if tuple(sub_arr) not in intersection])
-    new_Y_neighboor[:, 5] = 0  # Reset weight column in the data
+    new_Y_neighboor[:, weight_index] = 0  # Reset weight column in the data
  
     # Concatenate the new and neighboring Y samples with the test set
     #Y = np.concatenate((new_Y, y_test), casting='no')
@@ -551,7 +549,7 @@ def construct_database(
         # If X is not loaded, generate the features
         X, features_name = get_sub_nodes_feature(
             graphScale,
-            Y[:, :6],
+            Y[:, :len(ids_columns) - 1],
             departements,
             features,
             sinister,
@@ -560,14 +558,13 @@ def construct_database(
             dir_output,
             dir_train,
             resolution,
-            graph_construct
         )
     else:
         # Align X with Y based on node IDs and dates
         X_ = np.empty((Y.shape[0], X.shape[1]))
         for i, instance in enumerate(Y):
             instance_index = np.argwhere(
-                (X[:, 0] == instance[0]) & (X[:, 4] == instance[4])
+                (X[:, id_index] == instance[id_index]) & (X[:, date_index] == instance[date_index])
             )[:, 0]
             if instance_index.shape[0] >= 2:
                 instance_index = instance_index[0]
@@ -576,21 +573,21 @@ def construct_database(
         X = X_
 
         # Boucle sur chaque noeud unique dans la première colonne de X
-        for node in np.unique(X[:, 0]):
+        for node in np.unique(X[:, id_index]):
             # Créer un masque pour sélectionner les lignes correspondant à ce noeud
-            mask_node = (X[:, 0] == node)
+            mask_node = (X[:, id_index] == node)
             
             # Boucle sur chaque colonne (à partir de la 6ème) pour l'interpolation
-            for band in range(6, X.shape[1]):
+            for band in range(len(ids_columns), X.shape[1]):
                 # Extraire les valeurs non-NaN pour l'interpolation
-                x = X[mask_node & ~np.isnan(X[:, band]), 4]  # Dates non-NaN
+                x = X[mask_node & ~np.isnan(X[:, band]), date_index]  # Dates non-NaN
                 y = X[mask_node & ~np.isnan(X[:, band]), band]  # Valeurs non-NaN correspondantes
                 if x.shape[0] == 0:
                     continue
                 # Vérifier s'il reste des NaN à interpoler dans cette bande
                 nan_mask = mask_node & np.isnan(X[:, band])
                 if np.any(nan_mask):
-                    nan_date = X[nan_mask, 4]  # Dates où il y a des NaN
+                    nan_date = X[nan_mask, date_index]  # Dates où il y a des NaN
                     
                     # Créer une fonction d'interpolation
                     f = scipy.interpolate.interp1d(x, y, kind='nearest', fill_value='extrapolate')
@@ -602,30 +599,30 @@ def construct_database(
                     X[nan_mask, band] = new_values
 
     # Sort Y and X based on node IDs and dates
-    ind = np.lexsort([Y[:, 4], Y[:, 0]])
+    ind = np.lexsort([Y[:, date_index], Y[:, id_index]])
     Y = Y[ind]
     if X is not None:
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
     # Extract the training samples from Y
-    y_train = Y[(Y[:, 4] < allDates.index(maxDate)) & (np.isin(Y[:, 3], trainCode))]
+    y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
     print(y_train.shape, Y.shape, new_Y.shape)
     # Print unique values and sums for verification
     print(np.unique(y_train[:, -2]))
-    print(np.sum(y_train[y_train[:, 5] > 0, -2]))
+    print(np.sum(y_train[y_train[:, weight_index] > 0, -2]))
 
     # Log the number of events and non-events used for training
     logger.info(
-        f'Number of event used for training {np.argwhere((y_train[:, -2] > 0) & (y_train[:, 5] > 0)).shape}'
+        f'Number of event used for training {np.argwhere((y_train[:, -2] > 0) & (y_train[:, weight_index] > 0)).shape}'
     )
     logger.info(
-        f'Number of non event used for training {np.argwhere((y_train[:, -2] == 0) & (y_train[:, 5] > 0)).shape}'
+        f'Number of non event used for training {np.argwhere((y_train[:, -2] == 0) & (y_train[:, weight_index] > 0)).shape}'
     )
     # Log the number of samples per class
     for c in np.unique(y_train[:, -3]):
         logger.info(
-            f'{c} : , {np.argwhere((y_train[:, -3] == c) & (y_train[:, 5] > 0)).shape}'
+            f'{c} : , {np.argwhere((y_train[:, -3] == c) & (y_train[:,weight_index] > 0)).shape}'
         )
 
     # Return the features, ground truth, and feature names
@@ -792,7 +789,8 @@ def init(args, dir_output, script):
         graphScale._plot_risk_departement(mode='2022-03-01_2022-09-01', dir_output=dir_output, path=dir_output)"""
 
     else:
-        graphScale = read_object(f'graph_{scale}_{graph_construct}.pkl', dir_output)
+        graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
+        graphScale._plot(graphScale.nodes, dir_output=dir_output)
 
     departements = [dept for dept in departements if dept not in graphScale.drop_department] 
     train_departements = [dept for dept in train_departements if dept not in graphScale.drop_department] 
@@ -849,7 +847,7 @@ def init(args, dir_output, script):
             ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
 
         X, Y, features_name = construct_database(graphScale,
-                                            ps, scale, k_days,
+                                            ps, k_days,
                                             departements,
                                             features,
                                             sinister,
@@ -861,8 +859,7 @@ def init(args, dir_output, script):
                                             values_per_class,
                                             'train',
                                             resolution,
-                                            trainDate,
-                                            graph_construct)
+                                            trainDate)
         
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
@@ -870,9 +867,8 @@ def init(args, dir_output, script):
         X = read_object('X_'+prefix+'.pkl', dir_output)
         Y = read_object('Y_'+prefix+'.pkl', dir_output)
         features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
-        print(features_name)
 
-    X = X[:, 6:]
+    X = X[:, len(ids_columns)-1:]
 
     if newFeatures != []:
         X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution, graph_construct)
@@ -880,7 +876,7 @@ def init(args, dir_output, script):
             start , maxi, _, _ = calculate_feature_range(fet, scale, METHODS_SPATIAL)
             X[:, features_name.index(start): features_name.index(start) + maxi] = X2[:, features_name_.index(start): features_name_.index(start) + maxi]
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
-        X = X[:, 6:]
+        X = X[:, len(ids_columns)-1:]
 
     ############################## Dataframe creation ###################################
 
@@ -893,7 +889,7 @@ def init(args, dir_output, script):
     if True:
     #else:
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
-        df[features_name] = X
+        df[features_name] = X 
         df[ids_columns[:-1] + targets_columns] = Y
         find_df = False
     print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
@@ -980,8 +976,8 @@ def init(args, dir_output, script):
     leni = len(features_name)
     
     # Remove correlated Features
-    if (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl').is_file():
-        features_name = list(read_object(f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation'))
+    if (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
+        features_name = list(read_object(f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation'))
         df_features = df[features_name]
     else:
         logger.info('Removing correlated feature')
@@ -1000,8 +996,8 @@ def init(args, dir_output, script):
         
         check_and_create_path(dir_output / 'features_correlation')
 
-        save_object(features_name, f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
-        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_correlated_group.pkl', dir_output  / 'features_correlation')
+        save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group.pkl', dir_output  / 'features_correlation')
     
     logger.info(f'Smart Correlated Selection {leni} -> {len(features_name)}')
 

@@ -341,7 +341,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     maxDate = args.maxDate
     trainDate = args.trainDate
     doFet = args.featuresSelection == "True"
-    nbfeatures = int(args.NbFeatures)
+    nbfeatures = args.NbFeatures
     values_per_class = args.nbpoint
     scale = int(args.scale) if args.scale != 'departement' else args.scale
     dataset_name= args.dataset
@@ -406,7 +406,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     features_selected = features_selection(doFet, train_dataset, dir_output / prefix, features_name, len(features_name), 'risk')
 
-    prefix = f'{values_per_class}_{k_days}_{nbfeatures}_{scale}_{args.graphConstruct}_{graph.graph_method}_{top_cluster}'
+    prefix = f'{values_per_class}_{k_days}_{nbfeatures}_{scale}_{args.graphConstruct}_{args.graph_method}_{top_cluster}'
 
     if days_in_futur > 1:
         prefix += f'_{days_in_futur}_{futur_met}'

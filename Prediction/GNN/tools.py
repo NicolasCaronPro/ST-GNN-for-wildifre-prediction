@@ -509,16 +509,14 @@ def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
     ori[:,0] = nodes[:,id_index]
     ori[:,1] = nodes[:,date_index]
 
-    newSubNode = np.full((nodes.shape[0], nodes.shape[1] + 1), -1, dtype=nodes.dtype)
+    newSubNode = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
     newSubNode[:,:nodes.shape[1]] = nodes
-    newSubNode[:,-1] = 1
 
     if k_days == 0:
         return newSubNode
 
-    array = np.full((nodes.shape[0], nodes.shape[1] + 1), -1, dtype=nodes.dtype)
+    array = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
     array[:,:nodes.shape[1]] = nodes
-    array[:,-1] = 1
     for k in range(1, k_days+1):
         array[:,date_index] = nodes[:,date_index] - k
         newSubNode = np.concatenate((newSubNode, array))

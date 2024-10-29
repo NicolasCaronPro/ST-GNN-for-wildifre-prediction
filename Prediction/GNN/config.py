@@ -279,7 +279,9 @@ def get_academic_zone(name, date):
     return dict_zones[name][1]
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
+
 targets_columns = ['class_risk', 'nbsinister', 'risk']
+
 weights_columns = ['weight_proportion_on_zero_class',
                    'weight_class',
                    'weight_one',
@@ -343,7 +345,7 @@ maxDist = {
            1 : math.inf,
            2 : math.inf,
            3 : math.inf,
-        4 : math.inf,
+        4 : 50,
         5 : math.inf,
         6 : math.inf,
         7 : math.inf,
