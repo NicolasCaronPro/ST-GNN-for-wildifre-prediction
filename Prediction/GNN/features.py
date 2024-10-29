@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 from shapely import unary_union
 from arborescence import *
@@ -226,8 +227,9 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             if departement in graph.drop_department:
                 continue
 
-            nodeDepartementMask = np.argwhere(subNode[:,3] == name2int[departement])
+            nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
             nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
+            nodeDepartement = np.unique(nodeDepartement, axis=0)
             codes.append(name2int[departement])
 
             mask = read_object(f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl', dir_mask)
@@ -235,14 +237,14 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
 
             if array is None:
-                Y[nodeDepartementMask, ids_columns.index('weight'):] = 0
+                Y[nodeDepartementMask, :] = 0
                 continue
 
             #predictor = read_object(f'{departement}Predictor{graph.scale}_{graph_construct}.pkl', dir_predictor)
 
             for node in nodeDepartement:
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                maskNode = mask == node[0]
+                index = np.argwhere((subNode[:,graph_id_index] == node[graph_id_index]) & (subNode[:, date_index] == node[date_index]))
+                maskNode = mask == node[graph_id_index]
                     
                 if node[4] >= array.shape[-1]:
                     continue
@@ -253,7 +255,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                     Y[index, -1] = 0
 
                     # Nb events
-                    values = (np.unique(arrayBin[maskNode, int(node[4])]))[0]
+                    values = (np.unique(arrayBin[maskNode, int(node[date_index])]))[0]
                     Y[index, -2] = values
 
                     # Class
@@ -266,8 +268,8 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                 
             #Y[nodeDepartementMask, -3] = order_class(predictor, Y[nodeDepartementMask, -3]).reshape(-1, 1)
             
-        Y[:, ids_columns.index('weight')] = Y[:, -3] + 1
-        Y = Y[np.isin(Y[:, ids_columns.index('departement')], codes)]
+        Y[:, weight_index] = Y[:, -3] + 1
+        Y = Y[np.isin(Y[:, departement_index], codes)]
         #Y = Y[Y[:, ids_columns.index('weight')] > 0]
         return Y
 
@@ -376,7 +378,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
     dir_mask = path / 'raster'
-    logging.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
+    logging.info(f'Shape of X {X.shape}, {np.unique(X[:,departement_index])}')
     for departement in departements:
         if departement in graph.drop_department:
             continue
@@ -385,10 +387,13 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         #dir_data = root / 'csv' / departement / 'raster' / resolution
         dir_data = rootDisk / 'csv' / departement / 'raster' / resolution
 
-        name = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}_node.pkl'
         mask = read_object(name, dir_mask)
+
+        name_graph = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        mask_graph = read_object(name, dir_mask)
         
-        nodeDepartementMask = np.argwhere(subNode[:,3] == name2int[departement])
+        nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
 
         if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_log.pkl').is_file():
@@ -402,7 +407,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             continue
         logger.info('Calendar')
         if 'Calendar' in features:
-            unDate = np.unique(nodeDepartement[:, ids_columns.index('date')]).astype(int)
+            unDate = np.unique(nodeDepartement[:, date_index]).astype(int)
             band = calendar_variables[0]
             for unDate in unDate:
                 date = allDates[unDate]
@@ -425,7 +430,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
                 X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = \
                         np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
-                
                 
                 for ir in range(stop_calendar, size_calendar):
                     var_ir = calendar_variables[ir]
@@ -457,9 +461,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             if array is None:
                 continue
             for node in nodeDepartement:
-                maskNode = mask == node[0]
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                save_values(array[:,:,int(node[4])], var, index, maskNode)
+                maskNode = mask == node[id_index]
+                index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                save_values(array[:,:,int(node[date_index])], var, index, maskNode)
 
         del array
 
@@ -472,9 +476,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if array is None:
                     continue
                 for node in nodeDepartement:
-                    maskNode = mask == node[0]
-                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                    save_value(array[:,:,int(node[4])], var, index, maskNode)
+                    maskNode = mask == node[id_index]
+                    index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                    save_value(array[:,:,int(node[date_index])], var, index, maskNode)
 
         logger.info('Population elevation Highway Sentinel Foret')
 
@@ -539,10 +543,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayCOSIALandcover = read_object(name, dir_data)
 
         if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
-            unode = np.unique(nodeDepartement[:,0])
+            unode = np.unique(nodeDepartement[:,id_index])
+            ugraph = np.unique(nodeDepartement[:,graph_id_index])
             for node in unode:
                 maskNode = mask == node
-                index = np.argwhere(subNode[:,0] == node)
+                index = np.argwhere(subNode[:,id_index] == node)
                 if 'population' in features:
                     if arrayPop is not None:
                         save_values(arrayPop, 'population', index, maskNode)
@@ -601,15 +606,15 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         if arraySent is not None or arrayLand is not None or arrayDW is not None:
             for node in nodeDepartement:
-                maskNode = mask == node[0]
+                maskNode = mask == node[id_index]
                 if True not in np.unique(maskNode):
                     continue
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
+                index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
 
                 if 'sentinel' in features:
                     if arraySent is not None:
                         for band, var in enumerate(sentinel_variables):
-                            save_values(arraySent[band,:, :,int(node[4])], var , index, maskNode)
+                            save_values(arraySent[band,:, :,int(node[date_index])], var , index, maskNode)
                 
                 if 'landcover' in features:
                     if arrayLand is not None:
@@ -619,7 +624,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'dynamicWorld' in features:
                     if arrayDW is not None:
                         for band, var in enumerate(dynamic_world_variables):
-                            save_values(arrayDW[band, :, :, int(node[4])], var, index, maskNode)
+                            save_values(arrayDW[band, :, :, int(node[date_index])], var, index, maskNode)
 
         del arrayPop
         del arrayEl
@@ -635,8 +640,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             #if arrayInfluence is not None:
 
                 for node in nodeDepartement:
-                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                    maskNode = mask == node[0]
+                    index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                    maskNode = mask == node[id_index]
                     X[index, features_name.index('pastinfluence')] = 0
 
                     #save_value_sum(arrayInfluence[:,:, int(node[4] - 1)], historical_variables[0], index, maskNode)
@@ -649,9 +654,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             #if arrayInfluence is not None:
 
                 for node in nodeDepartement:
-                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                    maskNode = mask == node[0]
-                    if node[4] - 1 < 0:
+                    index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                    maskNode = mask == node[id_index]
+                    if node[date_index] - 1 < 0:
                         continue
 
                     for var in auto_regression_variable_reg:
@@ -667,14 +672,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
             if arrayBin is not None:
                 for node in nodeDepartement:
-                    index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                    maskNode = mask == node[0]
-                    if node[4] - 1 < 0:
+                    index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                    maskNode = mask == node[id_index]
+                    if node[date_index] - 1 < 0:
                         continue
 
                     for var in auto_regression_variable_bin:
                         step = int(var.split('-')[-1])
-                        save_value(arrayBin[:,:, int(node[4] - step)], f'AutoRegressionBin-{var}', index, maskNode)
+                        save_value(arrayBin[:,:, int(node[date_index] - step)], f'AutoRegressionBin-{var}', index, maskNode)
                 del arrayBin
 
         logger.info('Vigicrues')
@@ -683,11 +688,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 array = read_object('vigicrues'+var+'.pkl', dir_data)
                 if array is not None:
                     for node in nodeDepartement:
-                        index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                        maskNode = mask == node[0]
-                        if node[4] >= array.shape[-1]:
+                        index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                        maskNode = mask == node[id_index]
+                        if node[date_index] >= array.shape[-1]:
                             continue
-                        save_values(array[:,:, int(node[4])], var, index, maskNode)
+                        save_values(array[:,:, int(node[date_index])], var, index, maskNode)
                     del array
 
         logger.info('nappes')
@@ -696,19 +701,19 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 array = read_object(var+'.pkl', dir_data)
                 if array is not None:
                     for node in nodeDepartement:
-                        index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:, ids_columns.index('date')] == node[4]))
-                        maskNode = mask == node[0]
+                        index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                        maskNode = mask == node[id_index]
                         
-                        save_values(array[:,:, int(node[4])], var, index, maskNode)
+                        save_values(array[:,:, int(node[date_index])], var, index, maskNode)
                 del array
 
         logger.info('Cluster encoder')
         assert encoder_cluster is not None
         if 'cluster_encoder' in features:
-            unodes = np.unique(nodeDepartement[:, 0])
-            for node in unodes:
-                index = np.argwhere((subNode[:,0] == node))
-                X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[node]]).values[0]
+            ugraph = np.unique(nodeDepartement[:, graph_id_index])
+            for graph in ugraph:
+                index = np.argwhere((subNode[:,graph_id_index] == graph))
+                X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[graph]]).values[0]
                 #X[index, features_name.index('cluster_encoder')] = 0
 
         check_and_create_path(path / 'log')
@@ -895,7 +900,7 @@ def add_time_columns(array, integer_param, dataframe, train_features):
                 column_name, method_name = vec[0], vec[1]
             else:
                 column_name, method_name = vec[0] + '_mean_'  + vec[1], vec[2]
-
+            
             if 'Calendar' in vec[0] and 'Calendar' in train_features:
                 columns = calendar_variables
             elif 'air' in vec[0] and 'air' in train_features:
@@ -915,16 +920,18 @@ def add_time_columns(array, integer_param, dataframe, train_features):
                 new_column_name = f"{col}_{method_name}_{i}"
                 if column_name in new_fet:
                     continue
-                new_fet.append(new_column_name)
                 if new_column_name not in dataframe.columns:
                     if method_name in methods_dict:
                         # Apply the method over a rolling window of size 'i'
                         if f'{col}_mean' in dataframe.columns:
                             dataframe[new_column_name] = dataframe[f'{col}_mean'].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                            new_fet.append(new_column_name)
                         elif col in dataframe.columns:
                             dataframe[new_column_name] = dataframe[col].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                            new_fet.append(new_column_name)
                         else:
-                            raise ValueError(f"Unknown feature '{col}'")
+                            continue
+                            raise ValueError(f"Unknown feature '{column_name}, {col}'")
                     else:
                         raise ValueError(f"Unknown method '{method_name}'")
                     

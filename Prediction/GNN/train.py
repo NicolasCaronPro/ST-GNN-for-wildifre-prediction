@@ -1459,9 +1459,9 @@ def launch_train_loader(model, loader,
     for i, data in enumerate(loader, 0):
 
         if model_name in models_hybrid:
-            inputs_1D, inputs_2D, labels, edges = data
+            inputs_1D, inputs_2D, labels, edges, graphs = data
         else:
-            inputs, labels, edges = data
+            inputs, labels, edges, graphs = data
 
         if target_name == 'binary' or target_name == 'nbsinister':
             band = -2
@@ -1474,16 +1474,16 @@ def launch_train_loader(model, loader,
         if model_name in models_hybrid:
             inputs_1D = inputs_1D[:, features[0]]
             inputs_2D = inputs_2D[:, features[1]]
-            output = model(inputs_1D, inputs_2D, edges)
+            output = model(inputs_1D, inputs_2D, edges, graphs)
         elif model_name in models_2D:
             inputs_model = inputs[:, features]
-            output = model(inputs_model, edges)
+            output = model(inputs_model, edges, graphs)
         elif model_name in temporal_model_list:
             inputs_model = inputs[:, features]
-            output = model(inputs_model, edges)
+            output = model(inputs_model, edges, graphs)
         else:
             inputs_model = inputs[:, features]
-            output = model(inputs_model, edges)
+            output = model(inputs_model, edges, graphs)
 
         if target_name == 'risk' or target_name == 'nbsinister':
             #print(inputs.shape, labels.shape, target.shape, output.shape)

@@ -59,7 +59,7 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
             argile_value += list(argile[~np.isnan(tar[:, :, 0])])
 
         dir_mask = Path(dir_output / '..' /  'raster')
-        id_mask = read_object(f'{dep}rasterScale{graph.scale}_{graph.base}.pkl', dir_mask)
+        id_mask = read_object(f'{dep}rasterScale{graph.scale}_{graph.base}_node.pkl', dir_mask)
         if id_mask is not None:
             ids_value += list(id_mask[~np.isnan(tar[:, :, 0])])
 

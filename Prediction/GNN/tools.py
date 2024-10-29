@@ -62,6 +62,9 @@ if is_pc:
     from xgboost import XGBClassifier, XGBRegressor
     import convertdate
     from dtaidistance import dtw, similarity
+    from sklearn.feature_selection import VarianceThreshold
+    from dtwParallel import dtw_functions
+    from scipy.spatial import distance as d
 else:
     import datetime as dt
     import geopandas as gpd
@@ -120,6 +123,7 @@ else:
     from dico_departements import *
     from features_selection import *
     import convertdate
+    from sklearn.feature_selection import VarianceThreshold
 
 random.seed(42)
 
@@ -502,8 +506,8 @@ def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
     logger.info(f'Add {k_days} temporal nodes')
 
     ori = np.empty((nodes.shape[0], 2))
-    ori[:,0] = nodes[:,0]
-    ori[:,1] = nodes[:,4]
+    ori[:,0] = nodes[:,id_index]
+    ori[:,1] = nodes[:,date_index]
 
     newSubNode = np.full((nodes.shape[0], nodes.shape[1] + 1), -1, dtype=nodes.dtype)
     newSubNode[:,:nodes.shape[1]] = nodes
@@ -516,10 +520,10 @@ def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
     array[:,:nodes.shape[1]] = nodes
     array[:,-1] = 1
     for k in range(1, k_days+1):
-        array[:,4] = nodes[:,4] - k
+        array[:,date_index] = nodes[:,date_index] - k
         newSubNode = np.concatenate((newSubNode, array))
 
-    indexToDel = np.argwhere(newSubNode[:,4] < 0)
+    indexToDel = np.argwhere(newSubNode[:,date_index] < 0)
     newSubNode = np.delete(newSubNode, indexToDel, axis=0)
 
     return np.unique(newSubNode, axis=0)
@@ -532,10 +536,10 @@ def add_new_random_nodes_from_nei(nei : np.array,
                   graph_nodes : np.array,
                   nodes : np.array):
            
-    maskNode = np.argwhere((np.isin(newSubNode[:,0], nei)) & (newSubNode[:,4] == node[4]))
+    maskNode = np.argwhere((np.isin(newSubNode[:,id_index], nei)) & (newSubNode[:,4] == node[date_index]))
     # Check for current nei in dataset
     if maskNode.shape[0] > 0:
-        nei = np.delete(nei, np.argwhere(np.isin(nei, newSubNode[maskNode][:, 0])))
+        nei = np.delete(nei, np.argwhere(np.isin(nei, newSubNode[maskNode][:, id_index])))
 
     maxNumber = min(nei.shape[0], maxNumber)
     minNumber = min(nei.shape[0], minNumber)
@@ -548,33 +552,10 @@ def add_new_random_nodes_from_nei(nei : np.array,
 
     nei = np.random.choice(nei, number_of_new_nodes, replace=False)
     new_nodes = np.full((number_of_new_nodes, nodes.shape[1]), -1.0)
-    new_nodes[:,:5] = graph_nodes[np.isin(graph_nodes[:,0], nei)]
-    new_nodes[:,4] = node[4]
+    new_nodes[:,:weight_index] = graph_nodes[np.isin(graph_nodes[:,0], nei)]
+    new_nodes[:,date_index] = node[date_index]
 
     newSubNode = np.concatenate((newSubNode, new_nodes))
-    return newSubNode
-
-def assign_graphID(nei : np.array,
-                   newSubNode : np.array,
-                   date : int,
-                   graphId : int,
-                   edges : np.array) -> np.array:
-    
-    maskNode = np.argwhere((newSubNode[:,0] == nei) & (newSubNode[:,4] == date) & (newSubNode[:,-1] != graphId))
-   
-    if maskNode.shape[0] == 0:
-        #logger.info(nei, date, graphId)
-        return newSubNode
-
-    newSubNode[maskNode, -1] = graphId
-    newNei = np.unique(edges[1][np.argwhere((edges[0] == nei) &
-                                             (np.isin(edges[1], np.unique(newSubNode[:,0])))
-                                             )].reshape(-1))
-    
-    newNei = np.delete(newNei, np.argwhere(np.isin(newNei, nei)))
-
-    for ne in newNei:
-        newSubNode = assign_graphID(ne, newSubNode, date, graphId, edges)
     return newSubNode
 
 def generate_subgraph(graph, minNumber : int, maxNumber : int, nodes : np.array) -> np.array:
@@ -609,43 +590,39 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
     ks : size of the time series
     """
 
-    date_index_ids_col = ids_columns.index('date')
-    weight_index_ids_col = ids_columns.index('weight')
+    mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
 
-    mask = np.argwhere((X[:,date_index_ids_col] == date) & (X[:, weight_index_ids_col] > 0))
-    #mask = np.argwhere((X[:,ids_columns.index('date')] == date))
+    x = X[mask]
+    node_with_weight = np.unique(x[:, id_index])
 
-    x = X[mask[:,0]]
-    node_with_weight = np.unique(x[:, 0])
-
-    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, 0]))]
+    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
     if ks != 0:
-        maskts = np.argwhere(((np.isin(X[:,0], x[:,0]) | np.isin(X[:, 0], connection)) & (X[:,date_index_ids_col] <= date) & (X[:,date_index_ids_col] >= date - ks)))
+        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
         if maskts.shape[0] == 0:
             return None, None, None
-        xts = X[maskts[:,0]]
+        xts = X[maskts]
         x = np.concatenate((x, xts))
 
     if Y is not None:
-        y = Y[mask[:,0]]
+        y = Y[mask]
         if ks != 0:
-            yts = Y[maskts[:,0]]
-            yts[:, ids_columns.index('weight')] = 0
+            yts = Y[maskts]
+            yts[:, weight_index] = 0
             y = np.concatenate((y, yts))
 
     # Graph indexing
-    ind = np.lexsort((x[:,0], x[:,4]))
+    ind = np.lexsort((x[:,id_index], x[:,date_index]))
     x = x[ind]
     if Y is not None:
         y = y[ind]
 
     # Get graph specific spatial and temporal edges 
-    maskgraph = np.argwhere((np.isin(graph.edges[0], np.unique(node_with_weight))) & (np.isin(graph.edges[1], np.unique(x[:,0]))))
-    maskTemp = np.argwhere((np.isin(graph.temporalEdges[0], date)) & (np.isin(graph.temporalEdges[1], np.unique(x[:,4]))))
+    maskgraph = np.argwhere((np.isin(graph.edges[0], np.unique(node_with_weight))) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    maskTemp = np.argwhere((np.isin(graph.temporalEdges[0], date)) & (np.isin(graph.temporalEdges[1], np.unique(x[:,date_index]))))[:, 0]
 
-    spatialEdges = np.asarray([graph.edges[0][maskgraph[:,0]], graph.edges[1][maskgraph[:,0]]])
-    temporalEdges = np.asarray([graph.temporalEdges[0][maskTemp[:,0]], graph.temporalEdges[1][maskTemp[:,0]]])
+    spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    temporalEdges = np.asarray([graph.temporalEdges[0][maskTemp], graph.temporalEdges[1][maskTemp]])
 
     edges = []
     target = []
@@ -657,43 +634,43 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
         for i, node in enumerate(x):
             # Spatial edges
             if spatialEdges.shape[1] != 0:
-                spatialNodes = x[np.argwhere((x[:,4] == node[4]))]
+                spatialNodes = x[np.argwhere((x[:,date_index] == node[date_index]))]
                 spatialNodes = spatialNodes.reshape(-1, spatialNodes.shape[-1])
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[0])]
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
                 for sp in spatial:
-                    if (i, np.argwhere((x[:,4] == node[4]) & (x[:,0] == sp))[0][0]) not in seen_edges:
+                    if (i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]) not in seen_edges:
                         src.append(i)
-                        target.append(np.argwhere((x[:,4] == node[4]) & (x[:,0] == sp))[0][0])
+                        target.append(np.argwhere((x[:,date_index] == node[date_index]) & (x[:,0] == sp))[0][0])
                         time_delta.append(0)
-                        seen_edges.append((i, np.argwhere((x[:,4] == node[4]) & (x[:,0] == sp))[0][0]))
+                        seen_edges.append((i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,0] == sp))[0][0]))
 
             # temporal edges
             if temporalEdges.shape[1] != 0:
-                temporalNodes = x[np.argwhere((x[:,0] == node[0]))]
+                temporalNodes = x[np.argwhere((x[:,id_index] == node[id_index]))]
                 temporalNodes = temporalNodes.reshape(-1, temporalNodes.shape[-1])
-                temporal = temporalEdges[1][(np.isin(temporalEdges[1], temporalNodes[:,4])) & (temporalEdges[0] == node[4])]
+                temporal = temporalEdges[1][(np.isin(temporalEdges[1], temporalNodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
                 for tm in temporal:
-                    if (i, np.argwhere((x[:,4] == tm) & (x[:,0] == node[0]))[0][0]) not in seen_edges:
+                    if (i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]) not in seen_edges:
                         src.append(i)
-                        target.append(np.argwhere((x[:,4] == tm) & (x[:,0] == node[0]))[0][0])
-                        time_delta.append(abs(node[4] - tm))
-                        seen_edges.append((i, np.argwhere((x[:,4] == tm) & (x[:,0] == node[0]))[0][0]))
+                        target.append(np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0])
+                        time_delta.append(abs(node[date_index] - tm))
+                        seen_edges.append((i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]))
 
             # Spatio-temporal edges
             if temporalEdges.shape[1] != 0  and spatialEdges.shape[1] != 0:
-                nodes = x[(np.argwhere((x[:,4] != node[4]) & (x[:,0]  != node[0])))]
+                nodes = x[(np.argwhere((x[:,date_index] != node[date_index]) & (x[:,id_index]  != node[id_index])))]
                 nodes = nodes.reshape(-1, nodes.shape[-1])
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], nodes[:,0])) & (spatialEdges[0] == node[0])]
-                temporal = temporalEdges[1][(np.isin(temporalEdges[1], nodes[:,4])) & (temporalEdges[0] == node[4])]
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], nodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
+                temporal = temporalEdges[1][(np.isin(temporalEdges[1], nodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
                 for sp in spatial:
                     for tm in temporal:
-                        arg = np.argwhere((x[:,0] == sp) & (x[:,4] == tm))
+                        arg = np.argwhere((x[:,id_index] == sp) & (x[:,date_index] == tm))
                         if arg.shape[0] == 0:
                             continue
                         if (i, arg[0][0]) not in seen_edges:
                             src.append(i)
                             target.append(arg[0][0])
-                            time_delta.append(abs(node[4] - tm))
+                            time_delta.append(abs(node[date_index] - tm))
                             seen_edges.append((i, arg[0][0]))
 
         edges = np.row_stack((src, target, time_delta)).astype(int)
@@ -701,18 +678,15 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
     return x[:, start_features:], y, edges
 
 def concat_temporal_graph_into_time_series(array : np, ks : int, date : int) -> np.array:
-    uniqueNodes = np.unique(array[:,0])
+    uniqueNodes = np.unique(array[:,id_index])
     res = []
 
     date_limit_min = date - ks
     range_date = np.arange(date_limit_min, date)
 
     for uNode in uniqueNodes:
-        arrayNode = array[array[:,0] == uNode]
-        dept = np.unique(arrayNode[:, 3])[0]
-        longitude = np.unique(arrayNode[:, 1])[0]
-        laitude = np.unique(arrayNode[:, 2])[0]
-        ind = np.lexsort([arrayNode[:,4]])
+        arrayNode = array[array[:,id_index] == uNode]
+        ind = np.lexsort([arrayNode[:,date_index]])
 
         #ind = np.flip(ind)
         arrayNode = arrayNode[ind]
@@ -768,29 +742,26 @@ def construct_graph_with_time_series(graph, date : int,
     Y : train or val target
     ks : size of the time series
     """
-    date_index_ids_col = ids_columns.index('date')
-    weight_index_ids_col = ids_columns.index('weight')
 
-    mask = np.argwhere((X[:,date_index_ids_col] == date) & (X[:, weight_index_ids_col] > 0))
-    #mask = np.argwhere((X[:,ids_columns.index('date')] == date))
+    mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
 
-    x = X[mask[:,0]]
-    node_with_weight = np.unique(x[:, 0])
+    x = X[mask]
+    node_with_weight = np.unique(x[:, id_index])
 
-    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, 0]))]
+    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
-    maskts = np.argwhere(((np.isin(X[:,0], x[:,0]) | np.isin(X[:, 0], connection)) & (X[:,date_index_ids_col] <= date) & (X[:,date_index_ids_col] >= date - ks)))
+    maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
     
     if maskts.shape[0] == 0:
         return None, None, None
 
-    xts = X[maskts[:,0]]
+    xts = X[maskts]
     x = np.concatenate((x, xts))
 
     if Y is not None:
-        y = Y[mask[:,0]]
-        yts = Y[maskts[:,0]]
-        yts[:,weight_index_ids_col] = 0
+        y = Y[mask]
+        yts = Y[maskts]
+        yts[:,weight_index] = 0
         y = np.concatenate((y, yts))
 
     # Graph indexing
@@ -801,20 +772,20 @@ def construct_graph_with_time_series(graph, date : int,
         y = concat_temporal_graph_into_time_series(y, ks, date)
 
     # Get graph specific spatial
-    maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,0]))))
-    spatialEdges = np.asarray([graph.edges[0][maskgraph[:,0]], graph.edges[1][maskgraph[:,0]]])
+    maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
 
     edges = []
     target = []
     src = []
 
     for i, node in enumerate(x):
-        spatialNodes = x[np.argwhere((x[:,date_index_ids_col,-1] == node[date_index_ids_col][-1]))][:,:, 0, 0]
+        spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
         if spatialEdges.shape[1] != 0:
-            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[0][0])]
+            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,id_index])) & (spatialEdges[0] == node[id_index][0])]
             for sp in spatial:
                 src.append(i)
-                target.append(np.argwhere((x[:,date_index_ids_col,-1] == node[date_index_ids_col][-1]) & (x[:,0,0] == sp))[0][0])
+                target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
         src.append(i)
         target.append(i)
         
@@ -832,25 +803,24 @@ def construct_time_series(date : int,
     Y : train or val target
     ks : size of the time series
     """
-    date_index_ids_col = ids_columns.index('date')
-    weight_index_ids_col = ids_columns.index('weight')
 
-    maskgraph = np.argwhere((X[:,date_index_ids_col] == date) & (X[:, weight_index_ids_col] > 0))
-    x = X[maskgraph[:,0]]
+    maskgraph = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    x = X[maskgraph]
+
     if ks != 0:
-        maskts = np.argwhere((np.isin(X[:,0], x[:,0]) & (X[:,date_index_ids_col] < date) & (X[:,date_index_ids_col] >= date - ks)))
+        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date) & (X[:,date_index] >= date - ks)))[:, 0]
         
         if maskts.shape[0] == 0:
             return None, None
     
-        xts = X[maskts[:,0]]
+        xts = X[maskts]
         x = np.concatenate((x, xts))
 
     if Y is not None:
-        y = Y[maskgraph[:,0]]
+        y = Y[maskgraph]
         if ks != 0:
-            yts = Y[maskts[:,0]]
-            yts[:,weight_index_ids_col] = 0
+            yts = Y[maskts]
+            yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
 
     # Graph indexing
@@ -883,7 +853,7 @@ def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, me
     mask = read_object(name_mask, dir_mask)
     res = np.full(mask.shape, fill_value=np.nan)
 
-    unodes = np.unique(X[:,0])
+    unodes = np.unique(X[:,id_index])
     for node in unodes:
         index = mask == node
         if method == 'sum':
@@ -991,11 +961,15 @@ def add_metrics(methods : list, i : int,
             if graph.scale == 'departement':
                 continue
             dir_target = root_target
-            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl', dir / 'raster')
+            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
             assert raster is not None
+
+            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
+            assert raster_graph is not None
+
             target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
             assert target_values is not None
-            target_values = target_values[:, :, int(ytrue[0, 4]):int(ytrue[-1, 4])]
+            target_values = target_values[:, :, int(ytrue[0, date_index]):int(ytrue[-1, date_index])]
             target_values = np.nansum(target_values, axis=2)
 
             ytrue_mode = np.full((target_values.shape[0], target_values.shape[1], ytrue.shape[1]), fill_value=np.nan)
@@ -1007,9 +981,10 @@ def add_metrics(methods : list, i : int,
                 ytrue_mode[mask_node, -1] = target_values[mask_node]
                 ytrue_mode[mask_node, -2] = target_values[mask_node]
                 ytrue_mode[mask_node, -3] = 1
-                ytrue_mode[mask_node, 0] = node
-                ytrue_mode[mask_node, 1:-3] = 1
-                ytrue_mode[mask_node, 3] = name2int[testd_departement[0]]
+                ytrue_mode[mask_node, graph_id_index] = raster_graph[mask_node]
+                ytrue_mode[mask_node, id_index] = node
+                ytrue_mode[mask_node, longitude_index:-3] = 1
+                ytrue_mode[mask_node, departement_index] = name2int[testd_departement[0]]
 
                 ypred_mode[mask_node, 0] = np.nansum(ypred[ytrue[:, 0] == node, 0])
                 ypred_mode[mask_node, -1] = 1
@@ -1022,13 +997,17 @@ def add_metrics(methods : list, i : int,
             if graph.scale == 'departement':
                 continue
             dir_target = root_target
+
             raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl', dir / 'raster')
             assert raster is not None
-            #raster = raster[0]
+
+            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
+            assert raster_graph is not None
+
             target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
             assert target_values is not None
 
-            udates = np.unique(ytrue[:, 4]).astype(int)
+            udates = np.unique(ytrue[:, date_index]).astype(int)
             target_values = target_values[:, :, udates]
 
             ytrue_mode = np.full((udates.shape[0], target_values.shape[0], target_values.shape[1], ytrue.shape[1]), fill_value=np.nan)
@@ -1040,26 +1019,27 @@ def add_metrics(methods : list, i : int,
                 ytrue_mode[:, mask_node, -1] = np.moveaxis(target_values[mask_node], 0, 1)
                 ytrue_mode[:, mask_node, -2] = np.moveaxis(target_values[mask_node], 0, 1)
                 ytrue_mode[:, mask_node, -3] = 1
-                ytrue_mode[:, mask_node, 0] = node
-                ytrue_mode[:, mask_node, 1:-3] = 1
-                ytrue_mode[:, mask_node, 3] = name2int[testd_departement[0]]
+                ytrue_mode[:, mask_node, id_index] = node
+                ytrue_mode[:, mask_node, graph_index] = raster_graph[mask_node]
+                ytrue_mode[:, mask_node, longitude_index:-3] = 1
+                ytrue_mode[:, mask_node, departement_index] = name2int[testd_departement[0]]
 
                 for d in udates:
                     mask_date = udates == d
-                    ypred_mode[mask_date, mask_node, 0] = ypred[(ytrue[:, 0] == node) & (ytrue[:, 4] == d), 0]
+                    ypred_mode[mask_date, mask_node, 0] = ypred[(ytrue[:, id_index] == node) & (ytrue[:, date_index] == d), 0]
                     ypred_mode[mask_date, mask_node, -1] = 1
-                    ytrue_mode[mask_date, mask_node, 4] = d
+                    ytrue_mode[mask_date, mask_node, date_index] = d
 
             ytrue_mode = ytrue_mode.reshape(-1, ytrue.shape[1])
             ypred_mode = ypred_mode.reshape(-1, ypred.shape[1])
             ypred_mode = ypred_mode[~np.isnan(ytrue_mode[:, -1])]
             ytrue_mode = ytrue_mode[~np.isnan(ytrue_mode[:, -1])]
 
-        uids = np.unique(ytrue_mode[:, 0])
+        uids = np.unique(ytrue_mode[:, graph_id_index])
         ysum = np.empty((uids.shape[0], 2))
-        ysum[:, 0] = uids
+        ysum[:, graph_id_index] = uids
         for id in uids:
-            ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(ytrue_mode[np.argwhere(ytrue_mode[:, 0] == id)[:, 0], -2])
+            ysum[np.argwhere(ysum[:, graph_id_index] == id)[:, 0], 1] = np.sum(ytrue_mode[np.argwhere(ytrue_mode[:, graph_id_index] == id)[:, 0], -2])
         
         ind = np.lexsort([ysum[:,1]])
         ymax = np.flip(ytrue_mode[ind, 0])[:top]
@@ -1072,7 +1052,7 @@ def add_metrics(methods : list, i : int,
                 if target == 'nbsinister' or target == 'binary':
                     band = -2
             
-                mett = met(ypred_mode[:,0], ytrue_mode[:,band], ytrue_mode[:, ids_columns.index('weight')])
+                mett = met(ypred_mode[:,0], ytrue_mode[:,band], ytrue_mode[:, weight_index])
                 
                 if torch.is_tensor(mett):
                     mett = np.mean(mett.detach().cpu().numpy())
@@ -1080,32 +1060,32 @@ def add_metrics(methods : list, i : int,
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ypred_mode[mask, 0], ytrue_mode[mask,band], ytrue_mode[mask, ids_columns.index('weight')])
+                    mett = met(ypred_mode[mask, 0], ytrue_mode[mask,band], ytrue_mode[mask, weight_index])
                     if torch.is_tensor(mett):
                         mett = np.mean(mett.detach().cpu().numpy())
 
                     res[oname+'_'+season] = mett
 
-                mett = met(ypred_mode[mask_top, 0], ytrue_mode[mask_top,band], ytrue_mode[mask_top, ids_columns.index('weight')])
+                mett = met(ypred_mode[mask_top, 0], ytrue_mode[mask_top,band], ytrue_mode[mask_top, weight_index])
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster'] = mett
 
             elif met_type == 'cal':
-                mett = met(ytrue_mode, ypred_mode[:,1], target, ytrue[:, ids_columns.index('weight')])
+                mett = met(ytrue_mode, ypred_mode[:,1], target, ytrue[:, weight_index])
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, :], ypred_mode[:,1], target, ytrue_mode[:, ids_columns.index('weight')], mask)
+                    mett = met(ytrue_mode[:, :], ypred_mode[:,1], target, ytrue_mode[:, weight_index], mask)
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
@@ -1118,7 +1098,7 @@ def add_metrics(methods : list, i : int,
                 res[oname+'_unweighted'] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
                     mett = met(ytrue_mode[:], ypred_mode[:, 1], target, None, mask)
@@ -1133,24 +1113,24 @@ def add_metrics(methods : list, i : int,
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-                mett = met(ytrue_mode[:], ypred_mode[:, 1], target, ytrue_mode[:, ids_columns.index('weight')], mask_top)
+                mett = met(ytrue_mode[:], ypred_mode[:, 1], target, ytrue_mode[:, weight_index], mask_top)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster'] = mett
 
             elif met_type == 'bin':
 
-                mett = met(ytrue_mode, ypred_mode[:,0], target, ytrue_mode[:, ids_columns.index('weight')])
+                mett = met(ytrue_mode, ypred_mode[:,0], target, ytrue_mode[:, weight_index])
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, :], ypred_mode[:,0], target, ytrue_mode[:, ids_columns.index('weight')], mask)
+                    mett = met(ytrue_mode[:, :], ypred_mode[:,0], target, ytrue_mode[:, weight_index], mask)
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
@@ -1163,7 +1143,7 @@ def add_metrics(methods : list, i : int,
                 res[oname+'_unweighted'] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
                     mett = met(ytrue_mode[:], ypred_mode[:, 0], target, None, mask)
@@ -1178,26 +1158,26 @@ def add_metrics(methods : list, i : int,
                     mett = mett.detach().cpu().numpy()
                 res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
-                mett = met(ytrue_mode[:], ypred_mode[:, 0], target, ytrue_mode[:, ids_columns.index('weight')], mask_top)
+                mett = met(ytrue_mode[:], ypred_mode[:, 0], target, ytrue_mode[:, weight_index], mask_top)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster'] = mett
 
             elif met_type == 'class':
-                mett = met(ypred_mode, ytrue_mode, dir, weights=ytrue_mode[:, ids_columns.index('weight')], top=None)
+                mett = met(ypred_mode, ytrue_mode, dir, weights=ytrue_mode[:, weight_index], top=None)
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ypred_mode[mask], ytrue_mode[mask], dir, weights=ytrue_mode[mask, ids_columns.index('weight')], top=None)
+                    mett = met(ypred_mode[mask], ytrue_mode[mask], dir, weights=ytrue_mode[mask, weight_index], top=None)
                     res[oname+'_'+season] = mett
 
                 mett = met(ypred_mode, ytrue_mode, dir, weights=None, top=10)
                 res[oname+'top10'] = mett
 
-                mett = met(ypred_mode[mask_top], ytrue_mode[mask_top], dir, weights=ytrue_mode[mask_top, ids_columns.index('weight')], top=None)
+                mett = met(ypred_mode[mask_top], ytrue_mode[mask_top], dir, weights=ytrue_mode[mask_top, weight_index], top=None)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname+'_top_'+str(top)+'_cluster'] = mett
@@ -1215,7 +1195,7 @@ def add_metrics(methods : list, i : int,
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, ids_columns.index('date')], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
                     mett = met(ytrue_mode[:, band], ypred_mode[:,0], mask)
@@ -1741,7 +1721,7 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
 
     # Calcul du C-index with a minimum of 0
     y_events = np.ones(ytrue.shape[0])
-    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 0],
                                                                          y_events,
@@ -1751,7 +1731,7 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 1
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 1] = 1
-    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 0],
                                                                          y_events,
@@ -1761,7 +1741,7 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 2
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 2] = 1
-    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 0],
                                                                          y_events,
@@ -1771,7 +1751,7 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 3
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 3] = 1
-    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 0],
                                                                          y_events,
@@ -1817,7 +1797,7 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
 
      # Calcul du C-index with a minimum of 0
     y_events = np.ones(ytrue.shape[0])
-    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 1],
                                                                          y_events,
@@ -1827,7 +1807,7 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 1
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 1] = 1
-    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 1],
                                                                          y_events,
@@ -1837,7 +1817,7 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 2
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 2] = 2
-    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 1],
                                                                          y_events,
@@ -1847,7 +1827,7 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Calcul du C-index with a minimum of 3
     y_events = np.zeros(ytrue.shape[0])
     y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 3] = 3
-    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, ids_columns.index('days_until_next_event')],
+    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, days_until_next_event_index],
                                                                          ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
                                                                          ypred[:, 1],
                                                                          y_events,
@@ -1937,9 +1917,9 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
 
     # Obtenir les propriétés des régions labellisées
     regions = measure.regionprops(labeled_image)
+    regions = sorted(regions, key=lambda r: r.area)
 
     # Masque pour les clusters à fusionner
-    #mask = #np.zeros_like(labeled_image, dtype=labeled_image.dtype)
     mask = np.copy(labeled_image)
 
     changed_labels = []
@@ -1947,23 +1927,25 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
     nb_attempt = 3
 
     # Fusionner les clusters de petite taille
-    for i, region in enumerate(regions):
-        if region.label in changed_labels:
-            continue
+    len_regions = len(regions)
+    i = 0
+    while i < len_regions:
+
+        region = regions[i]
 
         if region.label == exclude_label or region.label == background:
             # Si le cluster est à exclure, on le conserve tel quel
             mask[labeled_image == region.label] = region.label
+            i += 1
             continue
-        
+
         label = region.label
-        mask_label = mask == label
-        ones = np.argwhere(mask_label == 1).shape[0]
+        ones = np.argwhere(mask == label).shape[0]
         if ones < min_cluster_size:
             nb_test = 0
             find_neighbor = False
             dilated_image = np.copy(mask)
-            while nb_test < nb_attempt:
+            while nb_test < nb_attempt and not find_neighbor:
 
                 # Obtenir les labels des voisins
                 mask_label = dilated_image == label
@@ -1972,57 +1954,92 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                 neighbor_labels = np.unique(dilated_image[neighbors])
                 neighbor_labels = neighbor_labels[(neighbor_labels != exclude_label) & (neighbor_labels != background) & (neighbor_labels != label)]  # Exclure le fond et le label à exclure
                 dilate = True
+                changed_labels.append(label)
 
                 if len(neighbor_labels) > 0:
 
                     neighbors_size = np.sort([[neighbor_label, np.sum(mask == neighbor_label)] for neighbor_label in neighbor_labels])
-
+                    best_neighbor = None
                     if mode == 'size':
+                        max_neighbor_size = -math.inf
                         for nei, neighbor in enumerate(neighbors_size):
-                            if neighbor[1] + np.sum(mask == label) > min_cluster_size or nei == len(neighbor) - 1:
-                                if neighbor[1] + np.sum(mask == label) < max_cluster_size:
+                            if neighbor[0] == label:
+                                continue
+                            neighbor_size = neighbor[1] + np.sum(mask == label)
+
+                            # Enregistrer le voisin le plus grand si min_cluster_size n'est pas atteint
+                            if neighbor_size > max_neighbor_size:
+                                best_neighbor = neighbor[0]
+                                max_neighbor_size = neighbor_size
+
+                            # Vérifier si le voisin satisfait min_cluster_size
+                            if neighbor_size > min_cluster_size:
+                                # Vérifier aussi que la taille est en dessous de max_cluster_size
+                                if neighbor_size < max_cluster_size:
                                     dilate = False
                                     mask[mask_label_ori] = neighbor[0]
-                                    changed_labels.append(label)
+                                    logger.info(f'label {label} -> {neighbor[0]}')
                                     label = neighbor[0]
+                                    find_neighbor = True
+                                    break
+
+                        # Si aucun voisin n'a permis d'atteindre min_cluster_size, utiliser le voisin le plus grand
+                        if not find_neighbor and best_neighbor is not None:
+                            if max_neighbor_size < max_cluster_size:
+                                mask[mask_label_ori] = best_neighbor
+                                dilate = False
+                                logger.info(f'label {label} -> {best_neighbor}')
+                                label = best_neighbor
                                 find_neighbor = True
-                                break
 
                     elif mode == 'time_series_similarity':
                         assert oridata is not None
                         time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
                         best_neighbord = None
-                        max_simi = -math.inf  # On cherche à maximiser la similarité
-                        simi_thresh = 0.5
+                        min_dst = math.inf  # On cherche à maximiser la similarité
+                        dst_thresh = 50
+
                         # Construire une matrice contenant le label et tous ses voisins
-                        all_series = [time_series_data]
+                        for neighbor in neighbors_size:
+
+                            if neighbor[0] == label:
+                                continue
+
+                            time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
+                            distance = dtw.distance(time_series_data, time_series_data_neighbor)
+
+                            # Debug : Afficher la similarité avec ce voisin
+                            #print(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
+                            if distance < min_dst and distance < dst_thresh:
+                                best_neighbord = neighbor[0]
+                                min_dst = distance  # Mettre à jour le voisin le plus similaire et la similarité max
+                                
+                        # Si on a trouvé un voisin, on met à jour le label
+                        if best_neighbord is not None:
+                            dilate = False
+                            mask[mask_label_ori] = best_neighbord
+                            logger.info(f'label {label} -> {best_neighbord}')
+                            changed_labels.append(label)
+                            label = best_neighbord
+                            find_neighbor = True
+
+                    elif mode == 'time_series_similarity_fast':
+                        assert oridata is not None
+                        time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
+                        best_neighbord = None
+                        min_simi = math.inf  # On cherche à maximiser la similarité
+                        dst_thresh = 100
+                        # Construire une matrice contenant le label et tous ses voisins
                         for neighbor in neighbors_size:
                             time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
-                            all_series.append(time_series_data_neighbor)
+                            _, simi = dtw_functions.dtw(time_series_data, time_series_data_neighbor, local_dissimilarity=d.euclidean)
 
-                        # Convertir la liste en numpy array pour utiliser la matrice de distance 
-                        all_series = np.asarray(all_series)
-
-                        # Calculer la matrice de distance (DTW) entre le label et tous les voisins
-                        distance_matrix = dtw.distance_matrix(all_series)
-                        
-                        # Convertir la matrice de distance en matrice de similarité
-                        similarity_matrix = similarity.distance_to_similarity(distance_matrix, method='exponential')
-                        
-                        # Debug: Afficher la matrice de similarité
-                        logger.info(f"Similarity matrix: {similarity_matrix}")
-                        
-                        # Parcourir les voisins pour trouver celui avec la similarité maximale
-                        for i, neighbor in enumerate(neighbors_size):
-                            simi = similarity_matrix[0, i+1]  # Similarité entre le label et ce voisin
-                            
                             # Debug : Afficher la similarité avec ce voisin
-                            logger.info(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
-                            
-                            if simi > max_simi and simi > simi_thresh:
+                            #print(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
+                            if simi < min_simi and simi < dst_thresh:
                                 best_neighbord = neighbor[0]
-                                max_simi = simi  # Mettre à jour le voisin le plus similaire et la similarité max
-                        
+                                min_simi = simi  # Mettre à jour le voisin le plus similaire et la similarité max
+
                         # Si on a trouvé un voisin, on met à jour le label
                         if best_neighbord is not None:
                             dilate = False
@@ -2031,41 +2048,45 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                             label = best_neighbord
                             find_neighbor = True
 
-
                 # Si on a pas de voisin
                 if dilate:
                     mask_label = morphology.dilation(mask_label, morphology.square(3))
                     dilated_image[(mask_label)] = label
                     nb_test += 1
 
-                mask_label = mask == label
-                ones = np.argwhere(mask_label == 1).shape[0]
-
                 if not dilate:
                     break
 
             # Si la taille est petite et qu'on a jamais trouvé de voisin -> région isolée.
-            #if not find_neighbor:
-            if nb_test == nb_attempt and not find_neighbor:
+            if not find_neighbor:
                 if ones < min_cluster_size:
                     mask_label = dilated_image == label
                     ones = np.argwhere(mask_label == 1).shape[0]
                     if ones < min_cluster_size:
-                        mask[mask == region.label] = 0
+                        mask[mask_label] = 0
+                        logger.info(f'Remove label {region.label}')
                     else:
                         mask[mask_label] = region.label
-
+                        logger.info(f'Keep label dilated {region.label}')
             regions = measure.regionprops(mask)
-            
+            regions = sorted(regions, key=lambda r: r.area)
+            len_regions = len(regions)
+            i = 0
+            continue
         else:
             # Si le cluster est assez grand, on le conserve tel quel
-            mask[labeled_image == region.label] = region.label
+            #mask[labeled_image == region.label] = region.label
+            logger.info(f'Keep label {region.label}')
 
-    # Image finale après fusion
-    merged_image = np.copy(mask)
-    
-    return merged_image
+        i += 1
 
+    return mask
+
+def variance_threshold(df,th):
+    var_thres=VarianceThreshold(threshold=th)
+    var_thres.fit(df)
+    new_cols = var_thres.get_support()
+    return df.iloc[:,new_cols]
 
 def find_clusters(image, threshold, clusters_to_ignore=None, background=0):
     """
@@ -2118,9 +2139,9 @@ def split_large_clusters(image, size_threshold, min_cluster_size, background):
 
     for region in regions:
 
-        if region.label == background:
+        if region.label in background:
             continue
-
+        
         if region.area > size_threshold:
             # Si la région est plus grande que le seuil, la diviser
             
@@ -2130,10 +2151,9 @@ def split_large_clusters(image, size_threshold, min_cluster_size, background):
             
             # Obtenir les coordonnées des pixels du cluster
             coords = np.column_stack(np.nonzero(region_mask))
-            
             # Appliquer K-means pour diviser en 2 clusters
             if len(coords) > 1:  # Assurez-vous qu'il y a suffisamment de points pour appliquer K-means
-                clusterer = KMeans(n_clusters=2, random_state=0).fit(coords)
+                clusterer = KMeans(n_clusters=2, random_state=42).fit(coords)
                 #clusterer = HDBSCAN(min_cluster_size=size_threshold).fit(coords)
                 labels = clusterer.labels_
                 

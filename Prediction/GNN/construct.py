@@ -48,9 +48,9 @@ def look_for_information(graph, dataset_name : str,
     points.to_csv(dir / sinister / name, index=False)
 
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements,
-                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_date, val_date):
+                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_date, val_date, graph_method):
     
-    graphScale = GraphStructure(scale, geo, maxDist, nmax, resolution, graph_construct, sinister, sinister_encoding, dataset_name, train_departements)
+    graphScale = GraphStructure(scale, geo, maxDist, nmax, resolution, graph_construct, sinister, sinister_encoding, dataset_name, train_departements, graph_method)
 
     sucseptibility_map_model_config = {'type': 'Unet',
                                        'device': 'cuda',
@@ -69,15 +69,17 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             'days_since_rain', 'sum_consecutive_rainfall',
                                             'sum_rain_last_7_days',
                                             'sum_snow_last_7_days', 'snow24h', 'snow24h16']
-
-    """graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
-                                        departements=train_departements,
-                                        variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
-                                        root_data=rootDisk / 'csv',
-                                        root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                        dir_output=dir_output)"""
-
-    graphScale._create_sinister_region(base=graph_construct, doRaster=doRaster,
+    if dataset_name == 'firemen2':
+        graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
+                                            departements=train_departements,
+                                            variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
+                                            root_data=rootDisk / 'csv',
+                                            root_target=root_target / sinister / dataset_name / sinister_encoding,
+                                            dir_output=dir_output)
+    else:
+        pass
+        
+    graphScale._create_sinister_region(base=graph_construct,
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
                                  sinister_encoding=sinister_encoding,
                                  resolution=resolution, train_date=train_date)
@@ -213,7 +215,7 @@ def construct_database(
     
     # Predict nodes based on position and assign them to the DataFrame
     
-    ps[f'scale{scale}'] = graphScale._predict_node_with_position(X_kmeans, ps.departement)
+    ps[f'graph_{scale}'], ps[f'scale{scale}'] = graphScale._predict_node_graph_with_position(X_kmeans, ps.departement)
     ps = ps[~ps[f'scale{scale}'].isna()] 
 
     # Define the output file name
@@ -229,12 +231,11 @@ def construct_database(
     logger.info(f'{len(ps)} point in the dataset. Constructing database')
 
     # Initialize an array for original nodes with default values
-    orinode = np.full((len(ps), 5), -1.0, dtype=float)
-    orinode[:, 0] = ps[f'scale{scale}'].values  # Assign node IDs
-    orinode[:, 4] = ps['date']  # Assign dates
-    orinode[:, 3] = ps['departement']
-
-    print(np.unique(orinode[:, 3]))
+    orinode = np.full((len(ps), 6), -1.0, dtype=float)
+    orinode[:, graph_id_index] = ps[f'graph_{scale}'].values  # Assign node IDs
+    orinode[:, id_index] = ps[f'scale{scale}'].values  # Assign node IDs
+    orinode[:, departement_index] = ps['departement']
+    orinode[:, date_index] = ps['date']  # Assign dates
 
     #orinode = generate_subgraph(graphScale, 0, 0, orinode)
 
@@ -248,7 +249,6 @@ def construct_database(
     #subNode = graphScale._assign_department(subNode)
 
     # Log information about the graph
-
     graphScale._info_on_graph(subNode, Path('log'))
 
     ################################## Try loading Y database #############################
@@ -712,6 +712,7 @@ def init(args, dir_output, script):
     sinister_encoding = args.sinisterEncoding
     weights_version = args.weights
     top_cluster = args.top_cluster
+    graph_method = args.graph_method
 
     ######################## Get features and train features list ######################
 
@@ -745,7 +746,7 @@ def init(args, dir_output, script):
     else:
         prefix = f'{values_per_class}_{k_days}'
 
-    prefix += f'_{scale}_{graph_construct}'
+    prefix += f'_{scale}_{graph_construct}_{graph_method}'
 
     autoRegression = 'AutoRegressionReg' in train_features
     if autoRegression:
@@ -773,6 +774,7 @@ def init(args, dir_output, script):
                                     graph_construct=graph_construct,
                                     train_date=trainDate,
                                     val_date=maxDate,
+                                    graph_method=graph_method
                                     )
         graphScale._plot(graphScale.nodes, dir_output=dir_output)
         #graphScale._clusterize_node(train_departements, ['population', 'foret'], maxDate, dir_output, rootDisk / 'csv')
@@ -888,8 +890,8 @@ def init(args, dir_output, script):
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
 
-    #if True:
-    else:
+    if True:
+    #else:
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X
         df[ids_columns[:-1] + targets_columns] = Y
@@ -956,11 +958,63 @@ def init(args, dir_output, script):
     df = graphScale._create_predictor(df.copy(deep=True), minDate, maxDate, dir_output)
     print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
 
+    ############################## Add survival column #############################
+
+    df['days_until_next_event'] = calculate_days_until_next_event(df['id'].values, df['date'].values, df['nbsinister'].values)
+
+    ################################ Remove bad or correlated features #############################################
+    features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
+    df = df[features_name + ids_columns + targets_columns]
+
+    old_shape = df.shape
+    df = remove_nan_nodes(df)
+    logger.info(f'Removing nan Features DataFrame shape : {old_shape} -> {df.shape}')
+
+    leni = len(features_name)
+    df_features = df[features_name]
+
+    # Remove low variance Features:
+    df_features = variance_threshold(df_features, 0.15)
+    features_name = list(df_features.columns)
+    logger.info(f'Remove low Variance {leni} -> {len(features_name)}')
+    leni = len(features_name)
+    
+    # Remove correlated Features
+    if (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl').is_file():
+        features_name = list(read_object(f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation'))
+        df_features = df[features_name]
+    else:
+        logger.info('Removing correlated feature')
+        tr = SmartCorrelatedSelection(
+                variables=None,
+                method="pearson",
+                threshold=0.8,
+                missing_values="raise",
+                selection_method="model_performance",
+                estimator=XGBRegressor(random_state=42),
+                scoring='neg_root_mean_squared_error'
+        )
+        
+        df_features = tr.fit_transform(df_features, df['risk'])
+        features_name = list(df_features.columns)
+        
+        check_and_create_path(dir_output / 'features_correlation')
+
+        save_object(features_name, f'{scale}_{graphScale.base}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_correlated_group.pkl', dir_output  / 'features_correlation')
+    
+    logger.info(f'Smart Correlated Selection {leni} -> {len(features_name)}')
+
+    features_name = list(df_features.columns)
+    df_features[targets_columns + ids_columns] = df[targets_columns + ids_columns]
+    df = df_features
+
     ############################## Add varying time features #############################
  
     if k_days > 0:
         df, new_fet_time = add_time_columns(varying_time_variables, k_days, df.copy(deep=True), train_features)
         varying_time_variables_name = new_fet_time
+    
     print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
 
         ############################## Add weight columns #############################
@@ -973,12 +1027,7 @@ def init(args, dir_output, script):
 
     df.drop_duplicates(inplace=True)
 
-    ############################## Add survival column #############################
-
-    df['days_until_next_event'] = calculate_days_until_next_event(df['id'].values, df['date'].values, df['nbsinister'].values)
-
     ############################## Update features list #############################
-    features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
     
     if 'new_fet_fr' in locals():
         features_name += varying_time_variables_name + new_fet_fr

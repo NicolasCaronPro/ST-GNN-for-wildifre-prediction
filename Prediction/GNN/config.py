@@ -278,7 +278,7 @@ def get_academic_zone(name, date):
         return dict_zones[name][0]
     return dict_zones[name][1]
 
-ids_columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
+ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 targets_columns = ['class_risk', 'nbsinister', 'risk']
 weights_columns = ['weight_proportion_on_zero_class',
                    'weight_class',
@@ -295,6 +295,19 @@ weights_columns = ['weight_proportion_on_zero_class',
                    'weight_normalize_nbsinister',
                    'weight_nbsinister_nbsinister',
                    'weight_random_nbsinister']
+
+id_index = ids_columns.index('id')
+graph_id_index = ids_columns.index('graph_id')
+longitude_index = ids_columns.index('longitude')
+latitude_index = ids_columns.index('latitude')
+departement_index = ids_columns.index('departement')
+date_index = ids_columns.index('date')
+weight_index = ids_columns.index('weight')
+days_until_next_event_index = ids_columns.index('days_until_next_event')
+
+class_index = targets_columns.index('class_risk')
+nbsinister_index = targets_columns.index('nbsinister')
+risk_index = targets_columns.index('risk')
 
 ############################ Logger ######################################
 
@@ -324,7 +337,9 @@ if MLFLOW:
         exit(1)
 
 
-maxDist = {0 : math.inf,
+maxDist = {
+    -1 : math.inf,
+            0 : math.inf,
            1 : math.inf,
            2 : math.inf,
            3 : math.inf,
@@ -365,7 +380,6 @@ veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
             in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
-device = torch.device('cpu')
 Rewrite = True
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used

@@ -49,6 +49,7 @@ parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
 parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
+parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
 
 args = parser.parse_args()
 
@@ -83,6 +84,7 @@ graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
+graph_method = args.graph_method
 
 assert k_days == 0
 
@@ -254,7 +256,7 @@ if doTest:
 
     host = 'pc'
     
-    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
+    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}_{top_cluster}'
 
     trainCode = [name2int[dept] for dept in train_departements]
 

@@ -16,15 +16,15 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
     elif band == -1 or band == -2:
         band = 0
 
-    dept = np.unique(y[:, 3])
+    dept = np.unique(y[:, departement_index])
     classes = np.unique(y[:, -3])
     colors = plt.cm.get_cmap('jet', 5)
     
     for d in dept:
-        mask = np.argwhere(y[:, 3] == d)[:, 0]
+        mask = np.argwhere(y[:, departement_index] == d)[:, 0]
         maxi = max(np.nanmax(ypred[mask]), np.nanmax(ytrue[mask]))
         mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
-        ids = np.unique(y[mask, 0])
+        ids = np.unique(y[mask, graph_id_index])
         if ids.shape[0] == 1:
             fig, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
             ax.plot(ypred[mask], color='red', label='predict')
@@ -44,7 +44,7 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
         else:
             fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
-                mask2 = np.argwhere(y[:, 0] == id)[:, 0]
+                mask2 = np.argwhere(y[:, graph_id_index] == id)[:, 0]
                 ax[i].plot(ypred[mask2], color='red', label='predict')
                 ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
 
@@ -67,21 +67,21 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
         plt.savefig(dir_output / outn)
         plt.close('all')
 
-    uids = np.unique(y[:, 0])
+    uids = np.unique(y[:, graph_id_index])
     if uids.shape[0] < 5:
         return
     ysum = np.empty((uids.shape[0], 2))
-    ysum[:, 0] = uids
+    ysum[:, graph_id_index] = uids
     for id in uids:
-        ysum[np.argwhere(ysum[:, 0] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, 0] == id)[:, 0], -2])
+        ysum[np.argwhere(ysum[:, graph_id_index] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, graph_id_index] == id)[:, 0], -2])
 
     ind = np.lexsort([ysum[:, 1]])
-    ymax = np.flip(ysum[ind, 0])[:2]
+    ymax = np.flip(ysum[ind, graph_id_index])[:2]
     _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50, 25))
     for i, idtop in enumerate(ymax):
-        mask = np.argwhere(y[:, 0] == idtop)[:, 0]
-        dept = np.unique(y[mask, 3])[0]
-        ids = np.unique(y[mask, 0])
+        mask = np.argwhere(y[:, graph_id_index] == idtop)[:, 0]
+        dept = np.unique(y[mask, departement_index])[0]
+        ids = np.unique(y[mask, graph_id_index])
         ax[i].plot(ypred[mask], color='red', label='predict')
         ax[i].plot(ytrue[mask], color='blue', label='real', alpha=0.5)
 
@@ -109,11 +109,11 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
 
 def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname):
     check_and_create_path(dir_output)
-    udept = np.unique(ytrue[:, 3])
+    udept = np.unique(ytrue[:, departement_index])
 
     for dept in udept:
-        y = ytrue[ytrue[:, 3] == dept]
-        ypredclass = ypredclassfull[ytrue[:, 3] == dept] 
+        y = ytrue[ytrue[:, departement_index] == dept]
+        ypredclass = ypredclassfull[ytrue[:, departement_index] == dept] 
         nbclass = [0,1,2,3,4]
 
         meansinisterinpred = []
@@ -290,15 +290,15 @@ def realVspredict2d(ypred : np.array,
     def add_value_from_array(date, x, array, index):
         try:
             if index is not None:
-                return array[(ytrue[:,4] == date) & (ytrue[:,0] == x)][:,index][0]
+                return array[(ytrue[:,date_index] == date) & (ytrue[:,graph_id_index] == x)][:,index][0]
             else:
-                return array[(ytrue[:,4] == date) & (ytrue[:,0] == x)][0]
+                return array[(ytrue[:,date_index] == date) & (ytrue[:,graph_id_index] == x)][0]
         except Exception as e:
             #logger.info(e)
             return 0
     
     check_and_create_path(dir_output)
-    uniqueDates = np.sort(np.unique(ytrue[:,4])).astype(int)
+    uniqueDates = np.sort(np.unique(ytrue[:,date_index])).astype(int)
     mean = []
     for date in uniqueDates:
         try:
@@ -392,12 +392,12 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
     sinister_point['departement'] = np.nan
     sinister_point['id'] = np.nan
     values = graph._assign_department(sinister_point[['id', 'longitude', 'latitude', 'departement']].values)
-    sinister_point['departement'] = values[:, 3]
+    sinister_point['departement'] = values[:, departement_index]
 
     regions_france['departement'] = np.nan
     regions_france['id'] = np.nan
     values = graph._assign_department(regions_france[['id', 'longitude', 'latitude', 'departement']].values)
-    regions_france['departement'] = values[:, 3]
+    regions_france['departement'] = values[:, departement_index]
 
     for date_index in dates:
         date = allDates[date_index]

@@ -23,7 +23,6 @@ parser = argparse.ArgumentParser(
     description='Create graph and database according to config.py and tained model',
 )
 parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
-parser.add_argument('-dataset', '--dataset', type=str, help='Dataset')
 parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
 parser.add_argument('-p', '--point', type=str, help='Construct points')
@@ -35,6 +34,7 @@ parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date'
 parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
 parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
 parser.add_argument('-sc', '--scale', type=str, help='Scale')
+parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
 parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
 parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
 parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
@@ -52,13 +52,13 @@ parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
 parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
+parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
 
 args = parser.parse_args()
 
 # Input config
 dataset_name = args.dataset
 name_exp = args.name
-
 maxDate = args.maxDate
 trainDate = args.trainDate
 doEncoder = args.encoder == "True"
@@ -70,7 +70,7 @@ doFet = args.featuresSelection == "True"
 optimize_feature = args.optimizeFeature == "True"
 doTest = args.doTest == "True"
 doTrain = args.doTrain == "True"
-nbfeatures = int(args.NbFeatures)
+nbfeatures = args.NbFeatures
 sinister = args.sinister
 values_per_class = args.nbpoint
 scale = int(args.scale) if args.scale != 'departement' else args.scale
@@ -81,12 +81,15 @@ ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
-days_in_futur = int(args.days_in_futur) # The target time validation
+days_in_futur = args.days_in_futur # The target time validation
 scaling = args.scaling
 graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
+graph_method = args.graph_method
+
+assert graph_method == 'node'
 
 ######################## Get features and train features list ######################
 
