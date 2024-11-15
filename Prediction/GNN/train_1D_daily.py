@@ -157,6 +157,8 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
 features_selected = list(features_selected)
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
+else:
+    nbfeatures = int(nbfeatures)
 
 features_selected_str = features_selected
 print(features_selected_str)
@@ -180,14 +182,14 @@ if MLFLOW:
 
 prefix += f'_{weights_version}'
 
-train_dataset['weight'] = train_dataset[weights_version]
-val_dataset['weight'] = val_dataset[weights_version]
+train_dataset['weight'] = train_dataset[f'{weights_version}_nbsinister']
+val_dataset['weight'] = val_dataset[f'{weights_version}_nbsinister']
+
 train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
 val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
-test_dataset['weight'] = 1
-test_dataset['weight_nbsinister'] = 1
-
+test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'weight_outlier_2_nbsinister']
+test_dataset['weight'] = test_dataset[f'weight_outlier_2_nbsinister']
 #test_dataset = val_dataset
 
 models = [
@@ -197,12 +199,12 @@ models = [
             ]
 
 gnn_models = [
-    ('GAT', True, 'risk_regression_rmse', autoRegression),
     ('GAT', True, 'nbsinister_regression_rmse', autoRegression),
+    #('GAT', True, 'nbsinister_regression_rmse', autoRegression),
     #('GAT', True, 'binary_classification_weightedcrossentropy', autoRegression),
 
-    ('GCN', True, 'nbsinister_regression_rmse', autoRegression),
-    ('GCN', True, 'risk_regression_rmse', autoRegression),
+    #('GCN', True, 'nbsinister_regression_rmse', autoRegression),
+    #('GCN', True, 'risk_regression_rmse', autoRegression),
     #('GCN', True, 'binary_classification_weightedcrossentropy', autoRegression),
 ]
 
@@ -230,7 +232,7 @@ params = {
     "Rewrite": Rewrite,
     "dir_output": dir_output,
     "train_dataset_unscale": train_dataset_unscale,
-    "scale": scale,
+    "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
 }
@@ -254,7 +256,7 @@ if doTrain:
 
 if doTest:
 
-    host = 'pc'
+    host = 'server'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}_{top_cluster}'
 
@@ -293,14 +295,15 @@ if doTest:
             ('class', ck, 'class'),
             #('poisson', po, 'proba'),
             ('ca', ca, 'class'),
-            #('bca', bca, 'class'),
+            ('bca', bca, 'class'),
             ('maec', meac, 'class'),
             ('acc', acc, 'class'),
-            ('c_index', c_i, 'class'),
-            ('c_index_class', c_i_class, 'class'),
+            #('c_index', c_i, 'class'),
+            #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation')
+            ('spearman', spearman_coefficient, 'correlation'),
+            ('auc_roc', my_roc_auc, 'bin')
             ]
 
     models = [
@@ -311,12 +314,12 @@ if doTest:
     ]
 
     gnn_models = [
-        ('GAT_risk_regression_rmse', True, 'risk', autoRegression),
         ('GAT_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
+        #('GAT_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
         #('GAT_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
 
-        ('GCN_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
-        ('GCN_risk_regression_rmse', True, 'risk', autoRegression),
+        #('GCN_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
+        #('GCN_risk_regression_rmse', True, 'risk', autoRegression),
         #('GCN_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
     ]
 
@@ -333,6 +336,7 @@ if doTest:
                 client.create_experiment(name=exp_name, tags=tags)
 
             mlflow.set_experiment(exp_name)
+
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
         if test_dataset_unscale is not None:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
@@ -365,12 +369,26 @@ if doTest:
                             name_exp=name_exp,
                             doKMEANS=doKMEANS)
         else:
-            for name, use_temporal_as_edges, target_name, autoRegression in models:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-                res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
+            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
+            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
             
-            metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
+            print(metrics)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    
+                    mlflow.end_run()
 
         """if len(res) > 0:
             res = pd.concat(res).reset_index(drop=True)

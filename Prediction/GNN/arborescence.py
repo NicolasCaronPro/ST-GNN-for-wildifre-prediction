@@ -1,5 +1,4 @@
 from pathlib import Path
-import sys
 
 # Arboressence
 rootDisk = Path('/media/caron/X9 Pro/travaille/Thèse')

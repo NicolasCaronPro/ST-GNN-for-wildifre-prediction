@@ -285,6 +285,7 @@ if __name__ == "__main__":
     parser.add_argument('-am', '--addMean', type=str, help='Add mean kernel')
     parser.add_argument('-d', '--dataset', type=str, help='Dataset to Use')
     parser.add_argument('-se', '--sinisterEncoding', type=str, help='Value to use for sinister encoding')
+    parser.add_argument('-od', '--output_dataset', type=str, help='Value to use for sinister encoding')
 
     args = parser.parse_args()
 
@@ -295,11 +296,15 @@ if __name__ == "__main__":
     resolution = args.resolution
     dataset_name = args.dataset
     sinister_encoding = args.sinisterEncoding
+    output_dataset = args.output_dataset
+
+    if output_dataset is None:
+        output_dataset = dataset_name
 
     ###################################### Data loading ###################################
     #root = Path('/home/caron/Bureau/csv')
     root = Path('/media/caron/X9 Pro/travaille/Thèse/csv')
-    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+dataset_name + '/' + sinister_encoding)
+    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+output_dataset + '/' + sinister_encoding)
 
     """if dataset_name == 'firemen':
         spa = 3
@@ -351,9 +356,9 @@ if __name__ == "__main__":
     regions.index = regions['hex_id']
     dico = regions['scale0'].to_dict()
     regions.reset_index(drop=True, inplace=True)
-    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}'))
+    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}'))
     print(regions.departement.unique())
-    regions.to_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}/regions.geojson', driver='GeoJSON')
+    regions.to_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/regions.geojson', driver='GeoJSON')
 
     ################################### Create output directory ###########################
     check_and_create_path(dir_output / 'mask' / 'geo' / resolution)
@@ -395,7 +400,7 @@ if __name__ == "__main__":
         dims[dept] = ((spa, spa, dim_med), (spa, spa, dim_high), (spa, spa, dim_low))
         print(dept, leni, (dim_med, dim_high, dim_low))
     
-    save_object(dims, 'dimension.pkl', Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{dataset_name}/{sinister_encoding}'))
+    save_object(dims, 'dimension.pkl', Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/{sinister_encoding}'))
 
     ################################## Process #################################
 
@@ -403,8 +408,8 @@ if __name__ == "__main__":
                                     n_pixel_y=n_pixel_y, n_pixel_x=n_pixel_x, read=read)
 
     fp = pd.concat(fp).reset_index(drop=True)
-    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{dataset_name}'))
-    fp.to_csv(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{dataset_name}/{sinister}.csv', index=False)
+    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}'))
+    fp.to_csv(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}/{sinister}.csv', index=False)
 
     model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
     model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements, False)

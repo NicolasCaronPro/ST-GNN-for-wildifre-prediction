@@ -79,6 +79,7 @@ class GraphStructure():
         self.dataset_name = dataset_name
         self.train_departements = train_departements
         self.graph_method = graph_method
+        self.susceptility_mapper = None
 
     def _create_sinister_region(self, base: str, path: Path, sinister: str, dataset_name:str, sinister_encoding : str, resolution, train_date) -> None:
         udept = np.unique(self.departements)
@@ -99,7 +100,7 @@ class GraphStructure():
         self.ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
         self.graph_ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
 
-        for dept in udept:
+        for i, dept in enumerate(udept):
             mask = self.departements == dept
             logger.info(f'######################### {dept} ####################')
             if self.scale == 'departement':
@@ -109,9 +110,9 @@ class GraphStructure():
                 assert raster is not None
                 raster = raster[0]
                 pred = np.full(raster.shape, fill_value=np.nan)
-                pred[~np.isnan(raster)] = 0.0
+                pred[~np.isnan(raster)] = i
                 # Process post-watershed results
-                self._post_process_result(pred, raster, mask, node_already_predicted)
+                self._post_process_result(pred, raster, mask, node_already_predicted, 'graph')
                 self._save_feature_image(path, dept, 'pred_final', pred, raster)
             else:
                 if 'clustering' in vec_base:
@@ -121,11 +122,11 @@ class GraphStructure():
                 elif 'regular' in vec_base:
                     self.create_geometry_with_regular(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
 
-            current_cluster = np.unique(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])]).shape[0]
+            current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])])
             logger.info(f'{dept} Unique cluster : {np.unique(self.graph_ids[mask])}, {current_cluster}. {node_already_predicted}')
-            node_already_predicted += current_cluster
-            self.numCluster += current_cluster
-        
+            if 'watershed' not in vec_base:
+                node_already_predicted = current_cluster + 1
+            
         self.oriIds = self.oriIds[~np.isnan(self.graph_ids)]
         self.oriLatitudes = self.oriLatitudes[~np.isnan(self.graph_ids)].reset_index(drop=True)
         self.oriGeometry = self.oriGeometry[~np.isnan(self.graph_ids)]
@@ -133,6 +134,7 @@ class GraphStructure():
         self.departements = self.departements[~np.isnan(self.graph_ids)].reset_index(drop=True)
         self.graph_ids = self.graph_ids[~np.isnan(self.graph_ids)].astype(int)
         self.graph_ids = relabel_clusters(self.graph_ids, 0)
+        self.numCluster = np.unique(self.graph_ids).shape[0]
         
         self.oriLen = self.oriLatitudes.shape[0]
         self.numCluster = np.shape(np.unique(self.graph_ids))[0]
@@ -159,7 +161,7 @@ class GraphStructure():
         for vb in vec_base:
             if vb == 'clustering':
                 continue
-            data = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+            data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
             if data is None:
                 continue
             if vb == 'geometry':
@@ -192,7 +194,7 @@ class GraphStructure():
         values = values[:, pred_mask]
         values = np.moveaxis(values, 0, 1)
         min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
-        max_cluster_size = int(1 + 3.5 * self.scale * (self.scale + 1))
+        max_cluster_size = int(min_cluster_size * 2.5)
 
         model = HDBSCAN()
         pred[pred_mask] = model.fit_predict(values)
@@ -215,6 +217,37 @@ class GraphStructure():
         self._post_process_result(pred, raster, mask, node_already_predicted)
         self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
+    def my_watershed(self, dept, data, valid_mask, raster, path, vb, image_type):
+        reducor = Predictor(n_clusters=4, name='risk_reducor')
+        reducor.fit(data[valid_mask].reshape(-1,1))
+        data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
+        data[valid_mask] = order_class(reducor, data[valid_mask])
+        data[~valid_mask] = 0
+
+        data[valid_mask] = morphology.erosion(data, morphology.square(1))[valid_mask]
+        self._save_feature_image(path, dept, f'{vb}_{image_type}', data, raster)
+
+        # High Fire region
+        # Détection des contours avec l'opérateur Sobel
+        edges = filters.sobel(data)
+        self._save_feature_image(path, dept, f'edges_{image_type}', edges, raster)
+
+        # Créer une carte de distance
+        distance = np.full(data.shape, fill_value=0.0)
+        distance = ndi.distance_transform_edt(edges)
+        self._save_feature_image(path, dept, f'distance_{image_type}', distance, raster)
+
+        # Marquer les objets (régions connectées) dans l'image
+        local_maxi = np.full(data.shape, fill_value=0)
+        markers = np.full(data.shape, fill_value=0)
+        local_maxi = morphology.local_maxima(distance)
+        markers, _ = ndi.label(local_maxi)
+
+        # Appliquer la segmentation Watershed
+        pred = watershed(-data, markers, mask=data, connectivity=1)
+        self._save_feature_image(path, dept, f'pred_watershed_{image_type}', pred, raster)
+        return pred
+
     def create_geometry_with_watershed(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):
         
@@ -233,7 +266,7 @@ class GraphStructure():
         vb = vec_base[0]
         mode = vec_base[1]
 
-        data = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+        data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
         if data is None:
             logger.info(f'Can t find {vb}')
             exit(1)
@@ -242,38 +275,14 @@ class GraphStructure():
             self.max_target_value = np.nanmax(data)
         else:
             self.max_target_value = max(self.max_target_value, np.nanmax(data))
-
         oridata = np.copy(data)
+        
         self._save_feature_image(path, dept, 'sum', data, raster, 0, self.max_target_value)
 
-        reducor = Predictor(n_clusters=4, name='risk_reducor')
-        reducor.fit(data[valid_mask].reshape(-1,1))
-        data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
-        data[valid_mask] = order_class(reducor, data[valid_mask])
-        data[~valid_mask] = 0
-
-        data[valid_mask] = morphology.erosion(data, morphology.square(1))[valid_mask]
-        self._save_feature_image(path, dept, f'{vb}', data, raster)
-
-        # High Fire region
-        # Détection des contours avec l'opérateur Sobel
-        edges = filters.sobel(data)
-        self._save_feature_image(path, dept, 'edges', edges, raster)
-
-        # Créer une carte de distance
-        distance = np.full(data.shape, fill_value=0.0)
-        distance = ndi.distance_transform_edt(edges)
-        self._save_feature_image(path, dept, 'distance', distance, raster)
-
-        # Marquer les objets (régions connectées) dans l'image
-        local_maxi = np.full(data.shape, fill_value=0)
-        markers = np.full(data.shape, fill_value=0)
-        local_maxi = morphology.local_maxima(distance)
-        markers, _ = ndi.label(local_maxi)
-
-        # Appliquer la segmentation Watershed
-        pred = watershed(-data, markers, mask=data, connectivity=1)
-        self._save_feature_image(path, dept, 'pred_watershed', pred, raster)
+        pred = self.my_watershed(dept, data, valid_mask, raster, path, vb, 'pred')
+        if GT is not None:
+            self._save_feature_image(path, dept, 'gt_sum', GT, raster, 0, self.max_target_value)
+            pred_GT = self.my_watershed(dept, GT, valid_mask, raster, path, vb, 'gt')
 
         # Merge and split clusters
         umarker = np.unique(pred)
@@ -294,7 +303,7 @@ class GraphStructure():
             frs = []
             scales = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
             for scale in scales:
-                fr_scale = self.create_cluster(pred, dept, path, scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted)
+                fr_scale, _ = self.create_cluster(pred, dept, path, scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted)
                 frs.append(fr_scale)
                 if fr_scale > best_fr:
                     best_fr = fr_scale
@@ -307,15 +316,52 @@ class GraphStructure():
             plt.ylabel('Frequency ratio')
             plt.savefig(path / 'scale_optimization' / f'{dept}_scale_optimization.png')
             plt.close('all')
-            self.create_cluster(pred, dept, path, best_scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted)
+            _, pred = self.create_cluster(pred, dept, path, best_scale, mode, bin_data, raster, valid_mask, 'pred')
         else:
-            self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted)
-                
-    def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted):
+            _, pred = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred')
+
+        if GT is not None:
+            _, pred_GT = self.create_cluster(pred_GT, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'gt')
+
+            iou = calculate_iou(pred_GT, pred)
+
+            logger.info(f'{dept} -> IoU : {iou}')
+            if MLFLOW:
+                existing_run = get_existing_run(f'segmentation_{dept}_{self.susceptility_mapper_name}')
+                if existing_run:
+                    mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                else:
+                    mlflow.start_run(run_name=f'segmentation_{dept}_{self.susceptility_mapper_name}', nested=True)
+                mlflow.log_metric('IoU', iou)
+                mlflow.end_run()
+
+        # Process post-watershed results
+        pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
+        self._save_feature_image(path, dept, 'pred_final', pred, raster)
+        
+        # Analyse dispersion of fire regions
+        self.dispersions = {}
+        clusters = np.unique(pred[valid_mask])
+        for cluster_id in clusters:
+            # Extraire les pixels du cluster actuel
+            cluster_pixels = np.argwhere(pred == cluster_id)
+            
+            # Calculer le centroïde du cluster
+            centroid = np.mean(cluster_pixels, axis=0)
+            
+            # Calculer la distance de chaque pixel au centroïde
+            distances = cdist(cluster_pixels, [centroid])
+            
+            # Calculer la dispersion (écart-type des distances)
+            self.dispersions[cluster_id] = np.std(distances)
+
+        logger.info(f'Cluster dispersion {self.dispersions}')
+
+    def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, type):
         
         min_cluster_size = 1 + 3 * scale * (scale + 1)
-        max_cluster_size = (int)(min_cluster_size * 2.1)
-
+        max_cluster_size = (int)(min_cluster_size * 2.5)
+        
         if mode == 'size':
             pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, oridata=None, mode=mode, exclude_label=0, background=-1)
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
@@ -334,12 +380,12 @@ class GraphStructure():
             pred[valid_mask] -= 1
             
             pred = pred.astype(float)
-            self._save_feature_image(path, dept, 'pred_split', pred, raster)
+            self._save_feature_image(path, dept, f'{type}_split', pred, raster)
 
         elif mode == 'time_series_similarity':
             pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, oridata=bin_data, exclude_label=0, background=-1)
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
-            self._save_feature_image(path, dept, 'pred_merge', pred, raster)
+            self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
             logger.info(np.unique(pred))
             logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
@@ -357,7 +403,7 @@ class GraphStructure():
             pred[~valid_mask] = -1
             pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, oridata=bin_data, exclude_label=0, background=-1)
             valid_cluster = find_clusters(pred, math.inf, 0, -1)
-            self._save_feature_image(path, dept, 'pred_merge', pred, raster)
+            self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
             logger.info(np.unique(pred))
             logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
@@ -377,33 +423,14 @@ class GraphStructure():
             fr_cluster = frequency_ratio(bin_data_sum[~np.isnan(bin_data_sum)], np.argwhere((pred[~np.isnan(bin_data_sum)] == cluster)))
             sum_fr += fr_cluster
             logger.info(f'{cluster} frequency ratio -> {fr_cluster}')
-             
-        sum_fr = sum_fr / len(valid_cluster)
+        
+        if len(valid_cluster) == 0:
+            sum_fr = 0
+        else:
+            sum_fr = sum_fr / len(valid_cluster)
         logger.info(f'Mean fr {sum_fr}')
 
-        # Process post-watershed results
-        pred = self._post_process_result(pred, raster, mask, node_already_predicted) 
-        self._save_feature_image(path, dept, 'pred_final', pred, raster)
-
-        # Analyse dispersion of fire regions
-        self.dispersions = {}
-        clusters = np.unique(pred[valid_mask])
-        for cluster_id in clusters:
-            # Extraire les pixels du cluster actuel
-            cluster_pixels = np.argwhere(pred == cluster_id)
-            
-            # Calculer le centroïde du cluster
-            centroid = np.mean(cluster_pixels, axis=0)
-            
-            # Calculer la distance de chaque pixel au centroïde
-            distances = cdist(cluster_pixels, [centroid])
-            
-            # Calculer la dispersion (écart-type des distances)
-            self.dispersions[cluster_id] = np.std(distances)
-
-        logger.info(f'Cluster dispersion {self.dispersions}')
-
-        return sum_fr
+        return sum_fr, pred
 
     def create_geometry_with_regular(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted):
@@ -422,22 +449,29 @@ class GraphStructure():
         self.max_target_value = None
 
         min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
-        max_cluster_size = (int)(min_cluster_size * 2.1)
+        max_cluster_size = (int)(min_cluster_size * 2.5)
         
-        pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, -1)
+        pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, [-1])
         pred -= 1
         pred = pred.astype(float)
         pred[~valid_mask] = np.nan
         self._save_feature_image(path, dept, 'pred', pred, raster)
 
         # Process post-watershed results
-        self._post_process_result(pred, raster, mask, node_already_predicted)
+        self._post_process_result(pred, raster, mask, node_already_predicted, 'graph')
         self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
     def _process_base_data(self, vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path):
+        
+        GT = None
+
         if vb == 'risk':
             data = read_object(f'{dept}Influence.pkl', dir_target)
             if data is None or dept not in self.train_departements:
+                if data is not None:
+                    GT = np.copy(data)
+                    GT = GT[:, :, :allDates.index(train_date)]
+                    GT = np.nansum(GT, axis=2)
                 data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
                 if data is None:
                     self.predict_susecptibility_map([dept], self.susecptibility_variables, dir_data, path / 'predict_map')
@@ -491,13 +525,17 @@ class GraphStructure():
                 data = np.nansum(data, axis=2)
 
         data[~valid_mask] = np.nan
-        return data
+        if GT is not None:
+            GT[~valid_mask] = np.nan
+
+        return data, GT
     
     def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name, sinister_encoding, train_date):
 
         dir_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resStr
         dir_bin_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'bin' / resStr
         dir_target = root_target / sinister / dataset_name /  sinister_encoding / 'log' / resStr
+        dir_target_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'log' / resStr
         dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resStr
 
         if len(self.drop_department) == self.departements.unique().shape[0]:
@@ -509,22 +547,32 @@ class GraphStructure():
             if dept in self.drop_department:
                 continue
 
+            #if (path / 'raster' / f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl').is_file():
+            #    if self.graph_method == 'node':
+            #        self.ids = np.copy(self.graph_ids)
+            #    continue
+
             maskDept = np.argwhere(self.departements == dept)
-            geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
+            """geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
             geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
             mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
-            mask = mask[0]
+            mask = mask[0]"""
             outputName = f'{dept}rasterScale0.pkl'
             raster = read_object(outputName, dir_raster)
             assert raster is not None
             raster = raster[0]
 
+            mask = np.full(raster.shape, fill_value=np.nan)
+            for uid in np.unique(raster[~np.isnan(raster)]):
+                mask[raster == uid] = self.graph_ids[self.oriIds == uid]
+
             logger.info(f'{dept, mask.shape, raster.shape}')
 
             mask[np.isnan(raster)] = np.nan
-
+            
             if self.graph_method == 'graph':
-                raster_node = np.full(mask.shape, fill_value=np.nan)
+                check_and_create_path(path / 'raster' / 'graph_method')
+                raster_node = np.full(raster.shape, fill_value=np.nan)
                 self.graph_node_dict = {}
                 uids = np.unique(mask)
                 uids = uids[~np.isnan(uids)]
@@ -534,12 +582,13 @@ class GraphStructure():
                 for id in uids:
                     mask_id = mask == id
                     coords = np.column_stack(np.nonzero(mask_id))
-                    raster_node[(mask_id) & (np.isnan(raster_node))] = graph_node_cluster.fit_predict(coords)
-
+                    result = graph_node_cluster.fit_predict(coords)
+                    raster_node[(mask_id) & (np.isnan(raster_node))] = result
+                    
                     raster_node = np.where((raster_node == -1), np.nan, raster_node)
 
                     # Exemple de tableau raster avec des valeurs -1 remplacées par NaN
-                    raster_node_with_nan = np.where((raster_node == -1) & (mask_id), np.nan, raster_node)
+                    """raster_node_with_nan = np.where((raster_node == -1) & (mask_id), np.nan, raster_node)
 
                     # Calculer une carte de distance pour chaque NaN vers le point le plus proche non-NaN
                     # Cette méthode remplit les NaN par les valeurs les plus proches
@@ -559,28 +608,47 @@ class GraphStructure():
 
                     # Remettre à jour raster_node
                     raster_node[mask_id] = filled_raster[mask_id]
-
+                    """
+                    
                     raster_node[mask_id] = raster_node[mask_id] + num_cluster
-                    num_cluster += np.unique(raster_node[mask_id]).shape[0]
+                    num_cluster += np.unique(raster_node[mask_id & ~np.isnan(raster_node)]).shape[0]
 
-                    #plt.figure(figsize=(15,5))
-                    #plt.imshow(raster_node)
-                    #plt.show()
-
-                save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
+                    plt.figure(figsize=(15,5))
+                    plt.imshow(raster_node)
+                    plt.savefig(path / 'raster' / 'graph_method' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}_{id}.png')
+                    plt.close()
 
                 if 'node_already_predicted' not in locals():
                     node_already_predicted = 0
-                self._post_process_result(raster_node, raster, self.departements == dept, node_already_predicted, 'graph')
+                raster_node = self._post_process_result(raster_node, raster, self.departements == dept, node_already_predicted, 'node')
                 current_nodes = np.unique(self.ids[self.departements == dept][~np.isnan(self.ids[self.departements == dept])]).shape[0]
                 logger.info(f'{dept} Unique node in graph : {np.unique(self.ids[self.departements == dept])}, {current_nodes}. {node_already_predicted}')
                 node_already_predicted += current_nodes
+
+                uids = np.unique(self.ids[self.departements == dept])
+                for id in uids:
+                    graph_values = self.graph_ids[self.ids == id]
+                    if np.unique(graph_values).shape[0] > 1:
+                        major_id = np.bincount(graph_values).argmax()
+                        self.graph_ids[self.ids == id] = major_id
+
+                """geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
+                mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
+                mask = mask[0]"""
+
+                mask = np.full(raster.shape, fill_value=np.nan)
+                for uid in np.unique(raster[~np.isnan(raster)]):
+                    mask[raster == uid] = self.graph_ids[self.oriIds == uid]
+
+                mask[np.isnan(raster)] = np.nan
+                save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
+                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
             else:
                 self.ids = np.copy(self.graph_ids)
+                raster_node = np.copy(mask)
                 save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
-
-            save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
-
+                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
+           
             unique_ids = np.unique(mask)
             unique_ids = unique_ids[~np.isnan(unique_ids)]
             plt.figure(figsize=(15, 5))
@@ -610,31 +678,27 @@ class GraphStructure():
                 plt.close('all')
 
             if doBin:
-                outputName = dept+'binScale0.pkl'
+                outputName = f'{dept}binScale0.pkl'
                 if dept not in ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines', 'departement-69-rhone'] and dataset_name == 'firemen':
+                    logger.info(f'Load {dept} from bdiff')
                     bin = read_object(outputName, dir_bin_bdiff)
+                    outputName = f'{dept}Influence.pkl'
+                    influence = read_object(outputName, dir_target_bdiff)
                 else:
                     bin = read_object(outputName, dir_bin)
-                if bin is None:
-                    continue
-                outputName = dept+'Influence.pkl'
-                influence = read_object(outputName, dir_target)
+                    outputName = f'{dept}Influence.pkl'
+                    influence = read_object(outputName, dir_target)
 
                 binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence, raster)
                 save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'bin')
                 save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'influence')
-        
-        if self.graph_method == 'graph':
-            uids = np.unique(self.ids)
-            for id in uids:
-                graph_values = self.graph_ids[self.ids == id]
-                if np.unique(graph_values).shape[0] > 1:
-                    major_id = np.bincount(graph_values).argmax()
-                    # Remplacer tous les graph_ids minoritaires par le majoritaire
-                    self.graph_ids[self.ids == id] = major_id
+
+                binImageScale, influenceImageScale = create_larger_scale_bin(raster_node, bin, influence, raster)
+                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'bin')
+                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'influence')
 
             self.numCluster = np.shape(np.unique(self.ids))[0]
-        
+            
     def _raster(self, path : Path,
                 sinister : str, 
                 dataset_name: str,
@@ -642,10 +706,9 @@ class GraphStructure():
                 resolution : str,
                 base: str,
                 train_date) -> None:
-        """"
+        """
         Create new raster mask
         """
-        
         check_and_create_path(path)
         check_and_create_path(path / 'raster')
         check_and_create_path(path / 'bin')
@@ -656,7 +719,7 @@ class GraphStructure():
 
     def _save_feature_image(self, path, dept, vb, image, raster, mini=None, maxi=None):
         data = np.copy(image)
-        check_and_create_path(path / 'features_geometry' / dept)
+        check_and_create_path(path / 'features_geometry' / f'{self.scale}_{self.base}_{self.graph_method}' / dept)
         data = data.astype(float)
         data[np.isnan(raster)] = np.nan
         plt.figure(figsize=(15, 15))
@@ -667,7 +730,7 @@ class GraphStructure():
         img = plt.imshow(data, vmin=mini, vmax=maxi)
         plt.colorbar(img)
         plt.title(vb)
-        plt.savefig(path / 'features_geometry' / dept / f'{vb}.png')
+        plt.savefig(path / 'features_geometry' / f'{self.scale}_{self.base}_{self.graph_method}' / dept / f'{vb}.png')
         plt.close('all')
 
     def _post_process_result(self, pred, raster, mask, node_already_predicted, graph_or_node='node'):
@@ -716,10 +779,9 @@ class GraphStructure():
                 array[np.where(mask)[0][invalid_mask]] = predicted_values.astype(int)
 
         if graph_or_node == 'node': # graph = node
-            self.graph_ids[mask] = np.where(np.isnan(self.graph_ids[mask]), array[mask], self.graph_ids[mask])
+            self.ids[mask] = array[mask]
         elif graph_or_node == 'graph': # nodes per graph
-            #print(np.unique(self.ids[mask]), np.unique(self.graph_ids[mask]))
-            self.ids[mask] = np.where(np.isnan(self.ids[mask]), array[mask], self.ids[mask])
+            self.graph_ids[mask] = array[mask]
         else:
             logger.info(f'Unknow graph_or_node value {graph_or_node}')
             exit(1)
@@ -913,7 +975,7 @@ class GraphStructure():
                 assert values is not None
                 for i, var2 in enumerate(foret_variables):
                     values2 = values[i]
-                    self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{var2}', values2, raster)
+                    self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{foretint2str[var2]}', values2, raster)
                     vec_x.append(values2)
 
             elif var == 'cosia':
@@ -966,7 +1028,7 @@ class GraphStructure():
                 assert values is not None
                 for i, var2 in enumerate(osmnx_variables):
                     values2 = values[i]
-                    self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{var2}', values2, raster)
+                    self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{osmnxint2str[var2]}', values2, raster)
                     vec_x.append(values2)
 
             elif var == 'dynamic_world':
@@ -1013,115 +1075,144 @@ class GraphStructure():
 
         years = np.arange(2018, 2024)
 
+        logger.info('Creating Susceptibilty mapper')
+
         y_train = []
         y_test = []
         y_val = []
         dept_test = []
-        for dept in departements:
-            if dept in self.drop_department:
-                continue
+        years_test = []
 
-            dir_data = root_data / dept / 'raster' / self.resolution
-            raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
-            assert raster is not None
-            raster = raster[0]
+        if not (dir_output / 'susecptibility_map_features' / model_config['type'] / 'y_train.pkl').is_file():
 
-            for year in years:
+            for dept in departements:
+                if dept in self.drop_department:
+                    continue
+                logger.info(f'{dept}')
 
-                if target == 'risk':
-                    target_value = read_object(f'{dept}Influence.pkl', dir_target)
-                elif target == 'nbsinister':
-                    target_value = read_object(f'{dept}binScale0.pkl', dir_target_bin)
-            
-                assert target_value is not None
+                dir_data = root_data / dept / 'raster' / self.resolution
+                raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+                assert raster is not None
+                raster = raster[0]
 
-                sdate_year = f'{year}-0{group_month[1][0]}-01'
-                edate_year = f'{year}-{group_month[1][-1] + 1}-01'
+                for year in years:
+
+                    if target == 'risk':
+                        target_value = read_object(f'{dept}Influence.pkl', dir_target)
+                    elif target == 'nbsinister':
+                        target_value = read_object(f'{dept}binScale0.pkl', dir_target_bin)
                 
-                if allDates[0] > edate_year:
-                        continue
-                if allDates[-1] < sdate_year:
-                        continue
-                
-                if sdate_year < allDates[0]:
-                    sdate_year = allDates[0]
+                    assert target_value is not None
 
-                if edate_year > allDates[-1]:
-                    edate_year = allDates[-1]
+                    sdate_year = f'{year}-06-01'
+                    edate_year = f'{year}-10-01'
+                    
+                    if allDates[0] > edate_year:
+                            continue
+                    if allDates[-1] < sdate_year:
+                            continue
+                    
+                    if sdate_year < allDates[0]:
+                        sdate_year = allDates[0]
 
-                if edate_year < train_date:
-                    set_type = 'train'
-                elif edate_year < val_date:
-                    set_type = 'val'
-                else:
-                    set_type = 'test'
+                    if edate_year > allDates[-1]:
+                        edate_year = allDates[-1]
 
-                if dept == 'departement-69-rhone':
-                    set_type = 'test'
-                    if sdate_year > train_date:
+                    if dept == 'departement-69-rhone' and year > 2022:
                         continue
 
-                target_value = target_value[:, :, allDates.index(sdate_year):allDates.index(edate_year)]
+                    if edate_year < train_date:
+                        set_type = 'train'
+                    elif edate_year < val_date:
+                        set_type = 'val'
+                    else:
+                        set_type = 'test'
 
-                check_and_create_path(dir_output / 'susecptibility_map_features' / str(year))
+                    if dept not in self.train_departements:
+                        set_type = 'test'
+                        
+                    target_value = target_value[:, :, allDates.index(sdate_year):allDates.index(edate_year)]
 
-                # Calculer la somme de target_value le long de la troisième dimension (axis=2)
-                sum_values = np.sum(target_value, axis=2)
+                    check_and_create_path(dir_output / 'susecptibility_map_features' / str(year))
 
-                if self.max_target_value is None or np.nanmax(sum_values) > self.max_target_value:
-                    self.max_target_value = np.nanmax(sum_values)
+                    # Calculer la somme de target_value le long de la troisième dimension (axis=2)
+                    sum_values = np.sum(target_value, axis=2)
 
-                self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{target}', sum_values, raster)
+                    if self.max_target_value is None or np.nanmax(sum_values) > self.max_target_value:
+                        self.max_target_value = np.nanmax(sum_values)
 
-                if model_config['type'] in sklearn_model_list:
-                    X_, y_ = self.susecptibility_map_individual_pixel_feature(dept, year, variables, sum_values, sdate_year, edate_year, raster, dir_data, dir_output)
-                    if set_type == 'train':
-                        y_train += list(np.asarray([y_]))
-                        if 'X_train' not in locals():
-                            X_train = X_
-                        else:
-                            X_train = np.concatenate((X_train, X_), axis=0)
-                    elif set_type == 'val':
-                        y_val += list(np.asarray([y_]))
-                        if 'X_val' not in locals():
-                            X_val = X_
-                        else:
-                            X_val = np.concatenate((X_val, X_), axis=0)
-                    elif set_type == 'test':
-                        y_test += list(np.asarray([y_]))
-                        if 'X_test' not in locals():
-                            X_test = X_
-                        else:
-                            X_test = np.concatenate((X_test, X_), axis=0)
-                else:
-                    X_, y_ = self.susecptibility_map_all_image(dept, year, variables, sum_values, sdate_year, edate_year, raster, dir_data, dir_output)
-                    X_ = X_[np.newaxis, :, :, :]
-                    if set_type == 'train':
-                        y_train += list(np.asarray([y_]))
-                        if 'X_train' not in locals():
-                            X_train = X_
-                        else:
-                            X_train = np.concatenate((X_train, X_), axis=0)
-                    elif set_type == 'val':
-                        y_val += list(np.asarray([y_]))
-                        if 'X_val' not in locals():
-                            X_val = X_
-                        else:
-                            X_val = np.concatenate((X_val, X_), axis=0)
-                    elif set_type == 'test':
-                        dept_test.append(dept)
-                        y_test += list(np.asarray([y_]))
-                        if 'X_test' not in locals():
-                            X_test = X_
-                        else:
-                            X_test = np.concatenate((X_test, X_), axis=0)
+                    self._save_feature_image(dir_output / 'susecptibility_map_features' / str(year), dept, f'{target}', sum_values, raster)
 
-        y_train = np.asarray(y_train)
-        y_test = np.asarray(y_test)
-        y_val = np.asarray(y_val)
-        X_train = np.asarray(X_train)
-        X_val = np.asarray(X_val)
-        X_test = np.asarray(X_test)
+                    if model_config['type'] in sklearn_model_list:
+                        X_, y_ = self.susecptibility_map_individual_pixel_feature(dept, year, variables, sum_values, sdate_year, edate_year, raster, dir_data, dir_output)
+                        if set_type == 'train':
+                            y_train += list(np.asarray([y_]))
+                            if 'X_train' not in locals():
+                                X_train = X_
+                            else:
+                                X_train = np.concatenate((X_train, X_), axis=0)
+                        elif set_type == 'val':
+                            y_val += list(np.asarray([y_]))
+                            if 'X_val' not in locals():
+                                X_val = X_
+                            else:
+                                X_val = np.concatenate((X_val, X_), axis=0)
+                        elif set_type == 'test':
+                            y_test += list(np.asarray([y_]))
+                            if 'X_test' not in locals():
+                                X_test = X_
+                            else:
+                                X_test = np.concatenate((X_test, X_), axis=0)
+                    else:
+                        X_, y_ = self.susecptibility_map_all_image(dept, year, variables, sum_values, sdate_year, edate_year, raster, dir_data, dir_output)
+                        X_ = X_[np.newaxis, :, :, :]
+                        if set_type == 'train':
+                            y_train += list(np.asarray([y_]))
+                            if 'X_train' not in locals():
+                                X_train = X_
+                            else:
+                                X_train = np.concatenate((X_train, X_), axis=0)
+                        elif set_type == 'val':
+                            y_val += list(np.asarray([y_]))
+                            if 'X_val' not in locals():
+                                X_val = X_
+                            else:
+                                X_val = np.concatenate((X_val, X_), axis=0)
+                        elif set_type == 'test':
+                            dept_test.append(dept)
+                            years_test.append(year)
+                            y_test += list(np.asarray([y_]))
+                            if 'X_test' not in locals():
+                                X_test = X_
+                            else:
+                                X_test = np.concatenate((X_test, X_), axis=0)
+
+            y_train = np.asarray(y_train)
+            y_test = np.asarray(y_test)
+            y_val = np.asarray(y_val)
+            X_train = np.asarray(X_train)
+            X_val = np.asarray(X_val)
+            X_test = np.asarray(X_test)
+
+            save_object(y_train, 'y_train.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(y_test, 'y_test.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(y_val, 'y_val.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(X_train, 'X_train.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(X_val, 'X_val.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(X_test, 'X_test.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(dept_test, 'dept_test.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+            save_object(years_test, 'years_test.pkl', dir_output / 'susecptibility_map_features' / model_config['type'])
+
+        else:
+            base_path = dir_output / 'susecptibility_map_features' / model_config['type']
+            y_train = read_object('y_train.pkl', base_path)
+            y_test = read_object('y_test.pkl', base_path)
+            y_val = read_object('y_val.pkl', base_path)
+            X_train = read_object('X_train.pkl', base_path)
+            X_val = read_object('X_val.pkl', base_path)
+            X_test = read_object('X_test.pkl', base_path)
+            dept_test = read_object('dept_test.pkl', base_path)
+            years_test = read_object('years_test.pkl', base_path)
 
         logger.info('################# Susceptibility map dataset #########################')
         logger.info(f'positive : {y_train[y_train > 0].shape}, zero : {y_train[y_train == 0].shape}')
@@ -1156,18 +1247,20 @@ class GraphStructure():
             new_y_test[..., -2] = y_test
 
             # Mise de la bande -4 à 1
-            new_y_train[..., -4] = 1
-            new_y_val[..., -4] = 1
-            new_y_test[..., -4] = 1
+            new_y_train[..., weight_index] = 1
+            new_y_val[..., weight_index] = 1
+            new_y_test[..., weight_index] = 1
 
             logger.info(f'{X_train.shape}, {X_val.shape}, {X_test.shape}')
             logger.info(f'{new_y_train.shape}, {new_y_val.shape}, {new_y_test.shape}')
 
-            scaler = StandardScaler()
-            scaler.fit(X_train.reshape(-1, X_train.shape[1]))
-            X_train = scaler.transform(X_train.reshape(-1, X_train.shape[1])).reshape(X_train.shape)
-            X_val = scaler.transform(X_val.reshape(-1, X_train.shape[1])).reshape(X_val.shape)
-            X_test = scaler.transform(X_test.reshape(-1, X_train.shape[1])).reshape(X_test.shape)
+            self.susceptibility_scaler = StandardScaler()
+            self.susceptibility_scaler.fit(X_train.reshape(-1, X_train.shape[1]))
+            X_train = self.susceptibility_scaler.transform(X_train.reshape(-1, X_train.shape[1])).reshape(X_train.shape)
+            X_val = self.susceptibility_scaler.transform(X_val.reshape(-1, X_train.shape[1])).reshape(X_val.shape)
+            X_test = self.susceptibility_scaler.transform(X_test.reshape(-1, X_train.shape[1])).reshape(X_test.shape)
+
+            logger.info(f'{np.max(X_train)} {np.max(X_val)} {np.max(X_test)}')
 
             data_augmentation_transform = RandomFlipRotateAndCrop(proba_flip=0.5, size_crop=32, max_angle=180)
 
@@ -1188,16 +1281,18 @@ class GraphStructure():
 
             train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True)
             val_loader = DataLoader(dataset=val_dataset, batch_size=val_dataset.__len__(), shuffle=False)
-            test_loader = DataLoader(dataset=test_dataset, batch_size=test_dataset.__len__(), shuffle=False)
+            test_loader = DataLoader(dataset=test_dataset, batch_size=1, shuffle=False)
 
             check_and_create_path(dir_output / 'susecptibility_map_features' / model_config['type'])
 
             features = np.arange(0, X_train.shape[1])
 
+            save_graph_method = self.graph_method
+            self.graph_method = 'node'
             params = {'train_loader' : train_loader,
                       'val_loader' : val_loader,
                       'test_loader' : test_loader,
-                      'scale': 'departement',
+                      'graph': self,
                       'optimize_feature' : False,
                       'PATIENCE_CNT': 100,
                       'CHECKPOINT' : CHECKPOINT,
@@ -1213,54 +1308,104 @@ class GraphStructure():
                       'k_days' : 0,
                       'custom_model_params': model_config['params']
                       }
-
-            train(params)
-
-            if model_config['type'] in models_hybrid:
-                self.susceptility_mapper, _ = make_model(model_config['type'], len(features), len(features), 'departement', dropout, 'relu', 0, target == 'binary', device, num_lstm_layers, model_config['params'])
-            else:
-                self.susceptility_mapper, _ = make_model(model_config['type'], len(features), len(features), 'departement', dropout, 'relu', 0, target == 'binary', device, num_lstm_layers, model_config['params'])
             
-            self.susceptility_mapper.load_state_dict(torch.load(dir_output / 'susecptibility_map_features' / model_config['type'] / 'best.pt', map_location=device, weights_only=False), strict=False)
+            self.susceptility_mapper_name = model_config['type']
+            
+            if model_config['type'] in models_hybrid:
+                self.susceptility_mapper, _ = make_model(model_config['type'], len(features), len(features), self, dropout, 'relu', 0, target == 'binary', device, num_lstm_layers, model_config['params'])
+            else:
+                self.susceptility_mapper, _ = make_model(model_config['type'], len(features), len(features), self, dropout, 'relu', 0, target == 'binary', device, num_lstm_layers, model_config['params'])
+
+            if (dir_output / 'susecptibility_map_features' / model_config['type'] / 'best.pt').is_file():
+                self.susceptility_mapper.load_state_dict(torch.load(dir_output / 'susecptibility_map_features' / model_config['type'] / 'best.pt', map_location=device, weights_only=True), strict=False)
+
+            else:
+                train(params)
+                self.susceptility_mapper.load_state_dict(torch.load(dir_output / 'susecptibility_map_features' / model_config['type'] / 'best.pt', map_location=device, weights_only=True), strict=False)
+
+            self.graph_method = save_graph_method
+
+            if MLFLOW:
+                exp_name = f"{self.dataset_name}_train"
+                experiments = client.search_experiments()
+
+                if exp_name not in list(map(lambda x: x.name, experiments)):
+                    tags = {
+                        "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+                    }
+
+                    client.create_experiment(name=exp_name, tags=tags)
+                    
+                mlflow.set_experiment(exp_name)
+                existing_run = get_existing_run('Preprocessing')
+                if existing_run:
+                    mlflow.start_run(run_id=existing_run.info.run_id)
+                else:
+                    mlflow.start_run(run_name='Preprocessing')
 
             ####### test ########
 
             check_and_create_path(dir_output / 'susecptibility_map_features' / model_config['type'] / 'test')
 
-            mae_func = torch.nn.L1Loss(reduce='mean')
-            mae = 0
-            itest = 0
-            for data in test_loader:
-                X, y, _ = data
-                output = self.susceptility_mapper(X, None)
-                loss = mae_func(output[:, 0], y[:, :, :, -1])
-                y = y.detach().cpu().numpy() 
-                output = output.detach().cpu().numpy()
-                mae += loss.item()
-                for b in range(y.shape[0]):
-                    fig, ax = plt.subplots(1, 2, figsize=(15,5))
-
-                    raster = read_object(f'{dept_test[b]}rasterScale0.pkl', dir_raster)
-                    assert raster is not None
-                    raster = raster[0]
+            self.susceptility_mapper.eval()
+            with torch.no_grad():
+                mae_func = torch.nn.L1Loss(reduce='none')
+                itest = 0
+                mae = 0
+                for data in test_loader:
+                    try:
+                        X, y, _, _ = data
+                    except:
+                        X, y, _ = data
                     
-                    output_image = resize_no_dim(output[b][0], raster.shape[0], raster.shape[1])
-                    y_image = resize_no_dim(y[b, :,  :, -1], raster.shape[0], raster.shape[1])
+                    logger.info(f'{torch.max(X)}')
+                    output = self.susceptility_mapper(X, None)
+                
+                    for b in range(y.shape[0]):
+                        loss = mae_func(output[b, 0], y[b, :, :, -1])
+                        yb = y[b].detach().cpu().numpy()
+                        outputb = output[b].detach().cpu().numpy()
 
-                    output_image[np.isnan(raster)] = np.nan
-                    y_image[np.isnan(raster)] = np.nan
+                        logger.info(f'loss {itest} {dept_test[itest]} {years_test[itest]}: {loss.item()} {np.max(outputb)}')
 
-                    ax[0].set_title('Prediction map')
-                    ax[0].imshow(output_image, vmin=np.nanmin(y[b, :, :, -1]), vmax=np.nanmax(y[b, :, :, -1]))
-                    ax[1].set_title('Ground truth')
-                    ax[1].imshow(y_image, vmin=np.nanmin(y[b, :, :, -1]), vmax=np.nanmax(y[b, :, :, -1]))
-                    plt.tight_layout()
-                    plt.savefig(dir_output / 'susecptibility_map_features' /  model_config['type'] / 'test' / f'{itest}.png')
-                    plt.close('all')
-                    itest += 1 
+                        if MLFLOW:
+                            existing_run = get_existing_run(f'susceptibility_{dept_test[itest]}_{years_test[itest]}_{model_config["type"]}')
+                            if existing_run:
+                                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                            else:
+                                mlflow.start_run(run_name=f'susceptibility_{dept_test[itest]}_{years_test[itest]}_{model_config["type"]}', nested=True)
+                            
+                            mlflow.log_metric('MAE', loss.item())
 
-            logger.info(f'MAE on test set : {mae}')
+                        mae += loss.item()
 
+                        fig, ax = plt.subplots(1, 2, figsize=(15,5))
+                        raster = read_object(f'{dept_test[itest]}rasterScale0.pkl', dir_raster)
+                        assert raster is not None
+                        raster = raster[0]
+                        
+                        output_image = resize_no_dim(outputb[0], raster.shape[0], raster.shape[1])
+                        y_image = resize_no_dim(yb[:,  :, -1], raster.shape[0], raster.shape[1])
+
+                        output_image[np.isnan(raster)] = np.nan
+                        y_image[np.isnan(raster)] = np.nan
+
+                        maxi = max(np.nanmax(output_image), np.nanmax(y_image))
+
+                        ax[0].set_title('Prediction map')
+                        ax[0].imshow(output_image, vmin=0, vmax=maxi)
+                        ax[1].set_title('Ground truth')
+                        ax[1].imshow(y_image, vmin=0, vmax=maxi)
+                        plt.tight_layout()
+                        plt.savefig(dir_output / 'susecptibility_map_features' /  model_config['type'] / 'test' / f'{dept_test[itest]}_{years_test[itest]}')
+                        plt.close('all')
+                        if MLFLOW:
+                            mlflow.log_figure(fig, f'_{dept_test[itest]}_{years_test[itest]}.png')
+                            mlflow.end_run()
+                        itest += 1
+
+                logger.info(f'MAE on test set : {mae / itest}')
+            
     def predict_susecptibility_map(self, departements, variables, dir_data, dir_output):
         assert self.susceptility_mapper is not None
         assert self.sinister is not None
@@ -1285,7 +1430,7 @@ class GraphStructure():
 
                 index_start = test_season_start
                 index_end = test_season_end
-
+                
                 assert raster is not None
 
                 check_and_create_path(dir_output / 'susecptibility_map_features' / str(year))
@@ -1302,17 +1447,24 @@ class GraphStructure():
                     susceptibility_map_flat[mask_X[:, 0]] = predictions
                     susceptibility_map += susceptibility_map_flat.reshape(raster.shape)[0]
                 else:
-                    X = X[np.newaxis, :, :, :]
-                    predictions = self.susceptility_mapper(torch.tensor(X, dtype=torch.float32, device=device), None)
-                    if torch.is_tensor(predictions):
-                        predictions = predictions.detach().cpu().numpy()
-                    predictions = resize_no_dim(predictions[0][0], raster.shape[0], raster.shape[1])
-                    susceptibility_map += predictions
+                    self.susceptility_mapper.eval()
+                    with torch.no_grad():
+                        X = X[np.newaxis, :, :, :]
+                        X = self.susceptibility_scaler.transform(X.reshape(-1, X.shape[1])).reshape(X.shape)
+                        X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
+                        predictions = self.susceptility_mapper(X_tensor, None)
+                        if torch.is_tensor(predictions):
+                            predictions = predictions.detach().cpu().numpy()
+                            print(predictions.shape)
+                        logger.info(f'{np.max(X)} {torch.max(X_tensor)} {np.max(predictions)}')
+                        
+                        predictions = resize_no_dim(predictions[0][0], raster.shape[0], raster.shape[1])
+                        susceptibility_map += predictions
 
                 if self.susceptility_target == 'risk':
-                    self._save_feature_image(dir_output / str(year), dept, f'Influence_{year}', predictions, raster, 0, self.max_target_value)
+                    self._save_feature_image(dir_output / str(year), dept, f'Influence_{year}', predictions, raster, 0, np.nanmax(predictions))
                 else:
-                    self._save_feature_image(dir_output / str(year), dept, f'binScale0_{year}', predictions, raster, 0, self.max_target_value)
+                    self._save_feature_image(dir_output / str(year), dept, f'binScale0_{year}', predictions, raster, 0, np.nanmax(predictions))
 
             if self.susceptility_target == 'risk':
                 save_object(susceptibility_map, f'{dept}Influence.pkl', dir_output)
@@ -1620,7 +1772,7 @@ class GraphStructure():
                 vec_target.append(target_node)
 
         vec = np.concatenate(vec, axis=0)
-
+        
         ### Clustering
         self.cluster_node_model = Predictor(n_clusters=3)
         self.knearestKneighbours = NearestNeighbors(n_neighbors=1).fit(vec)
@@ -1641,7 +1793,7 @@ class GraphStructure():
                 continue
 
             plt.figure(figsize=(15,5))
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}.pkl', path / 'raster')
+            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'raster')
             assert raster is not None
 
             time_series_image = np.full(raster.shape, fill_value=np.nan)
@@ -1650,13 +1802,12 @@ class GraphStructure():
                 time_series_image[raster == node] = self.node_cluster[node]
                 
             img = plt.imshow(time_series_image, vmin=0, vmax=4, cmap='jet')
-            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}.png')
-            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}.pkl', path / 'time_series_clustering')
+            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}.png')
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
             plt.close('all')
-            save_object(time_series_image, f'{dept}_{self.scale}.pkl', path / 'time_series_clustering')
+            save_object(time_series_image, f'{dept}_{self.scale}_{self.graph_method}.pkl', path / 'time_series_clustering')
 
         logger.info(f'Time series clustering {self.node_cluster}')
-
 
     def _clusterize_node_with_time_series(self, departements, variables, target, train_date, path, root_data, root_target):
         self.variables_for_cluster = variables
@@ -2004,7 +2155,6 @@ class GraphStructure():
         for id in self.uniqueIDS:
             mask = np.argwhere(id == self.ids)
             graph_id = self.graph_ids[mask][:, 0][0]
-            print(np.unique(self.graph_ids[mask]))
             if self.scale != 0:
                 nodeGeometry = unary_union(self.oriGeometry[mask[:,0]]).centroid
             else:
@@ -2434,7 +2584,7 @@ class GraphStructure():
         self.model = model
 
     def _load_model_from_path(self, path : Path, model : torch.nn.Module, device, model_name : str) -> None:
-        model.load_state_dict(torch.load(path, map_location=device, weights_only=False), strict=False)
+        model.load_state_dict(torch.load(path, map_location=device, weights_only=True), strict=False)
         self.model = model
         self.model_name = model_name
 
@@ -2494,10 +2644,10 @@ class GraphStructure():
         dataframe['month_non_encoder'] = dataframe['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
     
         # Sort the dataframe by date
-        dataframe = dataframe.sort_values(by=['id', 'date'])
+        dataframe = dataframe.sort_values(by=['graph_id', 'date'])
         #self.sequences_month = None
 
-        points = np.unique(self.nodes[:, id_index])
+        points = np.unique(self.nodes[:, graph_id_index])
         # If sequences_month is not already calculated, compute it
         self.sequences_month = {}
         if database_name == 'firemen':
@@ -2526,9 +2676,14 @@ class GraphStructure():
                 self.sequences_month[name[i]][point]['mean_size'] = 1
 
                 # Get the data for the current point
-                df_point = df[df['id'] == point]
+
+                df_point = df[df['graph_id'] == point]
+
                 if len(df_point) == 0:
                     continue
+
+                uids = df_point['id'].unique()
+                df_point = df_point[df_point['id'] == uids[0]]
 
                 # Group the data by date for the current point
                 for date, group in df_point.groupby('date'):
@@ -2571,20 +2726,24 @@ class GraphStructure():
         ###################################### Applying convolution ##############################################
 
         if self.historical_risk is None:
-            self.historical_risk = pd.DataFrame(index=np.arange(len(dataframe)), columns=['id', 'date', 'month', 'risk', 'past_risk'])
+            self.historical_risk = pd.DataFrame(index=np.arange(len(dataframe)), columns=['graph_id', 'id', 'date', 'month', 'risk', 'past_risk'])
             self.historical_risk['date'] = dataframe['date'].values
             self.historical_risk['month'] = dataframe['month_non_encoder'].values
-            self.historical_risk['id'] = dataframe['id'].values
+            self.historical_risk['graph_id'] = dataframe['graph_id'].values
             self.historical_risk['risk'] = 0.0
             self.historical_risk['past_risk'] = 0.0
-        
+            self.historical_risk = self.historical_risk.drop_duplicates(keep='first')
+
         # For each point, compute risk values using convolution
         for point in points:
 
             logger.info(f'############################ {point} #############################')
 
             # Get the data for the current point
-            node_df_values = dataframe[dataframe['id'] == point].reset_index(drop=True)
+            node_df_values = dataframe[dataframe['graph_id'] == point].reset_index(drop=True)
+            uids = node_df_values['id'].unique()
+            node_df_values = node_df_values[node_df_values['id'] == uids[0]]
+
             historical = 0
             historical_past = 0
             num_historical = 0
@@ -2620,14 +2779,17 @@ class GraphStructure():
                     historical_past /= num_historical_past
 
                 self.historical_risk.loc[self.historical_risk[(self.historical_risk['date'] == date_int) & \
-                                                                (self.historical_risk['id'] == point)].index, 'risk'] = historical
+                                                                (self.historical_risk['graph_id'] == point)].index, 'risk'] = historical
                 self.historical_risk.loc[self.historical_risk[(self.historical_risk['date'] == date_int) & \
-                                                            (self.historical_risk['id'] == point)].index, 'past_risk'] = historical_past
+                                                            (self.historical_risk['graph_id'] == point)].index, 'past_risk'] = historical_past
 
             # Apply convolution for each season
             for i, months in enumerate(group_month):
                 # Get the indices of the current point for the current season
-                node_index = dataframe[(dataframe['id'] == point) & (dataframe['month_non_encoder'].isin(months))].index
+                node_values = dataframe[(dataframe['graph_id'] == point) & (dataframe['month_non_encoder'].isin(months))]
+                uids = node_values['id'].unique()
+                node_index = node_values[node_values['id'] == uids[0]].index
+
                 # Get the 'nbsinister' values for these indices
                 node_values = dataframe.loc[node_index, 'nbsinister'].values
 
@@ -2666,44 +2828,48 @@ class GraphStructure():
                 kernel_daily_past = MinMaxScaler((0, 1)).fit_transform(kernel_daily_past.reshape(-1,1)).reshape(-1)
                 kernel_daily_past[:past_kernel_size // 2 + 1] = 0.0
                 kernel_season_past[:past_kernel_size // 2 + 1] = 0.0
-
-                # Apply convolution with the daily kernel
-                node_values_daily_past = convolve_fft(
-                    node_values, kernel_daily_past, normalize_kernel=False)
                 
-                # Apply convolution with the seasonal kernel
-                node_values_season_past = convolve_fft(
-                    node_values, kernel_season_past, normalize_kernel=False)
-
                 # Get the historical values for the current months
-                node_values_historical = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['id'] == point)]['risk']
-                node_values_historical_past = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['id'] == point)]['past_risk']
+                node_values_historical = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['graph_id'] == point)]['risk']
+                #node_values_historical_past = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['graph_id'] == point)]['past_risk']
                 
                 # Sum the different components to obtain the risk values
                 nodes_values = node_values_daily + node_values_season + node_values_historical
-                nodes_values_past = node_values_daily_past + node_values_season_past + node_values_historical_past
 
-                # Update the dataframe with the calculated risk values
-                dataframe.loc[node_index, 'pastinfluence_risk'] = nodes_values_past.values
-                dataframe.loc[node_index, 'risk'] = nodes_values.values
+                for id in uids:
+                    node_index_total = dataframe[(dataframe['id'] == id) & (dataframe['month_non_encoder'].isin(months))].index
+                    node_values_id = dataframe[(dataframe['id'] == id) & (dataframe['month_non_encoder'].isin(months))]['nbsinister_id'].values
+
+                    # Apply convolution with the daily kernel
+                    node_values_daily_past = convolve_fft(
+                        node_values_id, kernel_daily_past, normalize_kernel=False)
+                    
+                    nodes_values_past = node_values_daily_past
+
+                    # Update the dataframe with the calculated risk values
+                    dataframe.loc[node_index_total, 'pastinfluence_risk'] = nodes_values_past
+                    dataframe.loc[node_index_total, 'risk'] = nodes_values.values
 
                 #print(np.unique(dataframe.loc[node_index, 'risk'].isna()))
                 #print(dataframe.loc[node_index, 'risk'])
                 #print(nodes_values)
-
+                
         # Incorporate multi step historic values
-        for point in points:
+        """for point in points:
             for var in auto_regression_variable_reg:
                 ste = int(var.split('-')[1])
-                dataframe.loc[dataframe[dataframe['id'] == point].index, f'AutoRegressionReg-J-{ste}'] = dataframe[dataframe['id'] == point]['risk'].shift(ste).values
+                df_point = dataframe[dataframe['graph_id'] == point]
+                uids = df_point['id'].unique()
+                for id in uids:
+                    dataframe.loc[dataframe[dataframe['id'] == point].index, f'AutoRegressionReg-J-{ste}'] = dataframe[dataframe['id'] == id]['risk'].shift(ste).values"""
             
             #dataframe.loc[dataframe[dataframe['id'] == point].index, f'pastinfluence'] = dataframe[dataframe['id'] == point]['pastinfluence_risk'].shift(ste).values
 
         dataframe['historical'] = self.historical_risk['past_risk']
         dataframe['pastinfluence'] = dataframe['pastinfluence_risk']
 
-        dataframe['risk'] = np.round(dataframe['risk'].values, 3)
-        dataframe['pastinfluence'] = np.round(dataframe['pastinfluence'].values, 3)
+        dataframe['risk'] = np.round(dataframe['risk'].values, 1)
+        dataframe['pastinfluence'] = np.round(dataframe['pastinfluence'].values, 1)
 
         return dataframe
 
@@ -2736,37 +2902,36 @@ class GraphStructure():
                 y = []
 
                 for i, data in enumerate(X, 0):
-                    if self.model_name in models_hybrid:
-                        inputs_1D, inputs_2D, orilabels, edges = data
-                        inputs_1D = inputs_1D.to(device)
-                        inputs_2D = inputs_2D.to(device)
-                    else:
-                        inputs, orilabels, edges = data
-                        inputs = inputs.to(device)
+                    try:
+                        if self.model_name in models_hybrid:
+                            inputs_1D, inputs_2D, labels, edges, graphs = data
+                        else:
+                            inputs, orilabels, edges, graphs = data
+                    except:
+                        if self.model_name in models_hybrid:
+                            inputs_1D, inputs_2D, labels, edges = data
+                        else:
+                            inputs, orilabels, edges = data
+                        graphs = None
 
                     orilabels = orilabels.to(device)
                     edges = edges.to(device)
+                    labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
-                    # Adjust labels if needed
-                    if len(orilabels.shape) == 3:
-                        labels = orilabels[:, :, -1]  # Get the last time step
-                    else:
-                        labels = orilabels
-                        
                     # No autoregression
                     if self.model_name in models_hybrid:
                         inputs_1D = inputs_1D[:, features[0]]
                         inputs_2D = inputs_2D[:, features[1]]
-                        output = self.model(inputs_1D, inputs_2D, edges)
+                        output = self.model(inputs_1D, inputs_2D, edges, graphs)
                     elif self.model_name in models_2D:
                         inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges)
+                        output = self.model(inputs_model, edges, graphs)
                     elif self.model_name in temporal_model_list:
                         inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges)
+                        output = self.model(inputs_model, edges, graphs)
                     else:
                         inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges)
+                        output = self.model(inputs_model, edges, graphs)
 
                     if target_name == 'binary':
                         output = output[:, 1]
@@ -2780,6 +2945,7 @@ class GraphStructure():
 
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
+                pred = torch.round(pred, decimals=1)
                 return pred, y
 
     def simulate_event_with_convolution(self, x, node, date_int, kernel_size):
@@ -2848,9 +3014,10 @@ class GraphStructure():
         return np.asarray(all_simulation)
     
     def predict_model_api_sklearn(self, X : pd.DataFrame,
-                                  features : list, isBin : bool,
+                                  features : list, target_name : bool,
                                   autoRegression : bool) -> np.array:
         assert self.model is not None
+        isBin = target_name== 'binary'
         X.reset_index(inplace=True, drop=True)
         if not autoRegression:
             if isinstance(self.model, ModelVoting):
@@ -2860,9 +3027,16 @@ class GraphStructure():
                     return self.model.predict_proba([X[features[i]] for i in range(len(features))])[:,1]
             else:
                 if not isBin:
-                    return self.model.predict(X[features])
+                    pred = self.model.predict(X[features])
                 else:
-                    return self.model.predict_proba(X[features])[:,1]
+                    pred = self.model.predict_proba(X[features])[:,1]
+                
+                if target_name == 'binary' or target_name == 'risk':
+                    pred = np.round(pred, 1)
+                elif target_name == 'nbsinister':
+                    pred = np.round(pred, 1)
+                
+                return pred
         else:
             assert self.sequences_month is not None
             pred_max = np.zeros(X.shape[0])

@@ -88,7 +88,6 @@ weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
 
-
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
@@ -155,11 +154,13 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
 
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
+else:
+    nbfeatures = int(nbfeatures)
 
-_, varying_time_variables_2 = add_time_columns(varying_time_variables, k_days, train_dataset, train_features)
-
+varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
 features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
 features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2, nbfeatures)
+
 features_selected_str = list(features_selected_str)
 features_selected = np.arange(0, len(features_selected_str))
 logger.info((features_selected_str, len(features_selected_str)))
@@ -187,8 +188,8 @@ val_dataset['weight'] = val_dataset[weights_version]
 train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
 val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
-test_dataset['weight'] = val_dataset['weight_class_nbsinister']
-test_dataset['weight_nbsinister'] = val_dataset['weight_class_nbsinister']
+test_dataset_unscale['weight_nbsinister'] = 1
+test_dataset['weight'] = 1
 
 models = [
         #('LSTM', 'risk_regression_rmse', autoRegression),
@@ -204,13 +205,9 @@ models = [
             ]
 
 gnn_models = [
-    #('DST-GCN', False, 'risk_regression_rmse', autoRegression),
-    #('LSTMGCN', False, 'risk_regression_rmse', autoRegression),
-    #('LSTMGCN', False, 'nbsinister_regression_rmse', autoRegression),
-    #('LSTMGAT', False, 'risk_regression_rmse', autoRegression),
-    #('LSTMGAT', False, 'nbsinister_regression_rmse', autoRegression),
+    ('DST-GAT', False, 'risk_regression_rmse', autoRegression),
     #('ST-GAT', False, 'risk_regression_rmse', autoRegression),
-    ('ST-GCN', False, 'risk_regression_rmse', autoRegression),
+    #('ST-GCN', False, 'risk_regression_rmse', autoRegression),
     #('SDT-GCN', False, 'risk_regression_rmse', autoRegression),
     #('ATGN', False, 'risk_regression_rmse', autoRegression),
     #('ST-GATLSTM', False, 'risk_regression_rmse', autoRegression),
@@ -220,7 +217,7 @@ gnn_models = [
     #('ST-GCN', False, 'nbsinister_regression_rmse', autoRegression),
     #('SDT-GCN', False, 'nbsinister_regression_rmse', autoRegression),
     #('ATGN', False, 'nbsinister_regression_rmse', autoRegression),
-    #('ST-GATLTSM', False, 'nbsinister_regression_rmse', autoRegression)
+    #('ST-GATLSTM', False, 'risk_regression_rmse', autoRegression)
 ]
 
 train_loader = None
@@ -247,7 +244,7 @@ params = {
     "Rewrite": Rewrite,
     "dir_output": dir_output,
     "train_dataset_unscale": train_dataset_unscale,
-    "scale": scale,
+    "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
 }
@@ -271,7 +268,7 @@ if doTrain:
 
 if doTest:
 
-    host = 'pc'
+    host = 'server'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
@@ -317,12 +314,13 @@ if doTest:
             #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation')
+            ('spearman', spearman_coefficient, 'correlation'),
+            ('auc_roc', my_roc_auc, 'bin')
             ]
 
     models = [
-            ('LSTM_risk_regression_rmse', None, 'risk', autoRegression),
-            ('LSTM_nbsinister_regression_rmse', None, 'nbsinister', autoRegression),
+            #('LSTM_risk_regression_rmse', None, 'risk', autoRegression),
+            #('LSTM_nbsinister_regression_rmse', None, 'nbsinister', autoRegression),
             #('LSTM_binary_classification_weightedcrossentropy', False, 'binary', autoRegression),
             #('LSTM_risk_regression_poisson', False, 'risk', autoRegression),
             #('LSTM_risk_regression_rmsle', False, 'risk', autoRegression),
@@ -335,12 +333,9 @@ if doTest:
 
     gnn_models = [
         #('DST-GCN_risk_regression_rmse', False, 'risk', autoRegression),
-        ('ST-GAT_risk_regression_rmse', False, 'risk', autoRegression),
-        ('ST-GCN_risk_regression_rmse', False, 'risk', autoRegression),
-        ('LSTMGCN_risk_regression_rmse', False, 'risk', autoRegression),
-        ('LSTMGCN_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-        ('LSTMGAT_risk_regression_rmse', False, 'risk', autoRegression),
-        ('LSTMGAT_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
+        ('ST-DGATD_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
+        #('ST-GAT_risk_regression_rmse', False, 'risk', autoRegression),
+        #('ST-GCN_risk_regression_rmse', False, 'risk', autoRegression),
         #('SDT-GCN_risk_regression_rmse', False, 'risk', autoRegression),
         #('ATGN_risk_regression_rmse', False, 'risk', autoRegression),
         #('ST-GATLSTM_risk_regression_rmse', False, 'risk', autoRegression),
@@ -349,7 +344,7 @@ if doTest:
         #('ST-GCN', False, 'nbsinister_regression_rmse', autoRegression),
         #('SDT-GCN', False, 'nbsinister_regression_rmse', autoRegression),
         #('ATGN', False, 'nbsinister_regression_rmse', autoRegression),
-        #('ST-GATLTSM', False, 'nbsinister_regression_rmse', autoRegression)
+        #('ST-GATLSTM_risk_regression_rmse', False, 'risk_regression_rmse', autoRegression)
     ]
 
     for dept in departements:
@@ -398,12 +393,26 @@ if doTest:
                             name_exp=name_exp,
                             doKMEANS=doKMEANS)
         else:
-            for name, use_temporal_as_edges, target_name, autoRegression in models:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-                res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
+            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
+            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
             
-            metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
+            print(metrics)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    
+                    mlflow.end_run()
 
         """if len(res) > 0:
             res = pd.concat(res).reset_index(drop=True)
@@ -436,25 +445,45 @@ if doTest:
                                 resolution='0.03x0.03', region_dept=regions_test, column='prediction',
                                 dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)"""
 
-        metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
-                        test_dataset_unscale_dept=test_dataset_unscale,
-                           methods=methods,
-                           test_name=dept,
-                           features_name=features_selected_str,
-                           prefix=prefix,
-                           prefix_train=prefix,
-                           models=models,
-                           dir_output=dir_output / dept / prefix,
-                           device=device,
-                           k_days=k_days,
-                           encoding=encoding,
-                           scaling=scaling,
-                           test_departement=[dept],
-                           dir_train=dir_train,
-                           features=features,
-                           dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
-                           name_exp=name_exp,
-                           doKMEANS=doKMEANS)
+        if host == 'pc':
+            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+                            test_dataset_unscale_dept=test_dataset_unscale,
+                            methods=methods,
+                            test_name=dept,
+                            features_name=features_selected_str,
+                            prefix=prefix,
+                            prefix_train=prefix,
+                            models=models,
+                            dir_output=dir_output / dept / prefix,
+                            device=device,
+                            k_days=k_days,
+                            encoding=encoding,
+                            scaling=scaling,
+                            test_departement=[dept],
+                            dir_train=dir_train,
+                            features=features,
+                            dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                            name_exp=name_exp,
+                            doKMEANS=doKMEANS)
+        
+        else:
+            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
+            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
+            
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
         
         """if len(res) > 0:
             res = pd.concat(res).reset_index(drop=True)

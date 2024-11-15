@@ -1,6 +1,8 @@
 import sys
 import os
 
+from itsdangerous import NoneAlgorithm
+
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -9,8 +11,7 @@ parent_dir = os.path.dirname(current_dir)
 
 # Insert the parent directory into sys.path
 sys.path.insert(0, parent_dir)
-
-from GNN.visualize import *
+from GNN.construct import *
 import geopandas as gpd
 import argparse
 
@@ -51,7 +52,6 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
-
 args = parser.parse_args()
 
 # Input config
@@ -79,13 +79,15 @@ ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
-days_in_futur = args.days_in_futur # The target time validation
+days_in_futur = int(args.days_in_futur) # The target time validation
 scaling = args.scaling
 graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
+
+assert graph_method == 'node'
 
 ######################## Get features and train features list ######################
 
@@ -121,7 +123,7 @@ if autoRegression:
 
 ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_trees')
+df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_fire_index')
 
 if MLFLOW:
     exp_name = f"{dataset_name}_train"
@@ -144,10 +146,11 @@ if MLFLOW:
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_name, train_departements,
                                                                                     prefix,
-                                                                                    dir_output, METHODS_SPATIAL_TRAIN, args)
+                                                                                    dir_output,
+                                                                                    ['mean'], args)
 
 if MLFLOW:
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
@@ -165,12 +168,22 @@ if MLFLOW:
 ######################## Training ##############################
 
 prefix += f'_{weights_version}'
+
 train_dataset['weight'] = train_dataset[weights_version]
 val_dataset['weight'] = val_dataset[weights_version]
+train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
+val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
+
+test_dataset_unscale['weight_nbsinister'] = 1
+test_dataset['weight'] = 1
+
+print(test_dataset_unscale['weight_nbsinister'].unique())
 
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 
 if doTest:
+
+    host = 'pc'
 
     logger.info('############################# TEST ###############################')
 
@@ -203,43 +216,45 @@ if doTest:
             ('cal', cal, 'cal'),
             ('fre', fre, 'cal'),
             ('binary', f1, 'bin'),
-            ('binary', bacc, 'bin'),
+            ('accuracy', bacc, 'bin'),
             ('class', ck, 'class'),
             #('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
             ('maec', meac, 'class'),
             ('acc', acc, 'class'),
-            ('c_index', c_i, 'class'),
-            ('c_index_class', c_i_class, 'class'),
+            #('c_index', c_i, 'class'),
+            #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation')
+            ('spearman', spearman_coefficient, 'correlation'),
+            ('roc_auc', my_roc_auc, 'bin')
             ]
     
     models = [
-        ('fwi_max', 'nbsinister'),
-        #('fwi_mean', 'nbsinister'),
-        #('fwi_min', 'nbsinister'),
+        #('pastinfluence_risk', 'indice'),
+        ('fwi_max', 'indice'),
+        #('fwi_mean', 'indice'),
+        #('fwi_min', 'indice'),
 
-        ('dailySeverityRating_max', 'nbsinister'),
-        #('dailySeverityRating_mean', 'nbsinister'),
-        #('dailySeverityRating_min', 'nbsinister'),
+        #('dailySeverityRating_max', 'indice'),
+        #('dailySeverityRating_mean', 'indice'),
+        #('dailySeverityRating_min', 'indice'),
 
-        #('nesterov_max', 'nbsinister'),
-        #('nesterov_mean', 'nbsinister'),
-        #('nesterov_min', 'nbsinister'),
+        #('nesterov_max', 'indice'),
+        #('nesterov_mean', 'indice'),
+        #('nesterov_min', 'indice'),
 
-        #('bui_max', 'nbsinister'),
-        #('bui_mean', 'nbsinister'),
-        #('bui_min', 'nbsinister'),
+        #('bui_max', 'indice'),
+        #('bui_mean', 'indice'),
+        #('bui_min', 'indice'),
 
-        ('angstroem_max', 'nbsinister'),
-        ##('angstroem_mean', 'nbsinister'),
-        #('angstroem_min', 'nbsinister'),
+        #('angstroem_max', 'indice'),
+        ##('angstroem_mean', 'indice'),
+        #('angstroem_min', 'indice'),
         ]
     
-    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}'
+    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}'
 
     if days_in_futur > 0:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
@@ -268,21 +283,39 @@ if doTest:
 
         if test_dataset_dept.shape[0] < 5:
             continue
+        
+        if host == 'pc':
+            logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["graph_id"].values)}')
 
-        logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["id"].values)}')
-
-        metrics, metrics_dept, res, res_dept = test_fire_index_model(vars(args), graphScale, test_dataset_dept,
-                               test_dataset_unscale_dept,
-                                methods,
-                                dept,
-                                prefix,
-                                models,
-                                dir_output / dept / prefix,
-                                encoding,
-                                scaling,
-                                [dept],
-                                dir_train,
-                                )
+            metrics, metrics_dept, res, res_dept = test_fire_index_model(vars(args), graphScale, test_dataset_dept,
+                                test_dataset_unscale_dept,
+                                    methods,
+                                    dept,
+                                    prefix,
+                                    models,
+                                    dir_output / dept / prefix,
+                                    encoding,
+                                    scaling,
+                                    [dept],
+                                    dir_train,
+                                    )
+        else:
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'.pkl', dir_output / dept / prefix)
+            print(metrics)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    
+                    mlflow.end_run()
         
         """res = pd.concat(res).reset_index(drop=True)
         res_dept = pd.concat(res_dept).reset_index(drop=True)

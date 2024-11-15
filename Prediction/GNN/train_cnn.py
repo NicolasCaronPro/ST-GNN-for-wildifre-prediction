@@ -156,19 +156,22 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
                                                                                     ['mean'], args)
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
+else:
+    nbfeatures = int(nbfeatures)
     
 _, varying_time_variables_2 = add_time_columns(varying_time_variables, k_days, train_dataset, train_features)
 
 features_name, newShape = get_features_name_list(6, train_features, ['mean'])
+features_name = [fet for fet in features_name if fet in train_dataset.columns]
 features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
-features_selected_str = get_features_selected_for_time_series_for_2D(features_selected, features_name_2D, varying_time_variables_2, nbfeatures)
+features_selected_str = get_features_selected_for_time_series_for_2D(features_name, features_name_2D, varying_time_variables_2, nbfeatures)
 features_selected_str = list(np.unique(features_selected_str))
 features_selected = np.arange(0, len(features_selected_str))
 
 logger.info(f'features_name_2D shape : {len(features_name_2D)}')
+logger.info(features_selected_str) 
 
 if MLFLOW:
-
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
     test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
@@ -185,15 +188,19 @@ if MLFLOW:
 ############################# Training ##################################
 
 prefix += f'_{weights_version}'
+
 train_dataset['weight'] = train_dataset[weights_version]
 val_dataset['weight'] = val_dataset[weights_version]
+train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
+val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
-train_dataset = train_dataset[train_dataset['weight'] > 0]
+test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'weight_outlier_nbsinister_2']
+test_dataset['weight'] = test_dataset[f'weight_outlier_nbsinister_2']
 
 cnn_models = [
-             #('Zhang', None, 'risk_regression_rmse', True, autoRegression),
+             ('Zhang', None, 'risk_regression_rmse', True, autoRegression),
              #('ConvLSTM', None, 'nbsinister_regression_poisson', True, autoRegression),
-            ('Zhang', None, 'nbsinister_regression_poisson', True, autoRegression),
+            #('Zhang', None, 'nbsinister_regression_poisson', True, autoRegression),
              #('Unet', FalsNonee, 'risk_regression_rmse', False, autoRegression)
             ]
 
@@ -207,7 +214,7 @@ else:
     temp_dir = '.'
 
 params = {
-    "graphScale": graphScale,
+    "graph": graphScale,
     "val_dataset": val_dataset_unscale,
     "test_dataset": test_dataset_unscale,
     "k_days": k_days,
@@ -223,7 +230,6 @@ params = {
     "Rewrite": Rewrite,
     "dir_output": dir_output,
     "train_dataset_unscale": train_dataset_unscale,
-    "scale": scale,
     "features_name_1D": features_name,
     "features_selected_2D": features_selected,
     "features_name_2D": features_selected_str,
@@ -244,7 +250,7 @@ if doTrain:
 
 if doTest:
     
-    host = 'pc'
+    host = 'server'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
@@ -255,7 +261,6 @@ if doTest:
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
-
     mae = my_mean_absolute_error
     rmse = weighted_rmse_loss
     std = standard_deviation
@@ -279,22 +284,23 @@ if doTest:
             ('cal', cal, 'cal'),
             ('fre', fre, 'cal'),
             ('binary', f1, 'bin'),
-            ('binary', bacc, 'bin'),
+            ('accuracy', bacc, 'bin'),
             ('class', ck, 'class'),
             #('poisson', po, 'proba'),
             ('ca', ca, 'class'),
             ('bca', bca, 'class'),
             ('maec', meac, 'class'),
             ('acc', acc, 'class'),
-            ('c_index', c_i, 'class'),
-            ('c_index_class', c_i_class, 'class'),
+            #('c_index', c_i, 'class'),
+            #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation')
+            ('spearman', spearman_coefficient, 'correlation'),
+            ('auc_roc', my_roc_auc, 'bin')
             ]
 
-    cnn_models = [('Zhang_nbsinister_regression_poisson', False, 'risk', autoRegression),
-                #('UNET_risk_regression_rmse', False, 'risk', autoRegression)
+    cnn_models = [('Zhang_risk_regression_rmse', None, 'risk', autoRegression),
+                #('UNET_risk_regression_rmse', None, 'risk', autoRegression)
                 ]
 
     for dept in departements:
@@ -346,9 +352,21 @@ if doTest:
                             doKMEANS=doKMEANS)
         
         else:
-            for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-                res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
+            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
+            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
             
             metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in cnn_models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    mlflow.end_run()

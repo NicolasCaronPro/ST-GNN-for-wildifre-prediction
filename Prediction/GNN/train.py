@@ -223,7 +223,8 @@ def fit(params):
                 logger.info(e)
                 model.fit(X=df_train[features], y=df_train[target],
                     optimization=parameter_optimization_method,
-                    grid_params=grid_params, fit_params=fit_params) """    
+                    grid_params=grid_params, fit_params=fit_params)"""
+        
     #else:
     model.fit(X=df_train[features], y=df_train[target],
                 optimization=parameter_optimization_method,
@@ -324,7 +325,7 @@ def train_sklearn_api_model(params):
     }
 
     #if model_type != 'gam':
-    fit(fit_params_dict)
+    #fit(fit_params_dict)
     #else:
     #    logger.info('GAM can t being train with all features. SKIP')
     
@@ -429,19 +430,19 @@ def train_xgboost(params):
         'objective': objective,
         'verbosity': 0,
         'early_stopping_rounds': 15,
-        'learning_rate': 0.01,
+        'learning_rate': 0.0001,
         'min_child_weight': 1.0,
         'max_depth': 6,
         'max_delta_step': 1.0,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'colsample_bylevel': 0.8,
-        'reg_lambda': 1.0,
-        'reg_alpha': 0.9,
+        'subsample': 0.55,
+        'colsample_bytree': 0.73,
+        'colsample_bylevel': 0.62,
+        'reg_lambda': 9.638,
+        'reg_alpha': 0.53,
         'n_estimators': 10000,
         'random_state': 42,
         'tree_method': 'hist',
-        'device':"cpu"
+        'device':"cuda"
     }
 
     grid_params = {'max_depth': [6],
@@ -1426,7 +1427,7 @@ def train_break_point(df : pd.DataFrame, features : list, dir_output : Path, n_c
 
 ################################ DEEP LEARNING #########################################
 
-def compute_weights_and_target(target_name, labels, band, ids_columns, grap_or_node, graphs):
+def compute_weights_and_target(target_name, labels, band, ids_columns, is_grap_or_node, graphs):
     weight_idx = ids_columns.index('weight')
     target_is_binary = target_name == 'binary'
 
@@ -1446,28 +1447,50 @@ def compute_weights_and_target(target_name, labels, band, ids_columns, grap_or_n
         weights = labels[:, weight_idx]
         target = (labels[:, band] > 0).long() if target_is_binary else labels[:, band]
     
-    if grap_or_node == 'graph':
-        _, first_indices = torch.unique(tensor, return_inverse=False, return_counts=False, sorted=True, return_index=True)
-
-        weight = weights[first_indices]
+    if is_grap_or_node:
+        unique_elements = torch.unique(graphs, return_inverse=False, return_counts=False, sorted=True)
+        first_indices = torch.tensor([torch.nonzero(graphs == u, as_tuple=True)[0][0] for u in unique_elements])
+        weights = weights[first_indices]
         target = target[first_indices]
 
     return target, weights
 
+def compute_labels(labels, is_grap_or_node, graphs):
+    if len(labels.shape) == 3:
+        labels = labels[:, :, -1]
+    elif len(labels.shape) == 5:
+        labels = labels[:, :, :, :, -1]
+    elif len(labels.shape) == 4:
+        labels = labels
+    else:
+        labels = labels
+    
+    if is_grap_or_node:
+        unique_elements = torch.unique(graphs, return_inverse=False, return_counts=False, sorted=True)
+        first_indices = torch.tensor([torch.nonzero(graphs == u, as_tuple=True)[0][0] for u in unique_elements])
+        labels = labels[first_indices]
+
+    return labels
+
 def launch_train_loader(model, loader,
                   features, target_name,
                   criterion, optimizer,
-                  autoRegression,
-                  features_name,
                   model_name):
     
     model.train()
     for i, data in enumerate(loader, 0):
-
-        if model_name in models_hybrid:
-            inputs_1D, inputs_2D, labels, edges, graphs = data
-        else:
-            inputs, labels, edges, graphs = data
+        
+        try:
+            if model_name in models_hybrid:
+                inputs_1D, inputs_2D, labels, edges, graphs = data
+            else:
+                inputs, labels, edges, graphs = data
+        except:
+            if model_name in models_hybrid:
+                inputs_1D, inputs_2D, labels, edges = data
+            else:
+                inputs, labels, edges = data
+            graphs = None
 
         if target_name == 'binary' or target_name == 'nbsinister':
             band = -2
@@ -1475,9 +1498,9 @@ def launch_train_loader(model, loader,
             band = -1
 
         try:
-            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.graph_or_node, graphs)
-        except:
-            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, 'node')
+            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
+        except Exception as e:
+            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, False, graphs)
 
         # Prepare inputs for the model
         if model_name in models_hybrid:
@@ -1519,8 +1542,6 @@ def launch_train_loader(model, loader,
 def launch_val_test_loader(model, loader,
                            features, target_name,
                            criterion, optimizer,
-                           autoRegression,
-                           features_name,
                            model_name):
     """
     Evaluates the model using the provided data loader, with optional autoregression.
@@ -1546,17 +1567,20 @@ def launch_val_test_loader(model, loader,
     total_loss = 0.0
 
     with torch.no_grad():
-        if autoRegression:
-            # Initialize a dictionary to store previous outputs for autoregression
-            prev_outputs = {}
 
         for i, data in enumerate(loader, 0):
             
-            if model_name in models_hybrid:
-                # Unpack data for hybrid model
-                inputs_1D, inputs_2D, labels, edges = data
-            else:
-                inputs, labels, edges = data
+            try:
+                if model_name in models_hybrid:
+                    inputs_1D, inputs_2D, labels, edges, graphs = data
+                else:
+                    inputs, labels, edges, graphs = data
+            except:
+                if model_name in models_hybrid:
+                    inputs_1D, inputs_2D, labels, edges = data
+                else:
+                    inputs, labels, edges = data
+                graphs = None
 
             # Determine the index of the target variable in labels
             if target_name == 'binary' or target_name == 'nbsinister':
@@ -1564,25 +1588,25 @@ def launch_val_test_loader(model, loader,
             else:
                 band = -1
 
-            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns)
+            try:
+                target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
+            except Exception as e:
+                target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, False, graphs)
 
             # Prepare inputs for the model
             if model_name in models_hybrid:
                 inputs_1D = inputs_1D[:, features[0]]
                 inputs_2D = inputs_2D[:, features[1]]
-                output = model(inputs_1D, inputs_2D, edges)
+                output = model(inputs_1D, inputs_2D, edges, graphs)
             elif model_name in models_2D:
                 inputs_model = inputs[:, features]
-                output = model(inputs_model, edges)
+                output = model(inputs_model, edges, graphs)
             elif model_name in temporal_model_list:
                 inputs_model = inputs[:, features]
-                #time_step = labels[:, 4, :]
-                #time_step = time_step.view(time_step.shape[0], 1, time_step.shape[1])
-                #inputs_model = torch.concatenate((time_step, inputs_model), dim=1)
-                output = model(inputs_model, edges)
+                output = model(inputs_model, edges, graphs)
             else:
                 inputs_model = inputs[:, features]
-                output = model(inputs_model, edges)
+                output = model(inputs_model, edges, graphs)
 
             # Compute loss
             if target_name == 'risk' or target_name == 'nbsinister':
@@ -1607,17 +1631,19 @@ def launch_val_test_loader(model, loader,
     return total_loss
 
 def func_epoch(model, train_loader, val_loader, features,
-               optimizer, criterion, binary,
-                autoRegression,
-                features_name,
+               optimizer, criterion, target_name,
                 model_name):
     
-    train_loss = launch_train_loader(model, train_loader, features, binary, criterion, optimizer,  autoRegression,
-                  features_name, model_name)
+    train_loss = launch_train_loader(model, train_loader,
+                  features, target_name,
+                  criterion, optimizer,
+                  model_name)
 
     if val_loader is not None:
-        val_loss = launch_val_test_loader(model, val_loader, features, binary, criterion, optimizer,  autoRegression,
-                    features_name, model_name)
+        val_loss = launch_val_test_loader(model, val_loader,
+                  features, target_name,
+                  criterion, optimizer,
+                  model_name)
     
     else:
         val_loss = train_loss
@@ -1685,11 +1711,11 @@ def train(params):
         custom_model_params = None
 
     if MLFLOW:
-        existing_run = get_existing_run(f'{modelname}')
+        existing_run = get_existing_run(f'{modelname}_')
         if existing_run:
             mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
         else:
-            mlflow.start_run(run_name=f'{modelname}', nested=True)
+            mlflow.start_run(run_name=f'{modelname}_', nested=True)
 
     assert train_loader is not None and val_loader is not None
 
@@ -1711,6 +1737,9 @@ def train(params):
                               target_name == 'binary',
                               device, num_lstm_layers,
                               custom_model_params)
+    
+    #if (dir_output / '100.pt').is_file():
+    #    model.load_state_dict(torch.load((dir_output / '100.pt'), map_location=device, weights_only=True), strict=False)
         
     optimizer = optim.Adam(model.parameters(), lr=lr)
     BEST_VAL_LOSS = math.inf
@@ -1725,10 +1754,14 @@ def train(params):
     save_object(features_selected, 'features.pkl', dir_output)
     save_object(features_selected_str, 'features_str.pkl', dir_output)
     for epoch in tqdm(range(epochs)):
-        val_loss, train_loss = func_epoch(model, train_loader, val_loader, features_selected, optimizer, criterion,
-                                          target_name, autoRegression, features_selected_str, modelname)
+        val_loss, train_loss = func_epoch(model, train_loader, val_loader, features_selected,
+                                            optimizer, criterion, target_name,
+                                                modelname)
+        train_loss = train_loss.item()
+        val_loss = round(val_loss, 3)
+        train_loss = round(train_loss, 3)
         val_loss_list.append(val_loss)
-        train_loss_list.append(train_loss.item())
+        train_loss_list.append(train_loss)
         epochs_list.append(epoch)
         if val_loss < BEST_VAL_LOSS:
             BEST_VAL_LOSS = val_loss

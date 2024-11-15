@@ -63,7 +63,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'foret_encoder',
                     'argile_encoder',
                     'id_encoder',
-                    'cluster_encoder',
+                    #'cluster_encoder',
                     #'cosia_encoder',
                     'vigicrues',
                     'foret',
@@ -83,7 +83,9 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
             train_features = [
                     'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                     'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                    'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+                    'isi', 'angstroem', 'bui',
+                    'fwi',
+                    'dailySeverityRating',
                     'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
@@ -211,7 +213,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
         
         logger.info('Ground truth')
 
-        newShape = subNode.shape[1] + 3
+        newShape = subNode.shape[1] + 4
         Y = np.full((subNode.shape[0], newShape), 0, dtype=float)
         Y[:, :subNode.shape[1]] = subNode
         codes = []
@@ -235,6 +237,9 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_proba)
             arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
 
+            mask_node = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_mask)
+            arrayBin_node = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_bin)
+
             if array is None:
                 Y[nodeDepartementMask, :] = 0
                 continue
@@ -243,7 +248,8 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
 
             for node in nodeDepartement:
                 index = np.argwhere((subNode[:,graph_id_index] == node[graph_id_index]) & (subNode[:, date_index] == node[date_index]))
-                maskNode = mask == node[graph_id_index]
+                maskgraph = mask == node[graph_id_index]
+                masknode = mask_node == node[id_index]
                     
                 if node[4] >= array.shape[-1]:
                     continue
@@ -254,15 +260,19 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                     Y[index, -1] = 0
 
                     # Nb events
-                    values = (np.unique(arrayBin[maskNode, int(node[date_index])]))[0]
+                    values = (np.unique(arrayBin[maskgraph, int(node[date_index])]))[0]
                     Y[index, -2] = values
+
+                    # Nb events
+                    values = (np.unique(arrayBin_node[masknode, int(node[date_index])]))[0]
+                    Y[index, -4] = values
 
                     # Class
                     #Y[index, -3] = predictor.predict(np.asarray(Y[index, -1])).reshape(-1)
                     Y[index, -3] = 0
 
                 except Exception as e:
-                    logger.info(e)
+                    logger.info(f'{departement}, {node}, {np.unique(mask)}, {e}')
                     continue
                 
             #Y[nodeDepartementMask, -3] = order_class(predictor, Y[nodeDepartementMask, -3]).reshape(-1, 1)
@@ -365,9 +375,9 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
     encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
     encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
-    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
     encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
-    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
 
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
@@ -390,16 +400,22 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         mask = read_object(name, dir_mask)
 
         name_graph = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl'
-        mask_graph = read_object(name, dir_mask)
+        mask_graph = read_object(name_graph, dir_mask)
         
         nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
+        print(np.unique(mask), np.unique(nodeDepartement[:, id_index]))
+        print(np.unique(mask_graph), np.unique(nodeDepartement[:, graph_id_index]))
 
         if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl').is_file():
-            X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
-            assert X_dept is not None
-            X[nodeDepartementMask] = X_dept.reshape(X[nodeDepartementMask].shape)
-            continue    
+            try:
+                X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
+                assert X_dept is not None
+                X[nodeDepartementMask] = X_dept.reshape(X[nodeDepartementMask].shape)
+                continue
+            except Exception as e:
+                logger.info(f'{e}')
+                pass
 
         logger.info(nodeDepartement.shape)
         if nodeDepartement.shape[0] == 0:
@@ -576,6 +592,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                             save_value_with_encoding(arrayForetLandcover, 'foret_encoder', index, maskNode, encoder_foret)
                         except Exception as e:
                             exit(1)
+
                 if 'highway_encoder' in features:
                     if arrayOSLand is not None:
                         save_value_with_encoding(arrayOSLand, 'highway_encoder', index, maskNode, encoder_osmnx)
@@ -668,14 +685,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         logger.info('AutoRegressionBin')
         if 'AutoRegressionBin' in features:
             dir_bin = dir_train / 'bin'
-            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl', dir_bin)
+            arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}_node.pkl', dir_bin)
             if arrayBin is not None:
                 for node in nodeDepartement:
-                    index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                    index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
                     maskNode = mask == node[id_index]
                     if node[date_index] - 1 < 0:
                         continue
-
+                    
                     for var in auto_regression_variable_bin:
                         step = int(var.split('-')[-1])
                         save_value(arrayBin[:,:, int(node[date_index] - step)], f'AutoRegressionBin-{var}', index, maskNode)
@@ -881,6 +898,7 @@ def add_time_columns(array, integer_param, dataframe, train_features):
     :param dataframe: The pandas DataFrame to which new columns will be added
     :return: The updated DataFrame with new columns added
     """
+    dataframe = dataframe.copy()
     # Dictionary of available methods
     methods_dict = {
         'mean': lambda x: np.nanmean(x),
@@ -919,14 +937,87 @@ def add_time_columns(array, integer_param, dataframe, train_features):
                 new_column_name = f"{col}_{method_name}_{i}"
                 if column_name in new_fet:
                     continue
-                if new_column_name not in dataframe.columns:
+                unode = dataframe['id'].unique()
+                dataframe[new_column_name] = np.nan
+                for node in unode:
+                    index = dataframe[dataframe['id'] == node].index
+                    if new_column_name not in dataframe.columns:
+                        if method_name in methods_dict:
+                            # Apply the method over a rolling window of size 'i'
+                            if f'{col}_mean' in dataframe.columns:
+                                dataframe.loc[index, new_column_name] = dataframe[f'{col}_mean'].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                                if new_column_name not in new_fet:
+                                    new_fet.append(new_column_name)
+                            elif col in dataframe.columns:
+                                dataframe.loc[index, new_column_name] = dataframe[col].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                                if new_column_name not in new_fet:
+                                    new_fet.append(new_column_name)
+                            else:
+                                continue
+                                raise ValueError(f"Unknown feature '{column_name}, {col}'")
+                        else:
+                            raise ValueError(f"Unknown method '{method_name}'")
+                    
+    return dataframe, new_fet
+
+def get_time_columns(array, integer_param, dataframe, train_features):
+    """
+    For each integer between 1 and the integer parameter,
+    the function iterates through the array of column names and adds to the dataframe
+    the values of the method applied to each element of the array.
+    The elements are created as {column}_{method}.
+    The final column name is {column}_{method}_{integer}.
+
+    :param array: List of column names to process
+    :param integer_param: Integer specifying the range of integers to iterate over
+    :param dataframe: The pandas DataFrame to which new columns will be added
+    :return: The updated DataFrame with new columns added
+    """
+    dataframe = dataframe.copy()
+    # Dictionary of available methods
+    methods_dict = {
+        'mean': lambda x: np.nanmean(x),
+        'sum': lambda x: np.nansum(x),
+        'max': lambda x: np.nanmax(x),
+        'min': lambda x: np.nanmin(x),
+        'std': lambda x: np.nanstd(x),
+        'grad': lambda x : nan_gradient(x)
+    }
+    new_fet = []
+    # List of methods you want to apply
+    for i in range(1, integer_param + 1):
+        for column in array:
+            vec = column.split('_')
+            if len(vec) == 2:
+                column_name, method_name = vec[0], vec[1]
+            else:
+                column_name, method_name = vec[0] + '_mean_'  + vec[1], vec[2]
+            
+            if 'Calendar' in vec[0] and 'Calendar' in train_features:
+                columns = calendar_variables
+            elif 'air' in vec[0] and 'air' in train_features:
+                columns = air_variables
+            elif 'Historical' in column_name and 'Historical' in train_features:
+                columns = historical_variables
+            elif 'AutoRegressionBin' in vec[0] and 'AutoRegressionBin' in train_features:
+                columns = [f'AutoRegressionBin-{bin_fet}' for bin_fet in auto_regression_variable_bin]
+            elif 'AutoRegressionReg' in vec[0] and 'AutoRegressionReg' in train_features:
+                columns = [f'AutoRegressionReg-{reg_fet}' for reg_fet in auto_regression_variable_reg]
+            elif vec[0] in train_features:
+                columns = [column_name]
+            else:
+                continue
+
+            for col in columns:
+                new_column_name = f"{col}_{method_name}_{i}"
+                if column_name in new_fet:
+                    continue
+                if new_column_name in dataframe.columns:
                     if method_name in methods_dict:
                         # Apply the method over a rolling window of size 'i'
                         if f'{col}_mean' in dataframe.columns:
-                            dataframe[new_column_name] = dataframe[f'{col}_mean'].rolling(window=i).apply(methods_dict[method_name], raw=True)
                             new_fet.append(new_column_name)
                         elif col in dataframe.columns:
-                            dataframe[new_column_name] = dataframe[col].rolling(window=i).apply(methods_dict[method_name], raw=True)
                             new_fet.append(new_column_name)
                         else:
                             continue
@@ -934,7 +1025,7 @@ def add_time_columns(array, integer_param, dataframe, train_features):
                     else:
                         raise ValueError(f"Unknown method '{method_name}'")
                     
-    return dataframe, new_fet
+    return new_fet
 
 def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFrame, graph_structure : str) -> np.array:
 

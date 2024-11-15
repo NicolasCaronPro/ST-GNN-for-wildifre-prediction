@@ -57,7 +57,7 @@ def get_features(df, variables, target='appels', num_feats=100, learn_mode = 'sl
     if not gpu:
         print("   - Random forests")
         dico = dict(n_estimators=100, max_depth=7)
-        dico.update(n_jobs=-1)
+        #dico.update(n_jobs=-1)
         embeded_rf_selector = SelectFromModel(
                         RandomForestRegressor(**dico),
                         max_features=num_feats)

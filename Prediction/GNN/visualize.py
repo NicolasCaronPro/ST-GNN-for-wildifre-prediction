@@ -4,7 +4,7 @@ from torch import ge
 from GNN.encoding import *
 import matplotlib.cm as cm
 import seaborn as sns
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, roc_curve, auc, precision_recall_curve
 
 def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
     check_and_create_path(dir_output)
@@ -45,9 +45,11 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
             fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
                 mask2 = np.argwhere(y[:, graph_id_index] == id)[:, 0]
+                unode = np.unique(y[mask2, id_index])
+                mask2 = np.argwhere(y[:, id_index] == unode[0])[:, 0]
                 ax[i].plot(ypred[mask2], color='red', label='predict')
                 ax[i].plot(ytrue[mask2], color='blue', label='real', alpha=0.5)
-
+                
                 # Ajout des courbes et bandes si pred_min et pred_max ne sont pas None
                 if pred_min is not None and pred_max is not None:
                     ax[i].plot(pred_min[mask2, band], color='green', linestyle='--', label='pred_min')
@@ -75,30 +77,39 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
     for id in uids:
         ysum[np.argwhere(ysum[:, graph_id_index] == id)[:, 0], 1] = np.sum(y[np.argwhere(y[:, graph_id_index] == id)[:, 0], -2])
 
+    tops = 1  # or any other number
     ind = np.lexsort([ysum[:, 1]])
-    ymax = np.flip(ysum[ind, graph_id_index])[:2]
-    _, ax = plt.subplots(np.unique(ymax).shape[0], figsize=(50, 25))
+    ymax = np.flip(ysum[ind, graph_id_index])[:tops]
+    _, ax = plt.subplots(1 if tops == 1 else np.unique(ymax).shape[0], figsize=(50, 25))
+
+    # Ensure ax is iterable, even when tops == 1
+    if tops == 1:
+        ax = [ax]
+
     for i, idtop in enumerate(ymax):
         mask = np.argwhere(y[:, graph_id_index] == idtop)[:, 0]
         dept = np.unique(y[mask, departement_index])[0]
         ids = np.unique(y[mask, graph_id_index])
+        
         ax[i].plot(ypred[mask], color='red', label='predict')
         ax[i].plot(ytrue[mask], color='blue', label='real', alpha=0.5)
 
-        # Ajout des courbes et bandes si pred_min et pred_max ne sont pas None
+        # Add curves and bands if pred_min and pred_max are not None
         if pred_min is not None and pred_max is not None:
             ax[i].plot(pred_min[mask, band], color='green', linestyle='--', label='pred_min')
             ax[i].plot(pred_max[mask, band], color='purple', linestyle='--', label='pred_max')
             ax[i].fill_between(np.arange(len(mask)), pred_min[mask, band], pred_max[mask, band], color='lightcoral', alpha=0.5, label='prediction range')
 
         for class_value in classes:
-            class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
+            class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask, -2] > 0))[:, 0]
             ax[i].scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, linewidths=5, marker='x', s=200)
+
         ax[i].set_ylim(ymin=0, ymax=np.nanmax(ytrue[mask]))
         ax[i].set_title(f'{dept}_{idtop}')
 
+    # Show the plot
     plt.tight_layout()
-    outn = 'top_2' + on + '.png'
+    outn = f'top_{tops}{on}.png'
     
     if MLFLOW:
         mlflow.log_figure(fig, dir_output / outn)
@@ -106,6 +117,91 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
     plt.savefig(dir_output / outn)
     plt.close('all')
 
+def plot_and_save_roc_curve(Y: np.array, ypred: np.array, dir_output: Path, target_name : str, isDept):
+    """
+    Trace et sauvegarde la courbe ROC dans un répertoire spécifié.
+
+    Paramètres:
+    - Y : np.array
+        Les vraies étiquettes binaires.
+    - ypred : np.array
+        Les probabilités prédites pour la classe positive.
+    - dir_output : str
+        Chemin du répertoire où sauvegarder l'image de la courbe ROC.
+    """
+    if target_name != 'binary':
+        ypred = MinMaxScaler().fit_transform(ypred.reshape(-1,1))
+    # Calcul des taux de faux positifs et vrais positifs
+    fpr, tpr, _ = roc_curve(Y, ypred)
+    roc_auc = auc(fpr, tpr)
+
+    # Tracé de la courbe ROC
+    plt.figure()
+    plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.2f})')
+    plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.legend(loc="lower right")
+
+    # Création du répertoire de sortie s'il n'existe pas
+    check_and_create_path(dir_output)
+
+    # Chemin de l'image
+    if isDept:
+        output_path = os.path.join(dir_output, 'roc_curve_departement.png')
+    else:
+        output_path = os.path.join(dir_output, 'roc_curve.png')
+
+    # Sauvegarde de la figure
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Courbe ROC sauvegardée à l'emplacement : {output_path}")
+
+def plot_and_save_pr_curve(Y: np.array, ypred: np.array, dir_output: Path, target_name: str, isDept):
+    """
+    Trace et sauvegarde la courbe Precision-Recall (PR) dans un répertoire spécifié.
+
+    Paramètres:
+    - Y : np.array
+        Les vraies étiquettes binaires.
+    - ypred : np.array
+        Les probabilités prédites pour la classe positive.
+    - dir_output : Path
+        Chemin du répertoire où sauvegarder l'image de la courbe PR.
+    - target_name : str
+        Type de cible. Si non binaire, applique une transformation MinMax à `ypred`.
+    """
+    # Si la cible n'est pas binaire, applique MinMaxScaler à ypred pour normaliser entre 0 et 1
+    if target_name != 'binary':
+        ypred = MinMaxScaler().fit_transform(ypred.reshape(-1, 1)).flatten()
+
+    # Calcul des taux de précision et rappel
+    precision, recall, _ = precision_recall_curve(Y, ypred)
+    pr_auc = auc(recall, precision)
+
+    # Tracé de la courbe Precision-Recall
+    plt.figure()
+    plt.plot(recall, precision, color='darkorange', lw=2, label=f'Precision-Recall curve (AUC = {pr_auc:.2f})')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend(loc="lower left")
+
+    # Création du répertoire de sortie s'il n'existe pas
+    check_and_create_path(dir_output)
+
+    # Chemin de l'image
+    if isDept:
+        output_path = os.path.join(dir_output, 'pr_curve_departement.png')
+    else:
+        output_path = os.path.join(dir_output, 'pr_curve.png')
+
+    # Sauvegarde de la figure
+    plt.savefig(output_path)
+    plt.close()
+    print(f"Courbe Precision-Recall sauvegardée à l'emplacement : {output_path}")
 
 def sinister_distribution_in_class(ypredclassfull, ytrue, dir_output, outputname):
     check_and_create_path(dir_output)
@@ -285,7 +381,7 @@ def realVspredict2d(ypred : np.array,
 
     x = list(zip(geo.longitude, geo.latitude))
 
-    geo['id'] = graph._predict_node_with_position(x)
+    geo['id'], _ = graph._predict_node_graph_with_position(x)
 
     def add_value_from_array(date, x, array, index):
         try:
@@ -391,12 +487,14 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
 
     sinister_point['departement'] = np.nan
     sinister_point['id'] = np.nan
-    values = graph._assign_department(sinister_point[['id', 'longitude', 'latitude', 'departement']].values)
+    sinister_point['graph_id'] = 0
+    values = graph._assign_department(sinister_point[['graph_id', 'id', 'longitude', 'latitude', 'departement']].values)
     sinister_point['departement'] = values[:, departement_index]
 
     regions_france['departement'] = np.nan
     regions_france['id'] = np.nan
-    values = graph._assign_department(regions_france[['id', 'longitude', 'latitude', 'departement']].values)
+    regions_france['graph_id'] = np.nan
+    values = graph._assign_department(regions_france[['graph_id', 'id', 'longitude', 'latitude', 'departement']].values)
     regions_france['departement'] = values[:, departement_index]
 
     for date_index in dates:
@@ -410,7 +508,7 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
         
         if not dept_reg:
             array = regions_france_in_graph[['longitude', 'latitude']].values
-            values = graph._predict_node_with_position(array)
+            values, _ = graph._predict_node_graph_with_position(array)
             regions_france.loc[regions_france_in_graph.index, 'id'] = values
         else:
             regions_france['id'] = regions_france['departement'].values
@@ -447,6 +545,10 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
         #    geo_spa = gpd.read_file(f'{dir_data}/hexagones.geojson')
             #non_sinister_h3 = geo_spa[geo_spa['sinister'] == 0]['hex_id']
             #regions_france[regions_france['hex_id'].isin(non_sinister_h3)][band] = 0
+
+        database_in_fp = sinister_point['database'].unique()
+        colors = {'bdiff': 'red',
+                  'firemen': 'yellow'}
         
         regions_france.loc[regions_france[~regions_france['departement'].isin(df_res.departement.unique())].index, band] = 0
         fig, ax = plt.subplots(1, figsize=(30,30))
@@ -457,7 +559,8 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
         fig.colorbar(sm, ax=ax, orientation="vertical", label=band)
         if len(sinister_point_date) > 0:
             sinister_point_date = gpd.GeoDataFrame(sinister_point_date, geometry=gpd.points_from_xy(sinister_point_date.longitude, sinister_point_date.latitude))
-            sinister_point_date.plot(ax=ax, marker='X', color='red', edgecolor='black', markersize=100)
+            for database_name in database_in_fp:
+                sinister_point_date[sinister_point_date['database'] == database_name].plot(ax=ax, marker='X', color=colors[database_name], edgecolor='black', markersize=100)
         plt.xlabel('Longitude')
         plt.ylabel('Latitude')
         plt.savefig(dir_output / f'susectibility_map_daily_{outname}_{band}_{date}.png')
@@ -483,7 +586,7 @@ def susectibility_map_france_daily_image(df, vmax, graph, departement, dates, re
         n_pixel_x = resolutions[resolution]['x']
         n_pixel_y = resolutions[resolution]['y']
         array = region_dept[['longitude', 'latitude']].values
-        values = graph._predict_node_with_position(array)
+        values, _ = graph._predict_node_graph_with_position(array)
         region_dept['id'] = values
 
         if column in region_dept.columns:

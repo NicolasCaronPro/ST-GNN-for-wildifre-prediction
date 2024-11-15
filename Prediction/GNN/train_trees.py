@@ -81,7 +81,7 @@ ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
-days_in_futur = args.days_in_futur # The target time validation
+days_in_futur = int(args.days_in_futur) # The target time validation
 scaling = args.scaling
 graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
@@ -159,8 +159,12 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
+
 if nbfeatures == 'all':
     nbfeatures = len(features_selected)
+else:
+    nbfeatures = int(nbfeatures)
+    
 features_selected = features_selected[:nbfeatures]
 
 if MLFLOW:
@@ -180,27 +184,30 @@ if MLFLOW:
 
 prefix += f'_{weights_version}'
 
-train_dataset['weight'] = train_dataset[weights_version]
-val_dataset['weight'] = val_dataset[weights_version]
+train_dataset['weight'] = train_dataset[f'{weights_version}_nbsinister']
 train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
+
+val_dataset['weight'] = val_dataset[f'{weights_version}_nbsinister']
 val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
 
-test_dataset['weight'] = test_dataset[f'weight_normalize_nbsinister']
-test_dataset['weight_nbsinister'] = test_dataset['weight_normalize_nbsinister']
+test_dataset_unscale['weight_nbsinister'] = 1
+test_dataset['weight'] = 1
+
+#test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'{weights_version}_nbsinister']
+#test_dataset['weight'] = test_dataset[f'{weights_version}_nbsinister']
 
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 
 models = [
         ('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
         #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-        #('poisson_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
         #('xgboost_binary_classification_logloss', False, 'binary', autoRegression),
         ]
 
 gam_models = [
         #('gam_binary_classification_logloss', False, 'binary', autoRegression),
-        #('gam_risk_regression_rmse', False, 'binary', autoRegression),
-        #('gam_nbsinister_regression_rmse', False, 'binary', autoRegression),
+        #('gam_risk_regression_rmse', False, 'risk', autoRegression),
+        #('gam_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
 ]
 
 voting_models = [
@@ -271,6 +278,8 @@ if doTrain:
 
 if doTest:
 
+    host = 'pc'
+
     logger.info('############################# TEST ###############################')
 
     dn = dataset_name
@@ -317,11 +326,13 @@ if doTest:
             #('c_index_class', c_i_class, 'class'),
             ('kendall', kendall_coefficient, 'correlation'),
             ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation')
+            ('spearman', spearman_coefficient, 'correlation'),
+            ('auc_roc', my_roc_auc, 'bin')
             ]
     
     models = [
         ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
+        #('xgboost_risk_regression_rmse_grid_search', 'risk', autoRegression),
         #('xgboost_risk_regression_rmse_voting_10', 'risk', autoRegression),
 
         #('xgboost_nbsinister_regression_poisson', 'nbsinister', autoRegression),
@@ -387,33 +398,52 @@ if doTest:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
         else:
             test_dataset_unscale_dept = None
-
+        
+        print(test_dataset_dept.shape)
         if test_dataset_dept.shape[0] < 5:
             continue
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["id"].values)}')
 
-        metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset_dept,
-                               test_dataset_unscale_dept,
-                                methods,
-                                dept,
-                                prefix,
-                                models,
-                                dir_output / dept / prefix,
-                                device,
-                                encoding,
-                                scaling,
-                                [dept],
-                                dir_train,
-                                name_exp,
-                                dir_train / 'check_none' / prefix_kmeans / 'kmeans',
-                                doKMEANS
-                                )
+        if host == 'pc':
+            metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset_dept,
+                                test_dataset_unscale_dept,
+                                    methods,
+                                    dept,
+                                    prefix,
+                                    models,
+                                    dir_output / dept / prefix,
+                                    device,
+                                    encoding,
+                                    scaling,
+                                    [dept],
+                                    dir_train,
+                                    name_exp,
+                                    dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                                    doKMEANS
+                                    )
         
-        res = pd.concat(res).reset_index(drop=True)
+            res = pd.concat(res).reset_index(drop=True)
         #res_dept = pd.concat(res_dept).reset_index(drop=True)
+        else:
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'.pkl', dir_output / dept / prefix)
+            print(metrics)
+            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            if MLFLOW:
+                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
+                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[name], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    
+                    mlflow.end_run()
 
-        ############## Prediction ######################
+        """############## Prediction ######################
         for name, target_name, _ in models:
             if name not in res.model.unique():
                 continue
@@ -438,20 +468,20 @@ if doTest:
                                         scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
                                         dept_reg=False, sinister=sinister, sinister_point=fp)
 
-            """susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
+            susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
                             resolution='2x2', region_dept=regions_test, column='prediction',
-                            dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))"""
+                            dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))
 
-        """train_dataset_dept = train_dataset[train_dataset['departement'] == name2int[dept]].groupby(['departement', 'date'])[target_name].sum().reset_index()
+        train_dataset_dept = train_dataset[train_dataset['departement'] == name2int[dept]].groupby(['departement', 'date'])[target_name].sum().reset_index()
             vmax_band = np.nanmax(train_dataset_dept[target_name].values)
 
             susectibility_map_france_daily_geojson(res_test_dept,
                                         regions_test, graphScale, np.unique(dates).astype(int),
                                         target_name, 'departement',
                                         dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                        dept_reg=True, sinister=sinister, sinister_point=fp)"""
+                                        dept_reg=True, sinister=sinister, sinister_point=fp)
 
-        """################# Ground Truth #####################
+        ################# Ground Truth #####################
         name = 'GT'
         susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'risk',
                                     f'{scale}_gt', dir_output / dept / prefix / name, vmax_band=vmax_band,
@@ -461,9 +491,9 @@ if doTest:
                                     regions_test, graphScale, np.unique(dates).astype(int),
                                     target_name, 'departement_gt',
                                     dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                    dept_reg=True, sinister=sinister, sinister_point=fp)"""
+                                    dept_reg=True, sinister=sinister, sinister_point=fp)
         
-        aggregated_prediction.append(res)
+    aggregated_prediction.append(res)
         #aggregated_prediction_dept.append(res_dept)
 
     aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
@@ -482,24 +512,36 @@ if doTest:
         #aggregated_prediction_dept = aggregated_prediction_dept[aggregated_prediction_dept['model'] == name]
 
         #dates = aggregated_prediction[aggregated_prediction['nbsinister'] == aggregated_prediction['nbsinister'].max()]['date'].values
-        dates = [allDates.index('2023-06-14')]
+        dates = [
+            allDates.index('2023-04-26'),
+            allDates.index('2023-05-25'),
+            allDates.index('2023-03-06'),
+            allDates.index('2023-04-17'),
+            allDates.index('2023-06-15'),
+            allDates.index('2023-09-03'),
+            allDates.index('2023-09-17'),
+            allDates.index('2023-09-13'),
+            allDates.index('2023-08-15'),
+            allDates.index('2023-05-08')
+        ]
+
 
         region_france = gpd.read_file('/home/caron/Bureau/csv/france/data/geo/hexagones_france.gpkg')
         region_france['latitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.y))
         region_france['longitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.x))
 
         ####################### Prediction #####################
-        check_and_create_path(dir_output / name)
-        susectibility_map_france_daily_geojson(aggregated_prediction, region_france, graphScale, np.unique(dates).astype(int), 'prediction', f'{scale}_france',
-                                    dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
+        #check_and_create_path(dir_output / name)
+        #susectibility_map_france_daily_geojson(aggregated_prediction, region_france, graphScale, np.unique(dates).astype(int), 'prediction', f'{scale}_france',
+        #                            dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
         
-        """train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
+        train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
         vmax_band = np.nanmax(train_dataset_dept[target_name].values)
         
         susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
-                                    dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)"""
+                                    dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)
     
-    """######################## Ground Truth ####################
+    ######################## Ground Truth ####################
     name = 'GT'
     check_and_create_path(dir_output / name)
     susectibility_map_france_daily_geojson(aggregated_prediction, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), target_name,

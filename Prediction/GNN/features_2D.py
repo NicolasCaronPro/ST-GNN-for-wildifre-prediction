@@ -18,7 +18,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
     
     # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
 
-    dir_output = dir_train / f'2D_database_{graph.scale}_{graph.base}'
+    dir_output = dir_train / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}'
 
     assert graph.nodes is not None
 
@@ -31,7 +31,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
     encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
     encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
     encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
-    encoder_ids = read_object(f'encoder_ids_{graph.scale}_{graph.base }.pkl', dir_encoder)
+    encoder_ids = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
     encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
     encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
 
@@ -53,12 +53,16 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
         dir_target = dir_train / 'influence'
         dir_target_bin =  dir_train / 'bin'
 
-        name = f'{departement}rasterScale{graph.scale}_{graph_construct}.pkl'
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl'
         mask = read_object(name, dir_mask)
         assert mask is not None
 
-        Y_dept = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_target)
-        Y_dept_bin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_target_bin)
+        name_node = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}_node.pkl'
+        mask_node = read_object(name_node, dir_mask)
+        assert mask_node is not None
+
+        Y_dept = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl', dir_target)
+        Y_dept_bin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl', dir_target_bin)
 
         nodeDepartement = df[df['departement'] == name2int[departement]][ids_columns].values
 
@@ -67,7 +71,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
         if nodeDepartement.shape[0] == 0:
             continue
 
-        unDates = np.unique(nodeDepartement[:,4]).astype(int)
+        unDates = np.unique(nodeDepartement[:,date_index]).astype(int)
 
         if 'population' in features:
             name = 'population.pkl'
@@ -174,8 +178,8 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             if 'id_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert encoder_ids is not None
-                assert mask is not None
-                X[features_name.index('id_encoder'), :, :] = encoder_ids.transform(mask.reshape(-1,1)).values.reshape(mask.shape)
+                assert mask_node is not None
+                X[features_name.index('id_encoder'), :, :] = encoder_ids.transform(mask_node.reshape(-1,1)).values.reshape(mask_node.shape)
 
             if 'cosia_encoder' in features:
                 #logger.info('OSMNX landcover')
@@ -267,7 +271,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 #arrayInfluence = read_object(name, dir_target_2)
                 #if arrayInfluence is not None:
                     #X[features_name.index(historical_variables[0]), :, :] = arrayInfluence[:, :, unDate - 1]
-                unode = np.unique(nodeDepartement[:, 0])
+                unode = np.unique(nodeDepartement[:, id_index])
                 for node in unode:
                     if len(df[(df['id'] == node) & (df['date'] == unDate)]) == 0:
                         X[features_name.index(historical_variables[0]), mask == node] = 0
@@ -277,10 +281,11 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                     
             #logger.info('AutoRegressionReg')
             if 'AutoRegressionReg' in features:
+                X[features_name.index(f'AutoRegressionReg-J-1'), :] = 0
                 #dir_target_2 = dir_train / 'influence'
                 #arrayInfluence = read_object(f'{departement}InfluenceScale{graph.scale}_{graph_construct}.pkl', dir_target_2)
                 #if arrayInfluence is not None:
-                unode = np.unique(nodeDepartement[:, 0])
+                """unode = np.unique(nodeDepartement[:, 0])
                 for var in auto_regression_variable_reg:
                     step = int(var.split('-')[-1])
                     #X[features_name.index(f'AutoRegressionReg_{var}'), :, :] = arrayInfluence[:, :, unDate - step]
@@ -288,14 +293,14 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                         if len(df[(df['id'] == node) & (df['date'] == unDate)]) == 0:
                             X[features_name.index(f'AutoRegressionReg-{var}'), mask == node] = 0
                         else:
-                            X[features_name.index(f'AutoRegressionReg-{var}'), mask == node] = df[(df['id'] == node) & (df['date'] == unDate)][f'AutoRegressionReg-{var}'].values[0]
+                            X[features_name.index(f'AutoRegressionReg-{var}'), mask == node] = df[(df['id'] == node) & (df['date'] == unDate)][f'AutoRegressionReg-{var}'].values[0]"""
                             #del arrayInfluence
                     #del arrayInfluence
 
             #logger.info('AutoRegressionBin')
             if 'AutoRegressionBin' in features:
                 dir_bin = dir_train / 'bin'
-                arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}.pkl', dir_bin)
+                arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}_node.pkl', dir_bin)
                 if arrayBin is not None:
                     for var in auto_regression_variable_bin:
                         step = int(var.split('-')[-1])

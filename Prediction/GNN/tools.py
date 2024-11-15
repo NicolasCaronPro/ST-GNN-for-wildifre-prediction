@@ -1,4 +1,3 @@
-from cv2 import dilate
 from torch import cosine_embedding_loss, fill
 from GNN.dico_departements import *
 from GNN.weigh_predictor import *
@@ -43,7 +42,7 @@ if is_pc:
     from scipy import ndimage as ndi
     from scipy.interpolate import griddata
     from scipy.signal import fftconvolve as scipy_fft_conv
-    from scipy.stats import kendalltau, pearsonr, spearmanr
+    from scipy.stats import kendalltau, pearsonr, spearmanr, rankdata
     from skimage import img_as_float
     from skimage import measure, segmentation, morphology
     from skimage.feature import peak_local_max
@@ -53,7 +52,7 @@ if is_pc:
     from sklearn.decomposition import PCA
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error
+        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
@@ -65,6 +64,11 @@ if is_pc:
     from sklearn.feature_selection import VarianceThreshold
     from dtwParallel import dtw_functions
     from scipy.spatial import distance as d
+    import cv2
+    # Suppress FutureWarning messages
+    warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
+    warnings.simplefilter(action='ignore', category=UserWarning)
+    warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
 else:
     import datetime as dt
     import geopandas as gpd
@@ -112,7 +116,7 @@ else:
     from sklearn.decomposition import PCA
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error
+        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
@@ -126,11 +130,6 @@ else:
     from sklearn.feature_selection import VarianceThreshold
 
 random.seed(42)
-
-"""# Suppress FutureWarning messages
-warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-warnings.simplefilter(action='ignore', category=UserWarning)
-warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)"""
 
 def create_larger_scale_image(input, proba, bin, raster):
     probaImageScale = np.full(proba.shape, np.nan)
@@ -491,12 +490,10 @@ def remove_non_fire_season(df: pd.DataFrame, SAISON_FEUX: dict, departements: li
             end_idx = allDates.index(date_fin) - ks
 
             valid_indices = np.concatenate((valid_indices, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < end_idx)].index))
-
             zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= end_idx) & (df['date'] < end_idx + ks)].index))
             zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < start_idx + ks)].index))
 
     df.loc[zeros_dates, weights_columns] = 0
-    print(zeros_dates)
     df = df.loc[valid_indices]
 
     return df.reset_index(drop=True)
@@ -589,14 +586,13 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
     """
 
     mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
-
     x = X[mask]
     node_with_weight = np.unique(x[:, id_index])
 
     connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
     if ks != 0:
-        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
         if maskts.shape[0] == 0:
             return None, None, None
         xts = X[maskts]
@@ -614,7 +610,7 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
     x = x[ind]
     if Y is not None:
         y = y[ind]
-
+    
     # Get graph specific spatial and temporal edges 
     maskgraph = np.argwhere((np.isin(graph.edges[0], np.unique(node_with_weight))) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
     maskTemp = np.argwhere((np.isin(graph.temporalEdges[0], date)) & (np.isin(graph.temporalEdges[1], np.unique(x[:,date_index]))))[:, 0]
@@ -638,9 +634,9 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
                 for sp in spatial:
                     if (i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]) not in seen_edges:
                         src.append(i)
-                        target.append(np.argwhere((x[:,date_index] == node[date_index]) & (x[:,0] == sp))[0][0])
+                        target.append(np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0])
                         time_delta.append(0)
-                        seen_edges.append((i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,0] == sp))[0][0]))
+                        seen_edges.append((i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]))
 
             # temporal edges
             if temporalEdges.shape[1] != 0:
@@ -675,58 +671,64 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
 
     return x[:, start_features:], y, edges
 
-def concat_temporal_graph_into_time_series(array : np, ks : int, date : int) -> np.array:
-    uniqueNodes = np.unique(array[:,id_index])
+import numpy as np
+import scipy.interpolate
+
+def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) -> np.array:
+    uniqueNodes = np.unique(array[:, id_index])
     res = []
 
     date_limit_min = date - ks
-    range_date = np.arange(date_limit_min, date)
+    range_date = np.arange(date_limit_min, date + 1)
 
     for uNode in uniqueNodes:
-        arrayNode = array[array[:,id_index] == uNode]
-        ind = np.lexsort([arrayNode[:,date_index]])
-
-        #ind = np.flip(ind)
+        arrayNode = array[array[:, id_index] == uNode]
+        ind = np.lexsort([arrayNode[:, date_index]])
         arrayNode = arrayNode[ind]
-        if ks + 1 > arrayNode.shape[0]:
-            #print(date, allDates[int(date)], uNode)
-            """new_data = np.zeros((ks + 1 - arrayNode.shape[0], arrayNode.shape[1]))
-            new_data[:, 3] = dept
-            new_data[:, 0] = uNode
-            udates = np.unique(arrayNode[:, 4])
-            for ud in udates:
-                if ud < date_limit_min:
-                    break
-                if ud not in range_date and ud >= date_limit_min and ud <= date:
-                    new_data = np.empty((1, arrayNode.shape[1]))
-                    new_data[:, 3] = dept
-                    new_data[:, 0] = uNode
-                    new_data[:, 4] = ud
-                    new_data[:, 1] = longitude
-                    new_data[:, 1] = laitude
-                    new_data[:, 5] = 0
-                    for band in range(6, arrayNode.shape[1]):
-                        x = arrayNode[:ks + 1, 4]
-                        y = arrayNode[:ks + 1, band]
-                        f = scipy.interpolate.interp1d(x, y, kind='linear')
-                        new_values = f(ud)
-                        new_data[:, band] = new_values
 
-                    array_node_before_date = arrayNode[arrayNode[:, 4] < ud]
-                    array_node_after_date = arrayNode[arrayNode[:, 4] > ud]
-                    print(array_node_before_date.shape, new_data.shape, array_node_after_date.shape)
-                    arrayNode = np.concatenate((array_node_before_date, new_data, array_node_after_date), axis=1)"""
+        if ks > 0 and arrayNode.shape[0] <= 1:
             continue
 
-            #ind = np.lexsort([arrayNode[:,4]])
-            #arrayNode = arrayNode[ind]
+        if date not in arrayNode[:, date_index]:
+            continue
 
-        res.append(arrayNode[:ks + 1])
+        udates = np.unique(arrayNode[:, date_index])
+        
+        # Ajouter des dates manquantes
+        for ud in range_date:
+            if ud not in udates:
+                new_data = np.empty((1, arrayNode.shape[1]))
+                new_data[:, graph_id_index] = arrayNode[0, graph_id_index]
+                new_data[:, id_index] = uNode
+                new_data[:, longitude_index] = arrayNode[0, longitude_index]
+                new_data[:, latitude_index] = arrayNode[0, latitude_index]
+                new_data[:, date_index] = ud
+                new_data[:, departement_index] = arrayNode[0, departement_index]
+                new_data[:, weight_index] = 0
+
+                for band in range(len(ids_columns), arrayNode.shape[1]):
+                    x = arrayNode[:, date_index]
+                    y = arrayNode[:, band]
+                    if len(x) > 1:  # Vérifier si interpolation possible
+                        f = scipy.interpolate.interp1d(x, y, kind='nearest', bounds_error=False, fill_value='extrapolate')
+                        new_data[:, band] = f(ud)
+                    else:
+                        new_data[:, band] = 0  # ou une autre valeur par défaut
+
+                arrayNode = np.vstack([arrayNode, new_data])
+                arrayNode = arrayNode[np.argsort(arrayNode[:, date_index])]
+        
+        # Extraire les données dans l'intervalle de date
+        cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date)]
+        cur_array = np.unique(cur_array, axis=0)
+        
+        res.append(cur_array[:ks+1])
 
     if len(res) == 0:
-        return None
-    res = np.asarray(res)
-    res = np.moveaxis(res, 1,2)
+        return np.empty((0, ks))
+
+    res = np.array(res)
+    res = np.moveaxis(res, 1, 2)
     return res
 
 def construct_graph_with_time_series(graph, date : int,
@@ -748,7 +750,8 @@ def construct_graph_with_time_series(graph, date : int,
 
     connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
-    maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+    maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+    maskts = np.asarray([index for index in maskts if index not in mask])
     
     if maskts.shape[0] == 0:
         return None, None, None
@@ -780,7 +783,7 @@ def construct_graph_with_time_series(graph, date : int,
     for i, node in enumerate(x):
         spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
         if spatialEdges.shape[1] != 0:
-            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,id_index])) & (spatialEdges[0] == node[id_index][0])]
+            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[id_index][0])]
             for sp in spatial:
                 src.append(i)
                 target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
@@ -807,6 +810,7 @@ def construct_time_series(date : int,
 
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date) & (X[:,date_index] >= date - ks)))[:, 0]
+        maskts = np.asarray([index for index in maskts if index not in maskgraph])
         
         if maskts.shape[0] == 0:
             return None, None
@@ -821,7 +825,6 @@ def construct_time_series(date : int,
             yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
 
-    # Graph indexing
     x = concat_temporal_graph_into_time_series(x, ks, date)
     if x is None:
         return None, None
@@ -931,6 +934,12 @@ def weighted_cross_entropy(logits, target, weight=None):
 def np_groupby(x, index):
     return np.split(x, np.where(np.diff(x[:,index]))[0]+1)
 
+def tolerance_from_std(data, factor=0.01):
+    std_dev = np.std(data)
+
+    tolerance = std_dev * factor
+    return tolerance
+
 def add_metrics(methods : list, i : int,
                 ypred : torch.tensor,
                 ytrue : torch.tensor,
@@ -945,10 +954,20 @@ def add_metrics(methods : list, i : int,
     seasons = generate_season_dict(years)
 
     modes = ['temporal',
-             'spatial',
+             #'spatial',
              #'spatio-temporal'
              ]
-    top = 2
+    
+    if target == 'binary':
+        tolerance = 0
+    elif target ==' nbsinister':
+        tolerance = 0
+    elif target == 'risk':
+        tolerance = 0
+    else:
+        tolerance = 0
+
+    top = 1
     res = {}
     for mode in modes:
         if mode == 'temporal':
@@ -959,19 +978,19 @@ def add_metrics(methods : list, i : int,
             if graph.scale == 'departement':
                 continue
             dir_target = root_target
-            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
+            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir / 'raster')
             assert raster is not None
 
-            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
+            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir / 'raster')
             assert raster_graph is not None
 
             target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
             assert target_values is not None
-            target_values = target_values[:, :, int(ytrue[0, date_index]):int(ytrue[-1, date_index])]
+            target_values = target_values[:, :, int(ytrue[0, date_index]):int(ytrue[-1, date_index])] 
             target_values = np.nansum(target_values, axis=2)
 
             ytrue_mode = np.full((target_values.shape[0], target_values.shape[1], ytrue.shape[1]), fill_value=np.nan)
-            ypred_mode = np.full((target_values.shape[0], target_values.shape[1], ypred.shape[1]), fill_value=np.nan)
+            ypred_mode = np.full((target_values.shape[0], ypred_modetarget_values.shape[1], ypred.shape[1]), fill_value=np.nan)
             unodes = np.unique(raster)
             unodes = unodes[~np.isnan(unodes)]
             for node in unodes:
@@ -995,11 +1014,11 @@ def add_metrics(methods : list, i : int,
             if graph.scale == 'departement':
                 continue
             dir_target = root_target
-
-            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl', dir / 'raster')
+            
+            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir / 'raster')
             assert raster is not None
 
-            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}.pkl_node', dir / 'raster')
+            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir / 'raster')
             assert raster_graph is not None
 
             target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
@@ -1045,11 +1064,12 @@ def add_metrics(methods : list, i : int,
 
         for name, met, met_type in methods:
             oname = f'{mode}_{name}'
+            band = -1
+            if target == 'nbsinister' or target == 'binary' or target == 'indice':
+                band = -2
+
             if met_type == 'proba':
-                band = -1
-                if target == 'nbsinister' or target == 'binary':
-                    band = -2
-            
+
                 mett = met(ypred_mode[:,0], ytrue_mode[:,band], ytrue_mode[:, weight_index])
                 
                 if torch.is_tensor(mett):
@@ -1186,7 +1206,7 @@ def add_metrics(methods : list, i : int,
                 res[oname+'_top_'+str(top)+'_cluster_unweighted'] = mett
 
             elif met_type == 'correlation':
-                mett = met(ytrue_mode[:, band], ypred_mode[:,0])
+                mett = met(ytrue_mode[:, -2], ypred_mode[:,0], tolerance=tolerance)
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
@@ -1196,13 +1216,13 @@ def add_metrics(methods : list, i : int,
                     mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, band], ypred_mode[:,0], mask)
+                    mett = met(ytrue_mode[:, -2], ypred_mode[:,0], mask,  tolerance=tolerance)
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
                     res[oname+'_'+season] = mett
 
-                mett = met(ytrue_mode[:, band], ypred_mode[:, 0], mask_top)
+                mett = met(ytrue_mode[:, -2], ypred_mode[:, 0], mask_top,  tolerance=tolerance)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[name+'_top_'+str(top)+'_cluster'] = mett
@@ -1211,16 +1231,18 @@ def add_metrics(methods : list, i : int,
 
     return res
 
-def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, scale : int, isBin : bool, graph_construct):
+def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, target_name : str, graph, departement_scale):
+    scale = graph.scale
     predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-    logger.info(f'Create {nameDep}Predictor{modelName}{str(scale)}.pkl')
-    predictor = Predictor(min(5, np.unique(ypred[:,0]).shape[0]), name=nameDep+'Binary', binary=isBin)
+    predictor = Predictor(min(5, np.unique(ypred[:,0]).shape[0]), name=nameDep+'Binary', binary=target_name == 'binary')
     predictor.fit(np.unique(ypred[:,0]))
 
-    if scale == 'Departement':
-        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}.pkl', dir_predictor)
+    if departement_scale:
+        logger.info(f'Create {nameDep}Predictor{modelName}Departement.pkl')
+        save_object(predictor, f'{nameDep}Predictor{modelName}Departement.pkl', dir_predictor)
     else:
-        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}_{graph_construct}.pkl', dir_predictor)
+        logger.info(f'Create {nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl')
+        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl', dir_predictor)
 
 def my_mean_absolute_error(input, target, weights = None):
     return mean_absolute_error(y_true=target, y_pred=input, sample_weight=weights)
@@ -1315,8 +1337,13 @@ def frequency_class_error(Y : np.array, ypred : np.array, target : str, weights 
     return res
 
 # Les fonctions pour calculer les coefficients de corrélation
+def rankdata_with_tolerance(data, tolerance=1e-5, method='average'):
+    data_rounded = np.round(data / tolerance) * tolerance
+    
+    ranks = rankdata(data_rounded, method=method)
+    return ranks
 
-def kendall_coefficient(y_true, y_pred, mask=None):
+def kendall_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
     Calcule le coefficient de Kendall en utilisant un masque optionnel.
     
@@ -1328,15 +1355,17 @@ def kendall_coefficient(y_true, y_pred, mask=None):
     Retourne :
     - Le coefficient de Kendall (float).
     """
-    if mask is None:
 
-        return kendalltau(y_true, y_pred)[0]
-    
+    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
+    ranks_ytrue = rankdata(y_true, method='average')
+
+    if mask is None:
+        return kendalltau(y_pred, y_true)[0]
     
     mask = mask.reshape(-1)
-    return kendalltau(y_true[mask], y_pred[mask])[0]
+    return kendalltau(y_pred[mask], y_true[mask])[0]
 
-def pearson_coefficient(y_true, y_pred, mask=None):
+def pearson_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
     Calcule le coefficient de Pearson en utilisant un masque optionnel.
     
@@ -1348,16 +1377,20 @@ def pearson_coefficient(y_true, y_pred, mask=None):
     Retourne :
     - Le coefficient de Pearson (float).
     """
+
+    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
+    ranks_ytrue = rankdata(y_true, method='average')
+
     if mask is None:
-        return pearsonr(y_true, y_pred)[0]
-
+        return pearsonr(y_pred, y_true)[0]
+    
     mask = mask.reshape(-1)
-    return pearsonr(y_true[mask], y_pred[mask])[0]
+    return pearsonr(y_pred[mask], y_true[mask])[0]
 
-def spearman_coefficient(y_true, y_pred, mask=None):
+def spearman_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
     Calcule le coefficient de Spearman en utilisant un masque optionnel.
-    
+
     Paramètres :
     - y_true: Valeurs réelles (np.ndarray).
     - y_pred: Valeurs prédites (np.ndarray).
@@ -1366,16 +1399,19 @@ def spearman_coefficient(y_true, y_pred, mask=None):
     Retourne :
     - Le coefficient de Spearman (float).
     """
+    
+    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
+    ranks_ytrue = rankdata(y_true, method='average')
+
     if mask is None:
-        return spearmanr(y_true, y_pred)[0]
+        return spearmanr(y_pred, y_true)[0]
     
     mask = mask.reshape(-1)
-    return spearmanr(y_true[mask], y_pred[mask])[0]
+    return spearmanr(y_pred[mask], y_true[mask])[0]
 
-
-def my_f1_score(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+def my_roc_auc(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
     """
-    Calcule le F1 score sur une gamme de seuils et retourne le meilleur score avec les métriques associées.
+    Calcule l'AUC-ROC sur une gamme de seuils et retourne le meilleur score avec les métriques associées.
 
     Paramètres:
     - Y: Labels réels. Pour la classification binaire, Y doit avoir la forme (n_samples, 1) avec des labels binaires.
@@ -1386,62 +1422,130 @@ def my_f1_score(Y: np.array, ypred: np.array, target: str, weights: np.array = N
     - mask: Masque booléen pour sélectionner un sous-ensemble d'échantillons. Si None, tous les échantillons sont utilisés.
 
     Retourne:
-    - res: Dictionnaire contenant le meilleur F1 score, la précision, le rappel, le seuil, et la valeur du seuil.
+    - res: Dictionnaire contenant l'AUC-ROC, la précision, le rappel, le seuil optimal et la valeur du seuil.
     """
     if mask is None:
         mask = np.arange(ypred.shape[0])
     
+    # Extraction des labels binaires et des valeurs continues selon le type de cible
     ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
-    ytrueReg = Y[:, -1]   # On suppose que les cibles de régression sont dans la dernière colonne
+    
+    # Détermination du maximum pour le calcul du seuil
+    if target != 'binary':
+        ypred = MinMaxScaler().fit_transform(ypred.reshape(-1,1))
 
-    bounds = np.linspace(0.01, 0.90, 10)  # Seuils de 0.01 à 0.99 par pas de 0.01
-
-    res = {}
-
-    if target in ['binary']:
-        maxi = 1.0
-    else:
-        maxi = np.nanmax(ytrueReg)
-
-    bestScore = 0.0
-    bestBound = None
-    prec = 0.0
-    rec = 0.0
-
+    # Filtrage des données par masque
     ypredNumpy = ypred[mask]
     ytrueNumpy = ytrue[mask]
-    ytrueRegNumpy = ytrueReg[mask]
-
+    
     if weights is not None:
         weightsNumpy = weights[mask]
     else:
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
-    for bound in bounds:
-        if target in ['binary', 'nbsinister', 'risk']:
-            yBinPred = (ypredNumpy > bound * maxi).astype(int)
-        else:
-            yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
+    bestAUC = 0.0
 
-        f1 = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        if f1 > bestScore:
-            bestScore = f1
-            bestBound = bound
-            prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-            rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+    auc = roc_auc_score(ytrueNumpy, ypredNumpy, sample_weight=weightsNumpy)
+    if auc > bestAUC:
+        bestAUC = auc
 
-    if bestBound is None:
-        bestBound = bounds[0]
-        yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
-        prec = precision_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        rec = recall_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
-        bestScore = f1_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
+    # Retourne les résultats
+    res = {
+        'auc_roc': bestAUC,
+    }
+    
+    return res
 
-    res['f1'] = bestScore
-    res['precision'] = prec
-    res['recall'] = rec
-    res['threshold'] = bestBound
-    res['value'] = bestBound * maxi
+def my_auc_pr(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+    """
+    Calcule l'AUC-PR (Precision-Recall) et retourne un dictionnaire avec AUC-PR, précision, rappel, et seuil optimal.
+
+    Paramètres:
+    - Y : np.array
+        Les vraies étiquettes binaires.
+    - ypred : np.array
+        Les probabilités prédites pour la classe positive.
+    - target : str
+        Le type de cible. Doit être 'binary' ou un autre type.
+    - weights : np.array, optionnel
+        Poids des échantillons. Si None, tous les échantillons ont un poids égal.
+    - mask : np.array, optionnel
+        Masque booléen pour sélectionner un sous-ensemble d'échantillons. Si None, tous les échantillons sont utilisés.
+
+    Retourne:
+    - dict : Un dictionnaire contenant l'AUC-PR, la précision, le rappel, et le seuil optimal.
+    """
+    if mask is None:
+        mask = np.arange(ypred.shape[0])
+    
+    # Extraction des labels binaires
+    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+
+    # Filtrage des données par masque
+    ypredNumpy = ypred[mask]
+    ytrueNumpy = ytrue[mask]
+    
+    if weights is not None:
+        weightsNumpy = weights[mask]
+    else:
+        weightsNumpy = np.ones(ytrueNumpy.shape[0])
+
+    # Calcul de la courbe Precision-Recall
+    precision, recall, thresholds = precision_recall_curve(ytrueNumpy, ypredNumpy, sample_weight=weightsNumpy)
+    auc_pr = auc(recall, precision)
+
+    # Calcul du meilleur seuil (où la précision et le rappel sont les meilleurs)
+    best_threshold = thresholds[np.argmax(precision + recall)]
+    
+    # Retourne les résultats sous forme de dictionnaire
+    res = {
+        'auc_pr': auc_pr,
+        'precision': precision[np.argmax(precision + recall)],
+        'recall': recall[np.argmax(precision + recall)],
+        'threshold': best_threshold
+    }
+    
+    return res
+
+def my_f1_score(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+    """
+    Calcule le F1 score en utilisant le seuil optimal trouvé par la fonction my_auc_pr.
+    
+    Paramètres:
+    - Y : np.array
+        Les vraies étiquettes binaires.
+    - ypred : np.array
+        Les probabilités prédites pour la classe positive.
+    - target : str
+        Le type de cible. Doit être 'binary' ou un autre type.
+    - weights : np.array, optionnel
+        Poids des échantillons. Si None, tous les échantillons ont un poids égal.
+    - mask : np.array, optionnel
+        Masque booléen pour sélectionner un sous-ensemble d'échantillons. Si None, tous les échantillons sont utilisés.
+
+    Retourne:
+    - dict : Un dictionnaire contenant le F1 score, la précision, le rappel, et le seuil optimal.
+    """
+    if mask is None:
+        mask = np.arange(ypred.shape[0])
+
+    # Extraction des labels binaires
+    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+
+    # Calcul de l'AUC-PR et du seuil optimal
+    auc_pr_results = my_auc_pr(Y, ypred, target, weights, mask)
+    best_threshold = auc_pr_results['threshold']  # Seuil optimal trouvé par AUC-PR
+    
+    f1_scores = 2 * (auc_pr_results['precision'] * auc_pr_results['recall']) / (auc_pr_results['precision'] + auc_pr_results['recall'])
+    
+    # Résultats
+    res = {
+        'f1': f1_scores,
+        'precision': auc_pr_results['precision'],
+        'recall': auc_pr_results['recall'],
+        'threshold': best_threshold,
+        'auc_pr': auc_pr_results['auc_pr']
+    }
 
     return res
 
@@ -1503,21 +1607,21 @@ def binary_accuracy(Y: np.array, ypred: np.array, target: str, weights: np.array
     ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
     ytrueReg = Y[:, -1]   # On suppose que les cibles de régression sont dans la dernière colonne
 
-    # Augmentation du nombre de seuils testés
-    if target != 'nbsinister':
-        bounds = np.linspace(0.01, 0.90, 10)  # Seuils de 0.01 à 0.99 par pas de 0.01
-    else:
-        bounds = np.linspace(0.90, 1.00, 11)  # Seuils de 0.90 à 1.00 par pas de 0.01
+    bounds = np.linspace(0.01, 0.90, 10)  # Seuils de 0.01 à 0.99 par pas de 0.01
 
     res = {}
 
-    if target in ['binary', 'nbsinister', 'risk']:
+    if target in ['binary']:
         maxi = 1.0
-    else:
+    elif target == 'nbsinister':
+        maxi = np.nanmax(ytrue)
+    elif target == 'risk':
         maxi = np.nanmax(ytrueReg)
+    else:
+        maxi = np.nanmax(ypred)
 
     bestScore = 0.0
-
+    
     ypredNumpy = ypred[mask]
     ytrueNumpy = ytrue[mask]
     ytrueRegNumpy = ytrueReg[mask]
@@ -1528,7 +1632,7 @@ def binary_accuracy(Y: np.array, ypred: np.array, target: str, weights: np.array
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
     for bound in bounds:
-        if target in ['binary', 'nbsinister', 'risk']:
+        if target in ['binary', 'nbsinister', 'indice']:
             yBinPred = (ypredNumpy > bound * maxi).astype(int)
         else:
             yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
@@ -1936,8 +2040,13 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
             mask[labeled_image == region.label] = region.label
             i += 1
             continue
-
+    
         label = region.label
+
+        if label in changed_labels:
+            i += 1
+            continue
+        
         ones = np.argwhere(mask == label).shape[0]
         if ones < min_cluster_size:
             nb_test = 0
@@ -1976,7 +2085,8 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                                 if neighbor_size < max_cluster_size:
                                     dilate = False
                                     mask[mask_label_ori] = neighbor[0]
-                                    logger.info(f'label {label} -> {neighbor[0]}')
+                                    dilated_image[mask_label] = neighbor[0]
+                                    logger.info(f'Use neighbord label {label} -> {neighbor[0]}')
                                     label = neighbor[0]
                                     find_neighbor = True
                                     break
@@ -1984,9 +2094,10 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                         # Si aucun voisin n'a permis d'atteindre min_cluster_size, utiliser le voisin le plus grand
                         if not find_neighbor and best_neighbor is not None:
                             if max_neighbor_size < max_cluster_size:
-                                mask[mask_label_ori] = best_neighbor
+                                mask[mask_label] = best_neighbor
+                                dilated_image[mask_label] = best_neighbor
                                 dilate = False
-                                logger.info(f'label {label} -> {best_neighbor}')
+                                logger.info(f'Use biggest neighbord label {label} -> {best_neighbor}')
                                 label = best_neighbor
                                 find_neighbor = True
 
@@ -2064,8 +2175,13 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                         mask[mask_label] = 0
                         logger.info(f'Remove label {region.label}')
                     else:
+                        while ones > max_cluster_size:
+                            mask_label = morphology.erosion(mask_label, morphology.square(3))
+                            ones = np.argwhere(mask_label == 1).shape[0]
+                        
                         mask[mask_label] = region.label
                         logger.info(f'Keep label dilated {region.label}')
+
             regions = measure.regionprops(mask)
             regions = sorted(regions, key=lambda r: r.area)
             len_regions = len(regions)
@@ -2151,7 +2267,7 @@ def split_large_clusters(image, size_threshold, min_cluster_size, background):
             coords = np.column_stack(np.nonzero(region_mask))
             # Appliquer K-means pour diviser en 2 clusters
             if len(coords) > 1:  # Assurez-vous qu'il y a suffisamment de points pour appliquer K-means
-                clusterer = KMeans(n_clusters=2, random_state=42).fit(coords)
+                clusterer = KMeans(n_clusters=2, random_state=42, n_init=10).fit(coords)
                 #clusterer = HDBSCAN(min_cluster_size=size_threshold).fit(coords)
                 labels = clusterer.labels_
                 
@@ -2568,13 +2684,14 @@ def select_train_features(train_features, scale, features_name):
 
 def features_selection(doFet, df, dir_output, features_name, NbFeatures, target):
 
-    if NbFeatures == 'all':
+    print(features_name, NbFeatures)
+    if NbFeatures == len(features_name) or NbFeatures == 'all':
         features_selected = features_name
         return features_selected
 
     if doFet:
         df_weight = df[df['weight'] > 0]
-        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=NbFeatures)
+        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=int(NbFeatures))
         features_importance = np.asarray(features_importance)
 
         save_object(features_importance, f'features_importance_{NbFeatures}.pkl', dir_output)
@@ -2877,6 +2994,24 @@ def log_metrics_recursively(metrics_dict, prefix=""):
             # Gérer d'autres types si nécessaire (par exemple, des listes)
             #raise ValueError(f"Unsupported metric type: {type(value)} for key: {full_key}")
 
+def calculate_iou(image1, image2):
+    
+    # Vérifier que les deux images sont de la même taille
+    if image1.shape != image2.shape:
+        raise ValueError("Les deux images doivent être de la même taille pour calculer l'IoU.")
+    
+    # Binariser les images (seuiling pour les valeurs de pixels 0 ou 255)
+    _, binary_image1 = cv2.threshold(image1, 127, 255, cv2.THRESH_BINARY)
+    _, binary_image2 = cv2.threshold(image2, 127, 255, cv2.THRESH_BINARY)
+    
+    # Calculer l'intersection et l'union
+    intersection = np.logical_and(binary_image1, binary_image2).sum()
+    union = np.logical_or(binary_image1, binary_image2).sum()
+    
+    # Calculer l'IoU
+    iou = intersection / union if union != 0 else 0
+    return iou
+
 def get_existing_run(run_name):
     # Récupère tous les runs avec le nom spécifié
     client = mlflow.tracking.MlflowClient()
@@ -3029,73 +3164,127 @@ def calculate_proportion_weights(df):
     return res
 
 def calculate_class_weights(df):
-    return df['weight']
+    return df['weight'].values
 
 def calculate_nbsinister(df):
-    return df['nbsinister'] + 1
+    return df['nbsinister'].values + 1
 
 def calculate_normalize_weights(df, band):
-    res = (df[band] - np.nanmean(df[band]) / np.nanstd(df[band]))
+    res = (df[band].values - np.nanmean(df[band])) / np.nanstd(df[band])
     min_value = np.min(res)
-    return (res + abs(min_value)) + np.ones(df.shape[0])
+    res = (res + abs(min_value)) + np.ones(df.shape[0])
+    return res
+
+def calculate_outlier_weighs(df, band, params):
+    res = df[band].values - np.mean(df[band])
+    res = np.power(res, params['p'])
+    return np.where(res < 1, 1, res)
 
 def calculate_weight_proportion_on_zero_sinister(df):
     mask_sinister = np.argwhere(df['nbsinister'].values > 0).shape[0]
     mask_non_sinister = np.argwhere(df['nbsinister'].values == 0).shape[0]
     res = np.ones(df.shape[0])
-    res = np.where(df['nbsinister'] == 0, 1, mask_non_sinister / mask_sinister)
+    if mask_sinister > 0:
+        res = np.where(df['nbsinister'] == 0, 1, mask_non_sinister / mask_sinister)
+    else:
+        res = np.where(df['nbsinister'] == 0, 1, mask_non_sinister)
     return res
 
 def random_weights(df):
     rand_array = np.random.rand(df.shape[0]) * 10
     return rand_array
 
-def calculate_weighs(weight_col, df):
-    # Fonction auxiliaire pour ajuster les poids en fonction du nombre de sinistres
+def calculate_weighs(weight_col, df, train_date, train_code):
+    # Mask to identify rows based on date and department conditions
+    mask_subset = (df['date'] < train_date) & (df['departement'].isin(train_code))
+
+    # Helper function to adjust weights conditionally
     def adjust_weights_for_zero_sinister(weights, df):
-        # Mettre le poids à 1 pour les échantillons où le nombre de sinistres (colonne -2) est égal à 0
         zero_sinister_mask = df['nbsinister'] == 0
         weights[zero_sinister_mask] = 1
         return weights
+    
+    # Helper function to calculate weights based on mask
+    def calculate_weight_by_mask(weight_func, df, mask, band=None, params=None):
+        # Calculate weights for the subset and the full dataset
+        if True in np.unique(mask):
+            if params is not None:
+                subset_weights = weight_func(df[mask], band, params) if band else weight_func(df[mask], params)
+            else:
+                subset_weights = weight_func(df[mask], band) if band else weight_func(df[mask])
 
+        if params is not None:
+            full_weights = weight_func(df, band, params) if band else weight_func(df, params)
+        else:
+            full_weights = weight_func(df, band) if band else weight_func(df)
+        
+        # Initialize final weight array
+        weights = np.ones(df.shape[0], dtype=float)
+        # Assign subset weights for the masked elements, and full weights otherwise
+        if True in np.unique(mask):
+            weights[mask] = subset_weights.reshape(weights[mask].shape)
+
+        weights[~mask] = full_weights[~mask].reshape(weights[~mask].shape)
+        weights[np.isnan(weights)] = 1.0
+        return weights
+
+    # Apply the appropriate weight function based on `weight_col`
     if weight_col == 'weight_proportion_on_zero_class':
-        return calculate_proportion_weights(df)
+        return calculate_weight_by_mask(calculate_proportion_weights, df, mask_subset)
+    
     elif weight_col == 'weight_class':
-        return calculate_class_weights(df)
+        return calculate_weight_by_mask(calculate_class_weights, df, mask_subset)
+    
     elif weight_col == 'weight_nbsinister':
-        weights = calculate_nbsinister(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_nbsinister, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_one':
         return np.ones((df.shape[0], 1))
+    
     elif weight_col == 'weight_normalize':
-        return calculate_normalize_weights(df, 'risk')
+        return calculate_weight_by_mask(calculate_normalize_weights, df, mask_subset, 'risk')
+    
     elif weight_col == 'weight_proportion_on_zero_sinister':
-        weights = calculate_weight_proportion_on_zero_sinister(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_random':
-        weights = random_weights(df)
-        return adjust_weights_for_zero_sinister(weights, df)
-
+        return calculate_weight_by_mask(random_weights, df, mask_subset)
+    
+    elif weight_col.find('weight_outlier') != -1 and weight_col.find('nbsinister') == -1:
+        p_param = int(weight_col.split('_')[-1])
+        return calculate_weight_by_mask(calculate_outlier_weighs, df, mask_subset, 'risk', {'p' : p_param})
+    
     elif weight_col == 'weight_proportion_on_zero_class_nbsinister':
-        weights = calculate_proportion_weights(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_proportion_weights, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_class_nbsinister':
-        weights = calculate_class_weights(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_class_weights, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_one_nbsinister':
         return np.ones((df.shape[0], 1))
+    
     elif weight_col == 'weight_nbsinister_nbsinister':
-        weights = calculate_nbsinister(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_nbsinister, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_normalize_nbsinister':
-        weights = calculate_normalize_weights(df, 'nbsinister')
-        return adjust_weights_for_zero_sinister(weights, df)
+        return calculate_weight_by_mask(calculate_normalize_weights, df, mask_subset, 'nbsinister')
+    
     elif weight_col == 'weight_random_nbsinister':
-        weights = random_weights(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(random_weights, df, mask_subset)
+        return weights
+    
     elif weight_col == 'weight_proportion_on_zero_sinister_nbsinister':
-        weights = calculate_weight_proportion_on_zero_sinister(df)
-        return adjust_weights_for_zero_sinister(weights, df)
+        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, mask_subset)
+        return weights
+    
+    elif weight_col.find('weight_outlier') != -1 and weight_col.find('nbsinister') != -1:
+        p_param = int(weight_col.split('_')[2])
+        return calculate_weight_by_mask(calculate_outlier_weighs, df, mask_subset, 'nbsinister', {'p' : p_param})
     else:
         logger.info(f'Unknown value of weight {weight_col}')
         exit(1)

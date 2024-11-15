@@ -59,12 +59,12 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
             argile_value += list(argile[~np.isnan(tar[:, :, 0])])
 
         dir_mask = Path(dir_output / '..' /  'raster')
-        id_mask = read_object(f'{dep}rasterScale{graph.scale}_{graph.base}_node.pkl', dir_mask)
+        id_mask = read_object(f'{dep}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_mask)
         if id_mask is not None:
             ids_value += list(id_mask[~np.isnan(tar[:, :, 0])])
 
         dir_clustering = Path(dir_output / '..' /  'time_series_clustering')
-        cluster_mask = read_object(f'{dep}_{graph.scale}_{graph.base}.pkl', dir_clustering)
+        cluster_mask = read_object(f'{dep}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_clustering)
         if cluster_mask is not None:
             cluster_value += list(cluster_mask[~np.isnan(tar[:, :, 0])])
 
@@ -159,12 +159,12 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
     if ids_value.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(ids_value, spatialValues)
-        save_object(encoder, f'encoder_ids_{graph.scale}_{graph.base}.pkl', dir_output)
+        save_object(encoder, f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output)
 
     if cluster_value.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(cluster_value, spatialValues)
-        save_object(encoder, f'encoder_cluster_{graph.scale}_{graph.base}.pkl', dir_output)
+        save_object(encoder, f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output)
 
     if cosia.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))

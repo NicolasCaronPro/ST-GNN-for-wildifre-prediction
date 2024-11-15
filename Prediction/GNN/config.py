@@ -280,7 +280,7 @@ def get_academic_zone(name, date):
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 
-targets_columns = ['class_risk', 'nbsinister', 'risk']
+targets_columns = ['nbsinister_id', 'class_risk', 'nbsinister', 'risk']
 
 weights_columns = ['weight_proportion_on_zero_class',
                    'weight_class',
@@ -289,6 +289,11 @@ weights_columns = ['weight_proportion_on_zero_class',
                    'weight_nbsinister',
                    'weight_proportion_on_zero_sinister',
                    'weight_random',
+                   'weight_outlier_1',
+                   'weight_outlier_2',
+                   'weight_outlier_3',
+                   'weight_outlier_4',
+                   'weight_outlier_5',
                    
                    'weight_proportion_on_zero_class_nbsinister',
                    'weight_class_nbsinister',
@@ -296,7 +301,13 @@ weights_columns = ['weight_proportion_on_zero_class',
                    'weight_one_nbsinister',
                    'weight_normalize_nbsinister',
                    'weight_nbsinister_nbsinister',
-                   'weight_random_nbsinister']
+                   'weight_random_nbsinister',
+                   'weight_outlier_1_nbsinister',
+                   'weight_outlier_2_nbsinister',
+                   'weight_outlier_3_nbsinister',
+                   'weight_outlier_4_nbsinister',
+                   'weight_outlier_5_nbsinister',
+                   ]
 
 id_index = ids_columns.index('id')
 graph_id_index = ids_columns.index('graph_id')
@@ -373,7 +384,8 @@ resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
 
 shape2D = {10: (24, 24),
            30 : (30, 30),
-           3 : (15,15),
+          4  : (15,15),
+          5  : (25,25),
             8 : (30,30),
             'departement' : (64,64)}
 
@@ -382,17 +394,28 @@ veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
             in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
+#device = torch.device("cpu") # The device on which we train each models
 Rewrite = True
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used
 encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
+p_coef_value = {
+    'GAT': 4,
+    'xgboost': 4,
+    'gam': 1,
+    'DST-GAT': 4,
+    'ST-GATDILATED': 1,
+    'LSTM': 1,
+    'ST-GATLSTM': 1
+}
+ 
 epochs = 10000
-lr = 0.0000005
-PATIENCE_CNT = 50
-CHECKPOINT = 100
-batch_size = 64
+lr = 0.000001
+PATIENCE_CNT = 15
+CHECKPOINT = 50
+batch_size = 256
 
 METHODS_TEMPORAL = ['mean', 'min', 'max',
         # 'std',
@@ -434,8 +457,10 @@ models_hybrid = ['ConvGraphNet', 'ST-ConvGraphNet', 'HybridConvGraphNet']
 temporal_model_list = ['LSTM', 'DST-GCN', 'ST-GCN', 'ST-GAT', 'ATGCN', 'ST-GATLSTM']
 daily_model_list = ['GCN', 'GAT', 'KAN']
 
-zhang_layer_conversion = {
-    8 : 15,
-    10 : 15,
-    9 : 15,
-    }
+    
+zhang_layer_conversion = {  # Fire project, if you try this model you need to adapt it scale -> fc dim
+        4 : 7,
+        8: 15,
+        10: 12,
+        9: 15,
+}
