@@ -217,7 +217,6 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
             save_object(sat0, dept+'rasterScale0.pkl', dir_output / 'raster' / resolution)
         else:
             sat0 = read_object(dept+'rasterScale0.pkl', dir_output / 'raster' / resolution)
-        
         try:
             if dataset_name == 'firemen':
                 if sinister == 'firepoint':
@@ -242,7 +241,27 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
                 code_dept_str = f'{code_dept_str}'
             fp = fp[fp['Département'] == code_dept_str]
 
+        else:
+            # Convertir les colonnes en format datetime
+            # Fonction pour convertir en datetime en gérant les erreurs
+            def safe_to_datetime(column):
+                return pd.to_datetime(column, errors='coerce')
+
+            # Convertir les colonnes en format datetime
+            fp['date_debut'] = safe_to_datetime(fp['date_debut'])
+            fp['date_fin'] = safe_to_datetime(fp['date_fin'])
+
+            # Calculer la différence en heures pour les lignes valides
+            fp['hours_difference'] = (fp['date_fin'] - fp['date_debut']).dt.total_seconds() / 3600
+
+            # Calculer la moyenne des valeurs valides
+            mean_hours = fp['hours_difference'].mean(skipna=True)
+
+            # Remplacer les valeurs NaN par la moyenne
+            fp['hours_difference'] = fp['hours_difference'].fillna(mean_hours)
+
         fp = fp[fp['date'] > sdate]
+        print(fp.hours_difference.mean(), fp.hours_difference.max(), fp.hours_difference.min())
 
         if len(fp) == 0:
             print('Return a full zero image')
@@ -256,7 +275,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         sp['departement'] = dept
 
         sp['scale0'] = sp['h3'].replace(dico)
-
+        
         sat0 = sat0[0]
         if not read:
             inputDep = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
@@ -264,7 +283,12 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
             inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0
             save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
-        else: 
+            inputDep_time = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
+                                                             creneaux, sat0, sinister, 'hours_difference', n_pixel_y, n_pixel_x, dir_output, dept)
+            
+            inputDep_time[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
+            save_object(inputDep_time, dept+'timeScale0.pkl', dir_output / 'time_intervention' / resolution)
+        else:
             inputDep = read_object(dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
         input.append(inputDep)

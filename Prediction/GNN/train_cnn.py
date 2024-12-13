@@ -149,6 +149,8 @@ if MLFLOW:
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
 
+prefix_config = deepcopy(prefix)
+
 train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_name, train_departements,
                                                                                     prefix,
@@ -306,7 +308,7 @@ if doTest:
     for dept in departements:
 
         if MLFLOW:
-            exp_name = f"{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
+            exp_name = f"{name_exp}_{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
             experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
@@ -336,8 +338,8 @@ if doTest:
                             methods=methods,
                             test_name=dept,
                             features_name=features_name,
-                            prefix=prefix,
                             prefix_train=prefix,
+                            prefix_config=prefix_config,
                             models=cnn_models,
                             dir_output=dir_output / dept / prefix,
                             device=device,

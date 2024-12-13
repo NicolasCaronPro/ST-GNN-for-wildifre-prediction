@@ -70,15 +70,13 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             'days_since_rain', 'sum_consecutive_rainfall',
                                             'sum_rain_last_7_days',
                                             'sum_snow_last_7_days', 'snow24h', 'snow24h16']
-    #if dataset_name != 'bdiff':
-    #    variables_for_susecptibilty_and_clustering.append('cosia')
-    
-    """graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
-                                            departements=departements,
-                                            variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
-                                            root_data=rootDisk / 'csv',
-                                            root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                            dir_output=dir_output)"""
+    if dataset_name == 'bdiff':
+        graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
+                                                departements=departements,
+                                                variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
+                                                root_data=rootDisk / 'csv',
+                                                root_target=root_target / sinister / dataset_name / sinister_encoding,
+                                                dir_output=dir_output)
     #else:
     #pass
         
@@ -116,7 +114,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
 def export_to_all_date(df, dataset_name, sinister, departements, maxDate):
     res = []
     for departement in departements:
-        if dataset_name == 'firemen':
+        if dataset_name in ['firemen', 'Ain', 'Doubs', 'Rhone', 'Yvelines']:
             if sinister == 'inondation':
                 end_date = '2023-08-03'
                 start_date = '2017-06-12'
@@ -183,6 +181,154 @@ def est_un_entier_chaine(variable):
         return True
     except ValueError:
         return False
+
+def process_target(df, graphScale, prefix, find_df, minDate, departements, train_departements, features_name, kmeans_features, features, dir_output, args):
+
+    ######################### Input config #############################
+    dataset_name = args.dataset
+    maxDate = args.maxDate
+    trainDate = args.trainDate
+    do2D = args.database2D == "True"
+    sinister = args.sinister
+    scale = int(args.scale) if args.scale != 'departement' else args.scale
+    resolution = args.resolution
+    ncluster = int(args.ncluster)
+    shift = int(args.shift) 
+    graph_construct = args.graphConstruct
+    dataset_name = args.dataset
+    sinister_encoding = args.sinisterEncoding
+    graph_method = args.graph_method
+
+    trainCode = [name2int[d] for d in train_departements]
+    train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
+    target_column_name_list = ['0_0']
+    df['nbsinister_0_0'] = df['nbsinister'].values
+    limit_day = 9
+    shift_list = np.arange(0, 5)
+    thresh_kmeans_list = np.arange(0.1, 1, 0.1)
+    ############################ Frequency ratio / removing outliers ###########################################
+
+    if (dir_output / f'df_no_weight_{prefix}.pkl').is_file():
+        for thresh in thresh_kmeans_list:
+            target_column_name_list += [f'{s}_{thresh}' for s in shift_list]
+
+        df = read_object(f'df_no_weight_{prefix}.pkl', dir_output)
+    else:    
+        if dataset_name == 'firemen':
+            features_selected_kmeans, _ = get_features_name_list(scale, features, METHODS_KMEANS)
+            train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
+            features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS)
+            mask = (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode)) # Train Val mask
+
+            for thresh in thresh_kmeans_list:
+                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'nbsinister', thresh, features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=mask)
+                #df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'AutoRegressionBin-B-1', thresh, features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=mask)
+                target_column_name_list += [f'{s}_{thresh}' for s in shift_list]
+
+        #mask = ((df['date'] >= allDates.index(maxDate) + k_days) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode)) # Test mask
+        #df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'nbsinister', thresh_kmeans, features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=mask)
+
+        ############################## Add survival column #############################
+
+        for target_spe in target_column_name_list:
+            df[f'days_until_next_event_{target_spe}'] = calculate_days_until_next_event(df['id'].values, df['date'].values, df[f'nbsinister_{target_spe}'].values)
+
+        df[f'days_until_next_event'] = df[f'days_until_next_event_0_0'].values
+
+        ####################### Create risk target throught time ##############################
+        assert graphScale is not None
+        for target_spe in target_column_name_list:
+            df = graphScale.compute_mean_sequence(df.copy(deep=True), dataset_name, maxDate, target_spe)
+            df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'nbsinister_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'nbsinister_{target_spe}')
+            df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'risk_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'risk_{target_spe}')
+        
+        df['risk'] = df['risk_0_0'].values
+        for target_spe in target_column_name_list:
+            df = graphScale._create_predictor(df.copy(deep=True), minDate, maxDate, dir_output, target_spe)
+
+        ############################## Global variable #######################################
+
+        global varying_time_variables
+        global varying_time_variables_name
+
+        ########################################### Add futur risk/nbsinister #############################
+        for target_spe in target_column_name_list:
+            logger.info(f'Add {target_spe} in {limit_day} days in future')
+            df = target_by_day(df, limit_day, futur_met, target_spe)
+
+        save_object(df, f'df_no_weight_{prefix}.pkl', dir_output)
+
+    ############################## Add weight columns #############################
+
+    if not find_df:
+        all_weights_col = []
+        logger.info(f'Adding weight columns')
+
+        for target_spe in target_column_name_list:
+
+            for days in range(limit_day + 1):
+
+                target_name_nbsinister = f'nbsinister_sum_{target_spe}_+{days}'
+                target_name_risk = f'risk_max_{target_spe}_+{days}'
+                target_name_class = f'class_risk_max_{target_spe}_+{days}'
+
+                dataframe_graph = df[[target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
+                dataframe_graph.drop_duplicates(keep='first', inplace=True)
+
+                for weight_col in weights_columns:
+                    df_weight = []
+                    weigh_col_name = f'{weight_col}_{target_spe}_+{days}'
+                    all_weights_col.append(weigh_col_name)
+                    logger.info(f'{weigh_col_name}')
+                    continue
+                    if graph_method == 'node':
+                        df[weigh_col_name] = 0.0
+
+                    for dept in df.departement.unique():
+                        index_dept = df[df['departement'] == dept].index
+                        if graph_method == 'graph':
+                            dataframe_graph_2 = df.loc[index_dept, [target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
+                            dataframe_graph_2.drop_duplicates(keep='first', inplace=True)
+                            weight_dept = calculate_weighs(weight_col, dataframe_graph_2.copy(deep=True), target_name_nbsinister, target_name_risk, allDates.index(trainDate), trainCode)
+                            if weight_dept is None:
+                                continue
+
+                            weight_dept = weight_dept.reshape(dataframe_graph_2['weight'].values.shape)
+
+                            result = np.multiply(dataframe_graph_2['weight'].values, weight_dept)
+                            dataframe_graph_2[weigh_col_name] = result
+                            df_weight.append(dataframe_graph_2)
+                        else:
+                            weight_dept = calculate_weighs(weight_col, df.copy(deep=True).loc[index_dept], target_name_nbsinister, target_name_risk, allDates.index(trainDate), trainCode)
+                            if weight_dept is None:
+                                continue
+
+                            weight_dept = weight_dept.reshape(df.loc[index_dept, 'weight'].values.shape)
+
+                            result = np.multiply(df.loc[index_dept, 'weight'].values, weight_dept)
+
+                            df.loc[index_dept, weigh_col_name] = result
+
+                    if graph_method == 'graph':
+                        df_weight = pd.concat(df_weight)
+                        dataframe_graph = dataframe_graph.set_index(['graph_id', 'date']).join(df_weight.set_index(['graph_id', 'date'])[weigh_col_name], on=['graph_id', 'date']).reset_index()
+        
+        df[all_weights_col] = 1
+        """if graph_method == 'graph':
+            try:
+                df.drop(all_weights_col, inplace=True, axis=1)
+            except Exception as e:
+                print(e)
+            df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[all_weights_col], how='right').reset_index()"""
+    
+    if do2D:
+        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
+                                                                    sinister, dataset_name, dir_output, dir_output,
+                                                                    resolution, graph_construct, sinister_encoding)
+    else:
+        features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
+
+    return df
 
 def construct_database(
     graphScale: GraphStructure,
@@ -699,6 +845,8 @@ def init(args, dir_output, script):
     doPCA = args.pca == 'True'
     doKMEANS = args.KMEANS == 'True'
     ncluster = int(args.ncluster)
+    nbfeatures = args.NbFeatures
+    shift = int(args.shift) 
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
     days_in_futur = int(args.days_in_futur) # The target time validation
     dir_output = dir_output
@@ -709,6 +857,7 @@ def init(args, dir_output, script):
     weights_version = args.weights
     top_cluster = args.top_cluster
     graph_method = args.graph_method
+    thresh_kmeans = float(args.thresh_kmeans)
 
     ######################## Get features and train features list ######################
 
@@ -719,8 +868,6 @@ def init(args, dir_output, script):
     ######################## Get departments and train departments #######################
 
     departements, train_departements = select_departments(dataset_name, sinister)
-
-    trainCode = [name2int[d] for d in train_departements]
 
     ######################## CONFIG ################################
 
@@ -800,11 +947,6 @@ def init(args, dir_output, script):
 
     ########################### Create points ################################
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
-    fp['database'] = dataset_name
-    if two:
-        fpp = pd.read_csv(f'sinister/bdiff/{sinister}.csv', dtype=str)
-        fpp['database'] = dataset_name
-        fp = pd.concat((fp, fpp)).reset_index(drop=True)
     if doPoint:
         
         logger.info('#####################################')
@@ -852,11 +994,6 @@ def init(args, dir_output, script):
             ps = ps.copy(deep=True)
             ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
             ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
-            fp['database'] = dataset_name
-            if two:
-                fpp = pd.read_csv(Path('bdiff') / sinister / name)
-                fpp['database'] = 'bdiff'
-            fp = pd.concat((fp, fpp))
 
         X, Y, features_name = construct_database(graphScale,
                                             ps, k_days,
@@ -892,104 +1029,36 @@ def init(args, dir_output, script):
 
     ############################## Dataframe creation ###################################
 
-    prefix = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}_{top_cluster}'
+    prefix = f'{values_per_class}_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
     if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase:
-        print(f'df_{prefix}.pkl')
+        features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
-        features_name = list(df.columns)
-        features_name = [fet for fet in features_name if fet not in ids_columns and fet not in targets_columns and fet not in weights_columns]
-        features_name_train, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
-        features_name = [fet for fet in features_name if fet in features_name_train]
-        find_df = True
-        #return df, graphScale, prefix, fp, features_name
-    else:
+        return df, graphScale, prefix, fp, features_name
+    else: 
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
-        df[features_name] = X
+        df[features_name] = X 
         df[ids_columns[:-1] + targets_columns] = Y
         find_df = False
 
-    print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
+    prefix = f'{values_per_class}_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
-    ############################## Interpolate missing value #########################
+    ################################ Process Target ###############################################
 
-    ####################### Create risk target throught time ##############################
-
-    if not find_df:
-        df = graphScale.compute_mean_sequence(df.copy(deep=True), dataset_name, maxDate)
-
-    print('pastinfluence' in df.columns)
-
-    if top_cluster is not None:
-        uvalues = df.cluster_encoder.unique()
-        uvalues = np.sort(uvalues)
-        top_x = int(top_cluster.split('-')[1])
-        thresh = uvalues[-top_x]
-        #df.loc[df[df['cluster_encoder'] >= thresh].index, 'weight'] = 0
-        df = df[df['cluster_encoder'] >= thresh]
-        uvalues = df.cluster_encoder.unique()
-
-    print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
-
-    ############################## Global variable #######################################
-
-    global varying_time_variables
-    global varying_time_variables_name
-
-    ############################ Frequency ratio ###########################################
-    if doKMEANS:
-        trainCode = [name2int[d] for d in train_departements]
-        train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
-
-        features_selected_kmeans, _ = get_features_name_list(scale, features, METHODS_KMEANS)
-        train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster)
-
-        if not find_df:
-            features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS)
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'risk', tresh_kmeans, features_selected_kmeans, new_val=0)
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'class_risk', tresh_kmeans, features_selected_kmeans, new_val=0)
-            #df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'nbsinister', tresh_kmeans, features_selected_kmeans, new_val=0)
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', 'weight', tresh_kmeans, features_selected_kmeans, new_val=0)
-        
-        features_selected_kmeans, _ = get_features_name_list(scale, train_features, METHODS_KMEANS)
-        
-        #df, new_fet_fr = add_fr_variables(df.copy(deep=True), dir_output / 'check_none' / prefix / 'kmeans', features_selected_kmeans)
-
-        #new_varying_time_variables = []
-
-        #features_name += new_fet_fr
-        #for col1 in varying_time_variables:
-        #    col, met = col1.split('_')
-        #    new_varying_time_variables += [f'{col}_frequencyratio_{met}']
-            
-        #varying_time_variables += new_varying_time_variables
-
-    ################################ Create class ##################################################################
-
-    df = graphScale._create_predictor(df.copy(deep=True), minDate, maxDate, dir_output)
-    print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
-
-    ############################## Add survival column #############################
-
-    df['days_until_next_event'] = calculate_days_until_next_event(df['graph_id'].values, df['date'].values, df['nbsinister'].values)
-
-    ################################# 2D Database ###################################
-    
-    if do2D:
-        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
-                                                                sinister, dataset_name, dir_output, dir_output,
-                                                                resolution, graph_construct, sinister_encoding)
+    if (dir_output / f'df_mid_{prefix}.pkl').is_file():
+        df = read_object(f'df_mid_{prefix}.pkl', dir_output)
     else:
-        features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
+        df = process_target(df, graphScale, prefix, find_df, minDate, departements, train_departements, features_name, kmeans_features, features, dir_output, args)
+        save_object(df, f'df_mid_{prefix}.pkl', dir_output)
 
     ################################ Remove bad or correlated features #############################################
-    if not find_df and script != 'train_fire_index':
+    
+    if not find_df and (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
         features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
-        df = df[features_name + ids_columns + targets_columns]
 
         old_shape = df.shape
-        df = remove_nan_nodes(df)
+        df = remove_nan_nodes(df, features_name)
         logger.info(f'Removing nan Features DataFrame shape : {old_shape} -> {df.shape}')
 
         leni = len(features_name)
@@ -1001,80 +1070,53 @@ def init(args, dir_output, script):
         logger.info(f'Remove low Variance {leni} -> {len(features_name)}')
         leni = len(features_name)
         
-        # Remove correlated Features
-        if (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
-            features_name = list(read_object(f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation'))
-            df_features = df[features_name]
-        else:
-            logger.info('Removing correlated feature')
-            tr = SmartCorrelatedSelection(
-                    variables=None,
-                    method="pearson",
-                    threshold=0.8,
-                    missing_values="raise",
-                    selection_method="model_performance",
-                    estimator=XGBRegressor(random_state=42),
-                    scoring='neg_root_mean_squared_error'
-            )
+        logger.info('Removing correlated feature')
+        tr = SmartCorrelatedSelection(
+                variables=None,
+                method="pearson",
+                threshold=0.8,
+                missing_values="raise",
+                selection_method="model_performance",
+                estimator=XGBRegressor(random_state=42),
+                scoring='r2'
+        )
             
-            df_features = tr.fit_transform(df_features, df['risk'])
-            features_name = list(df_features.columns)
-            
-            check_and_create_path(dir_output / 'features_correlation')
-
-            save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
-            save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group.pkl', dir_output  / 'features_correlation')
+        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        features_name = list(df_features.columns)
         
+        check_and_create_path(dir_output / 'features_correlation')
+
+        save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group.pkl', dir_output  / 'features_correlation')
+    
         logger.info(f'Smart Correlated Selection {leni} -> {len(features_name)}')
 
         features_name = list(df_features.columns)
-        df_features[targets_columns + ids_columns] = df[targets_columns + ids_columns]
-        df = df_features
+    
+    features_name = read_object(f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+    
+    assert features_name is not None
+
+    features_name = list(features_name)
 
     ############################## Add varying time features #############################
 
-    if not find_df:
-        if k_days > 0:
-            logger.info(f'Adding time columns {k_days}')
-            df, new_fet_time = add_time_columns(varying_time_variables, k_days, df.copy(deep=True), train_features)
-            varying_time_variables_name = new_fet_time
+    if True:
+        logger.info(f'Adding time columns {7}')
+        df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
 
-        print(len(df[(df['weight'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
+    ################################ Drop all duplicate ############################
 
-    ############################## Add weight columns #############################
-    print(trainDate, trainCode)
-    for weight_col in weights_columns:
-        df[weight_col] = 0.0
-        for dept in df.departement.unique():
+    df.drop_duplicates(subset=['id', 'date'], inplace=True)
 
-            index_dept = df[df['departement'] == dept].index
+    ############################## Round Values #####################################
 
-            weight_dept = calculate_weighs(weight_col, df.copy(deep=True).loc[index_dept], allDates.index(trainDate), trainCode)
+    df[features_name] = df[features_name].round(3)
 
-            if weight_dept is None:
-                continue
-
-            weight_dept = weight_dept.reshape(df.loc[index_dept, 'weight'].values.shape)
-
-            result = np.multiply(df.loc[index_dept, 'weight'].values, weight_dept)
-
-            df.loc[index_dept, weight_col] = result
-
-    print(len(df[(df['weight_one'] >  0) & (df['date'] < allDates.index('2022-01-01'))]))
-    print(len(Y[(Y[:, 5] >  0) & (Y[:, 4] < allDates.index('2022-01-01'))]))
-
-    df.drop_duplicates(inplace=True)
-
-    ############################## Update features list #############################
-    
-    if 'new_fet_fr' in locals():
-        features_name += varying_time_variables_name + new_fet_fr
-    else:
-        features_name += varying_time_variables_name
-
-    ############################## Save dataframe ###################################
+    ############################## Save dataframe and features ###################################
 
     save_object(df, f'df_{prefix}.pkl', dir_output)
+    save_object(features_name, f'features_name_{prefix}.pkl', dir_output)
 
-    print('pastinfluence' in df.columns)
-    return df, graphScale, prefix, fp, list(np.unique(features_name))
+    ############################## Return data, graph, sinister point and features_name ################################
+    return df, graphScale, prefix, fp, features_name

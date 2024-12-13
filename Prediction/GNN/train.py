@@ -1,6 +1,7 @@
 from copy import deepcopy
 from turtle import mode
 from matplotlib.pyplot import grid
+from torch import Value
 from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
@@ -23,15 +24,150 @@ def create_weight_binary(df_train, df_val, df_test, use_weight):
     
     return df_train, df_val, df_test
 
+def get_grid_params(model_type):
+    """
+    Renvoie les paramètres à optimiser pour une recherche en grille (grid search)
+    en fonction du type de modèle.
+
+    Parameters:
+    - model_type (str): Le type de modèle ('xgboost', 'lightgbm', 'rf', 'dt', 'svm').
+
+    Returns:
+    - dict: Un dictionnaire contenant les paramètres à optimiser.
+    """
+    if model_type.lower() == 'xgboost':
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 5, 7, 10],
+            'learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'gamma': [0, 0.1, 0.2, 0.3],
+            'reg_alpha': [0, 0.1, 0.5, 1],
+            'reg_lambda': [1, 1.5, 2]
+        }
+
+    elif model_type.lower() == 'lightgbm':
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [-1, 5, 7, 10],
+            'learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'num_leaves': [31, 50, 70, 100],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'min_child_weight': [1, 5, 10],
+            'reg_alpha': [0, 0.1, 0.5, 1],
+            'reg_lambda': [1, 1.5, 2]
+        }
+
+    elif model_type.lower() == 'rf':  # Random Forest
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [None, 10, 20, 30],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['auto', 'sqrt', 'log2']
+        }
+
+    elif model_type.lower() == 'dt':  # Decision Tree
+        return {
+            'max_depth': [None, 10, 20, 30],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['auto', 'sqrt', 'log2'],
+            'criterion': ['gini', 'entropy']
+        }
+
+    elif model_type.lower() == 'svm':  # Support Vector Machine
+        return {
+            'C': [0.1, 1, 10, 100],
+            'kernel': ['linear', 'rbf', 'poly', 'sigmoid'],
+            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1],
+            'degree': [2, 3, 4, 5],  # Applicable uniquement pour 'poly'
+            'tol': [1e-3, 1e-4, 1e-5]
+        }
+
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+    
+def get_model_params(model_type):
+    """
+    Renvoie les paramètres à optimiser pour une recherche en grille (grid search)
+    en fonction du type de modèle.
+
+    Parameters:
+    - model_type (str): Le type de modèle ('xgboost', 'lightgbm', 'rf', 'dt', 'svm').
+
+    Returns:
+    - dict: Un dictionnaire contenant les paramètres à optimiser.
+    """
+    if model_type.lower() == 'xgboost':
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [3, 5, 7, 10],
+            'learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'gamma': [0, 0.1, 0.2, 0.3],
+            'reg_alpha': [0, 0.1, 0.5, 1],
+            'reg_lambda': [1, 1.5, 2]
+        }
+
+    elif model_type.lower() == 'lightgbm':
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [-1, 5, 7, 10],
+            'learning_rate': [0.01, 0.05, 0.1, 0.2],
+            'num_leaves': [31, 50, 70, 100],
+            'subsample': [0.6, 0.8, 1.0],
+            'colsample_bytree': [0.6, 0.8, 1.0],
+            'min_child_weight': [1, 5, 10],
+            'reg_alpha': [0, 0.1, 0.5, 1],
+            'reg_lambda': [1, 1.5, 2]
+        }
+
+    elif model_type.lower() == 'rf':  # Random Forest
+        return {
+            'n_estimators': [100, 200, 300],
+            'max_depth': [None, 10, 20, 30],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['auto', 'sqrt', 'log2']
+        }
+
+    elif model_type.lower() == 'dt':  # Decision Tree
+        return {
+            'max_depth': [None, 10, 20, 30],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'max_features': ['auto', 'sqrt', 'log2'],
+            'criterion': ['gini', 'entropy']
+        }
+
+    elif model_type.lower() == 'svm':  # Support Vector Machine
+        return {
+            'C': [0.1, 1, 10, 100],
+            'kernel': ['linear', 'rbf', 'poly', 'sigmoid'],
+            'gamma': ['scale', 'auto', 0.001, 0.01, 0.1],
+            'degree': [2, 3, 4, 5],  # Applicable uniquement pour 'poly'
+            'tol': [1e-3, 1e-4, 1e-5]
+        }
+
+    else:
+        raise ValueError(f"Unsupported model type: {model_type}")
+
 def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                       features, name, model_type, task_type, 
                       params, loss):
     
     if model_type == 'xgboost':
+        dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
+        dtrain = xgb.DMatrix(df_train[features], label=df_train[target], weight=df_train[weight_col])
         fit_params = {
-            'eval_set': [(df_train[features], df_train[target]), (df_val[features], df_val[target])],
+            'eval_set': [(dtrain, 'train'), (dval, 'validation')],
             'sample_weight': df_train[weight_col],
-            'verbose': False
+            'verbose': False,
+            'early_stopping_rounds' : 15
         }
 
     elif model_type == 'ngboost':
@@ -72,7 +208,7 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
     elif model_type == 'gam':
         fit_params = {
         'weights': df_train[weight_col]
-        }
+        } 
 
     elif model_type ==  'linear':
         fit_params = {}
@@ -126,15 +262,15 @@ def explore_features(model,
                         'sample_weight' : df_train[weight_col],
                         'verbose' : False
                         }
+                
             elif model.name.find('gam') != -1:
                 fitparams = {
                     #'weights' : df_train[weight_col]
                 }
 
-            
             all_fit_params.append(fitparams)
             model.fit(X=X_train_single, y=df_train[target], fit_params=fitparams)
-
+            
             # Calculer le score avec cette seule caractéristique
             single_feature_score = model.score(df_test[selected_features_], df_test[target], sample_weight=df_test[weight_col])
             
@@ -174,6 +310,36 @@ def explore_features(model,
         return all_selected_features, all_models, all_fit_params
     elif return_mode == 'both':
         return selected_features_iter, all_selected_features, all_models, all_fit_params
+    
+def add_aggregation_column(df_train, df_val, df_test, col_id):
+    if col_id == 'month':
+        df_train[col_id] = df_train['date'].apply(lambda x : allDates[int(x)].split('-')[1])
+        df_val[col_id] = df_val['date'].apply(lambda x : allDates[int(x)].split('-')[1])
+        df_test[col_id] = df_test['date'].apply(lambda x : allDates[int(x)].split('-')[1])
+    elif col_id == 'iweekend':
+        df_train[col_id] = df_train['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday() >= 5)
+        df_val[col_id] = df_val['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday() >= 5)
+        df_test[col_id] = df_test['date'].apply(lambda x : dt.datetime.strptime(allDates[x], '%Y-%m-%d').weekday() >= 5)
+    elif col_id == 'dayofweek':
+        df_train[col_id] = df_train['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday())
+        df_val[col_id] = df_val['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday())
+        df_test[col_id] = df_test['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday())
+    else:
+        return None, None, None
+    
+    return df_train, df_val, df_test
+
+def add_aggregation_column_df(df, col_id):
+    if col_id == 'month':
+        df[col_id] = df['date'].apply(lambda x : allDates[int(x)].split('-')[1])
+    elif col_id == 'isweekend':
+        df[col_id] = df['date'].apply(lambda x : dt.datetime.strptime(allDates[x], '%Y-%m-%d').weekday() >= 5)
+    elif col_id == 'dayofweek':
+        df[col_id] = df['date'].apply(lambda x : dt.datetime.strptime(allDates[int(x)], '%Y-%m-%d').weekday())
+    else:
+        return None
+    
+    return df
 
 ############################################### SKLEARN ##################################################
 
@@ -201,44 +367,54 @@ def fit(params):
     parameter_optimization_method = params['parameter_optimization_method']
     grid_params = params['grid_params']
     dir_output = params['dir_output']
+    type_aggregation = params['type_aggregation']
+    col_id = params['col_id']
+    features_search = params['features_search']
+
+    if type_aggregation == 'unique':
+        if col_id not in df_train.columns:
+            df_train, df_val, df_test = add_aggregation_column(df_train, df_val, df_test, col_id)
+            if df_train is None:
+                logger.info(f'Can t add {col_id} in dataset. Skip')
+                return
+        name = f'{type_aggregation}-{col_id}-{name}'
+        model = OneByID(model, loss=model.loss, model_type=model.model_type, name=f'{name}', id_train=df_train[col_id], id_val=df_val[col_id], id_test=df_test[col_id], col_id_name=col_id)
+    elif type_aggregation == 'federated':
+        if col_id not in df_train.columns:
+            return
+        name = f'{type_aggregation}-{col_id}-{name}'
+        model = FederatedByID(model, loss=model.loss, model_type=model.model_type, name=f'{name}', id_train=df_train[col_id], id_val=df_val[col_id])
 
     save_object(features, 'features.pkl', dir_output / name)
     save_object(grid_params, 'grid_params.pkl', dir_output / name)
-    save_object(fit_params, 'fit_params.pkl', dir_output / name)
-    logger.info(f'Fitting model {name}')
 
-    """if 'AutoRegressionReg-J-1' in features:
-        if 'early_stopping_rounds' in fit_params.keys():
-            early_stopping_rounds = fit_params['early_stopping_rounds']
-            fit_params['early_stopping_rounds'] = 0
-            model.recursive_fit(df_train[features], df_train[target], (df_val[features],
-                            df_val[['id', 'date', target]]), features, 1, early_stopping_rounds)
-        else:
-            #try:
-                early_stopping_rounds = model.get_params('early_stopping_rounds')
-                model.set_params(early_stopping_rounds=0)
-                model.recursive_fit(df_train[features], df_train[target], (df_val[features],
-                            df_val[['id', 'date', target]]), features, 1, early_stopping_rounds)
-                except Exception as e:
-                logger.info(e)
-                model.fit(X=df_train[features], y=df_train[target],
+    model.dir_log = dir_output / name
+
+    if isinstance(model, ModelVoting):
+        logger.info(f'Fitting model {name}')
+        model.fit(X=df_train[features], y=df_train[target], X_test=df_test[features], y_test=df_test[target],
                     optimization=parameter_optimization_method,
-                    grid_params=grid_params, fit_params=fit_params)"""
-        
-    #else:
-    model.fit(X=df_train[features], y=df_train[target],
-                optimization=parameter_optimization_method,
-                grid_params=grid_params, fit_params=fit_params)
+                    grid_params_list=grid_params, fit_params_list=fit_params)
+    else:
+        logger.info(f'Fitting model {name}')
+        model.fit(X=df_train[features], y=df_train[target],
+                    X_test=df_test[features], y_test=df_test[target],
+                    features_search=features_search,
+                    optimization=parameter_optimization_method,
+                    grid_params=grid_params, fit_params=fit_params)
 
     check_and_create_path(dir_output / name)
     save_object(model, name + '.pkl', dir_output / name)
-    logger.info(f'Model score {model.score(df_test[features], df_test[target], df_test[weight_col])}')
+    if isinstance(model, OneByID):
+        logger.info(f'Model score {model.score(df_test[features], df_test[target], df_test[col_id], df_test[weight_col])}')
+    else:
+        logger.info(f'Model score {model.score(df_test[features], df_test[target], df_test[weight_col])}')
 
     if isinstance(model, Model):
         if name.find('features') != -1:
             logger.info('Features importance')
-            model.shapley_additive_explanation(df_train[features], 'train', dir_output / name, 'beeswarm', figsize=(30,15))
-            model.shapley_additive_explanation(df_test[features], 'test',  dir_output / name, 'beeswarm', figsize=(30,15))
+            #model.shapley_additive_explanation(df_train[features], 'train', dir_output / name, 'beeswarm', figsize=(30,15))
+            #model.shapley_additive_explanation(df_test[features], 'test',  dir_output / name, 'beeswarm', figsize=(30,15))
 
         if name.find('search') != -1:
             model.plot_param_influence('max_depth', dir_output / name)
@@ -253,7 +429,10 @@ def fit(params):
         else:
             mlflow.start_run(run_name=name, nested=True)
 
-        signature = infer_signature(df_train[features], model.predict(df_train[features]))
+        if isinstance(model, OneByID):
+            signature = infer_signature(df_train[features], model.predict(df_train[features], df_train[col_id]))
+        else:
+            signature = infer_signature(df_train[features], model.predict(df_train[features]))
 
         mlflow.set_tag(f"Training", f"{name}")
         mlflow.log_param(f'relevant_feature_name', features)
@@ -300,55 +479,11 @@ def train_sklearn_api_model(params):
 
     df_train, df_val, df_test = create_weight_binary(df_train, df_val, df_test, use_weight=True)
 
-    if target == 'binary' or target == 'nbsinister':
-        weight_col = 'weight_nbsinister'
-    else:
-        weight_col = 'weight'
+    weight_col = 'weight'
 
+    relevant_features = features
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
-                                        features, name, model_type, task_type, 
-                                        model_params, loss)
-
-    fit_params_dict = {
-        'df_train': df_train,
-        'df_test': df_test,
-        'df_val': df_val,
-        'weight_col' : weight_col,
-        'target' : target,
-        'features': features,
-        'name': f'{name}',
-        'model': model,
-        'fit_params': fit_params,
-        'parameter_optimization_method': 'skip',
-        'grid_params': grid_params,
-        'dir_output': dir_output
-    }
-
-    #if model_type != 'gam':
-    #fit(fit_params_dict)
-    #else:
-    #    logger.info('GAM can t being train with all features. SKIP')
-    
-    if optimize_feature:
-        model = get_model(model_type=model_type, name=f'{name}_features', device=device, task_type=task_type, params=model_params, loss=loss)
-        relevant_features = explore_features(model=model,
-                                                features=features,
-                                                df_train=df_train, weight_col=weight_col, df_val=df_val,
-                                                df_test=df_test,
-                                                target=target,
-                                                num_iteration=1)
-
-        logger.info(relevant_features)
-
-        save_object(relevant_features, f'relevant_features_{target}.pkl', dir_output)
-    else:
-        relevant_features = read_object(f'relevant_features_{target}.pkl', dir_output)
-        if relevant_features is None:
-            logger.info('No relevant features found, train with all features')
-            relevant_features = features
-    
-    model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
-                                        relevant_features, f'{name}_features', model_type, task_type, 
+                                        relevant_features, name, model_type, task_type, 
                                         model_params, loss)
     
     fit_params_dict = {
@@ -358,12 +493,15 @@ def train_sklearn_api_model(params):
         'weight_col' : weight_col,
         'target' : target,
         'features': relevant_features,
-        'name': f'{name}_features',
+        'name': f'{name}',
         'model': model,
         'fit_params': fit_params,
         'parameter_optimization_method': 'skip',
         'grid_params': grid_params,
-        'dir_output': dir_output
+        'dir_output': dir_output,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id'],
+        'features_search':optimize_feature
     }
 
     fit(fit_params_dict)
@@ -399,7 +537,7 @@ def train_sklearn_api_model(params):
 
         fit(fit_params_dict)
 
-def train_xgboost(params):
+def train_xgboost(params, train=True):
     """
     Train xgboost model
     """
@@ -415,34 +553,23 @@ def train_xgboost(params):
     model = params['name']
     
     name, target, task_type, loss = model.split('_')
-
-    if loss == 'rmse':
-        task_type = 'regression'
-        objective = 'reg:squarederror'
-    elif loss == 'poisson':
-        task_type = 'regression'
-        objective = 'count:poisson'
-    elif loss == 'logloss':
-        task_type = 'classification'
-        objective = 'reg:logistic'
+    objective = loss
 
     model_params = {
         'objective': objective,
-        'verbosity': 0,
-        'early_stopping_rounds': 15,
-        'learning_rate': 0.0001,
+        'eta': 0.001,
         'min_child_weight': 1.0,
         'max_depth': 6,
         'max_delta_step': 1.0,
-        'subsample': 0.55,
-        'colsample_bytree': 0.73,
-        'colsample_bylevel': 0.62,
-        'reg_lambda': 9.638,
-        'reg_alpha': 0.53,
+        'subsample': 0.8,
+        'colsample_bytree': 0.8,
+        'colsample_bylevel': 0.8,
+        'reg_lambda': 1.0,
+        'reg_alpha': 0.9,
         'n_estimators': 10000,
         'random_state': 42,
         'tree_method': 'hist',
-        'device':"cuda"
+        'device':"gpu"
     }
 
     grid_params = {'max_depth': [6],
@@ -451,6 +578,9 @@ def train_xgboost(params):
                     'reg_alpha':[0.9,0.6,0.7],
                     'learning_rate':[0.01,0.001,0.005,0.00005]
                     }
+    
+    if not train:
+        return model_params
 
     train_sklearn_api_model({
         'df_train': df_train,
@@ -469,9 +599,11 @@ def train_xgboost(params):
         'name': model,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_ngboost(params):
+def train_ngboost(params, train=True):
     """
     Train NGBoost model
     """
@@ -503,6 +635,9 @@ def train_ngboost(params):
         'Base': None,
     }
     grid_params = {'n_estimators': [100, 500, 1000, 5000, 10000]}
+    
+    if not train:
+        return model_params
 
     train_sklearn_api_model({
         'df_train': df_train,
@@ -521,9 +656,11 @@ def train_ngboost(params):
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_lightgbm(params):
+def train_lightgbm(params, train=True):
     """
     Train LightGBM model
     """
@@ -564,6 +701,9 @@ def train_lightgbm(params):
     }
     grid_params = {'max_depth': [2, 5, 6, 8, 10, 15]}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -581,9 +721,11 @@ def train_lightgbm(params):
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_svm(params):
+def train_svm(params, train=True):
     """
     Train SVM model
     """
@@ -607,6 +749,9 @@ def train_svm(params):
     }
     grid_params = {'C': [0.1, 1, 10, 100], 'kernel': ['linear', 'rbf', 'poly', 'sigmoid']}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -624,9 +769,11 @@ def train_svm(params):
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_random_forest(params):
+def train_random_forest(params, train=True):
     """
     Train Random Forest model
     """
@@ -655,6 +802,9 @@ def train_random_forest(params):
     }
     grid_params = {'max_depth': [2, 5, 6, 8, 10, 15]}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -672,9 +822,11 @@ def train_random_forest(params):
         'name': name,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_decision_tree(params):
+def train_decision_tree(params, train=True):
     """
     Train Decision Tree model
     """
@@ -699,6 +851,9 @@ def train_decision_tree(params):
     }
     grid_params = {'max_depth': [2, 5, 6, 8, 10, 15]}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -716,9 +871,11 @@ def train_decision_tree(params):
         'name': model,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_poisson(params):
+def train_poisson(params, train=True):
     """
     Train Decision Tree model
     """
@@ -745,6 +902,9 @@ def train_poisson(params):
         }
     grid_params = {'alpha': [1.0,1.5,2.0]}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -762,9 +922,11 @@ def train_poisson(params):
         'name': model,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
-def train_gam(params):
+def train_gam(params, train=True):
     """
     Train Decision Tree model
     """
@@ -800,6 +962,9 @@ def train_gam(params):
 
     grid_params = {'terms' : []}
 
+    if not train:
+        return model_params
+
     train_sklearn_api_model({
         'df_train': df_train,
         'df_test': df_test,
@@ -817,10 +982,12 @@ def train_gam(params):
         'name': model,
         'model_params': model_params,
         'grid_params': grid_params,
+        'type_aggregation' : params['type_aggregation'],
+        'col_id' : params['col_id']
     })
 
 def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
-                                    model,
+                                    model, weights_version, spec, days_in_futur,
                             dir_output: Path,
                             device: str,
                             features: list,
@@ -829,10 +996,17 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                             do_grid_search: bool,
                             do_bayes_search: bool):
     
+    name, target, task_type, loss = model[0].split('_')
+
+    #train_dataset['weight'] = train_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
+    #val_dataset['weight'] = val_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
+    train_dataset['weight'] = 1
+    val_dataset['weight'] = 1
+    
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
     test_dataset = test_dataset[test_dataset['weight'] > 0]
-
+    
     logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
 
     params = {
@@ -846,6 +1020,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'name': model[0],
+        'type_aggregation' : model[-2],
+        'col_id' : model[-1] if model[-2] is not None else None
     }
 
     name, _,_ ,_ = model[0].split('_')
@@ -868,101 +1044,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
 
 ############################################################# Voting ######################################################################
 
-def fit_voting(params):
-    """
-    Function to fit a voting or stacking model with given parameters.
-    """
-    required_keys = [
-        'df_train', 'df_test', 'df_val', 'target', 'weight_col', 'features',
-        'name', 'model', 'fit_params', 'parameter_optimization_method',
-        'grid_params', 'dir_output'
-    ]
-
-    # Ensure all required parameters are provided
-    for key in required_keys:
-        assert key in params, f"Missing required parameter: {key}"
-
-    # Unpack parameters
-    df_train_list = params['df_train']
-    df_test_list = params['df_test']
-    df_val_list = params['df_val']
-    target_list = params['target']
-    weight_col_list = params['weight_col']
-    features_list = params['features']
-    name = params['name']
-    model = params['model']
-    fit_params = params['fit_params']
-    parameter_optimization_method = params['parameter_optimization_method']
-    grid_params = params['grid_params']
-    dir_output = params['dir_output']
-
-    # Save features used
-    save_object(features_list, 'features.pkl', dir_output / name)
-    logger.info(f'Fitting model {name}')
-
-    # Ensure all lists are of the same length
-    n_models = len(df_train_list)
-    print(n_models, len(features_list))
-    assert len(features_list) == n_models, "features_list length mismatch"
-    assert len(target_list) == n_models, "target_list length mismatch"
-    assert len(weight_col_list) == n_models, "weight_col_list length mismatch"
-    assert len(df_test_list) == n_models, "df_test_list length mismatch"
-
-    # Prepare training data lists
-    X_list = [df_train_list[i][features_list[i]] for i in range(n_models)]
-    y_list = [df_train_list[i][target_list[i]] for i in range(n_models)]
-
-    # Fit the model
-    model.fit(
-        X_list=X_list,
-        y_list=y_list,
-        optimization=parameter_optimization_method,
-        grid_params_list=grid_params,
-        fit_params_list=fit_params,
-        cv_folds=10
-    )
-
-    # Save the trained model
-    check_and_create_path(dir_output / name)
-    save_object(model, name + '.pkl', dir_output / name)
-
-    # Prepare test data lists
-    X_test_list = [df_test_list[i][features_list[i]] for i in range(n_models)]
-    y_test = df_test_list[0][target_list[0]]
-    weight = df_test_list[0][weight_col_list[0]]
-
-    # Evaluate the model
-    model_score = model.score(X_test_list, y_test, sample_weight=weight)
-    logger.info(f'Model score: {model_score}')
-
-    # Log model and parameters to MLflow if enabled
-    if MLFLOW:
-        existing_run = get_existing_run(name)
-        if existing_run:
-            mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-        else:
-            mlflow.start_run(run_name=name, nested=True)
-
-        # Prepare signature for logging
-        y_pred = model.predict(X_list)
-        #signature = infer_signature(X_list, y_pred)
-
-        mlflow.set_tag("Training", name)
-        mlflow.log_param('relevant_feature_name', features_list)
-        mlflow.log_params(model.get_params(deep=True))
-        """model_info = mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path=name,
-            #signature=signature,
-            input_example=X_list,
-            registered_model_name=name,
-        )"""
-
-        #save_object(model_info, f'mlflow_signature_{name}.pkl', dir_output)
-        mlflow.end_run()
-
 def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_dataset,
-                                    model_name,
+                                    model_name, weights_version, spec, days_in_futur,
                             dir_output: Path,
                             device: str,
                             features: list,
@@ -971,6 +1054,10 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                             do_grid_search: bool,
                             do_bayes_search: bool):
     
+    train_dataset['weight'] = 1
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
+
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
     test_dataset = test_dataset[test_dataset['weight'] > 0]
@@ -984,213 +1071,83 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
     else:
         parameter_optimization_method = 'skip'
 
-    model_type, target, task_type, loss = model_name[0].split('_')
-    
-    if target == 'binary' or target == 'nbsinister':
-        weight_col = 'weight_nbsinister'
-    else:
-        weight_col = 'weight'
+    models_type, target, task_type, loss = model_name[0].split('_')
 
-    if model_type == 'xgboost':
-
-        if loss == 'rmse':
-            task_type = 'regression'
-            objective = 'reg:squarederror'
-        else:
-            task_type = 'classification'
-            objective = 'reg:logistic'
-
-        model_params = {
-        'objective': objective,
-        'verbosity': 0,
-        'early_stopping_rounds': 15,
-        'learning_rate': 0.01,
-        'min_child_weight': 1.0,
-        'max_depth': 6,
-        'max_delta_step': 1.0,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'colsample_bylevel': 0.8,
-        'reg_lambda': 1.0,
-        'reg_alpha': 0.9,
-        'n_estimators': 10000,
-        'random_state': 42,
-        'tree_method': 'hist',
-        'device':"cuda"
-        }
-        
-        grid_params = {'max_depth': [6],
-                'min_child_weight': [1.0,1.5,3.5,5,10],
-                'reg_lambda' : [1.0,2.0,3.0,5.0],
-                'reg_alpha':[0.9,0.6,0.7],
-                'learning_rate':[0.01,0.001,0.005,0.00005]
-                }
-        
-    elif name == 'lightgbm':
-        pass
-    elif name == 'rf':
-        pass
-    elif name == 'svm':
-        pass
-    elif name == 'dt':
-        pass
-    elif name == 'ngboost':
-        pass
-
-    num_iteration = 10
+    models_type = models_type.split('-')
     
     train_dataset, val_dataset, test_dataset = create_weight_binary(train_dataset, val_dataset, test_dataset, False)
 
-    model, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, weight_col,
-                                    features, name, model_type, task_type,
-                                    model_params, loss)
-    
-    all_selected_features, all_models, all_fit_params = explore_features(model=model,
-                                                features=features,
-                                                df_train=train_dataset, weight_col=weight_col, df_val=val_dataset,
-                                                df_test=test_dataset,
-                                                target=target,
-                                                return_mode='all',
-                                                num_iteration=num_iteration)
-    
-    all_models = [class_model.best_estimator_ for class_model in all_models]
-    
-    estimator = ModelVoting(all_models, loss=loss, name=f'{model_name}')
+    models_list = []
+    fit_params_list = []
+    grid_params_list = []
 
-    fit_params_dict = {
-        'df_train': [train_dataset for i in range(num_iteration)],
-        'df_test': [test_dataset for i in range(num_iteration)],
-        'df_val': [val_dataset for i in range(num_iteration)],
-        'weight_col' : [weight_col for i in range(num_iteration)],
-        'target' : [target for i in range(num_iteration)],
-        'features': all_selected_features,
-        'name': f'{model_name[0]}_voting_{num_iteration}',
-        'model': estimator,
-        'fit_params': all_fit_params,
-        'parameter_optimization_method': parameter_optimization_method,
-        'grid_params': [grid_params for i in range(num_iteration)],
-        'dir_output': dir_output
+    params_temp = {
+        'df_train': train_dataset,
+        'df_val': val_dataset,
+        'df_test': test_dataset,
+        'features': features,
+        'optimize_feature': optimize_feature,
+        'dir_output': dir_output,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'name': model_name[0],
+        'type_aggregation' : model_name[-2],
+        'col_id' : model_name[-1] if model_name[-2] is not None else None
     }
 
-    fit_voting(fit_params_dict)
-
-def wrapped_train_voting_model_list(train_dataset, val_dataset, test_dataset,
-                                    models_list,
-                                    dir_output: Path,
-                                    device: str,
-                                    features: list,
-                                    autoRegression: bool,
-                                    optimize_feature: bool,
-                                    do_grid_search: bool,
-                                    do_bayes_search: bool):
-    
-    train_dataset = train_dataset[train_dataset['weight'] > 0]
-    val_dataset = val_dataset[val_dataset['weight'] > 0]
-    test_dataset = test_dataset[test_dataset['weight'] > 0]
-
-    logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
-
-    if do_grid_search:
-        parameter_optimization_method = 'grid'
-    elif do_bayes_search:
-        parameter_optimization_method = 'bayes'
-    else:
-        parameter_optimization_method = 'skip'
-
-    all_models = []
-    all_features = []
-    all_grid_params = []
-
-    model_type, target, task_type, loss = models_list[0].split('_')
-
-    if target == 'binary' or target == 'nbsinister':
-        weight_col = 'weight_nbsinister'
-    else:
-        weight_col = 'weight'
-
-    for model_name in models_list:
-
-        model = None
-        relevant_features = None
-        fit_params = None
-        grid_params = None
-
-        if model_name in sklearn_model_list:
-            if (dir_output / model_name / f'{model_name}.pkl').is_file():
-                model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                relevant_features = read_object('features.pkl', dir_output / model_name)
-                fit_params = read_object('fit_params.pkl', dir_output / model_name)
-                grid_params = read_object('grid_params.pkl', dir_output / model_name)
-
-            if not (dir_output / model_name / f'{model_name}.pkl').is_file() or model is None or relevant_features is None or fit_params is None or grid_params is None:
-                wrapped_train_sklearn_api_model(train_dataset=train_dataset, val_dataset=val_dataset, test_dataset=test_dataset, model=model_name,
-                                                            dir_output=dir_output, device=device, features=features, autoRegression=autoRegression,
-                                                            optimize_feature=optimize_feature, do_grid_search=do_grid_search, do_bayes_search=do_bayes_search)
-                
-                model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                relevant_features = read_object('features.pkl', dir_output / model_name)
-                fit_params = read_object('features.pkl', dir_output / model_name)
-                grid_params = read_object('grid_params.pkl', dir_output / model_name)
-
-        elif model_name in models_2D:
-            
-            if (dir_output / model_name / f'{model_name}.pkl').is_file():
-                model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                relevant_features = read_object('features.pkl', dir_output / model_name)
-                
-            if not (dir_output / model_name / f'{model_name}.pkl').is_file() or model is None or relevant_features is None:
-                raise FileNotFoundError('Le modèle entraîné est introuvable ou les caractéristiques pertinentes sont manquantes.')
-
-            elif model_name in models_hybrid:
-                if (dir_output / model_name / f'{model_name}.pkl').is_file():
-                    model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                    relevant_features = read_object('features.pkl', dir_output / model_name)
-
-                if not (dir_output / model_name / f'{model_name}.pkl').is_file() or model is None or relevant_features is None:
-                    raise FileNotFoundError('Le modèle hybride entraîné est introuvable ou les caractéristiques pertinentes sont manquantes.')
-
-            elif model_name in temporal_model_list:
-                if (dir_output / model_name / f'{model_name}.pkl').is_file():
-                    model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                    relevant_features = read_object('features.pkl', dir_output / model_name)
-
-                if not (dir_output / model_name / f'{model_name}.pkl').is_file() or model is None or relevant_features is None:
-                    raise FileNotFoundError('Le modèle temporel entraîné est introuvable ou les caractéristiques pertinentes sont manquantes.')
-
-            elif model_name in daily_model_list:
-                if (dir_output / model_name / f'{model_name}.pkl').is_file():
-                    model = read_object(f'{model_name}.pkl', dir_output / model_name)
-                    relevant_features = read_object('features.pkl', dir_output / model_name)
-                    
-                if not (dir_output / model_name / f'{model_name}.pkl').is_file() or model is None or relevant_features is None:
-                    raise FileNotFoundError('Le modèle journalier entraîné est introuvable ou les caractéristiques pertinentes sont manquantes.')
-
+    for model_type in models_type:
+        
+        if model_type == 'xgboost':
+            params = train_xgboost(params_temp, False)
+        elif model_type == 'lightgbm':
+            params = train_lightgbm(params_temp, False)
+        elif model_type == 'rf':
+            params = train_random_forest(params_temp, False)
+        elif model_type == 'svm':
+            params = train_svm(params_temp, False)
+        elif model_type == 'dt':
+            params = train_decision_tree(params_temp, False)
+        elif model_type == 'ngboost':
+            params = train_ngboost(params_temp, False)
+        elif model_type == 'poisson':
+            params = train_poisson(params_temp, False)
+        elif model_type == 'gam':
+            params = train_gam(params_temp, False)
         else:
-            ValueError(f'Unknow {model_name}')
-            
-        all_models.append(model)
-        all_features.append(relevant_features)
-        all_grid_params.append(grid_params)
+            raise ValueError(f'Unknow model_type {model_type}')
 
-    estimator = ModelVoting(all_models, loss=loss, name=f'{models_list}')
+        model, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
+                                        features, model_name[0], model_type, task_type, 
+                                        params, loss)
+        
+        grid_params = get_grid_params(model_type)
+        
+        models_list.append(model)
+        fit_params_list.append(fit_params)
+        grid_params_list.append(grid_params)
 
-    len_model = len(all_models)
+    estimator = ModelVoting(models_list, features=features, loss=loss, name=f'{model_name}')
+
     fit_params_dict = {
-        'df_train': [train_dataset for i in range(len_model)],
-        'df_test': [test_dataset for i in range(len_model)],
-        'df_val': [val_dataset for i in range(len_model)],
-        'weight_col' : [weight_col for i in range(len_model)],
-        'target' : [target for target in range(len_model)],
-        'features': all_features,
-        'name': f'{name}',
+        'df_train': train_dataset, 
+        'df_test': test_dataset,
+        'df_val': val_dataset,
+        'weight_col' : 'weight',
+        'target' : target,
+        'name': model_name[0],
         'model': estimator,
-        'fit_params': fit_params,
+        'fit_params': fit_params_list,
         'parameter_optimization_method': parameter_optimization_method,
-        'grid_params': all_grid_params,
-        'dir_output': dir_output
+        'grid_params': grid_params_list,
+        'dir_output': dir_output,
+        'features' : features,
+        'type_aggregation' : None,
+        'col_id': None,
+        'features_search' : optimize_feature
     }
 
-    fit_voting(fit_params_dict)
+    fit(fit_params_dict)
 
 ############################################################# Stacked ######################################################################
 
@@ -1328,7 +1285,17 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
 
 ############################################################# BREAK POINT #################################################################
 
-def train_break_point(df : pd.DataFrame, features : list, dir_output : Path, n_clusters : int):
+def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clusters: int, shifts: list):
+    """
+    Calculate break points based on clustering and apply shifts to the `nbsinister` column.
+
+    Args:
+        df (pd.DataFrame): Input DataFrame containing features and `nbsinister`.
+        features (list): List of feature names to process.
+        dir_output (Path): Directory to save the results.
+        n_clusters (int): Number of clusters for the clustering algorithm.
+        shifts (list): List of integers specifying the shifts to apply to `nbsinister`.
+    """
     check_and_create_path(dir_output)
     logger.info('###################" Calculate break point ####################')
 
@@ -1339,89 +1306,96 @@ def train_break_point(df : pd.DataFrame, features : list, dir_output : Path, n_c
         res_cluster = {}
     features_selected_2 = []
 
-    FF_t = np.sum(df['nbsinister'])
-    Area_t = len(df)
+    # Aggregate data by 'graph_id' and 'date'
+    df_agg = df.groupby(['graph_id', 'date'], as_index=False).mean()
 
-    # For each feature
-    for fet in features:
-        if fet in res_cluster.keys():
-            continue
-        check_and_create_path(dir_output / fet)
-        logger.info(fet)
-        res_cluster[fet] = {}
-        X_fet = df[fet].values # Select the feature
-        val_sinister = df['nbsinister'].values[~np.isnan(X_fet)]
-        X_fet = X_fet[~np.isnan(X_fet)]
-        if np.unique(X_fet).shape[0] < n_clusters:
-            continue
+    FF_t = np.sum(df_agg['nbsinister'])
+    Area_t = len(df_agg)
 
-        # Create the cluster model
-        model = Predictor(n_clusters, fet)
-        model.fit(np.unique(X_fet))
+    # Apply shifts and process for each shift
+    for shift in shifts:
+        logger.info(f"Applying shift: {shift}")
+        shifted_df = df_agg.copy()
+        shifted_df['nbsinister'] = shifted_df.groupby(['graph_id'])['nbsinister'].shift(-shift)
 
-        save_object(model, fet+'.pkl', dir_output / fet)
+        # Remove rows with NaN introduced by the shift
+        shifted_df = shifted_df.dropna(subset=['nbsinister'])
 
-        pred = order_class(model, model.predict(X_fet)) # Predict and order class to 0 1 2 3 4
+        # Process each feature
+        for fet in features:
+            key = f'{fet}_{shift}'
+            if key in res_cluster.keys():
+                continue
 
-        cls = np.unique(pred)
-        if cls.shape[0] != n_clusters:
-            continue
+            check_and_create_path(dir_output / fet)
+            #logger.info(f'{fet} for shift {shift}')
+            res_cluster[key] = {}
+            X_fet = shifted_df[fet].values  # Select the feature
+            dates = shifted_df['date'].values
+            depts = shifted_df['departement'].values
+            val_sinister = shifted_df['nbsinister'].values[~np.isnan(X_fet)]
+            date_fet = dates[~np.isnan(X_fet)]
+            dept_fet = depts[~np.isnan(X_fet)]
+            X_fet = X_fet[~np.isnan(X_fet)]
+            if np.unique(X_fet).shape[0] < n_clusters:
+                continue
 
-        plt.figure(figsize=(5,5)) # Create figure for ploting
+            # Create the cluster model
+            model = Predictor(n_clusters, fet)
+            model.fit(np.unique(X_fet))
 
-        # For each class calculate the target values
-        for c in cls:
-            mask = np.argwhere(pred == c)[:,0]
-            #res_cluster[fet][c] = round(np.sum(df['nbsinister'].values[mask]) / np.sum(df['nbsinister']) * 100, 3)
+            save_object(model, f'{fet}_{shift}.pkl', dir_output / fet)
 
-            # Calculer FF_i (le nombre de sinistres pour la classe c)
-            FF_i = np.sum(val_sinister[mask])
-            
-            # Calculer Area_i (le nombre total de pixels pour la classe c)
-            Area_i = mask.shape[0]
-            
-            # Calculer FireOcc et Area pour la classe c
-            FireOcc = FF_i / FF_t
-            Area = Area_i / Area_t
-            
-            # Calculer le ratio de fréquence (FR) pour la classe c
-            FR = FireOcc / Area
+            pred = order_class(model, model.predict(X_fet))  # Predict and order class to 0 1 2 3 4
 
-            res_cluster[fet][c] = round(FR, 3)
+            cls = np.unique(pred)
+            if cls.shape[0] != n_clusters:
+                continue
 
-            plt.scatter(X_fet[mask], val_sinister[mask], label=f'{c} : {res_cluster[fet][c]}')
+            plt.figure(figsize=(5, 5))  # Create figure for plotting
 
-        #logger.info(f'{fet} : {res_cluster[fet]}')        
-        # Calculate Pearson coefficient
-        #dff = pd.DataFrame(res_cluster, index=np.arange(n_clusters)).reset_index()
-        #dff.rename({'index': 'class'}, axis=1, inplace=True)
-        #dff['nbsinister'] = df['nbsinister']
-        #correlation = dff['class'].corr(dff['nbsinister'])
-        correlation = 0.8
-        res_cluster[fet]['correlation'] = correlation
+            # For each class calculate the target values
+            for c in cls:
+                mask = np.argwhere(pred == c)[:, 0]
+                FF_i = np.sum(val_sinister[mask])
+                Area_i = mask.shape[0]
+                FireOcc = FF_i / FF_t
+                Area = Area_i / Area_t
+                FR = FireOcc / Area
 
-        # Plot
-        plt.xlabel(fet)
-        plt.ylabel('nbsinister')
-        plt.title(fet)
-        plt.legend()
-        plt.savefig(dir_output / fet / f'{fet}.png')
-        plt.close('all')
+                if fet == 'prec24h_min' and c == 4:
+                    max = np.max(val_sinister[mask])
+                    max_mask = np.argwhere(val_sinister[mask] == max)
+                    print(fet, max_mask.shape, val_sinister[mask][max_mask], X_fet[mask][max_mask], date_fet[mask][max_mask], dept_fet[mask][max_mask], [allDates[int(d)] for d in np.unique(date_fet[mask][max_mask])])
 
-        # If no correlation then pass
-        if abs(correlation) > 0.7:
-            # If negative linearity, inverse class
-            if correlation < 0:
-                new_class = np.flip(np.arange(n_clusters))
-                temp = {}
-                for i, nc in enumerate(new_class):
-                    temp[nc] = res_cluster[fet][i]
-                temp['correlation'] = res_cluster[fet]['correlation']
-                res_cluster[fet] = temp
-            
-            # Add in selected features
-            features_selected_2.append(fet)
-        
+                res_cluster[key][c] = round(FR, 3)
+                plt.scatter(X_fet[mask], val_sinister[mask], label=f'{c} : {res_cluster[key][c]}')
+
+            correlation = 0.8
+            res_cluster[key]['correlation'] = correlation
+
+            # Plot
+            plt.xlabel(fet)
+            plt.ylabel('nbsinister')
+            plt.title(f'{fet} (Shift: {shift})')
+            plt.legend()
+            plt.savefig(dir_output / fet / f'{fet}_shift_{shift}.png')
+            plt.close('all')
+
+            # If no correlation then pass
+            if abs(correlation) > 0.7:
+                # If negative linearity, inverse class
+                if correlation < 0:
+                    new_class = np.flip(np.arange(n_clusters))
+                    temp = {}
+                    for i, nc in enumerate(new_class):
+                        temp[nc] = res_cluster[key][i]
+                    temp['correlation'] = res_cluster[key]['correlation']
+                    res_cluster[key] = temp
+
+                # Add in selected features
+                features_selected_2.append(f'{fet}_{shift}')
+
     logger.info(len(features_selected_2))
     save_object(res_cluster, 'break_point_dict.pkl', dir_output)
 

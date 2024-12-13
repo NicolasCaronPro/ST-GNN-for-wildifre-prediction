@@ -1,7 +1,6 @@
+from operator import index
 import sys
 import os
-
-from sqlalchemy import false
 
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -45,6 +44,8 @@ parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -88,6 +89,8 @@ sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
+shift = args.shift
+thresh_kmeans = args.thresh_kmeans
 
 assert graph_method == 'node'
 
@@ -131,7 +134,7 @@ if autoRegression:
 
 ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_trees')
+df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_trees')
 
 if MLFLOW:
     exp_name = f"{dataset_name}_train"
@@ -139,7 +142,7 @@ if MLFLOW:
 
     if exp_name not in list(map(lambda x: x.name, experiments)):
         tags = {
-            "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+            "",
         }
 
         client.create_experiment(name=exp_name, tags=tags)
@@ -154,19 +157,13 @@ if MLFLOW:
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
-                                                                                    features_name, train_departements,
+prefix_config = deepcopy(prefix)
+
+train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix = get_train_val_test_set(graphScale, df,
+                                                                                    features_selected, train_departements,
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
-
-if nbfeatures == 'all':
-    nbfeatures = len(features_selected)
-else:
-    nbfeatures = int(nbfeatures)
-    
-features_selected = features_selected[:nbfeatures]
-
 if MLFLOW:
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
@@ -184,24 +181,23 @@ if MLFLOW:
 
 prefix += f'_{weights_version}'
 
-train_dataset['weight'] = train_dataset[f'{weights_version}_nbsinister']
-train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
-
-val_dataset['weight'] = val_dataset[f'{weights_version}_nbsinister']
-val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
-
 test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
-
-#test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'{weights_version}_nbsinister']
-#test_dataset['weight'] = test_dataset[f'{weights_version}_nbsinister']
 
 name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
 
 models = [
-        ('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-        #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-        #('xgboost_binary_classification_logloss', False, 'binary', autoRegression),
+        #('xgboost_risk_regression_eae-1', False, 'risk', autoRegression, None),
+        #('xgboost_risk_regression_rmse', False, 'risk', autoRegression, None),
+        #('xgboost_nbsinister_regression_rmsle', False, 'nbsinister', autoRegression, None),
+        #('xgboost_nbsinister-robust_regression_rmse', False, 'nbsinister-robust', autoRegression, None),
+        #('xgboost_nbsinister_regression_sig2', False, 'nbsinister', autoRegression, None),
+        #('xgboost_nbsinister_regression_sig', False, 'nbsinister', autoRegression, None),
+        ('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, None),
+        #('xgboost_nbsinister_regression_quantile', False, 'nbsinister', autoRegression, None),
+        #('xgboost_nbsinister_regression_mse', False, 'nbsinister', autoRegression, None),
+        #('xgboost_nbsinister_regression_eae-1', False, 'nbsinister', autoRegression, None),
+        #('xgboost_binary_classification_logloss', False, 'binary', autoRegression, None),
         ]
 
 gam_models = [
@@ -213,13 +209,27 @@ gam_models = [
 voting_models = [
                 #('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
                 #('xgboost_binary_classification_logloss', False, 'binary', autoRegression)
-                #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression)
+                #('xgboost-xgboost-xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression)
                 ]
+
+one_by_id_model = [
+       #('xgboost_risk_regression_rmse', False, 'risk', autoRegression, 'unique', 'unique', 'departement'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'departement'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'graph_id'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'cluster_encoder'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'month'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'dayofweek'),
+       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'isweekend'),
+       #('xgboost_binary_classification_logloss', False, 'binary', autoRegression, 'unique', 'departement'),
+]
+
+federate_model_by_id_model = [
+]
 
 voting_models_list = [
                     #[('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-                    #   ('svm_risk_regression_rmse', False, 'risk', autoRegression),
-                    #   ('dt_risk_regresion_rmse', False, 'risk', autoRegression)]
+                    # ('svm_risk_regression_rmse', False, 'risk', autoRegression),
+                    # ('dt_risk_regresion_rmse', False, 'risk', autoRegression)]
                     ]
 
 if doTrain:
@@ -228,8 +238,11 @@ if doTrain:
         wrapped_train_sklearn_api_model(train_dataset=train_dataset,
                                 val_dataset=val_dataset,
                                 test_dataset=test_dataset,
+                                weights_version=weights_version,
+                                spec=f'{shift}_{thresh_kmeans}',
+                                days_in_futur=days_in_futur,
                                 dir_output=dir_output / name,
-                                device='cpu',
+                                device='gpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
                                 optimize_feature=optimize_feature,
@@ -241,6 +254,9 @@ if doTrain:
         wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset,
                                 val_dataset=val_dataset,
                                 test_dataset=test_dataset,
+                                spec=f'{shift}_{thresh_kmeans}',
+                                days_in_futur=days_in_futur,
+                                weights_version=weights_version,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -254,6 +270,9 @@ if doTrain:
          wrapped_train_sklearn_api_model(train_dataset=train_dataset,
                                 val_dataset=val_dataset,
                                 test_dataset=test_dataset,
+                                spec=f'{shift}_{thresh_kmeans}',
+                                days_in_futur=days_in_futur,
+                                weights_version=weights_version,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -263,10 +282,13 @@ if doTrain:
                                 do_bayes_search=do_bayes_search,
                                 model=model)
         
-    for model_list in voting_models_list:
-        wrapped_train_sklearn_api_voting_model_list(train_dataset=train_dataset,
+    for model in one_by_id_model:
+        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
                                 val_dataset=val_dataset,
                                 test_dataset=test_dataset,
+                                spec=f'{shift}_{thresh_kmeans}',
+                                days_in_futur=days_in_futur,
+                                weights_version=weights_version,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -274,7 +296,23 @@ if doTrain:
                                 optimize_feature=optimize_feature,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                models_list=model_list)
+                                model=model)
+        
+    for model in federate_model_by_id_model:
+        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
+                                val_dataset=val_dataset,
+                                test_dataset=test_dataset,
+                                spec=f'{shift}_{thresh_kmeans}',
+                                days_in_futur=days_in_futur,
+                                weights_version=weights_version,
+                                dir_output=dir_output / name,
+                                device='cpu',
+                                autoRegression=autoRegression,
+                                features=features_selected,
+                                optimize_feature=optimize_feature,
+                                do_grid_search=do_grid_search,
+                                do_bayes_search=do_bayes_search,
+                                model=model)
 
 if doTest:
 
@@ -329,44 +367,15 @@ if doTest:
             ('spearman', spearman_coefficient, 'correlation'),
             ('auc_roc', my_roc_auc, 'bin')
             ]
-    
+
     models = [
-        ('xgboost_risk_regression_rmse_features', 'risk', autoRegression),
-        #('xgboost_risk_regression_rmse_grid_search', 'risk', autoRegression),
-        #('xgboost_risk_regression_rmse_voting_10', 'risk', autoRegression),
-
-        #('xgboost_nbsinister_regression_poisson', 'nbsinister', autoRegression),
-        #('xgboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('xgboost_nbsinister_regression_rmse_voting_10', 'nbsinister', autoRegression),
-
-        #('xgboost_binary_classification_logloss_features', 'binary', autoRegression),
-        #('xgboost_binary_classification_logloss_voting_10', 'binary', autoRegression),
-
-        #('poisson_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        
-        #('gam_risk_regression_rmse_features', 'risk', autoRegression),
-        #('gam_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('gam_binary_classification_logloss_features', 'binary', autoRegression),
-
-        #('lightgbm_risk_regression_rmse_features', 'risk', autoRegression),
-        #('lightgbm_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('lightgbm_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('ngboost_risk_regression_rmse_features', 'risk', autoRegression),
-        #('ngboost_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('ngboost_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('rf_risk_regression_rmse_features', 'risk', autoRegression),
-        #('rf_nbsinister_regression_rmse_features', 'nbsinister', autoRegression),
-        #('rf_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('dt_risk_regression_mse_features', 'risk', autoRegression),
-        #('dt_nbsinister_regression_mse_features', 'nbsinister', autoRegression),
-        #('dt_binary_classification_log_loss_features', 'binary', autoRegression),
-
-        #('svm_risk_regression_mse_features', 'risk', autoRegression),
-        #('svm_nbsinister_regression_mse_features', 'nbsinister', autoRegression),
-        #('svm_binary_classification_log_loss_features', 'binary', autoRegression),
+        ('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('xgboost_nbsinister_regression_quantile', 'nbsinister', autoRegression),
+        ('unique-departement-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('unique-month-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('unique-dayofweek-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('unique-isweekend-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        ('xgboost-xgboost-xgboost_nbsinister_nbsinister_regression_rmse', 'nbsinister', autoRegression),
         ]
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -382,24 +391,21 @@ if doTest:
             dn = dataset_name
             if two:
                 dn += '2'
-            exp_name = f"{dn}_{dept}_{sinister}_{sinister_encoding}_test"
+            exp_name = f"{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
             experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
-                tags = {
-                    "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
-                }
 
-                client.create_experiment(name=exp_name, tags=tags)
+                client.create_experiment(name=exp_name)
 
             mlflow.set_experiment(exp_name)
+
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
         if test_dataset_unscale is not None:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
         else:
             test_dataset_unscale_dept = None
         
-        print(test_dataset_dept.shape)
         if test_dataset_dept.shape[0] < 5:
             continue
 
@@ -411,6 +417,7 @@ if doTest:
                                     methods,
                                     dept,
                                     prefix,
+                                    prefix_config,
                                     models,
                                     dir_output / dept / prefix,
                                     device,
@@ -424,26 +431,41 @@ if doTest:
                                     )
         
             res = pd.concat(res).reset_index(drop=True)
-        #res_dept = pd.concat(res_dept).reset_index(drop=True)
         else:
-            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'.pkl', dir_output / dept / prefix)
-            print(metrics)
-            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
+            assert metrics is not None
+            run = f'{dept}_{name}_{prefix}'
             if MLFLOW:
-                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
-                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+                for name, use_temporal_as_edges, target_name, autoRegression in models:
+                    existing_run = get_existing_run(f'{run}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
                     else:
-                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                        mlflow.start_run(run_name=f'{run}', nested=True)
                     if name in metrics.keys():
-                        log_metrics_recursively(metrics[name], prefix='')
+                        log_metrics_recursively(metrics[run], prefix='')
                     else:
                         logger.info(f'{name} not found')
                     
                     mlflow.end_run()
 
-        """############## Prediction ######################
+        if 'df_metrics' not in locals():
+            df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+        else:
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
+
+    df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
+    df_metrics.reset_index(drop=True, inplace=True)
+    
+    check_and_create_path(dir_output / prefix)
+    df_metrics.to_csv(dir_output / prefix / 'df_metrics.csv')
+
+    wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
+    wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')
+    wrapped_compare(df_metrics,  dir_output / prefix, 'Target')
+    wrapped_compare(df_metrics,  dir_output / prefix, 'Days_in_futur')
+
+    """############## Prediction ######################
         for name, target_name, _ in models:
             if name not in res.model.unique():
                 continue

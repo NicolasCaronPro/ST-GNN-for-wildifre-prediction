@@ -44,6 +44,8 @@ parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of kmeans FR to remove sinister', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -111,6 +113,11 @@ geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 name_dir = dataset_name + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
+if dataset_name == 'firemen2':
+    two = True
+    dataset_name = 'firemen'
+else:
+    two = False
 
 minDate = '2017-06-12' # Starting point
 
@@ -166,8 +173,6 @@ if MLFLOW:
     mlflow.end_run()
 
 ######################## Training ##############################
-
-prefix += f'_{weights_version}'
 
 train_dataset['weight'] = train_dataset[weights_version]
 val_dataset['weight'] = val_dataset[weights_version]
@@ -233,7 +238,10 @@ if doTest:
     
     models = [
         #('pastinfluence_risk', 'indice'),
-        ('fwi_max', 'indice'),
+        ('risk', 'indice'),
+        #('zero', 'nbsinister'),
+        #('one', 'nbsinister'),
+        #('fwi_max', 'indice'),
         #('fwi_mean', 'indice'),
         #('fwi_min', 'indice'),
 
@@ -264,17 +272,19 @@ if doTest:
 
     for dept in departements:
         if MLFLOW:
-            exp_name = f"{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
+            dn = dataset_name
+            if two:
+                dn += '2'
+            exp_name = f"{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
             experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
                 tags = {
-                    "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+                    "",
                 }
 
                 client.create_experiment(name=exp_name, tags=tags)
 
-            mlflow.set_experiment(exp_name)
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
         if test_dataset_unscale is not None:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)

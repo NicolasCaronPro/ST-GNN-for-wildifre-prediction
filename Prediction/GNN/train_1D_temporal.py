@@ -1,8 +1,6 @@
 import sys
 import os
 
-from itsdangerous import NoneAlgorithm
-
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -44,6 +42,7 @@ parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -111,6 +110,11 @@ geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 name_dir = dataset_name + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
+if dataset_name == 'firemen2':
+    two = True
+    dataset_name = 'firemen'
+else:
+    two = False
 
 minDate = '2017-06-12' # Starting point
 
@@ -146,6 +150,9 @@ if MLFLOW:
 
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
+
+prefix_config = deepcopy(prefix)
+
 train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_name, train_departements,
                                                                                     prefix,
@@ -349,17 +356,18 @@ if doTest:
 
     for dept in departements:
         if MLFLOW:
-            exp_name = f"{dataset_name}_{dept}_{sinister}_{sinister_encoding}_test"
+            dn = dataset_name
+            if two:
+                dn += '2'
+            exp_name = f"{name_exp}_{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
             experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
                 tags = {
-                    "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+                    "",
                 }
 
                 client.create_experiment(name=exp_name, tags=tags)
-
-            mlflow.set_experiment(exp_name)
         test_dataset_dept = test_dataset[(test_dataset['departement'] == name2int[dept])].reset_index(drop=True)
         if test_dataset_unscale is not None:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
@@ -378,8 +386,8 @@ if doTest:
                             methods=methods,
                             test_name=dept,
                             features_name=features_selected_str,
-                            prefix=prefix,
                             prefix_train=prefix,
+                            prefix_config=prefix_config,
                             models=gnn_models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
@@ -451,8 +459,8 @@ if doTest:
                             methods=methods,
                             test_name=dept,
                             features_name=features_selected_str,
-                            prefix=prefix,
                             prefix_train=prefix,
+                            prefix_config=prefix_config,
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,

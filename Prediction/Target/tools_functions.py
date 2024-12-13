@@ -466,7 +466,7 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
                 hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'nb'+sinisterType] += 1
 
             rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
-            
+             
         elif sinister_encoding == 'burned_area':
             hexaFire['Surface parcourue (m2)'] = 0
 
@@ -476,7 +476,18 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
             hexaFire['Surface parcourue (h)'] = hexaFire['Surface parcourue (m2)'] * 0.0001
             rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x,  'Surface parcourue (m2)', dir_output, dept+'_bin0')
 
-        spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
+        elif sinister_encoding == 'hours_difference':
+            hexaFire['hours_difference'] = 0.0
+
+            for _, row in fdataset.iterrows():
+                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'hours_difference'] += row['hours_difference']
+            
+            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'hours_difference', dir_output, dept+'_bin0')
+
+        if sinister_encoding == 'occurence':
+            spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
+        else:
+            spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]]
 
     return spatioTemporalRaster
 

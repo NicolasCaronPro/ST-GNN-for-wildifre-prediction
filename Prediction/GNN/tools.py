@@ -1,3 +1,5 @@
+from concurrent.futures import thread
+from sympy import true
 from torch import cosine_embedding_loss, fill
 from GNN.dico_departements import *
 from GNN.weigh_predictor import *
@@ -31,7 +33,7 @@ if is_pc:
     from array_fet import *
     from category_encoders import TargetEncoder, CatBoostEncoder
     from collections import Counter
-    from copy import copy
+    from copy import copy, deepcopy
     from geocube.api.core import make_geocube
     from geocube.rasterize import rasterize_points_griddata
     from lightgbm import LGBMClassifier, LGBMRegressor
@@ -52,7 +54,7 @@ if is_pc:
     from sklearn.decomposition import PCA
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc
+        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
@@ -128,6 +130,7 @@ else:
     from features_selection import *
     import convertdate
     from sklearn.feature_selection import VarianceThreshold
+    import cv2
 
 random.seed(42)
 
@@ -146,7 +149,7 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return None, binImageScale
 
-def create_larger_scale_bin(input, bin, influence, raster):
+"""def create_larger_scale_bin(input, bin, influence, raster):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
 
@@ -171,7 +174,27 @@ def create_larger_scale_bin(input, bin, influence, raster):
                 binImageScale[mask, di] = 0
                 influenceImageScale[mask, di] = 0
 
-    return binImageScale, influenceImageScale
+    return binImageScale, influenceImageScale"""
+
+def create_larger_scale_bin(input, bin, influence, time, raster):
+    binImageScale = np.full(bin.shape, np.nan)
+    influenceImageScale = np.full(influence.shape, np.nan)
+    timeScale = np.full(influence.shape, np.nan)
+
+    clusterID = np.unique(input)
+    for di in range(bin.shape[-1]):
+        for id in clusterID:
+            mask = (input == id)
+            if np.any(influence[mask, di] > 0):
+                binImageScale[mask, di] = np.nansum(bin[mask, di])
+                influenceImageScale[mask, di] = np.nansum(influence[mask, di])
+                timeScale[mask, di] = np.nansum(time[mask, di])
+            else:
+                binImageScale[mask, di] = 0
+                influenceImageScale[mask, di] = 0
+                timeScale[mask, di] = 0
+
+    return binImageScale, influenceImageScale, timeScale
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -418,18 +441,34 @@ def remove_none_target_np(arr: np.array, target: int) -> np.ndarray:
         return None, target[mask]
     return arr[mask], target[mask]
 
-def remove_nan_nodes(df: pd.DataFrame) -> pd.DataFrame:
+def remove_nan_nodes(df: pd.DataFrame, features_name: list) -> pd.DataFrame:
     """
-    Remove rows where any NaN values are present in 'nodes' columns.
+    Supprime les lignes contenant des valeurs NaN dans les colonnes spécifiées.
+
+    Parameters:
+    - df (pd.DataFrame): Le DataFrame à nettoyer.
+    - features_name (list): Une liste des colonnes dans lesquelles rechercher les NaN.
+
+    Returns:
+    - pd.DataFrame: Un nouveau DataFrame sans lignes contenant des NaN dans les colonnes spécifiées.
     """
-    logger.info(f'Nan columns : {np.unique(df.columns[df.isna().any()].tolist())}')
-    return df.dropna().reset_index(drop=True)
+    # Identifier les colonnes contenant des NaN parmi les colonnes spécifiées
+    nan_columns = df[features_name].isna().any()
+    nan_columns_list = nan_columns[nan_columns].index.tolist()
+
+    # Journaliser les colonnes concernées
+    logger.info(f"Colonnes contenant des NaN : {nan_columns_list}")
+
+    # Supprimer les lignes contenant des NaN et réinitialiser les index
+    cleaned_df = df.dropna(subset=features_name).reset_index(drop=True)
+    
+    return cleaned_df
 
 def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove rows where the target column has -1 or NaN values.
     """
-    return df[(df['risk'] != -1) & (~df['risk'].isna())].reset_index(drop=True)
+    return df[(df['nbsinister'] != -1) & (~df['nbsinister'].isna())].reset_index(drop=True)
 
 def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks : int) -> pd.DataFrame:
     global allDates, name2int
@@ -671,9 +710,6 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
 
     return x[:, start_features:], y, edges
 
-import numpy as np
-import scipy.interpolate
-
 def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) -> np.array:
     uniqueNodes = np.unique(array[:, id_index])
     res = []
@@ -835,7 +871,7 @@ def construct_time_series(date : int,
 
 def order_class(predictor, pred, min_values=0):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
-    cc = predictor.cluster_centers.reshape(-1)
+    cc = predictor.cluster_centers_.reshape(-1)
     classes = np.arange(cc.shape[0])
     ind = np.lexsort([cc])
     cc = cc[ind]
@@ -1408,6 +1444,117 @@ def spearman_coefficient(y_true, y_pred, mask=None, tolerance=0):
     
     mask = mask.reshape(-1)
     return spearmanr(y_pred[mask], y_true[mask])[0]
+
+def mae_per_class_recall(y_true, y_pred, classes):
+    """
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    distance between the true and predicted values, considering recall perspective.
+
+    Parameters:
+        y_true (array-like): Ground truth labels.
+        y_pred (array-like): Predicted labels.
+        classes (array-like): Unique classes to consider.
+
+    Returns:
+        dict: A dictionary where keys are class labels and values are the MAE for each class,
+              including a 'mean_mae' key for the overall mean MAE.
+    """
+    # Dictionnaire pour stocker la MAE par classe
+    mae_by_class = {}
+    
+    mae_values = []  # Stocker les MAE pour le calcul de la moyenne
+    
+    for cls in classes:
+        # Masquer les valeurs pour la classe en cours
+        mask = (y_true == cls)
+        if not np.any(mask):  # Vérifie si la classe est présente
+            continue
+        
+        # Calcul de la MAE pour la classe
+        mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
+        
+        # Ajouter la MAE pour cette classe
+        mae_by_class[cls] = round(mae, 2)
+        mae_values.append(mae)
+    
+    # Calculer la moyenne des MAE et l'ajouter au dictionnaire
+    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
+    
+    return mae_by_class
+
+def mae_per_class_pre(y_true, y_pred, classes):
+    """
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    distance between the true and predicted values, considering precision perspective.
+
+    Parameters:
+        y_true (array-like): Ground truth labels.
+        y_pred (array-like): Predicted labels.
+        classes (array-like): Unique classes to consider.
+
+    Returns:
+        dict: A dictionary where keys are class labels and values are the MAE for each class,
+              including a 'mean_mae' key for the overall mean MAE.
+    """
+    # Dictionnaire pour stocker la MAE par classe
+    mae_by_class = {}
+    
+    mae_values = []  # Stocker les MAE pour le calcul de la moyenne
+    
+    for cls in classes:
+        # Masquer les valeurs pour la classe en cours
+        mask = (y_pred == cls)
+        if not np.any(mask):  # Vérifie si la classe est présente
+            continue
+        
+        # Calcul de la MAE pour la classe
+        mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
+        
+        # Ajouter la MAE pour cette classe
+        mae_by_class[cls] = round(mae, 2)
+        mae_values.append(mae)
+    
+    # Calculer la moyenne des MAE et l'ajouter au dictionnaire
+    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
+    
+    return mae_by_class
+
+def mae_per_class(y_true, y_pred, classes):
+    """
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    distance between the true and predicted values, considering precision perspective.
+
+    Parameters:
+        y_true (array-like): Ground truth labels.
+        y_pred (array-like): Predicted labels.
+        classes (array-like): Unique classes to consider.
+
+    Returns:
+        dict: A dictionary where keys are class labels and values are the MAE for each class,
+              including a 'mean_mae' key for the overall mean MAE.
+    """
+    # Dictionnaire pour stocker la MAE par classe
+    mae_by_class = {}
+    
+    mae_values = []  # Stocker les MAE pour le calcul de la moyenne
+    
+    for cls in classes:
+        # Masquer les valeurs pour la classe en cours
+        mask = (y_pred == cls) | (y_true == cls)
+        if not np.any(mask):  # Vérifie si la classe est présente
+            continue
+        
+        # Calcul de la MAE pour la classe
+        mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
+        
+        # Ajouter la MAE pour cette classe
+        mae_by_class[cls] = round(mae, 2)
+        mae_values.append(mae)
+    
+    # Calculer la moyenne des MAE et l'ajouter au dictionnaire
+    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
+    
+    return mae_by_class
 
 def my_roc_auc(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
     """
@@ -2683,12 +2830,47 @@ def select_train_features(train_features, scale, features_name):
     return train_fet_num
 
 def features_selection(doFet, df, dir_output, features_name, NbFeatures, target):
+    check_and_create_path(dir_output)
+
+    if not doFet and (dir_output / 'features_importance.pkl').is_file():
+        features_importance = read_object(f'features_importance.pkl', dir_output)
+        assert features_importance is not None
+    else:
+        df_weight = df[df['weight'] > 0]
+        df_weight = df_weight.dropna(subset=features_name)
+        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=len(features_name))
+        save_object(features_importance, f'features_importance.pkl', dir_output)
+    
+    features_importance = np.asarray(features_importance)
+
+    # Séparer les caractéristiques et les valeurs
+    features, values = zip(*features_importance[:15])
+
+    # Tracer le graphique
+    plt.figure(figsize=(15, 8))
+    plt.bar(features, values, color='skyblue')
+
+    # Ajouter des labels et le titre
+    plt.xlabel('Valeur')
+    plt.ylabel('Caractéristique')
+    plt.title('Visualisation des caractéristiques et de leurs valeurs')
+
+    # Afficher le graphique
+    plt.tight_layout()
+    plt.savefig(dir_output / 'features_importance.png')
+    plt.close('all')
+
+    logger.info(features_importance)
+    features_selected = features_importance[:,0]
+    return features_selected
 
     print(features_name, NbFeatures)
     if NbFeatures == len(features_name) or NbFeatures == 'all':
+        df_weight = df[df['weight'] > 0]
+        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=int(NbFeatures))
         features_selected = features_name
         return features_selected
-
+    
     if doFet:
         df_weight = df[df['weight'] > 0]
         features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=int(NbFeatures))
@@ -2780,34 +2962,597 @@ def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break
         plt.savefig(dir_log / 'kmeans_feature' / f'{fet}_{date_limit}.png')
         plt.close('all')
 
-def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target : str, tresh : float, features_selected, new_val : int):
-    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
-    values_risk = df[target].values
-    for fet in features_selected:
-        logger.info(f'############## {fet} #################')
-        values = df[fet].values
-        predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
-        if predictor is None:
-            continue
-        predclass = order_class(predictor, predictor.predict(values))
-        cls = np.unique(predclass)
-        low = False
-        previous_class = -1
-        for c in cls:
-            mask = predclass == c
-            if int(c) not in dico_correlation[fet].keys():
-                continue
-            if dico_correlation[fet][int(c)] < tresh:
-                low = True
-                previous_class = c
-                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} -> 0')
-                values_risk[mask] = new_val
-            elif low:
-                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} due to {previous_class} -> 0')
-                values_risk[mask] = new_val
+def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path, target: str, tresh: float, features_selected, new_val: int, shifts: list, mask_df):
+    """
+    Applies KMeans classes on the target column based on thresholds and optionally considers shifts.
 
-    df[target] = values_risk
-    return df
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        dir_break_point (Path): Directory containing break points and models.
+        target (str): Target column to modify.
+        tresh (float): Threshold value for applying classes.
+        features_selected (list): List of selected features.
+        new_val (int): Value to assign for low correlation classes.
+        shifts (list): List of integer shifts to apply on the target column.
+        
+    Returns:
+        pd.DataFrame: Modified DataFrame with updated target column.
+    """
+    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
+
+    if mask_df is None:
+        df = dataframe.copy(deep=True)
+    else:
+        df = dataframe[mask_df].copy(deep=True)
+
+    values_risk = np.copy(df[target].values)
+
+    # Iterate over shifts
+    for shift in shifts:
+        logger.info(f'############## Processing shift: {shift} #################')
+
+        shifted_df = df.copy(deep=True)
+        
+        dataframe[f'{target}_{shift}_{tresh}'] = np.copy(dataframe[target].values)
+        df[f'{target}_{shift}_{tresh}'] = np.copy(df[target].values)
+
+        for fet in features_selected:
+            fet_key = f"{fet}_{shift}"
+            
+            shifted_df[fet] = shifted_df.groupby('graph_id')[fet].shift(shift)
+            values = shifted_df[fet].values
+            values[np.isnan(values)] = 0
+            
+            predictor = read_object(f'{fet}_{shift}.pkl', dir_break_point / fet)
+            if predictor is None:
+                continue
+            predclass = order_class(predictor, predictor.predict(values))
+            cls = np.sort(np.unique(predclass))
+            low = False
+
+            # Iterate over the classes
+            for c in cls:
+                mask = predclass == c
+                if dico_correlation[fet_key][int(c)] < tresh or low:
+                    low = True
+                    values_risk[mask] = new_val
+
+        df[f'{target}_{shift}_{tresh}'] = np.copy(values_risk)
+        logger.info(f'{target}_{shift}_{tresh} : {df[target].sum()} -> {df[f"{target}_{shift}_{tresh}"].sum()}')
+
+    if mask_df is None:
+        return df
+    else:
+        dataframe[mask_df] = df
+        return dataframe
+
+def calculate_woe_iv(data, feature, target):
+    """
+    Calcule le WoE (Weight of Evidence) et l'IV (Information Value) pour une variable.
+    
+    Args:
+        data (pd.DataFrame): Le DataFrame contenant les données.
+        feature (str): Le nom de la variable pour laquelle on veut calculer le WoE.
+        target (str): Le nom de la variable cible (somme des valeurs pour les "bons").
+    
+    Returns:
+        pd.DataFrame: Un DataFrame avec le WoE et IV pour chaque groupe de la variable.
+        float: La valeur totale de l'IV pour la variable.
+    """
+    # Table de contingence pour la variable et la cible
+    df_woe = data[[feature, target]].groupby(feature).agg(
+        Good=(target, lambda x: (x >= 1).sum()), # Somme des valeurs comme "bons"
+        Bad=(target, lambda x: (x == 0).sum())  # Compte les "mauvais" (cible = 0)
+    ).reset_index()
+    
+    # Calcul des totaux de "bons" et de "mauvais"
+    total_good = df_woe['Good'].sum()
+    total_bad = df_woe['Bad'].sum()
+    
+    # Calcul des proportions et du WoE
+    df_woe['Dist_Good'] = df_woe['Good'] / total_good
+    df_woe['Dist_Bad'] = df_woe['Bad'] / total_bad
+    df_woe['WoE'] = np.log(df_woe['Dist_Good'] / df_woe['Dist_Bad'].replace(0, 1e-10))
+    
+    # Calcul de l'IV pour chaque catégorie
+    df_woe['IV'] = (df_woe['Dist_Good'] - df_woe['Dist_Bad']) * df_woe['WoE']
+    
+    # IV total
+    iv_total = df_woe['IV'].sum()
+    
+    return df_woe, iv_total
+
+def get_saison(x):
+    date = allDates[(int(x))]
+    month = int(date.split('-')[1])
+    group_month = [
+                [2, 3, 4, 5],    # Medium season
+                [6, 7, 8, 9],    # High season
+                [10, 11, 12, 1]  # Low season
+            ]
+
+    if month in [2, 3, 4, 5]:
+        return 'medium'
+    if month in [6, 7, 8, 9]:
+        return 'high'
+    return 'low'
+
+def calculate_ks(data, score_col, event_col, thresholds, dir_output):
+    """
+    Calcule le KS-Statistic pour plusieurs seuils définis et renvoie les seuils optimaux pour chaque KS.
+    
+    :param data: pd.DataFrame contenant les scores et les événements.
+    :param score_col: Nom de la colonne des scores prédits.
+    :param event_col: Nom de la colonne des événements observés.
+    :param thresholds: Liste des seuils pour diviser les groupes en faible/haut risque.
+    :param dir_output: Dossier de sortie pour enregistrer les graphiques.
+    :return: dict contenant les seuils optimums et leurs KS pour chaque groupe.
+    """
+    dir_output = Path(dir_output)  # Assurez-vous que dir_output est un Path
+    dir_output.mkdir(parents=True, exist_ok=True)  # Crée le dossier si nécessaire
+
+    ks_results = []
+    optimal_thresholds = {}
+
+    for threshold in thresholds:
+        # Définir les groupes basés sur les seuils modifiés
+        data['group'] = np.where(
+            data[event_col] == threshold - 1, 'low_risk',  # Low risk pour les valeurs <= threshold - 1
+            np.where(data[event_col] >= threshold, 'high_risk', 'other')  # High risk pour les valeurs == threshold
+        )
+        
+        # Filtrer uniquement les données pertinentes (low_risk et high_risk)
+        data_filtered = data[data['group'].isin(['low_risk', 'high_risk'])].copy()
+
+        # Trier par score prédictif
+        data_sorted = data_filtered.sort_values(by=score_col).reset_index(drop=True)
+        
+        # Calcul des distributions cumulées pour chaque groupe
+        low_risk_cdf = np.cumsum(data_sorted['group'] == 'low_risk') / (data_filtered['group'] == 'low_risk').sum()
+        high_risk_cdf = np.cumsum(data_sorted['group'] == 'high_risk') / (data_filtered['group'] == 'high_risk').sum()
+        
+        # Calcul du KS : distance maximale entre les deux CDF
+        ks_stat = np.max(np.abs(low_risk_cdf - high_risk_cdf))
+        try:
+            optimal_score = data_sorted[score_col][np.argmax(np.abs(low_risk_cdf - high_risk_cdf))]
+        except:
+            optimal_score =-1
+            ks_stat = 0.0
+
+        # Stocker les résultats pour le seuil courant
+        ks_results.append({'threshold': threshold, 'ks_stat': ks_stat, 'optimal_score': optimal_score})
+        
+        # Visualiser les CDF
+        plt.figure()
+        plt.plot(data_sorted[score_col], low_risk_cdf, label='Low Risk CDF', color='blue')
+        plt.plot(data_sorted[score_col], high_risk_cdf, label='High Risk CDF', color='red')
+        plt.axvline(optimal_score, color='green', linestyle='--', label=f'Optimal Score: {optimal_score:.3f}')
+        plt.title(f"KS Plot for Threshold {threshold} (KS={ks_stat:.3f})")
+        plt.xlabel('Score')
+        plt.ylabel('Cumulative Distribution')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(dir_output / f'Cumulative_Distribution_{score_col}_{event_col}_{threshold}.png')
+        plt.close('all')
+
+    # Convertir les résultats en DataFrame pour inspection (facultatif)
+    ks_results_df = pd.DataFrame(ks_results)
+
+    return ks_results_df
+
+def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, dir_output):
+    """
+    Calcule l'Average Precision (AP) et identifie le seuil optimal basé sur le F1-score global
+    pour chaque seuil défini dans 'thresholds'.
+
+    :param data: pd.DataFrame contenant les scores prédits et les événements observés.
+    :param score_col: Nom de la colonne des scores prédits.
+    :param event_col: Nom de la colonne des événements observés (1 pour événement, 0 pour non-événement).
+    :param thresholds: Liste des seuils pour diviser les groupes en faible/haut risque.
+    :param dir_output: Dossier de sortie pour enregistrer les graphiques.
+    :return: dict contenant les résultats APR et un DataFrame des résultats pour chaque seuil.
+    """
+    # Assurez-vous que le dossier de sortie existe
+    dir_output = Path(dir_output)
+    dir_output.mkdir(parents=True, exist_ok=True)
+
+    # Initialisation des résultats
+    apr_results = []
+
+    for threshold in thresholds:
+        # Générer les labels binaires pour le seuil courant
+        data['binary_pred'] = (data[event_col] >= threshold).astype(int)
+
+        # Calculer les labels et scores
+        y_true = data['binary_pred']
+        y_scores = data[score_col]
+
+        if len(y_true) == 0:
+            continue
+
+        # Calculer la courbe précision-rappel et le score AP
+        precision, recall, pr_thresholds = precision_recall_curve(y_true, y_scores)
+        apr_score = average_precision_score(y_true, y_scores)
+
+        # Identifier le seuil optimal basé sur le F1-score
+        f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+        optimal_index = np.argmax(f1_scores)
+        optimal_threshold = pr_thresholds[optimal_index] if optimal_index < len(pr_thresholds) else None
+        optimal_precision = precision[optimal_index]
+        optimal_recall = recall[optimal_index]
+        optimal_f1 = f1_scores[optimal_index]
+
+        # Ajouter les résultats pour ce seuil
+        apr_results.append({
+            'threshold': threshold,
+            'apr_score': apr_score,
+            'f1_score': optimal_f1,
+            'optimal_threshold': optimal_threshold,
+            'optimal_precision': optimal_precision,
+            'optimal_recall': optimal_recall
+        })
+
+        # Tracer la courbe précision-rappel
+        plt.figure()
+        plt.plot(recall, precision, label=f"AP={apr_score:.3f}, F1={optimal_f1:.3f}", color='blue')
+        if optimal_index < len(pr_thresholds):
+            plt.scatter(optimal_recall, optimal_precision, color='red', label=f'Optimal Point (F1={optimal_f1:.3f}, Score={optimal_threshold:.3f})')
+        plt.title(f"Precision-Recall Curve for Threshold: {threshold}")
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.legend()
+        plt.grid(True)
+
+        # Sauvegarder la courbe
+        plt.savefig(dir_output / f'Precision_Recall_Threshold_{threshold}.png')
+        plt.close()
+
+    # Convertir les résultats en DataFrame
+    apr_results_df = pd.DataFrame(apr_results)
+
+    return apr_results_df
+
+def calculate_ks_per_season_and_graph_id(data, score_col, event_col, thresholds, dir_output):
+    """
+    Calcule le KS-Statistic pour chaque combinaison unique de 'saison' et 'graph_id'
+    à travers une liste de seuils définis, et renvoie les seuils optimaux pour chaque KS.
+
+    :param data: pd.DataFrame contenant les scores, les événements, les saisons et les graph_id.
+    :param score_col: Nom de la colonne des scores prédits.
+    :param event_col: Nom de la colonne des événements observés.
+    :param thresholds: Liste des seuils pour diviser les groupes en faible/haut risque.
+    :param dir_output: Dossier de sortie pour enregistrer les graphiques.
+    :return: dict contenant les seuils optimums et leurs KS pour chaque couple (saison, graph_id).
+    """
+    dir_output = Path(dir_output)  # Assurez-vous que dir_output est un Path
+    dir_output.mkdir(parents=True, exist_ok=True)  # Crée le dossier si nécessaire
+
+    # Dictionnaire pour stocker les résultats des seuils optimaux et des KS pour chaque couple (saison, graph_id)
+    results_per_group = {}
+
+    # Boucle sur chaque combinaison unique de 'saison' et 'graph_id'
+    for (saison, graph_id), group_data in data.groupby(['saison', 'graph_id']):
+        ks_results = []  # Liste pour stocker les résultats pour ce groupe spécifique
+
+        for threshold in thresholds:
+            # Définir les groupes basés sur les seuils modifiés
+            group_data['group'] = np.where(
+                group_data[event_col] == threshold - 1, 'low_risk',
+                np.where(group_data[event_col] >= threshold, 'high_risk', 'other')
+            )
+
+            # Filtrer uniquement les données pertinentes (low_risk et high_risk)
+            data_filtered = group_data[group_data['group'].isin(['low_risk', 'high_risk'])].copy()
+
+            # Trier par score prédictif
+            data_sorted = data_filtered.sort_values(by=score_col).reset_index(drop=True)
+
+            # Calcul des distributions cumulées pour chaque groupe
+            low_risk_cdf = np.cumsum(data_sorted['group'] == 'low_risk') / (data_filtered['group'] == 'low_risk').sum()
+            high_risk_cdf = np.cumsum(data_sorted['group'] == 'high_risk') / (data_filtered['group'] == 'high_risk').sum()
+
+            # Calcul du KS : distance maximale entre les deux CDF
+            ks_stat = np.max(np.abs(low_risk_cdf - high_risk_cdf))
+
+            try:
+                optimal_score = data_sorted[score_col][np.argmax(np.abs(low_risk_cdf - high_risk_cdf))]
+            except:
+                optimal_score = -1
+                ks_stat = 0.0
+
+            # Stocker les résultats pour le seuil courant
+            ks_results.append({'threshold': threshold, 'ks_stat': ks_stat, 'optimal_score': optimal_score})
+
+            # Visualiser les CDF pour ce seuil spécifique
+            plt.figure()
+            plt.plot(data_sorted[score_col], low_risk_cdf, label='Low Risk CDF', color='blue')
+            plt.plot(data_sorted[score_col], high_risk_cdf, label='High Risk CDF', color='red')
+            plt.axvline(optimal_score, color='green', linestyle='--', label=f'Optimal Score: {optimal_score:.3f}')
+            plt.title(f"KS Plot for Saison: {saison}, Graph ID: {graph_id}, Threshold: {threshold} (KS={ks_stat:.3f})")
+            plt.xlabel('Score')
+            plt.ylabel('Cumulative Distribution')
+            plt.legend()
+            plt.grid(True)
+
+            # Sauvegarder l'image du graphique dans le répertoire de sortie
+            plt.savefig(dir_output / f'KS_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png')
+            plt.close('all')
+
+        # Convertir les résultats de ce groupe en DataFrame pour inspection (facultatif)
+        ks_results_df = pd.DataFrame(ks_results)
+
+        # Sauvegarder les résultats pour ce groupe (saison, graph_id)
+        results_per_group[(saison, graph_id)] = ks_results_df
+
+    return results_per_group
+
+def calculate_apr_per_season_and_graph_id(data, score_col, event_col, thresholds, dir_output):
+    """
+    Calcule le score Average Precision (APR) pour chaque combinaison unique de 'saison' et 'graph_id'
+    à travers une liste de seuils définis, et renvoie les seuils optimaux pour maximiser l'APR.
+
+    :param data: pd.DataFrame contenant les scores, les événements, les saisons et les graph_id.
+    :param score_col: Nom de la colonne des scores prédits.
+    :param event_col: Nom de la colonne des événements observés.
+    :param thresholds: Liste des seuils pour diviser les groupes en faible/haut risque.
+    :param dir_output: Dossier de sortie pour enregistrer les graphiques.
+    :return: dict contenant les seuils optimums et leurs APR pour chaque couple (saison, graph_id).
+    """
+    dir_output = Path(dir_output)  # Assurez-vous que dir_output est un Path
+    dir_output.mkdir(parents=True, exist_ok=True)  # Crée le dossier si nécessaire
+
+    # Dictionnaire pour stocker les résultats des seuils optimaux et des APR pour chaque couple (saison, graph_id)
+    results_per_group = {}
+
+    # Boucle sur chaque combinaison unique de 'saison' et 'graph_id'
+    for (saison, graph_id), group_data in data.groupby(['saison', 'graph_id']):
+        apr_results = []  # Liste pour stocker les résultats pour ce groupe spécifique
+
+        for threshold in thresholds:
+            # Définir les groupes basés sur les seuils modifiés
+            group_data['group'] = np.where(
+                group_data[event_col] < threshold, 'low_risk',
+                np.where(group_data[event_col] >= threshold, 'high_risk', 'other')
+            )
+
+            # Filtrer uniquement les données pertinentes (low_risk et high_risk)
+            data_filtered = group_data[group_data['group'].isin(['low_risk', 'high_risk'])].copy()
+
+            # Calculer les labels binaires pour la métrique APR
+            y_true = (data_filtered['group'] == 'high_risk').astype(int)
+            y_scores = data_filtered[score_col]
+            
+            if y_true.shape[0] == 0:
+                continue
+            
+            # Calculer les courbes précision-rappel et l'APR
+            precision, recall, thresholds_pr = precision_recall_curve(y_true, y_scores, pos_label=1)
+            apr_score = average_precision_score(y_true, y_scores)
+
+            # Identifier le seuil optimal comme celui avec le F1-score maximal
+            f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
+            optimal_index = np.argmax(f1_scores)
+            optimal_threshold = thresholds_pr[optimal_index] if optimal_index < len(thresholds_pr) else None
+            optimal_precision = precision[optimal_index]
+            optimal_recall = recall[optimal_index]
+            optimal_f1 = f1_scores[optimal_index]
+
+            # Stocker les résultats pour le seuil courant
+            apr_results.append({
+                'threshold': threshold,
+                'apr_score': apr_score,
+                'f1_score': optimal_f1,
+                'optimal_threshold': optimal_threshold,
+                'optimal_precision': optimal_precision,
+                'optimal_recall': optimal_recall
+            })
+
+            # Visualiser la courbe précision-rappel
+            plt.figure()
+            plt.plot(recall, precision, label=f"Precision-Recall Curve (APR={apr_score:.3f}, (F1={optimal_f1:.3f})", color='blue')
+            plt.scatter(optimal_recall, optimal_precision, color='red', label=f'Optimal Point (P={optimal_precision:.3f}, R={optimal_recall:.3f})')
+            plt.title(f"{saison}, Graph ID: {graph_id}, Threshold: {threshold}. Optimal threshold: {optimal_threshold:.3f}")
+            plt.xlabel('Recall')
+            plt.ylabel('Precision')
+            plt.legend()
+            plt.grid(True)
+
+            # Sauvegarder l'image du graphique dans le répertoire de sortie
+            plt.savefig(dir_output / f'APR_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png')
+            plt.close('all')
+
+        # Convertir les résultats de ce groupe en DataFrame pour inspection (facultatif)
+        apr_results_df = pd.DataFrame(apr_results)
+
+        # Sauvegarder les résultats pour ce groupe (saison, graph_id)
+        results_per_group[(saison, graph_id)] = apr_results_df
+
+    return results_per_group
+
+def calculate_ks_continous(data, score_col, event_col, dir_output=None):
+    """
+    Calcule le KS-Statistic pour une colonne d'événements non binaire.
+    
+    :param data: pd.DataFrame contenant les scores et les événements.
+    :param score_col: Nom de la colonne des scores prédits.
+    :param event_col: Nom de la colonne des événements observés (valeurs continues ou non binaires).
+    :param dir_output: (Optional) Répertoire de sortie pour sauvegarder les graphes.
+    :return: KS-Statistic et DataFrame avec les CDFs pour visualisation.
+    """
+    # Trier les données par score décroissant
+    data_sorted = data.sort_values(by=score_col).reset_index(drop=True)
+    
+    total_events = data_sorted[event_col].sum()
+    total_non_events = len(data_sorted[data_sorted[event_col] == 0])
+
+    data_sorted['cum_events'] = np.cumsum(data_sorted[event_col]) / total_events
+    data_sorted['cum_non_events'] = np.cumsum(data_sorted[event_col].apply(lambda x: x == 0)) / total_non_events
+
+    # Calcul du KS-Statistic
+    data_sorted['ks_diff'] = np.abs(data_sorted['cum_events'] - data_sorted['cum_non_events'])
+    ks_stat = data_sorted['ks_diff'].max()
+    ks_position = data_sorted['ks_diff'].idxmax()
+
+    # Optionnel : Visualisation
+    plt.figure(figsize=(10, 6))
+    plt.plot(data_sorted[score_col], data_sorted['cum_events'], label='Cumulative Events', color='red')
+    plt.plot(data_sorted[score_col], data_sorted['cum_non_events'], label='Cumulative Non-Events', color='blue')
+    plt.axvline(x=data_sorted.loc[ks_position, score_col], color='green', linestyle='--', label=f'KS Point (KS={ks_stat:.3f})')
+    plt.title('KS Plot')
+    plt.xlabel('Score')
+    plt.ylabel('Cumulative Proportion')
+    plt.legend()
+    plt.grid(True)
+    
+    if dir_output:
+        plt.savefig(dir_output / f'KS_Plot_{score_col}_{event_col}.png')
+
+    plt.close('all')
+    
+    return ks_stat, data_sorted[[score_col, 'cum_events', 'cum_non_events', 'ks_diff']]
+
+def calculate_signal_scores(y_pred, y_true, graph_id):
+    """
+    Calcule les scores (aire commune, union, sous-prédiction, sur-prédiction) entre deux signaux.
+
+    Args:
+        t (np.array): Tableau de temps ou indices (axe x).
+        y_pred (np.array): Signal prédiction (rouge).
+        y_true (np.array): Signal vérité terrain (bleu).
+
+    Returns:
+        dict: Dictionnaire contenant les scores calculés.
+    """
+
+    ###################################### I. For the all signal ####################################
+    # Calcul des différentes aires
+    intersection = np.trapz(np.minimum(y_pred, y_true))  # Aire commune
+    union = np.trapz(np.maximum(y_pred, y_true))         # Aire d'union
+
+    under_prediction = np.trapz(np.maximum(0, y_true - y_pred))
+    over_prediction = np.trapz(np.maximum(0, y_pred - y_true))
+
+    over_prediction_zeros = np.trapz(np.maximum(0, y_pred[y_true == 0]))
+    under_prediction_zeros = np.trapz(np.maximum(0, y_true[y_pred == 0]))
+
+    under_prediction_fire = np.trapz(np.maximum(0, y_true[y_true > 0] - y_pred[y_true > 0]))
+    over_prediction_fire = np.trapz(np.maximum(0, y_pred[y_true > 0] - y_true[y_true > 0]))
+
+    only_true_value = np.trapz(y_true) # Air sous la courbe des prédictions
+    only_pred_value = np.trapz(y_pred) # Air sous la courbe des prédictions
+
+    # Enregistrement dans un dictionnaire
+    scores = {
+        "common_area": intersection,
+        "union_area": union,
+        "under_predicted_area": under_prediction,
+        "over_predicted_area": over_prediction,
+
+        "iou": round(intersection / union, 2) if union > 0 else 0,  # To avoid division by zero
+        "iou_under_prediction": round(under_prediction / union, 2) if union > 0 else 0,
+        "iou_over_prediction": round(over_prediction / union, 2) if (union) > 0 else 0,
+
+        "wildfire_predicted" : round(intersection / only_true_value, 2) if only_true_value > 0 else 0,
+        "wildfire_supposed" : round(intersection / only_pred_value, 2) if only_true_value > 0 else 0,
+        
+        "wildfire_over_predicted": round(over_prediction_fire / union, 2) if only_true_value > 0 else 0,
+        "wildfire_under_predicted": round(under_prediction_fire / union, 2) if only_true_value > 0 else 0,
+        
+        "over_bad_prediction" : round(over_prediction_zeros / union, 2) if union > 0 else 0,
+        "under_bad_prediction" : round(under_prediction_zeros / union, 2) if union > 0 else 0,
+        "bad_prediction" : round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
+    }
+
+    # Binarisation des prédictions et vérités terrain
+    # Binarisation des prédictions et vérités terrain
+    y_pred_day = (y_pred > 0).astype(int)  # Prédictions binarisées
+    y_true_day = (y_true > 0).astype(int)  # Vérités binarisées
+
+    # Calcul des différentes aires pour les données binaires
+    intersection_day = np.trapz(np.minimum(y_pred_day, y_true_day))  # Aire commune binaire
+    union_day = np.trapz(np.maximum(y_pred_day, y_true_day))         # Aire d'union binaire
+
+    under_prediction_day = np.trapz(np.maximum(0, y_true_day - y_pred_day))
+    over_prediction_day = np.trapz(np.maximum(0, y_pred_day - y_true_day))
+
+    over_prediction_zeros_day = np.trapz(np.maximum(0, y_pred_day[y_true_day == 0]))
+    under_prediction_zeros_day = np.trapz(np.maximum(0, y_true_day[y_pred_day == 0]))
+
+    under_prediction_fire_day = np.trapz(np.maximum(0, y_true_day[y_true_day > 0] - y_pred_day[y_true_day > 0]))
+    over_prediction_fire_day = np.trapz(np.maximum(0, y_pred_day[y_true_day > 0] - y_true_day[y_true_day > 0]))
+
+    only_true_value_day = np.trapz(y_true_day)  # Aire sous la courbe des vérités terrain binaires
+    only_pred_value_day = np.trapz(y_pred_day)  # Aire sous la courbe des prédictions binaires
+
+    # Enregistrement des scores pour les données binaires
+    scores.update({
+        "common_area_day": intersection_day,
+        "union_area_day": union_day,
+        "under_predicted_area_day": under_prediction_day,
+        "over_predicted_area_day": over_prediction_day,
+
+        "iou_day": round(intersection_day / union_day, 2) if union_day > 0 else 0,  # IoU binaire
+        "iou_under_prediction_day": round(under_prediction_day / union_day, 2) if union_day > 0 else 0,
+        "iou_over_prediction_day": round(over_prediction_day / union_day, 2) if union_day > 0 else 0,
+
+        "wildfire_predicted_day": round(intersection_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
+        "wildfire_supposed_day": round(intersection_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
+
+        "wildfire_over_predicted_day": round(over_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
+        "wildfire_under_predicted_day": round(under_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
+
+        "over_bad_prediction_day": round(over_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
+        "under_bad_prediction_day": round(under_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
+        "bad_prediction_day": round((over_prediction_zeros_day + under_prediction_zeros_day) / union_day, 2) if union_day > 0 else 0,
+    })
+
+    ###################################### I. For each graph_id ####################################
+    unique_graph_ids = np.unique(graph_id)
+
+    for i, g_id in enumerate(unique_graph_ids):
+        mask = graph_id == g_id
+
+        y_pred_graph = y_pred[mask]
+        y_true_graph = y_true[mask]
+
+        intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
+        union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
+
+        under_prediction_graph = np.trapz(np.maximum(0, y_true_graph - y_pred_graph))
+        over_prediction_graph = np.trapz(np.maximum(0, y_pred_graph - y_true_graph))
+
+        over_prediction_zeros_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph == 0]))
+        under_prediction_zeros_graph = np.trapz(np.maximum(0, y_true_graph[y_pred_graph == 0]))
+
+        under_prediction_fire_graph = np.trapz(np.maximum(0, y_true_graph[y_true_graph > 0] - y_pred_graph[y_true_graph > 0]))
+        over_prediction_fire_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph > 0] - y_true_graph[y_true_graph > 0]))
+
+        only_true_value = np.trapz(y_true_graph) # Air sous la courbe des prédictions
+        only_pred_value = np.trapz(y_pred_graph) # Air sous la courbe des prédictions
+
+        # Stocker les scores avec les clés précisant le graph_id
+        graph_scores= {
+            f"iou_{g_id}_{i}": round(intersection_graph / union, 2) if union_graph > 0 else 0,  # To avoid division by zero
+            f"iou_under_prediction_{g_id}_{i}": round(under_prediction_graph / union_graph, 2) if union > 0 else 0,
+            f"iou_over_prediction_{g_id}_{i}": round(over_prediction_graph / union_graph, 2) if (union) > 0 else 0,
+
+            f"wildfire_predicted_{g_id}_{i}" : round(intersection_graph / only_true_value, 2) if only_true_value > 0 else 0,
+            f"wildfire_supposed_{g_id}_{i}" : round(intersection_graph / only_pred_value, 2) if only_true_value > 0 else 0,
+            
+            f"wildfire_over_predicted_{g_id}_{i}": round(over_prediction_fire_graph / union_graph, 2) if only_true_value > 0 else 0,
+            f"wildfire_under_predicted_{g_id}_{i}": round(under_prediction_fire_graph / union_graph, 2) if only_true_value > 0 else 0,
+            
+            f"over_bad_prediction_unique_{g_id}_{i}" : round(over_prediction_zeros_graph / union_graph, 2) if union > 0 else 0,
+            f"under_bad_prediction_unique_{g_id}_{i}" : round(under_prediction_zeros_graph / union_graph, 2) if union > 0 else 0,
+            f"bad_prediction_unique_{g_id}_{i}" : round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union > 0 else 0,
+
+            f"over_bad_prediction_global_{g_id}_{i}" : round(over_prediction_zeros_graph / union, 2) if union > 0 else 0,
+            f"under_bad_prediction_global_{g_id}_{i}" : round(under_prediction_zeros_graph / union, 2) if union > 0 else 0,
+            f"bad_prediction_global_{g_id}_{i}" : round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union, 2) if union > 0 else 0,
+        }
+        scores.update(graph_scores)
+
+    return scores
 
 def add_fr_variables(df: pd.DataFrame, dir_break_point: Path, features_selected):
     dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
@@ -2908,7 +3653,7 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
-def target_by_day(df: pd.DataFrame, days: int, method: str) -> pd.DataFrame:
+def target_by_day(df: pd.DataFrame, days_range: int, method: str, target_spe='0') -> pd.DataFrame:
     """
     Adjust target values based on specified method (mean or max) over a number of future days.
     
@@ -2920,27 +3665,49 @@ def target_by_day(df: pd.DataFrame, days: int, method: str) -> pd.DataFrame:
     Returns:
     DataFrame with adjusted target values.
     """
-    df_res = df.copy()
+    df_res = df.copy(deep=True)
 
-    unique_nodes = df['id'].unique()
-    for node in unique_nodes:
-        node_df = df[df['id'] == node]
-        unique_dates = node_df['date'].unique()
-        for date in unique_dates:
-            mask = (df['date'] == date) & (df['id'] == node)
-            future_mask = (df['date'] >= date) & (df['date'] < date + days) & (df['id'] == node)
-            
-            if method == 'mean':
-                df_res.loc[mask, 'risk'] = node_df[future_mask]['risk'].mean()
-            elif method == 'max':
-                df_res.loc[mask, 'risk'] = node_df[future_mask]['risk'].max()
-            else:
-                raise ValueError(f'Unknown method {method}')
+    unique_nodes = df['graph_id'].unique()
+
+    df_res[f'nbsinister_sum_{target_spe}_+0'] =  df[f'nbsinister_{target_spe}'].values
+    df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}'].values
+    
+    for days in range(1, days_range + 1):
+        logger.info(f'################ {days} ################')
+        df_res[f'nbsinister_sum_{target_spe}_+{days}'] = 0
+        df_res[f'risk_mean_{target_spe}_+{days}'] = 0.0
+        df_res[f'risk_max_{target_spe}_+{days}'] = 0.0
+        #df[f'class_risk_max_{target_spe}_+{days}'] = 0.0
+        for node in unique_nodes:
+            node_df = df[df['graph_id'] == node]
+            unique_dates = node_df['date'].unique()
+            for date in unique_dates:
+                mask = (df['date'] == date) & (df['graph_id'] == node)
+                future_mask = (df['date'] >= date) & (df['date'] < date + days) & (df['graph_id'] == node)
                 
-            df_res.loc[mask, 'class_risk'] = node_df[future_mask]['class_risk'].max()
-            df_res.loc[mask, 'nbsinister'] = node_df[future_mask]['nbsinister'].sum()
+                df_res.loc[mask, f'risk_mean_{target_spe}_+{days}'] = node_df[future_mask][f'risk_{target_spe}'].mean()
+                df_res.loc[mask, f'risk_max_{target_spe}_+{days}'] = node_df[future_mask][f'risk_{target_spe}'].max()
+                df_res.loc[mask, f'class_risk_max_{target_spe}_+{days}'] = node_df[future_mask][f'class_risk_{target_spe}'].max()
+                df_res.loc[mask, f'nbsinister_sum_{target_spe}_+{days}'] = node_df[future_mask][f'nbsinister_{target_spe}'].sum()
             
     return df_res
+
+def scale_target(df, df_train, col , method):
+    assert col in ['nbsinister', 'risk']
+
+    if method == 'standard':
+        df[f'{col}-standard'] = standard_scaler(df[col].values, df_train[col].values, concat=False)
+        ids_columns.append(f'{col}-standard')
+    elif method == 'robust':
+        df[f'{col}-robust'] = robust_scaler(df[col].values, df_train[col].values, concat=False)
+        ids_columns.append(f'{col}-robust')
+    elif method == 'MinMax':
+        df[f'{col}-MinMax'] = min_max_scaler(df[col].values, df_train[col].values, concat=False)
+        ids_columns.append(f'{col}-MinMax')
+
+    return df
 
 def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, features_name : dict, target_name : str):
     logger.info(features_name)
@@ -3194,7 +3961,12 @@ def random_weights(df):
     rand_array = np.random.rand(df.shape[0]) * 10
     return rand_array
 
-def calculate_weighs(weight_col, df, train_date, train_code):
+def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, train_date, train_code):
+
+    df = dff.copy(deep=True)
+    df['nbsinister'] = dff[target_name_sinister]
+    df['risk'] = dff[target_name_risk]
+
     # Mask to identify rows based on date and department conditions
     mask_subset = (df['date'] < train_date) & (df['departement'].isin(train_code))
 

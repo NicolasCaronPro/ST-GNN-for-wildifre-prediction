@@ -1,6 +1,4 @@
 from matplotlib import axis, markers
-from sqlalchemy import column
-from torch import ge
 from GNN.encoding import *
 import matplotlib.cm as cm
 import seaborn as sns
@@ -116,6 +114,56 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
 
     plt.savefig(dir_output / outn)
     plt.close('all')
+
+def iou_vis(ypred, y, band, dir_output, col_for_dict):
+
+    dept = np.unique(y[:, departement_index])
+    classes = np.unique(y[:, -3])
+    colors = plt.cm.get_cmap('jet', 5)
+
+    ytrue = y[:, band]
+    for d in dept:
+
+        mask = np.argwhere(y[:, departement_index] == d)[:, 0]
+        maxi = max(np.nanmax(ypred[mask]), np.nanmax(ytrue[mask]))
+        mini = min(np.nanmin(ypred[mask]), np.nanmin(ytrue[mask]))
+        ids = np.unique(y[mask, graph_id_index])
+        if ids.shape[0] == 1:
+            fig, ax = plt.subplots(ids.shape[0], figsize=(15, 5))
+
+            ax.plot(ypred[mask], color='red', label='Prédiction')
+            ax.plot(ytrue[mask], color='blue', label='Vérité Terrain')
+            ax.fill_between(np.arange(len(mask)), np.minimum(ypred[mask], ytrue[mask]), color='purple', alpha=0.3, label='Intersection')
+            ax.fill_between(np.arange(len(mask)), ytrue[mask], ypred[mask], where=(ytrue[mask] > ypred[mask]), color='blue', alpha=0.3, label='Sous-Prédite')
+            ax.fill_between(np.arange(len(mask)), ypred[mask], ytrue[mask], where=(ypred[mask] > ytrue[mask]), color='red', alpha=0.3, label='Sur-Prédite')
+            ax.set_title(f'{ids[0]}')
+            for class_value in classes:
+                class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
+                ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, marker='x', s=50)
+            ax.set_ylim(ymin=mini, ymax=maxi)
+        else:
+            fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
+            for i, id in enumerate(ids):
+                mask2 = np.argwhere(y[:, graph_id_index] == id)[:, 0]
+                unode = np.unique(y[mask2, id_index])
+                mask2 = np.argwhere(y[:, id_index] == unode[0])[:, 0]
+                
+                # Visualisation
+                ax[i].plot(ypred[mask2], color='red', label='Prédiction')
+                ax[i].plot(ytrue[mask2], color='blue', label='Vérité Terrain')
+                ax[i].fill_between(np.arange(len(mask2)), np.minimum(ypred[mask2], ytrue[mask2]), color='purple', alpha=0.3, label='Intersection')
+                ax[i].fill_between(np.arange(len(mask2)), ytrue[mask2], ypred[mask2], where=(ytrue[mask2] > ypred[mask2]), color='blue', alpha=0.3, label='Sous-Prédite')
+                ax[i].fill_between(np.arange(len(mask2)), ypred[mask2], ytrue[mask2], where=(ypred[mask2] > ytrue[mask2]), color='red', alpha=0.3, label='Sur-Prédite')
+
+                ax[i].set_title(f'{id}')
+                for class_value in classes:
+                    class_mask = np.argwhere((y[mask2, -3] == class_value) & (y[mask2,-2] > 0))[:, 0]
+                    #ax[i].scatter(class_mask, ypred[mask2][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, linewidths=5, marker='x', s=200)
+                    ax[i].scatter(class_mask, ypred[mask2][class_mask], color='black', label=f'Fire', alpha=1, linewidths=5, marker='x', s=200)
+                ax[i].set_ylim(ymin=mini, ymax=maxi)
+
+        plt.legend()
+        plt.savefig(dir_output / f'iou_{col_for_dict}.png')
 
 def plot_and_save_roc_curve(Y: np.array, ypred: np.array, dir_output: Path, target_name : str, isDept):
     """
@@ -666,3 +714,153 @@ def susectibility_map_france_daily_image(df, vmax, graph, departement, dates, re
         plt.title(f'30m raster {departement}')
         plt.savefig(dir_output / f'{departement}_raster.png')
         plt.close('all')
+
+def parse_run_name(x):
+    dico = {}
+    vec = x.split('_')
+    dico['Department'] = vec[0]
+    dico['Model'] = vec[1]
+    i = 2
+    if dico['Model']  == 'fwi':
+        i += 1
+        dico['Target'] = 'indice'
+    else:
+        dico['Target'] = vec[i]
+        i += 1
+    if dico['Model'] != 'fwi':
+        dico['Task_type'] = vec[i]
+        i += 1
+        dico['loss'] = vec[i]
+        i += 1
+        if vec[i] == 'features':
+            i += 1
+    else:
+        dico['loss'] = None
+        dico['Task_type'] = 'Indice'
+
+    dico['Number_of_samples'] = vec[i]
+    i += 1
+    dico['k_days'] = vec[i]
+    i += 1
+    dico['Number_of_features'] = vec[i]
+    i += 1
+    dico['Scale'] = vec[i]
+    i += 1
+    dico['Days_in_futur'] = vec[i]
+    i += 1
+    dico['Base'] = vec[i]
+    i += 1
+    dico['Method'] = vec[i]
+    i += 1
+    if vec[i] == 'kmeans':
+        i += 1
+        dico['kmeans_shift'] = vec[i]
+        i += 1
+        dico['kmeans_thresh'] = vec[i]
+        i += 1
+    dico['weight'] = vec[i]
+    return dico
+
+def compare_models2(df, depts, dept_markers, metrics, col_to_analyse, dir_output, suffix):
+    task_types = df[col_to_analyse].unique()
+
+    np.random.seed(42)  # Pour rendre le code reproductible (vous pouvez le changer ou le retirer)
+    colors = sns.color_palette("husl", len(task_types))  # Palette de couleurs diversifiée et aléatoire
+
+    #Associer chaque modèle à une couleur
+    task_colors = dict(zip(task_types, colors))
+    # Create a new figure for all departments
+    fig, axs = plt.subplots(len(depts), len(metrics), figsize=(15, 3 * len(depts)), sharey='row')
+
+    # Loop through each department
+    for dept_index, dept in enumerate(depts):
+        # Filtering the DataFrame for a specific department
+        df_filtered = df[df['Department'].isin([dept])].reset_index()
+
+        # Loop through each metric to create a subplot for each metric
+        for metric_index, metric in enumerate(metrics):
+            ax = axs[dept_index, metric_index] if len(depts) > 1 else axs[metric_index]
+            for method in task_types:
+                subset = df_filtered[df_filtered[col_to_analyse] == method]
+
+                if len(subset) == 0:
+                    continue
+
+                subset = subset.sort_values(col_to_analyse)
+                
+                # Add label only for the first occurrence of each method
+                label = method if dept_index == 0 else None  # Only show labels for the first department
+                ax.plot(subset[col_to_analyse].values, subset[metric].values, marker=dept_markers[dept], linestyle='-', 
+                        label=label, color=task_colors[method])  # Use task type color
+                
+            # Configuration for each subplot
+            ax.set_ylim(0, 1)
+            ax.set_xlabel('Scale')
+            if dept_index == 0:  # Only set the title for the first row
+                ax.set_title(f'{metric}', fontsize=12)
+            #ax.set_xticks(subset[col_to_analyse].values, rotation=45)
+            ax.grid(True)
+
+        axs[dept_index, 0].set_ylabel('Metric Value')
+
+    # Create a custom legend for task types and departments
+    task_handles = [plt.Line2D([0], [0], color=task_colors[method], label=method) for method in task_types]
+    dept_handles = [plt.Line2D([0], [0], marker=dept_markers[dept], linestyle='None', color='black', label=dept) for dept in depts]
+
+    # Combine both legends
+    fig.legend(handles=task_handles + dept_handles, loc='center left', bbox_to_anchor=(0.85, 0.85), title="Legend")
+
+    plt.tight_layout(rect=[0, 0, 0.85, 1])  # Adjust layout to make room for the legend
+    plt.savefig(dir_output / f'{col_to_analyse}_{suffix}.png')
+    
+def wrapped_compare(df_metrics, dir_experiement, col_to_analyse):
+
+    check_and_create_path(dir_experiement)
+
+    # Define markers for each department
+    dept_markers = {
+        'departement-01-ain': 'o',   # Circle
+        'departement-25-doubs': 's',   # Square
+        'departement-78-yvelines': 'D',   # Diamond
+        # Add more departments and their markers as needed
+    }
+
+    # Initialisation des colonnes avec des valeurs None
+    df_metrics['Department'] = None
+    df_metrics['Model'] = None
+    df_metrics['Target'] = None
+    df_metrics['Task_type'] = None
+    df_metrics['Loss_function'] = None
+    df_metrics['Number_of_samples'] = None
+    df_metrics['kdays'] = None
+    df_metrics['Number_of_features'] = None
+    df_metrics['Scale'] = None
+    df_metrics['Base'] = None
+    df_metrics['Method'] = None
+    df_metrics['Days_in_futur'] = None
+
+    # Boucle pour remplir les colonnes avec les valeurs de dico_parse
+    for index, row in df_metrics.iterrows():
+        dico_parse = parse_run_name(row['Run'])
+        
+        # Mise à jour de chaque colonne avec les valeurs du dictionnaire dico_parse
+        df_metrics.loc[index, 'Department'] = dico_parse.get('Department')
+        df_metrics.loc[index, 'Model'] = dico_parse.get('Model')
+        df_metrics.loc[index, 'Target'] = dico_parse.get('Target')
+        df_metrics.loc[index, 'Task_type'] = dico_parse.get('Task_type')
+        df_metrics.loc[index, 'Loss_function'] = dico_parse.get('loss')
+        df_metrics.loc[index, 'Number_of_samples'] = dico_parse.get('Number_of_samples')
+        df_metrics.loc[index, 'kdays'] = dico_parse.get('kdays')
+        df_metrics.loc[index, 'Number_of_features'] = dico_parse.get('Number_of_features')
+        df_metrics.loc[index, 'Scale'] = dico_parse.get('Scale')
+        df_metrics.loc[index, 'Base'] = dico_parse.get('Base')
+        df_metrics.loc[index, 'Method'] = dico_parse.get('Method')
+        df_metrics.loc[index, 'Days_in_futur'] = dico_parse.get('Days_in_futur')
+
+    metrics =  ['bad_prediction_modified_nbsinister_max_1', 'wildfire_over_predicted_modified_nbsinister_max_1', 'iou_modified_nbsinister_max_1']
+
+    compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '1')
+
+    metrics = ['apr_nbsinister_max_1', 'r2_nbsinister_max_1']
+
+    compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '2')

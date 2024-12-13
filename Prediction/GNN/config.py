@@ -27,7 +27,7 @@ is_pc = get_machine_info() == 'caron-Precision-7780'
 
 MLFLOW = False
 if is_pc:
-    MLFLOW = True
+    MLFLOW = False
 if MLFLOW:
     import mlflow
     from mlflow import MlflowClient
@@ -280,7 +280,8 @@ def get_academic_zone(name, date):
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 
-targets_columns = ['nbsinister_id', 'class_risk', 'nbsinister', 'risk']
+targets_columns = [#'time_intervention',
+                   'nbsinister_id', 'class_risk', 'nbsinister', 'risk']
 
 weights_columns = ['weight_proportion_on_zero_class',
                    'weight_class',
@@ -288,7 +289,7 @@ weights_columns = ['weight_proportion_on_zero_class',
                    'weight_normalize',
                    'weight_nbsinister',
                    'weight_proportion_on_zero_sinister',
-                   'weight_random',
+                   #'weight_random',
                    'weight_outlier_1',
                    'weight_outlier_2',
                    'weight_outlier_3',
@@ -301,7 +302,7 @@ weights_columns = ['weight_proportion_on_zero_class',
                    'weight_one_nbsinister',
                    'weight_normalize_nbsinister',
                    'weight_nbsinister_nbsinister',
-                   'weight_random_nbsinister',
+                   #'weight_random_nbsinister',
                    'weight_outlier_1_nbsinister',
                    'weight_outlier_2_nbsinister',
                    'weight_outlier_3_nbsinister',
@@ -336,7 +337,6 @@ logger.addHandler(streamHandler)
 futur_met = 'mean'
 dummy = False # Is a dummy test (we don't use the complete time sequence)
 nmax = 6 # Number maximal for each node (usually 6 will be 1st order nodes)
-tresh_kmeans = 0.15
 
 FAST = False
 
@@ -441,9 +441,10 @@ METHODS_SPATIAL_TRAIN = ['mean', 'min', 'max',
            #'grad'
            ]
 
-METHODS_KMEANS = ['mean', 'min', 'max',
+METHODS_KMEANS = ['min'
                   #'std'
                   ]
+
 METHODS_KMEANS_TRAIN = ['mean', 'min', 'max',
                         #'std'
                         ]

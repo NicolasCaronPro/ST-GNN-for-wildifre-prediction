@@ -109,9 +109,10 @@ class GenerateDatabase():
         #    download_osnmx(self.region, self.spatialParams['dir'] / 'osmnx')
         #raster_osmnx(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'], self.departement)
 
-        """if not (self.spatialParams['dir'] / 'elevation' / 'elevation.csv').is_file():
+        #if not (self.spatialParams['dir'] / 'elevation' / 'elevation.csv').is_file():
+        if True:
             download_elevation(code_dept, self.region, self.spatialParams['dir'] / 'elevation')
-        raster_elevation(self.h3tif, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'], self.departement)"""
+        #raster_elevation(self.h3tif, self.dir_raster, self.resLon, self.resLat, self.spatialParams['dir'], self.departement)"""
         
         #if True:
         #if not (self.spatialParams['dir'] / 'BDFORET' / 'foret.geojson').is_file():

@@ -1,14 +1,7 @@
-from cProfile import label
-from calendar import day_abbr
 from re import L
-from tabnanny import check
-from flask.config import T
 from matplotlib import axis
 import numpy as np
 from pandas import Categorical
-from sympy import true
-from torch import Value
-from xgboost import train
 np.random.seed(11)
 from sklearn.cluster import KMeans, SpectralClustering
 from sklearn.mixture import BayesianGaussianMixture
@@ -28,7 +21,8 @@ from skimage.filters import rank
 from skimage.util import img_as_ubyte
 import scipy.ndimage as ndimage
 from astropy.convolution import convolve_fft
-from tslearn.clustering import TimeSeriesKMeans
+if is_pc:
+    from tslearn.clustering import TimeSeriesKMeans
 from scipy.spatial.distance import cdist
 
 # Create graph structure from corresponding geoDataframe
@@ -100,7 +94,7 @@ class GraphStructure():
         self.ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
         self.graph_ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
 
-        for i, dept in enumerate(udept):
+        for dept in udept:
             mask = self.departements == dept
             logger.info(f'######################### {dept} ####################')
             if self.scale == 'departement':
@@ -110,7 +104,7 @@ class GraphStructure():
                 assert raster is not None
                 raster = raster[0]
                 pred = np.full(raster.shape, fill_value=np.nan)
-                pred[~np.isnan(raster)] = i
+                pred[~np.isnan(raster)] = node_already_predicted
                 # Process post-watershed results
                 self._post_process_result(pred, raster, mask, node_already_predicted, 'graph')
                 self._save_feature_image(path, dept, 'pred_final', pred, raster)
@@ -122,10 +116,9 @@ class GraphStructure():
                 elif 'regular' in vec_base:
                     self.create_geometry_with_regular(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
 
-            current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])])
+            current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])]) + 1
             logger.info(f'{dept} Unique cluster : {np.unique(self.graph_ids[mask])}, {current_cluster}. {node_already_predicted}')
-            if 'watershed' not in vec_base:
-                node_already_predicted = current_cluster + 1
+            node_already_predicted = current_cluster
             
         self.oriIds = self.oriIds[~np.isnan(self.graph_ids)]
         self.oriLatitudes = self.oriLatitudes[~np.isnan(self.graph_ids)].reset_index(drop=True)
@@ -135,7 +128,6 @@ class GraphStructure():
         self.graph_ids = self.graph_ids[~np.isnan(self.graph_ids)].astype(int)
         self.graph_ids = relabel_clusters(self.graph_ids, 0)
         self.numCluster = np.unique(self.graph_ids).shape[0]
-        
         self.oriLen = self.oriLatitudes.shape[0]
         self.numCluster = np.shape(np.unique(self.graph_ids))[0]
 
@@ -533,9 +525,14 @@ class GraphStructure():
     def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name, sinister_encoding, train_date):
 
         dir_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resStr
+        dir_time = root_target / sinister / dataset_name / sinister_encoding / 'time_intervention' / resStr
+
         dir_bin_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'bin' / resStr
+        #dir_time_bdiff = root_target / sinister / dataset_name / sinister_encoding / 'time_intervention' / resStr
+
         dir_target = root_target / sinister / dataset_name /  sinister_encoding / 'log' / resStr
         dir_target_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'log' / resStr
+
         dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resStr
 
         if len(self.drop_department) == self.departements.unique().shape[0]:
@@ -553,8 +550,8 @@ class GraphStructure():
             #    continue
 
             maskDept = np.argwhere(self.departements == dept)
-            """geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
-            geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
+            geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
+            """geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
             mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
             mask = mask[0]"""
             outputName = f'{dept}rasterScale0.pkl'
@@ -562,14 +559,14 @@ class GraphStructure():
             assert raster is not None
             raster = raster[0]
 
-            mask = np.full(raster.shape, fill_value=np.nan)
+            mask = np.full(raster.shape, fill_value = np.nan)
             for uid in np.unique(raster[~np.isnan(raster)]):
                 mask[raster == uid] = self.graph_ids[self.oriIds == uid]
 
             logger.info(f'{dept, mask.shape, raster.shape}')
 
             mask[np.isnan(raster)] = np.nan
-            
+
             if self.graph_method == 'graph':
                 check_and_create_path(path / 'raster' / 'graph_method')
                 raster_node = np.full(raster.shape, fill_value=np.nan)
@@ -634,13 +631,11 @@ class GraphStructure():
 
                 """geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
                 mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
-                mask = mask[0]"""
-
-                mask = np.full(raster.shape, fill_value=np.nan)
+                mask = mask[0]
+                mask[np.isnan(raster)] = np.nan"""
+                mask = np.full(raster.shape, fill_value = np.nan)
                 for uid in np.unique(raster[~np.isnan(raster)]):
                     mask[raster == uid] = self.graph_ids[self.oriIds == uid]
-
-                mask[np.isnan(raster)] = np.nan
                 save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
                 save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
             else:
@@ -684,18 +679,27 @@ class GraphStructure():
                     bin = read_object(outputName, dir_bin_bdiff)
                     outputName = f'{dept}Influence.pkl'
                     influence = read_object(outputName, dir_target_bdiff)
+                    time = np.zeros(influence.shape)
                 else:
                     bin = read_object(outputName, dir_bin)
                     outputName = f'{dept}Influence.pkl'
                     influence = read_object(outputName, dir_target)
 
-                binImageScale, influenceImageScale = create_larger_scale_bin(mask, bin, influence, raster)
+                    outputName = f'{dept}timeScale0.pkl'
+                    time = read_object(outputName, dir_target)
+
+                if time is None:
+                    time = np.zeros(influence.shape)
+
+                binImageScale, influenceImageScale, timeScale = create_larger_scale_bin(mask, bin, influence, time, raster)
                 save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'bin')
                 save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'influence')
+                save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'time_intervention')
 
-                binImageScale, influenceImageScale = create_larger_scale_bin(raster_node, bin, influence, raster)
+                binImageScale, influenceImageScale, timeScale, = create_larger_scale_bin(raster_node, bin, influence, time, raster)
                 save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'bin')
                 save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'influence')
+                save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'time_intervention')
 
             self.numCluster = np.shape(np.unique(self.ids))[0]
             
@@ -2025,7 +2029,7 @@ class GraphStructure():
         self.clusterer = pickle.load(open(path / name, 'rb'))
         self.ids = self.clusterer.predict(X)
 
-    def _create_predictor(self, dataset, start, end, dir):
+    def _create_predictor(self, dataset, start, end, dir, target_spec):
         dir_predictor = root_graph / dir / 'influenceClustering'
 
         self.predictors = {}
@@ -2066,10 +2070,10 @@ class GraphStructure():
             
             self.predictors[self.scale][dep] = predictor
             
-            dataset.loc[dataset[dataset['departement'] == name2int[dep]].index, 'class_risk'] = \
+            dataset.loc[dataset[dataset['departement'] == name2int[dep]].index, f'class_risk_{target_spec}'] = \
                 order_class(predictor, predictor.predict(dataset[(dataset['departement'] == name2int[dep])]['risk'].values))
             
-        predictor = Predictor(5, name=f'general_{self.scale}')
+        predictor = Predictor(5, type='fix', name=f'general_{self.scale}')
         predictor.fit(np.asarray(all_values))
         save_object(predictor, f'general_predictor_{self.scale}_{self.base}_{self.graph_method}.pkl', path=dir_predictor)
 
@@ -2139,7 +2143,7 @@ class GraphStructure():
             #dataset.update(dataset_dep)
             self.predictors['departement'][dep] = predictor
 
-        predictor = Predictor(5, name=f'general_departement')
+        predictor = Predictor(5, type='fix', name=f'general_departement')
         predictor.fit(np.asarray(all_values))
         save_object(predictor, f'general_predictor_departement_{self.base}.pkl', path=dir_predictor)
 
@@ -2328,10 +2332,12 @@ class GraphStructure():
         if dir_output is not None:
             name = f'graph_{self.scale}_{self.base}_{self.graph_method}.png'
             plt.savefig(dir_output / name)
+
+        plt.close('all')
             
     def _plot_risk(self, mode, dir_output, path=None):
         check_and_create_path(dir_output / f'{self.base}_{self.scale}')
-        dir_output_ = copy(dir_output)
+        dir_output_ = deepcopy(dir_output)
         dir_output = dir_output / f'{self.base}_{self.scale}'
         if mode == 'time_series_class':
             graph_geometry = []
@@ -2614,7 +2620,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
             
-    def compute_mean_sequence(self, dataframe, database_name, maxdate):
+    def compute_mean_sequence(self, dataframe, database_name, maxdate, target_spe='0_0'):
         """
         Calculates the average size of continuous date sequences without interruption for each point.
         Updates the dataframe with the calculated risk values.
@@ -2638,27 +2644,32 @@ class GraphStructure():
             [10, 11, 12, 1]  # Low season
         ]
 
+        nbsinister_col = f'nbsinister_{target_spe}'
+
+        logger.info(f'{nbsinister_col} -> {dataframe[nbsinister_col].sum()}')
+
         # Names corresponding to each group of months
         name = ['medium', 'high', 'low']
 
         dataframe['month_non_encoder'] = dataframe['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
-    
+
         # Sort the dataframe by date
         dataframe = dataframe.sort_values(by=['graph_id', 'date'])
         #self.sequences_month = None
 
         points = np.unique(self.nodes[:, graph_id_index])
-        # If sequences_month is not already calculated, compute it
+
         self.sequences_month = {}
+
         if database_name == 'firemen':
             td = 3  # Time delta in days to consider continuity
         elif database_name == 'bdiff':
             td = 3
         else:
-            td = 1
+            td = 3
         # Get unique points from self.nodes
 
-        fire_dataframe = dataframe[dataframe['nbsinister'] > 0].reset_index()
+        fire_dataframe = dataframe[dataframe[nbsinister_col] > 0].reset_index()
 
         # Iterate over each group of months with its index
         for i, months in enumerate(group_month):
@@ -2683,6 +2694,7 @@ class GraphStructure():
                     continue
 
                 uids = df_point['id'].unique()
+
                 df_point = df_point[df_point['id'] == uids[0]]
 
                 # Group the data by date for the current point
@@ -2705,6 +2717,7 @@ class GraphStructure():
                             # Add the date to the sequence
                             seq.append(date)
                             find_seq = True
+
                             # Update the sequence in the list
                             self.sequences_month[name[i]][point]['dates'][sei] = seq
                             break
@@ -2725,14 +2738,13 @@ class GraphStructure():
 
         ###################################### Applying convolution ##############################################
 
-        if self.historical_risk is None:
-            self.historical_risk = pd.DataFrame(index=np.arange(len(dataframe)), columns=['graph_id', 'id', 'date', 'month', 'risk', 'past_risk'])
-            self.historical_risk['date'] = dataframe['date'].values
-            self.historical_risk['month'] = dataframe['month_non_encoder'].values
-            self.historical_risk['graph_id'] = dataframe['graph_id'].values
-            self.historical_risk['risk'] = 0.0
-            self.historical_risk['past_risk'] = 0.0
-            self.historical_risk = self.historical_risk.drop_duplicates(keep='first')
+        self.historical_risk = pd.DataFrame(index=np.arange(len(dataframe)), columns=['graph_id', 'id', 'date', 'month', 'risk', 'past_risk'])
+        self.historical_risk['date'] = dataframe['date'].values
+        self.historical_risk['month'] = dataframe['month_non_encoder'].values
+        self.historical_risk['graph_id'] = dataframe['graph_id'].values
+        self.historical_risk['risk'] = 0.0
+        self.historical_risk['past_risk'] = 0.0
+        self.historical_risk = self.historical_risk.drop_duplicates(keep='first')
 
         # For each point, compute risk values using convolution
         for point in points:
@@ -2766,10 +2778,10 @@ class GraphStructure():
                     newindex = allDates.index(newd)
                     if newindex not in node_df_values['date'].unique():
                         continue
-                    historical += node_df_values[node_df_values['date'] == newindex]['nbsinister'].values[0]
+                    historical += node_df_values[node_df_values['date'] == newindex][nbsinister_col].values[0]
                     num_historical += 1
                     if newindex < allDates.index(maxdate):
-                        historical_past += node_df_values[node_df_values['date'] == newindex]['nbsinister'].values[0]
+                        historical_past += node_df_values[node_df_values['date'] == newindex][nbsinister_col].values[0]
                         num_historical_past += 1
 
                 # Average over the number of years
@@ -2791,7 +2803,7 @@ class GraphStructure():
                 node_index = node_values[node_values['id'] == uids[0]].index
 
                 # Get the 'nbsinister' values for these indices
-                node_values = dataframe.loc[node_index, 'nbsinister'].values
+                node_values = dataframe.loc[node_index, nbsinister_col].values
 
                 # Get the kernel size based on the average size of sequences for the current point and season
                 kernel_size = self.sequences_month[name[i]][point]['mean_size']
@@ -2832,7 +2844,7 @@ class GraphStructure():
                 # Get the historical values for the current months
                 node_values_historical = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['graph_id'] == point)]['risk']
                 #node_values_historical_past = self.historical_risk[(self.historical_risk['month'].isin(months)) & (self.historical_risk['graph_id'] == point)]['past_risk']
-                
+
                 # Sum the different components to obtain the risk values
                 nodes_values = node_values_daily + node_values_season + node_values_historical
 
@@ -2843,17 +2855,17 @@ class GraphStructure():
                     # Apply convolution with the daily kernel
                     node_values_daily_past = convolve_fft(
                         node_values_id, kernel_daily_past, normalize_kernel=False)
-                    
+
                     nodes_values_past = node_values_daily_past
 
                     # Update the dataframe with the calculated risk values
                     dataframe.loc[node_index_total, 'pastinfluence_risk'] = nodes_values_past
-                    dataframe.loc[node_index_total, 'risk'] = nodes_values.values
+                    dataframe.loc[node_index_total, f'risk_{target_spe}'] = nodes_values.values
 
                 #print(np.unique(dataframe.loc[node_index, 'risk'].isna()))
                 #print(dataframe.loc[node_index, 'risk'])
                 #print(nodes_values)
-                
+
         # Incorporate multi step historic values
         """for point in points:
             for var in auto_regression_variable_reg:
@@ -2862,17 +2874,132 @@ class GraphStructure():
                 uids = df_point['id'].unique()
                 for id in uids:
                     dataframe.loc[dataframe[dataframe['id'] == point].index, f'AutoRegressionReg-J-{ste}'] = dataframe[dataframe['id'] == id]['risk'].shift(ste).values"""
-            
+
             #dataframe.loc[dataframe[dataframe['id'] == point].index, f'pastinfluence'] = dataframe[dataframe['id'] == point]['pastinfluence_risk'].shift(ste).values
 
         dataframe['historical'] = self.historical_risk['past_risk']
-        dataframe['pastinfluence'] = dataframe['pastinfluence_risk']
+        dataframe[f'pastinfluence_{target_spe}'] = dataframe[f'pastinfluence_risk']
 
-        dataframe['risk'] = np.round(dataframe['risk'].values, 1)
-        dataframe['pastinfluence'] = np.round(dataframe['pastinfluence'].values, 1)
+        dataframe[f'risk_{target_spe}'] = np.round(dataframe[f'risk_{target_spe}'].values, 3)
+        dataframe[f'pastinfluence_{target_spe}'] = np.round(dataframe[f'pastinfluence_{target_spe}'].values, 3)
 
         return dataframe
 
+    def compute_window_class(self, dataframe, window_sizes=[7], n_clusters=3, column='nbsinister', aggregate_funcs=['sum'], mode='train', target_name='', dir_output=Path('./')):
+        # Compute the average of `nbsinister` for each unique (graph_id, date) pair
+
+        logger.info(f'Compute window class for {column} with {n_clusters} class accross {window_sizes}')
+
+        if target_name == '':
+            target_name = column
+
+        df = dataframe.copy(deep=True)
+
+        df_unique = df.groupby(['graph_id', 'date'], as_index=False).agg({column: 'mean'})
+        check_and_create_path(dir_output)
+
+        # For each specified window size
+        for window_size in window_sizes:
+            # Loop through each aggregation function provided in aggregate_funcs
+            for aggregate_func in aggregate_funcs:
+                # Initialize a column to store the rolling aggregation
+                column_name = f'window_{column}_{aggregate_func}_{window_size}'
+                df_unique[column_name] = 0.0
+
+                # Calculate the offset around the current day
+                half_window = (window_size - 1) // 2
+
+                # Case when window_size is 1
+                if window_size == 1:
+                    # Directly assign the class without using a rolling window
+                    df_unique[column_name] = df_unique[column]  # Use the column's value directly for 'nbsinister'
+                else:
+                    # For each unique graph_id
+                    for graph_id in df_unique['graph_id'].unique():
+                        # Filter data for the current graph_id
+                        df_graph = df_unique[df_unique['graph_id'] == graph_id]
+
+                        # Iterate through each row in df_graph
+                        for idx, row in df_graph.iterrows():
+                            # Define the window bounds
+                            date_min = row['date'] - half_window
+                            date_max = row['date'] + window_size
+                            
+                            # Filter rows within the date window
+                            #window_df = df_graph[(df_graph['date'] >= date_min) & (df_graph['date'] <= date_max)]
+                            window_df = df_graph[(df_graph['date'] >= row['date']) & (df_graph['date'] <= date_max)]
+                            
+                            # Apply the aggregation function
+                            if aggregate_func == 'sum':
+                                df_unique.at[idx, column_name] = window_df[column].sum()
+                            elif aggregate_func == 'mean':
+                                df_unique.at[idx, column_name] = window_df[column].mean()
+                            elif aggregate_func == 'grad':
+                                # Determine if the trend is increasing, decreasing, or constant
+                                first_value = window_df[column].iloc[0]
+                                last_value = window_df[column].iloc[-1]
+                                if last_value > first_value:
+                                    df_unique.at[idx, column_name] = 2
+                                elif last_value < first_value:
+                                    df_unique.at[idx, column_name] = 0
+                                else:
+                                    df_unique.at[idx, column_name] = 1
+                            elif aggregate_func == 'max':
+                                df_unique.at[idx, column_name] = window_df[column].max()
+                            elif aggregate_func == 'min':
+                                df_unique.at[idx, column_name] = window_df[column].min()
+                            elif aggregate_func == 'std':
+                                df_unique.at[idx, column_name] = window_df[column].std()
+
+                # Apply KMeans to the rolling aggregation column for all functions except 'grad' and 'std'
+                if aggregate_func not in ['grad', 'std']:
+                    type_clustering = 'kmeans'
+                    if target_name == 'binary':
+                        type_clustering = 'fix'
+                    cluster_column_name = f'class_window_{target_name}_{aggregate_func}_{window_size}'
+                    if mode == 'train' or not (dir_output / f'{cluster_column_name}.pkl').is_file(): 
+                        values = df_unique[column_name].unique().reshape(-1,1)
+                        kmeans = Predictor(n_clusters=n_clusters, type=type_clustering, binary = target_name == 'binary')
+                        if values.shape[0] < n_clusters and target_name != 'binary':
+                            kmeans = Predictor(n_clusters=values.shape[0], type=type_clustering, binary = target_name == 'binary')
+                        kmeans.fit(values)
+                        df_unique[cluster_column_name] = kmeans.predict(df_unique[column_name].values.reshape(-1,1))
+                        save_object(kmeans, f'{cluster_column_name}.pkl', dir_output)
+                        logger.info(f'{column_name} -> {kmeans.cluster_centers_}')
+                    else:
+                        kmeans = read_object(f'{cluster_column_name}.pkl', dir_output)
+                        assert kmeans is not None
+                        df_unique[cluster_column_name] = kmeans.predict(df_unique[column_name].values.reshape(-1,1))
+
+                    # Sort the clusters based on the centroid values
+                    if type_clustering == 'kmeans':
+                        centroids = kmeans.cluster_centers_
+                        sorted_indices = np.argsort(centroids[:, 0])  # Sort by the first dimension (centroid value)
+                        df_unique[cluster_column_name] = np.vectorize(lambda x: np.where(sorted_indices == x)[0][0])(df_unique[cluster_column_name])
+
+                    fig, ax = plt.subplots(2, figsize=(15, 7))
+                    df_unique[column_name].plot(ax=ax[0])
+
+                    df_unique[cluster_column_name].plot(ax=ax[1])
+                    plt.title(column_name)
+                    check_and_create_path(dir_output / 'Image')
+                    plt.savefig(dir_output / 'Image' / f'{cluster_column_name}.png')
+                    #plt.show()
+                    plt.close('all')
+
+        # Merge the results with the original DataFrame to keep other columns
+        cols_to_merge = ['graph_id', 'date'] + [f'window_{column}_{aggregate_func}_{ws}' for ws in window_sizes for aggregate_func in aggregate_funcs] + \
+        [f'class_window_{target_name}_{aggregate_func}_{ws}' for ws in window_sizes for aggregate_func in aggregate_funcs if aggregate_func not in ['grad', 'std']]
+
+        for col in [f'window_{column}_{aggregate_func}_{ws}' for ws in window_sizes for aggregate_func in aggregate_funcs] + \
+            [f'class_window_{target_name}_{aggregate_func}_{ws}' for ws in window_sizes for aggregate_func in aggregate_funcs if aggregate_func not in ['grad', 'std']]:
+            if col in df.columns:
+                df.drop(col, axis=1, inplace=True)
+        
+        df = df.merge(df_unique[cols_to_merge], on=['graph_id', 'date'], how='left')
+
+        return df  
+    
     def _predict_test_loader(self, X: DataLoader, features: np.array, device, target_name: str,
                             autoRegression: bool, features_name: list, dataset: pd.DataFrame) -> torch.tensor:
             """
@@ -2880,7 +3007,6 @@ class GraphStructure():
 
             Note:
             - 'node_id' and 'date_id' are not included in features_name but can be found in labels[:, 0] and labels[:, 4].
-
             Parameters:
             - X_: DataLoader providing the test data.
             - features: Numpy array of feature indices to use.
@@ -2945,168 +3071,75 @@ class GraphStructure():
 
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
-                pred = torch.round(pred, decimals=1)
+
+                if target_name == 'binary' or target_name == 'risk':
+                    pred = torch.round(pred, decimals=1)
+                elif target_name == 'nbsinister':
+                    pred = torch.round(pred, decimals=1)
+                
                 return pred, y
 
-    def simulate_event_with_convolution(self, x, node, date_int, kernel_size):
-        assert self.historical_risk is not None
-        kernel_daily = np.linspace(-kernel_size // 2 * 1, kernel_size // 2 * 1 + 1, kernel_size)
-        kernel_daily = np.abs(kernel_daily)
-        kernel_daily[kernel_daily.shape[0] // 2] = 1
-        kernel_daily = 1 / kernel_daily
+    def predict_model_xgboost(self, X : pd.DataFrame,
+                                  features : list, target_name : bool,
+                                  autoRegression : bool, quantile=False) -> np.array:
+        isBin = target_name == 'binary'
+        assert self.model is not None
+        X.reset_index(inplace=True, drop=True)
 
-        # Create the seasonal kernel
-        kernel_season = np.ones(kernel_size, dtype=float)
-        kernel_season /= kernel_size  # Normalize the kernel
-        
-        dims = [0,1]
-
-        number_of_simulation = (kernel_size // 2)
-        all_simulation = []
-        if number_of_simulation != 0:
-            combinaisons = list(itertools.product(dims, repeat=number_of_simulation))
-            for combinaison in combinaisons:
-                simulate_x = np.copy(x)
-                #print(x.shape, combinaison, simulate_x[number_of_simulation:].shape)
-                simulate_x[number_of_simulation+1:] =  combinaison
-                daily = convolve_fft(simulate_x, kernel_daily, normalize_kernel=False)
-                seasonaly = convolve_fft(simulate_x, kernel_season, normalize_kernel=False)
-                res = daily + seasonaly
-                date = allDates[int(date_int)]
-                date = pd.to_datetime(date)
-                month = date.month
-                day = date.day
-                y = date.year - 1
-                newd = pd.Timestamp(year=y, month=month, day=day).strftime('%Y-%m-%d')
-                if newd not in allDates:
-                    logger.info('Can t find historical values, add zeros')
-                    historical = np.zeros(res.shape[0])
-                else:
-                    newindex = allDates.index(newd)
-                    historical = self.historical_risk[(self.historical_risk['id'] == node) & (self.historical_risk['date'] >= newindex - 1 - kernel_size // 2) & \
-                                                    (self.historical_risk['date'] <= newindex - 1 + kernel_size // 2)]['risk'].values
-                    if historical.shape != res.shape:
-                        # to do
-                        pass
-                res += historical
-                all_simulation.append(res[(kernel_size // 2)])
+        # Sélectionner les bonnes colonnes en fonction de la liste des features
+        if hasattr(self.model, 'col_id_name'):
+            col_id = self.model.col_id_name
+            if col_id not in list(X.columns):
+                X = add_aggregation_column_df(X, col_id)
+                if X is None:
+                    return np.zeros(X.shape[0])
         else:
-            res = np.copy(x)
-            date = allDates[int(date_int)]
-            date = pd.to_datetime(date)
-            month = date.month
-            day = date.day
-            y = date.year - 1
-            newd = pd.Timestamp(year=y, month=month, day=day).strftime('%Y-%m-%d')
-            if newd not in allDates:
-                logger.info('Can t find historical values, add zeros')
-                historical = np.zeros(res.shape[0])
-            else:
-                newindex = allDates.index(newd)
-                historical = self.historical_risk[(self.historical_risk['id'] == node) & (self.historical_risk['date'] >= newindex - 1 - kernel_size // 2) & \
-                                                (self.historical_risk['date'] <= newindex - 1 + kernel_size // 2)]['risk'].values
-                if historical.shape != res.shape:
-                    # to do
-                    pass
-            res += historical
-            all_simulation.append(res[(kernel_size // 2)])
+            col_id = None
 
-        return np.asarray(all_simulation)
+        if not autoRegression:
+            if not isBin:
+                if col_id is not None:
+                    return self.model.predict(X[features], X[col_id])
+                else:
+                    return self.model.predict(X[features])
+            else:
+                if col_id:
+                    return self.model.predict_proba(X[features], X[col_id])[:,1]
+                else:
+                    return self.model.predict_proba(X[features])[:,1]
+        else:
+            ValueError('Not implemented')  
     
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,
                                   autoRegression : bool) -> np.array:
+        
+        isBin = target_name == 'binary'
         assert self.model is not None
-        isBin = target_name== 'binary'
         X.reset_index(inplace=True, drop=True)
-        if not autoRegression:
-            if isinstance(self.model, ModelVoting):
-                if not isBin:
-                    return self.model.predict([X[features[i]] for i in range(len(features))])
-                else:
-                    return self.model.predict_proba([X[features[i]] for i in range(len(features))])[:,1]
-            else:
-                if not isBin:
-                    pred = self.model.predict(X[features])
-                else:
-                    pred = self.model.predict_proba(X[features])[:,1]
-                
-                if target_name == 'binary' or target_name == 'risk':
-                    pred = np.round(pred, 1)
-                elif target_name == 'nbsinister':
-                    pred = np.round(pred, 1)
-                
-                return pred
+
+        if hasattr(self.model, 'col_id_name'):
+            col_id = self.model.col_id_name
+            if col_id not in list(X.columns):
+                X = add_aggregation_column_df(X, col_id)
+                if X is None:
+                    return np.zeros(X.shape[0])
         else:
-            assert self.sequences_month is not None
-            pred_max = np.zeros(X.shape[0])
-            pred_min = np.zeros(X.shape[0])
-            pred = np.zeros(X.shape[0])
-            uid = np.unique(X['id'].unique())
-            for id in uid:
-                udate = np.unique(X['date'].unique())
-                min_date = np.min(udate)
-                for d in udate:
-                    if d == np.min(udate):
-                        continue
+            col_id = None
 
-                    x_values = X[(X['id'] == id) & (X['date'] == d)]
-
-                    if x_values.shape[0] == 0:
-                        continue
-
-                    date_str = allDates[int(d)]
-                    month = int(date_str.split('-')[1])
-
-                    if month in [2, 3, 4, 5]:
-                        name_month = 'medium'
-                    elif month in [6, 7, 8, 9]:
-                        name_month = 'high'
-                    elif month in [10,11,12,1]:
-                        name_month = 'low'
-                    else:
-                        raise ValueError(f'WTF is month {month}')
-
-                    kernel_size = self.sequences_month[name_month][id]['mean_size']
-                    x = X[(X['id'] == id) & (X['date'] >= (d - 1) - kernel_size // 2) & (X['date'] <= (d - 1) + kernel_size // 2)]['nbsinister'].values
-                    if (d - 1 - min_date) > kernel_size // 2 and kernel_size > 1:
-                        if x.shape[0] != kernel_size:
-                            zeros = np.zeros((kernel_size) - x.shape[0])
-                            x = np.concatenate((x, zeros))
-                        preddd = 0.0
-                        simulate_target = self.simulate_event_with_convolution(x, id, d, kernel_size)
-                        simulate_target = np.sort(simulate_target)
-                        max_st = np.max(simulate_target)
-                        min_st = np.min(simulate_target)
-                        for st in simulate_target:
-                            x_values['AutoRegressionReg-J-1'] = st
-                            if not isBin:
-                                pred_simulate = self.model.predict(x_values[features])
-                            else:
-                                pred_simulate = self.model.predict_proba(x_values[features])[:, 1]
-
-                            preddd += pred_simulate
-                            
-                            if st == max_st:
-                                preddd_max = pred_simulate
-                            if st == min_st:
-                                preddd_min = pred_simulate
-
-                        preddd /= len(simulate_target)
-                        pred[x_values.index] = preddd
-                        pred_max[x_values.index] = preddd_max
-                        pred_min[x_values.index] = preddd_min
-                    else:
-                        if not isBin:
-                            pred[x_values.index] = self.model.predict(x_values[features])
-                            pred_min[x_values.index] = self.model.predict(x_values[features])
-                            pred_max[x_values.index] = self.model.predict(x_values[features])
-                        else:
-                            pred[x_values.index] = self.model.predict_proba(x_values[features])[:, 1]
-                            pred_min[x_values.index] = self.model.predict_proba(x_values[features])[:, 1]
-                            pred_max[x_values.index] = self.model.predict_proba(x_values[features])[:, 1]
-
-            return pred, pred_max, pred_min
+        if not autoRegression:
+            if not isBin:
+                if col_id:
+                    return self.model.predict(X[features], X[col_id])
+                else:
+                    return self.model.predict(X[features])
+            else:
+                if col_id:
+                    return self.model.predict_proba(X[features], X[col_id])[:,1]
+                else:
+                    return self.model.predict_proba(X[features])[:,1]
+        else:
+            raise ValueError('Not implemented')
 
     def _predict_perference_with_Y(self, Y : np.array, target_name : str) -> np.array:
         res = np.empty(Y.shape[0])

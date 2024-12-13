@@ -38,9 +38,9 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                 ]
     
     kmeans_features = [
-            'rhum',
+            #'rhum',
             'prec24h',
-            'rhum16',
+            #'rhum16',
             'prec24h16',
             'sum_consecutive_rainfall',
             'sum_rain_last_7_days',
@@ -236,7 +236,8 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             mask = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_mask)
             array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_proba)
             arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
-
+            arrayTime = read_object(f'{departement}TimeScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
+                
             mask_node = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_mask)
             arrayBin_node = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_bin)
 
@@ -270,6 +271,9 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                     # Class
                     #Y[index, -3] = predictor.predict(np.asarray(Y[index, -1])).reshape(-1)
                     Y[index, -3] = 0
+
+                    # Time intervention
+                    #Y[index, -4] = (np.unique(arrayTime[maskgraph, int(node[date_index])]))[0]
 
                 except Exception as e:
                     logger.info(f'{departement}, {node}, {np.unique(mask)}, {e}')
@@ -885,7 +889,7 @@ def nan_gradient(arr, *args, **kwargs):
 
     return grad
 
-def add_time_columns(array, integer_param, dataframe, train_features):
+def add_time_columns(array, integer_param, dataframe, train_features, features_name):
     """
     For each integer between 1 and the integer parameter,
     the function iterates through the array of column names and adds to the dataframe
@@ -899,6 +903,7 @@ def add_time_columns(array, integer_param, dataframe, train_features):
     :return: The updated DataFrame with new columns added
     """
     dataframe = dataframe.copy()
+
     # Dictionary of available methods
     methods_dict = {
         'mean': lambda x: np.nanmean(x),
@@ -916,8 +921,8 @@ def add_time_columns(array, integer_param, dataframe, train_features):
             if len(vec) == 2:
                 column_name, method_name = vec[0], vec[1]
             else:
-                column_name, method_name = vec[0] + '_mean_'  + vec[1], vec[2]
-            
+                column_name, method_name = vec[0] + '_' + vec[1] + '_' + vec[1], vec[2]
+
             if 'Calendar' in vec[0] and 'Calendar' in train_features:
                 columns = calendar_variables
             elif 'air' in vec[0] and 'air' in train_features:
@@ -934,46 +939,65 @@ def add_time_columns(array, integer_param, dataframe, train_features):
                 continue
 
             for col in columns:
-                new_column_name = f"{col}_{method_name}_{i}"
-                if column_name in new_fet:
-                    continue
                 unode = dataframe['id'].unique()
-                dataframe[new_column_name] = np.nan
                 for node in unode:
                     index = dataframe[dataframe['id'] == node].index
-                    if new_column_name not in dataframe.columns:
-                        if method_name in methods_dict:
-                            # Apply the method over a rolling window of size 'i'
-                            if f'{col}_mean' in dataframe.columns:
-                                dataframe.loc[index, new_column_name] = dataframe[f'{col}_mean'].rolling(window=i).apply(methods_dict[method_name], raw=True)
-                                if new_column_name not in new_fet:
-                                    new_fet.append(new_column_name)
-                            elif col in dataframe.columns:
-                                dataframe.loc[index, new_column_name] = dataframe[col].rolling(window=i).apply(methods_dict[method_name], raw=True)
-                                if new_column_name not in new_fet:
-                                    new_fet.append(new_column_name)
-                            else:
-                                continue
-                                raise ValueError(f"Unknown feature '{column_name}, {col}'")
+                    if method_name in methods_dict:
+                        if col in features_name:
+                            new_column_name = f"{col}_{method_name}_{i}"
+                            if new_column_name not in list(dataframe.columns):
+                                logger.info(f'{new_column_name}')
+                            dataframe.loc[index, new_column_name] = dataframe[col].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                            if new_column_name not in new_fet:
+                                new_fet.append(new_column_name)
                         else:
-                            raise ValueError(f"Unknown method '{method_name}'")
+                            for spatial_method in METHODS_SPATIAL:
+                                if f'{col}_{spatial_method}' in features_name:
+                                    new_column_name = f"{col}_{spatial_method}_{method_name}_{i}"
+                                    if new_column_name not in list(dataframe.columns):
+                                        logger.info(f'{new_column_name}')
+                                        dataframe[new_column_name] = np.nan
+                                    dataframe.loc[index, new_column_name] = dataframe[f'{col}_{spatial_method}'].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                                    if new_column_name not in new_fet:
+                                        new_fet.append(new_column_name)
+                    else:
+                        raise ValueError(f"Unknown method '{method_name}'")
+                
+                    if col in features_name:
+                        new_column_name_shift = f"{col}_-{i}"
+                        if new_column_name_shift not in list(dataframe.columns):
+                            logger.info(f'{new_column_name_shift}')
+                            dataframe[new_column_name_shift] = np.nan
+                            dataframe.loc[index, new_column_name_shift] = dataframe[col].shift(i)
+                            if new_column_name not in new_fet:
+                                new_fet.append(new_column_name_shift)
+                    else:
+                        for spatial_method in METHODS_SPATIAL:
+                            if f'{col}_{spatial_method}' in features_name:
+                                new_column_name_shift = f"{col}_{spatial_method}_-{i}"
+                                if new_column_name_shift not in list(dataframe.columns):
+                                    dataframe[new_column_name_shift] = np.nan
+                                    logger.info(f'{new_column_name_shift}')
+                                dataframe.loc[index, new_column_name_shift] = dataframe[f'{col}_{spatial_method}'].shift(i)
+                                if new_column_name not in new_fet:
+                                    new_fet.append(new_column_name_shift)
                     
     return dataframe, new_fet
 
-def get_time_columns(array, integer_param, dataframe, train_features):
+def get_time_columns(array, integer_param, train_features, features_name):
     """
     For each integer between 1 and the integer parameter,
-    the function iterates through the array of column names and adds to the dataframe
-    the values of the method applied to each element of the array.
-    The elements are created as {column}_{method}.
-    The final column name is {column}_{method}_{integer}.
+    the function iterates through the array of column names and returns
+    the list of new column names based on the method applied to each element of the array.
 
     :param array: List of column names to process
     :param integer_param: Integer specifying the range of integers to iterate over
-    :param dataframe: The pandas DataFrame to which new columns will be added
-    :return: The updated DataFrame with new columns added
+    :param dataframe: The pandas DataFrame (not modified)
+    :param train_features: List of features to check for the corresponding categories
+    :param features_name: List of features present in the DataFrame
+    :return: List of new feature names (new_fet)
     """
-    dataframe = dataframe.copy()
+
     # Dictionary of available methods
     methods_dict = {
         'mean': lambda x: np.nanmean(x),
@@ -981,18 +1005,20 @@ def get_time_columns(array, integer_param, dataframe, train_features):
         'max': lambda x: np.nanmax(x),
         'min': lambda x: np.nanmin(x),
         'std': lambda x: np.nanstd(x),
-        'grad': lambda x : nan_gradient(x)
+        'grad': lambda x: nan_gradient(x)
     }
-    new_fet = []
-    # List of methods you want to apply
+
+    new_fet = []  # List to store new feature names
+
     for i in range(1, integer_param + 1):
         for column in array:
             vec = column.split('_')
             if len(vec) == 2:
                 column_name, method_name = vec[0], vec[1]
             else:
-                column_name, method_name = vec[0] + '_mean_'  + vec[1], vec[2]
-            
+                column_name, method_name = vec[0] + '_' + vec[1] + '_' + vec[1], vec[2]
+
+            # Determine which columns to use based on the feature categories
             if 'Calendar' in vec[0] and 'Calendar' in train_features:
                 columns = calendar_variables
             elif 'air' in vec[0] and 'air' in train_features:
@@ -1009,22 +1035,32 @@ def get_time_columns(array, integer_param, dataframe, train_features):
                 continue
 
             for col in columns:
-                new_column_name = f"{col}_{method_name}_{i}"
-                if column_name in new_fet:
-                    continue
-                if new_column_name in dataframe.columns:
-                    if method_name in methods_dict:
-                        # Apply the method over a rolling window of size 'i'
-                        if f'{col}_mean' in dataframe.columns:
+                if method_name in methods_dict:
+                    if col in features_name:
+                        new_column_name = f"{col}_{method_name}_{i}"
+                        if new_column_name not in new_fet:
                             new_fet.append(new_column_name)
-                        elif col in dataframe.columns:
-                            new_fet.append(new_column_name)
-                        else:
-                            continue
-                            raise ValueError(f"Unknown feature '{column_name}, {col}'")
                     else:
-                        raise ValueError(f"Unknown method '{method_name}'")
-                    
+                        for spatial_method in METHODS_SPATIAL:
+                            if f'{col}_{spatial_method}' in features_name:
+                                new_column_name = f"{col}_{spatial_method}_{method_name}_{i}"
+                                if new_column_name not in new_fet:
+                                    new_fet.append(new_column_name)
+                else:
+                    raise ValueError(f"Unknown method '{method_name}'")
+
+                # Add shifted versions of the column
+                if col in features_name:
+                    new_column_name_shift = f"{col}_-{i}"
+                    if new_column_name_shift not in new_fet:
+                        new_fet.append(new_column_name_shift)
+                else:
+                    for spatial_method in METHODS_SPATIAL:
+                        if f'{col}_{spatial_method}' in features_name:
+                            new_column_name_shift = f"{col}_{spatial_method}_-{i}"
+                            if new_column_name_shift not in new_fet:
+                                new_fet.append(new_column_name_shift)
+
     return new_fet
 
 def get_edges_feature(graph, newAxis : list, path: Path, regions : gpd.GeoDataFrame, graph_structure : str) -> np.array:

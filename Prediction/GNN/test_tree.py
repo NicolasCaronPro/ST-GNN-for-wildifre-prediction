@@ -152,15 +152,15 @@ def process_test(testname, testDate, pss, geo, testd_departement, dir_output, fe
 
     # Add varying time features
     if k_days > 0:
-        train_features_ = copy(train_features) + varying_time_variables
-        features_ = copy(features) + varying_time_variables
+        train_features_ = deepcopy(train_features) + varying_time_variables
+        features_ = deepcopy(features) + varying_time_variables
         features_name, newShape = get_features_name_list(graphScale.scale, 6, features_)
         if doDatabase:
             X = add_varying_time_features(X=X, features=varying_time_variables, newShape=newShape, features_name=features_name, ks=k_days)
             save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
-        train_features_ = copy(train_features)
-        features_ =  copy(features)
+        train_features_ = deepcopy(train_features)
+        features_ =  deepcopy(features)
 
     # Remove some bad nodes that goes to wrong departement
     logger.info(f'Orignal dept {np.unique(X[:, 3]), X.shape}')
