@@ -158,7 +158,7 @@ def get_model_params(model_type):
 
 def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                       features, name, model_type, task_type, 
-                      params, loss):
+                      params, loss, non_fire_number, post_process):
     
     if model_type == 'xgboost':
         dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
@@ -169,6 +169,17 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
             'verbose': False,
             'early_stopping_rounds' : 15
         }
+
+    elif model_type == 'catboost':
+        cat_features = [col for col in df_train.columns if str(df_train[col].dtype) == 'category']  # Identify categorical features
+        fit_params = {
+            'eval_set': [(df_val[features], df_val[target])],
+            'sample_weight': df_train[weight_col],
+            'cat_features': cat_features,
+            'verbose': False,
+            'early_stopping_rounds': 15,
+        }
+
 
     elif model_type == 'ngboost':
         fit_params = {
@@ -215,8 +226,8 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
 
     else:
         raise ValueError(f"Unsupported model model_type: {model_type}")
-        
-    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss)
+
+    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss, non_fire_number=non_fire_number, target_name=target, post_process=post_process)
     return model, fit_params
 
 def explore_features(model,
@@ -389,7 +400,7 @@ def fit(params):
     save_object(grid_params, 'grid_params.pkl', dir_output / name)
 
     model.dir_log = dir_output / name
-
+    
     if isinstance(model, ModelVoting):
         logger.info(f'Fitting model {name}')
         model.fit(X=df_train[features], y=df_train[target], X_test=df_test[features], y_test=df_test[target],
@@ -413,8 +424,8 @@ def fit(params):
     if isinstance(model, Model):
         if name.find('features') != -1:
             logger.info('Features importance')
-            #model.shapley_additive_explanation(df_train[features], 'train', dir_output / name, 'beeswarm', figsize=(30,15))
-            #model.shapley_additive_explanation(df_test[features], 'test',  dir_output / name, 'beeswarm', figsize=(30,15))
+            model.shapley_additive_explanation(df_train[features], 'train', dir_output / name, 'beeswarm', figsize=(30,15))
+            model.shapley_additive_explanation(df_test[features], 'test',  dir_output / name, 'beeswarm', figsize=(30,15))
 
         if name.find('search') != -1:
             model.plot_param_influence('max_depth', dir_output / name)
@@ -472,10 +483,12 @@ def train_sklearn_api_model(params):
     do_bayes_search = params['do_bayes_search']
     task_type = params['task_type']
     loss = params['loss']
+    non_fire_number = params['non_fire_number']
     model_type = params['model_type']
     name = params['name']
     model_params = params['model_params']
     grid_params = params['grid_params']
+    post_process = params['post_process']
 
     df_train, df_val, df_test = create_weight_binary(df_train, df_val, df_test, use_weight=True)
 
@@ -484,7 +497,7 @@ def train_sklearn_api_model(params):
     relevant_features = features
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                                         relevant_features, name, model_type, task_type, 
-                                        model_params, loss)
+                                        model_params, loss, non_fire_number, post_process)
     
     fit_params_dict = {
         'df_train': df_train,
@@ -551,8 +564,9 @@ def train_xgboost(params, train=True):
     do_grid_search = params['do_grid_search']
     do_bayes_search = params['do_bayes_search']
     model = params['name']
-    
-    name, target, task_type, loss = model.split('_')
+    post_process = params['post_process']
+
+    name, non_fire_number, weight_type, target, task_type, loss = model.split('_')
     objective = loss
 
     model_params = {
@@ -590,6 +604,7 @@ def train_xgboost(params, train=True):
         'target': target,
         'optimize_feature': optimize_feature,
         'dir_output': dir_output,
+        'non_fire_number' : non_fire_number,
         'device': device,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
@@ -597,10 +612,85 @@ def train_xgboost(params, train=True):
         'loss': loss,
         'model_type': 'xgboost',
         'name': model,
+        'post_process': post_process,
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
         'col_id' : params['col_id']
+    })
+
+def train_catboost(params, train=True):
+    """
+    Train CatBoost model
+    """
+    df_train = params['df_train']
+    df_val = params['df_val']
+    df_test = params['df_test']
+    features = params['features']
+    optimize_feature = params['optimize_feature']
+    dir_output = params['dir_output']
+    device = params['device']
+    do_grid_search = params['do_grid_search']
+    do_bayes_search = params['do_bayes_search']
+    model = params['name']
+    post_process = params['post_process']
+
+    name, non_fire_number, target, task_type, loss = model.split('_')
+    
+    # Map loss to CatBoost objectives
+    catboost_objective = {
+        'logloss': 'Logloss',
+        'rmse': 'RMSE',
+        'mae': 'MAE',
+        'crossentropy': 'CrossEntropy',
+        'multi_logloss': 'MultiClass',
+    }.get(loss, 'RMSE')  # Default to RMSE if not specified
+
+    model_params = {
+        'loss_function': catboost_objective,
+        'learning_rate': 0.001,
+        'depth': 6,
+        'l2_leaf_reg': 3.0,
+        'iterations': 10000,
+        'random_seed': 42,
+        'task_type': 'GPU' if device == 'gpu' else 'CPU',
+        'bootstrap_type': 'Bayesian',
+        'od_type': 'Iter',
+        'od_wait': 100,
+        'eval_metric': catboost_objective,
+    }
+
+    grid_params = {
+        'depth': [6, 8, 10],
+        'l2_leaf_reg': [1.0, 3.0, 5.0],
+        'learning_rate': [0.01, 0.001, 0.005],
+        'bootstrap_type': ['Bayesian', 'Bernoulli', 'MVS'],
+    }
+
+    if not train:
+        return model_params
+
+    train_sklearn_api_model({
+        'df_train': df_train,
+        'df_test': df_test,
+        'df_val': df_val,
+        'features': features,
+        'target': target,
+        'optimize_feature': optimize_feature,
+        'dir_output': dir_output,
+        'non_fire_number': non_fire_number,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'task_type': task_type,
+        'loss': loss,
+        'model_type': 'catboost',
+        'name': model,
+        'post_process': post_process,
+        'model_params': model_params,
+        'grid_params': grid_params,
+        'type_aggregation': params['type_aggregation'],
+        'col_id': params['col_id']
     })
 
 def train_ngboost(params, train=True):
@@ -987,7 +1077,7 @@ def train_gam(params, train=True):
     })
 
 def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
-                                    model, weights_version, spec, days_in_futur,
+                                    model, graph_method,
                             dir_output: Path,
                             device: str,
                             features: list,
@@ -996,11 +1086,12 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                             do_grid_search: bool,
                             do_bayes_search: bool):
     
-    name, target, task_type, loss = model[0].split('_')
+    name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
 
     #train_dataset['weight'] = train_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
     #val_dataset['weight'] = val_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
-    train_dataset['weight'] = 1
+
+    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
     val_dataset['weight'] = 1
     
     train_dataset = train_dataset[train_dataset['weight'] > 0]
@@ -1008,6 +1099,30 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     test_dataset = test_dataset[test_dataset['weight'] > 0]
     
     logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
+
+    logger.info(f'Train {target} values : {train_dataset[target].unique()}')
+    logger.info(f'Val {target} values {val_dataset[target].unique()}')
+    logger.info(f'Test {target} values {test_dataset[target].unique()}')
+
+    if non_fire_number != 'full':
+        if non_fire_number.find('binary') != -1:
+            vec = non_fire_number.split('-')
+            try:
+                nb = int(vec[-1]) * len(train_dataset[train_dataset['nbsinister'] > 0])
+            except:
+                print(f'{non_fire_number} with undefined factor, set to 1 -> {len(train_dataset[train_dataset["nbsinister"] > 0])}')
+                nb = len(train_dataset[train_dataset['nbsinister'] > 0])
+
+            new_train_dataset = train_dataset.loc[train_dataset['nbsinister'] > 0]
+            non_fire_dataset = train_dataset.loc[train_dataset['nbsinister']== 0]
+            nb = min(len(non_fire_dataset), nb)
+            non_fire_dataset = non_fire_dataset.sample(nb, random_state=42)
+            train_dataset = pd.concat((new_train_dataset, non_fire_dataset)).sort_values(by=['date', 'graph_id'], axis=0)
+
+            train_dataset.reset_index(drop=True, inplace=True)
+
+            print(f'Train mask {train_dataset.shape}')
+
 
     params = {
         'df_train': train_dataset,
@@ -1020,11 +1135,12 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'name': model[0],
-        'type_aggregation' : model[-2],
-        'col_id' : model[-1] if model[-2] is not None else None
+        'post_process' : model[-1],
+        'type_aggregation' : None,
+        'col_id' : None
     }
 
-    name, _,_ ,_ = model[0].split('_')
+    name, _, _, _,_ ,_ = model[0].split('_')
     if name == 'xgboost':
         train_xgboost(params)
     elif name == 'lightgbm':
@@ -1045,7 +1161,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
 ############################################################# Voting ######################################################################
 
 def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_dataset,
-                                    model_name, weights_version, spec, days_in_futur,
+                                    model_name, graph_method,
                             dir_output: Path,
                             device: str,
                             features: list,
@@ -1054,7 +1170,9 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                             do_grid_search: bool,
                             do_bayes_search: bool):
     
-    train_dataset['weight'] = 1
+    models_type, non_fire_number, weight_type, target, task_type, loss = model_name[0].split('_')
+
+    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)[weight_type]
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
 
@@ -1070,8 +1188,6 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         parameter_optimization_method = 'bayes'
     else:
         parameter_optimization_method = 'skip'
-
-    models_type, target, task_type, loss = model_name[0].split('_')
 
     models_type = models_type.split('-')
     
@@ -1119,7 +1235,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
 
         model, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                         features, model_name[0], model_type, task_type, 
-                                        params, loss)
+                                        params, loss, non_fire_number=non_fire_number)
         
         grid_params = get_grid_params(model_type)
         

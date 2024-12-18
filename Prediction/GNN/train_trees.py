@@ -92,6 +92,7 @@ graph_method = args.graph_method
 shift = args.shift
 thresh_kmeans = args.thresh_kmeans
 
+assert values_per_class == 'full'
 assert graph_method == 'node'
 
 ######################## Get features and train features list ######################
@@ -159,7 +160,7 @@ dir_output = dir_output / name_exp
 
 prefix_config = deepcopy(prefix)
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix = get_train_val_test_set(graphScale, df,
+train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
                                                                                     features_selected, train_departements,
                                                                                     prefix,
                                                                                     dir_output,
@@ -184,63 +185,85 @@ prefix += f'_{weights_version}'
 test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
-name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+
+###################### Defined ClassRisk model ######################
+
+# Min Max
+minmaxclass = MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])
+
+minmaxclass.fit(train_dataset['nbsinister'].values)
+
+train_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(train_dataset['nbsinister'].values)     
+val_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(val_dataset['nbsinister'].values)
+test_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(test_dataset['nbsinister'].values)
+
+train_dataset['nbsinister-MinMax'] = minmaxclass.predict(train_dataset['nbsinister'].values)     
+val_dataset['nbsinister-MinMax'] = minmaxclass.predict(val_dataset['nbsinister'].values)        
+test_dataset['nbsinister-MinMax'] = minmaxclass.predict(test_dataset['nbsinister'].values)
+
+# Other...
 
 models = [
-        #('xgboost_risk_regression_eae-1', False, 'risk', autoRegression, None),
-        #('xgboost_risk_regression_rmse', False, 'risk', autoRegression, None),
-        #('xgboost_nbsinister_regression_rmsle', False, 'nbsinister', autoRegression, None),
-        #('xgboost_nbsinister-robust_regression_rmse', False, 'nbsinister-robust', autoRegression, None),
-        #('xgboost_nbsinister_regression_sig2', False, 'nbsinister', autoRegression, None),
-        #('xgboost_nbsinister_regression_sig', False, 'nbsinister', autoRegression, None),
-        ('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, None),
-        #('xgboost_nbsinister_regression_quantile', False, 'nbsinister', autoRegression, None),
-        #('xgboost_nbsinister_regression_mse', False, 'nbsinister', autoRegression, None),
-        #('xgboost_nbsinister_regression_eae-1', False, 'nbsinister', autoRegression, None),
-        #('xgboost_binary_classification_logloss', False, 'binary', autoRegression, None),
+        #('xgboost_risk_regression_eae-1', 'risk', None),
+        #('xgboost_risk_regression_rmse', 'risk', MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])),
+        #('xgboost_nbsinister_regression_rmsle', 'nbsinister', None),
+        #('xgboost_nbsinister-MinMax_regression_rmse', 'nbsinister-robust', MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])),
+        #('xgboost_nbsinister-MinMaxClass_regression_rmse', 'nbsinister-MinMax', None),
+        ('xgboost_binary-1_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
+        ('xgboost_binary-2_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
+        ('xgboost_binary-3_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
+        ('xgboost_binary-4_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
+        #('xgboost_nbsinister_regression_sig2', 'nbsinister', None),
+        #('xgboost_nbsinister_regression_sig', 'nbsinister', None),
+        #('xgboost_nbsinister_regression_rmse', 'nbsinister', None),
+        #('xgboost_nbsinister_classification_softmax', 'nbsinister', None),
+        #('xgboost_nbsinister_regression_quantile', 'nbsinister', None),
+        #('xgboost_nbsinister_regression_mse', 'nbsinister', None),
+        #('xgboost_nbsinister_regression_eae-1', 'nbsinister', None),
+        #('xgboost_binary_classification_logloss', 'binary', None),
         ]
 
 gam_models = [
-        #('gam_binary_classification_logloss', False, 'binary', autoRegression),
-        #('gam_risk_regression_rmse', False, 'risk', autoRegression),
-        #('gam_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
+        #('gam_binary_classification_logloss', 'binary'),
+        #('gam_risk_regression_rmse', 'risk'),
+        #('gam_nbsinister_regression_rmse', 'nbsinister'),
 ]
 
 voting_models = [
-                #('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-                #('xgboost_binary_classification_logloss', False, 'binary', autoRegression)
-                #('xgboost-xgboost-xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression)
+                #('xgboost_risk_regression_rmse', 'risk'),
+                #('xgboost_binary_classification_logloss', 'binary')
+                #('xgboost-xgboost-xgboost_nbsinister_regression_rmse', 'nbsinister')
                 ]
 
 one_by_id_model = [
-       #('xgboost_risk_regression_rmse', False, 'risk', autoRegression, 'unique', 'unique', 'departement'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'departement'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'graph_id'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'cluster_encoder'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'month'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'dayofweek'),
-       #('xgboost_nbsinister_regression_rmse', False, 'nbsinister', autoRegression, 'unique', 'isweekend'),
-       #('xgboost_binary_classification_logloss', False, 'binary', autoRegression, 'unique', 'departement'),
+       #('xgboost_risk_regression_rmse', 'risk', 'unique', 'unique', 'departement'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'departement'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'graph_id'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'cluster_encoder'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'month'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'dayofweek'),
+       #('xgboost_nbsinister_regression_rmse', 'nbsinister', 'unique', 'isweekend'),
+       #('xgboost_binary_classification_logloss', 'binary', 'unique', 'departement'),
 ]
 
 federate_model_by_id_model = [
 ]
 
 voting_models_list = [
-                    #[('xgboost_risk_regression_rmse', False, 'risk', autoRegression),
-                    # ('svm_risk_regression_rmse', False, 'risk', autoRegression),
-                    # ('dt_risk_regresion_rmse', False, 'risk', autoRegression)]
+                    #[('xgboost_risk_regression_rmse', 'risk'),
+                    # ('svm_risk_regression_rmse', 'risk'),
+                    # ('dt_risk_regresion_rmse', 'risk')]
                     ]
+
 
 if doTrain:
 
     for model in models:
-        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                weights_version=weights_version,
-                                spec=f'{shift}_{thresh_kmeans}',
-                                days_in_futur=days_in_futur,
+        wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
                                 dir_output=dir_output / name,
                                 device='gpu',
                                 autoRegression=autoRegression,
@@ -251,12 +274,10 @@ if doTrain:
                                 model=model)
         
     for model in voting_models:
-        wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                spec=f'{shift}_{thresh_kmeans}',
-                                days_in_futur=days_in_futur,
-                                weights_version=weights_version,
+        wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -267,12 +288,10 @@ if doTrain:
                                 model_name=model)
         
     for model in gam_models:
-         wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                spec=f'{shift}_{thresh_kmeans}',
-                                days_in_futur=days_in_futur,
-                                weights_version=weights_version,
+         wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -283,12 +302,10 @@ if doTrain:
                                 model=model)
         
     for model in one_by_id_model:
-        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                spec=f'{shift}_{thresh_kmeans}',
-                                days_in_futur=days_in_futur,
-                                weights_version=weights_version,
+        wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -299,12 +316,10 @@ if doTrain:
                                 model=model)
         
     for model in federate_model_by_id_model:
-        wrapped_train_sklearn_api_model(train_dataset=train_dataset,
-                                val_dataset=val_dataset,
-                                test_dataset=test_dataset,
-                                spec=f'{shift}_{thresh_kmeans}',
-                                days_in_futur=days_in_futur,
-                                weights_version=weights_version,
+        wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
                                 dir_output=dir_output / name,
                                 device='cpu',
                                 autoRegression=autoRegression,
@@ -346,38 +361,23 @@ if doTest:
     c_i = c_index
     bacc = binary_accuracy
 
-    methods = [
-            ('mae', mae, 'proba'),
-            ('rmse', rmse, 'proba'),
-            ('std', std, 'proba'),
-            ('cal', cal, 'cal'),
-            ('fre', fre, 'cal'),
-            ('binary', f1, 'bin'),
-            ('accuracy', bacc, 'bin'),
-            ('class', ck, 'class'),
-            #('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('maec', meac, 'class'),
-            ('acc', acc, 'class'),
-            #('c_index', c_i, 'class'),
-            #('c_index_class', c_i_class, 'class'),
-            ('kendall', kendall_coefficient, 'correlation'),
-            ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation'),
-            ('auc_roc', my_roc_auc, 'bin')
-            ]
-
     models = [
-        ('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        ('xgboost_nbsinister_regression_quantile', 'nbsinister', autoRegression),
-        ('unique-departement-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        ('unique-month-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        ('unique-dayofweek-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        ('unique-isweekend-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        ('xgboost-xgboost-xgboost_nbsinister_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('xgboost_nbsinister-MinMax_regression_rmse', 'nbsinister', autoRegression),
+        #('xgboost_nbsinister-MinMaxClass_regression_rmse', 'nbsinister', autoRegression),
+        ('xgboost_binary-1_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
+        ('xgboost_binary-2_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
+        ('xgboost_binary-3_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
+        ('xgboost_binary-4_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
+        #('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('xgboost_risk_regression_rmse', 'risk', autoRegression),
+        #('xgboost_nbsinister_regression_quantile', 'nbsinister', autoRegression),
+        #('unique-departement-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('unique-month-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('unique-dayofweek-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('unique-isweekend-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('xgboost-xgboost-xgboost_nbsinister_nbsinister_regression_rmse', 'nbsinister', autoRegression),
         ]
-    
+
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
     if days_in_futur > 0:
@@ -414,7 +414,6 @@ if doTest:
         if host == 'pc':
             metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset_dept,
                                 test_dataset_unscale_dept,
-                                    methods,
                                     dept,
                                     prefix,
                                     prefix_config,
@@ -433,6 +432,7 @@ if doTest:
             res = pd.concat(res).reset_index(drop=True)
         else:
             metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
+            res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / name)
             assert metrics is not None
             run = f'{dept}_{name}_{prefix}'
             if MLFLOW:
@@ -454,6 +454,9 @@ if doTest:
         else:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
 
+        aggregated_prediction.append(res)
+        #aggregated_prediction_dept.append(res_dept)
+
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)
     
@@ -466,46 +469,46 @@ if doTest:
     wrapped_compare(df_metrics,  dir_output / prefix, 'Days_in_futur')
 
     """############## Prediction ######################
-        for name, target_name, _ in models:
-            if name not in res.model.unique():
-                continue
-            if target_name == 'risk':
-                predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-            else:
-                predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+    for name, target_name, _ in models:
+        if name not in res.model.unique():
+            continue
+        if target_name == 'risk':
+            predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+        else:
+            predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
 
-            if target_name == 'binary':
-                vmax_band = 1
-            else:
-                #vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
-                vmax_band = np.nanmax(train_dataset[target_name].values)
+        if target_name == 'binary':
+            vmax_band = 1
+        else:
+            #vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
+            vmax_band = np.nanmax(train_dataset[target_name].values)
 
-            res_test = res[res['model'] == name]
-            #res_test_dept = res_dept[res_dept['model'] == name]
-            regions_test = geo[geo['departement'] == dept]
-            #dates = res_test[(res_test['risk'] == res_test['risk'].max())]['date'].values
-            dates = allDates.index('2023-07-14')
+        res_test = res[res['model'] == name]
+        res_test_dept = res_dept[res_dept['model'] == name]
+        regions_test = geo[geo['departement'] == dept]
+        #dates = res_test[(res_test['risk'] == res_test['risk'].max())]['date'].values
+        dates = allDates.index('2023-07-14')
 
-            susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
-                                        scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                        dept_reg=False, sinister=sinister, sinister_point=fp)
+        susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
+                                    scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                    dept_reg=False, sinister=sinister, sinister_point=fp)
 
-            susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
-                            resolution='2x2', region_dept=regions_test, column='prediction',
-                            dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))
+        #susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
+        #                resolution='2x2', region_dept=regions_test, column='prediction',
+        #                dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))
 
         train_dataset_dept = train_dataset[train_dataset['departement'] == name2int[dept]].groupby(['departement', 'date'])[target_name].sum().reset_index()
-            vmax_band = np.nanmax(train_dataset_dept[target_name].values)
+        vmax_band = np.nanmax(train_dataset_dept[target_name].values)
 
-            susectibility_map_france_daily_geojson(res_test_dept,
-                                        regions_test, graphScale, np.unique(dates).astype(int),
-                                        target_name, 'departement',
-                                        dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                        dept_reg=True, sinister=sinister, sinister_point=fp)
+        susectibility_map_france_daily_geojson(res_test_dept,
+                                    regions_test, graphScale, np.unique(dates).astype(int),
+                                    target_name, 'departement',
+                                    dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                    dept_reg=True, sinister=sinister, sinister_point=fp)
 
         ################# Ground Truth #####################
         name = 'GT'
-        susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'risk',
+        susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), target_name,
                                     f'{scale}_gt', dir_output / dept / prefix / name, vmax_band=vmax_band,
                                     dept_reg=False, sinister=sinister, sinister_point=fp)
         
@@ -513,12 +516,9 @@ if doTest:
                                     regions_test, graphScale, np.unique(dates).astype(int),
                                     target_name, 'departement_gt',
                                     dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                    dept_reg=True, sinister=sinister, sinister_point=fp)
-        
-    aggregated_prediction.append(res)
-        #aggregated_prediction_dept.append(res_dept)
+                                    dept_reg=True, sinister=sinister, sinister_point=fp)"""
 
-    aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
+    """aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
     #aggregated_prediction_dept = pd.concat(aggregated_prediction_dept).reset_index(drop=True)
 
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
@@ -528,10 +528,10 @@ if doTest:
         if target_name == 'binary':
             vmax_band = 1
         else:
-            vmax_band = np.nanmax(aggregated_prediction['prediction'].values)
+            vmax_band = np.nanmax(aggregated_prediction[target_name].values)
 
-        aggregated_prediction = aggregated_prediction[aggregated_prediction['model'] == name]
-        #aggregated_prediction_dept = aggregated_prediction_dept[aggregated_prediction_dept['model'] == name]
+        aggregated_prediction_model = aggregated_prediction[aggregated_prediction['model'] == name]
+        #aggregated_prediction_dept_model = aggregated_prediction_dept[aggregated_prediction_dept['model'] == name]
 
         #dates = aggregated_prediction[aggregated_prediction['nbsinister'] == aggregated_prediction['nbsinister'].max()]['date'].values
         dates = [
@@ -547,21 +547,20 @@ if doTest:
             allDates.index('2023-05-08')
         ]
 
-
         region_france = gpd.read_file('/home/caron/Bureau/csv/france/data/geo/hexagones_france.gpkg')
         region_france['latitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.y))
         region_france['longitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.x))
 
         ####################### Prediction #####################
         #check_and_create_path(dir_output / name)
-        #susectibility_map_france_daily_geojson(aggregated_prediction, region_france, graphScale, np.unique(dates).astype(int), 'prediction', f'{scale}_france',
-        #                            dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
+        susectibility_map_france_daily_geojson(aggregated_prediction_model, region_france, graphScale, np.unique(dates).astype(int), 'prediction', f'{scale}_france',
+                                    dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
         
         train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
         vmax_band = np.nanmax(train_dataset_dept[target_name].values)
         
-        susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
-                                    dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)
+        #susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
+        #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)
     
     ######################## Ground Truth ####################
     name = 'GT'

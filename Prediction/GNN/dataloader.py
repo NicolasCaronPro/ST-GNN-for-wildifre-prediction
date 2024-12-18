@@ -1,3 +1,4 @@
+from asyncio import tasks
 from datetime import date
 from genericpath import isfile
 from threading import local
@@ -10,7 +11,7 @@ import torch
 from PIL import Image
 import torchvision.transforms.functional as TF
 from torchvision import transforms
-from GNN.train import *
+from GNN.discretization import *
 from feature_engine.selection import SmartCorrelatedSelection
 
 #########################################################################################################
@@ -369,7 +370,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     _, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, name_exp == 'inference')
     features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
     
-    prefix = f'{values_per_class}_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}'
+    prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}'
 
     if doKMEANS:
         prefix += f'_kmeans_{shift}_{thresh_kmeans}'
@@ -389,7 +390,6 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
             target_name_nbsinister += f'{shift}_{thresh_kmeans}'
             target_name_risk += f'{shift}_{thresh_kmeans}'
             target_name_class += f'{shift}_{thresh_kmeans}'
-            weights_name_columns = [f'{wc}_{shift}_{thresh_kmeans}' for wc in weights_columns]
         else:
             target_name_nbsinister += f'0_0'
             target_name_risk += f'0_0'
@@ -399,19 +399,18 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         target_name_nbsinister += f'_+{days_in_futur}'
         target_name_risk += f'_+{days_in_futur}'
         target_name_class += f'_+{days_in_futur}'
-        weights_name_columns = [f'{wc}_+{days_in_futur}' for wc in weights_name_columns]
 
     else:
         if doKMEANS:
             target_name_nbsinister = f'nbsinister_{shift}_{thresh_kmeans}'
             target_name_risk = f'risk_{shift}_{thresh_kmeans}'
             target_name_class = f'class_risk_{shift}_{thresh_kmeans}'
-            weights_name_columns = [f'{wc}_{shift}_{thresh_kmeans}_+0' for wc in weights_columns]
         else:
             target_name_nbsinister = f'nbsinister_0_0'
             target_name_risk = f'risk_0_0'
             target_name_class = f'class_risk_0_0'
-            weights_name_columns = [f'{wc}_0_0_+0' for wc in weights_columns]
+    
+    weights_name_columns = ['weight']
 
     #####################################################################################################################
 
@@ -453,7 +452,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     else:
         features_name = features_importance_order
 
-    ############################################### PLOTTING ####################################################""
+    ############################################### PLOTTING ####################################################
         
     realVspredict(test_dataset['risk'].values, test_dataset[ids_columns + targets_columns].values, -1, dir_output / prefix, 'raw')
 
@@ -464,7 +463,11 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
 
-    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix
+    logger.info(f'Nb sinister in train set : {train_dataset["nbsinister"].sum()}')
+    logger.info(f'Nb sinister in val set : {val_dataset["nbsinister"].sum()}')
+    logger.info(f'Nb sinister in test set : {test_dataset["nbsinister"].sum()}')
+
+    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_name
 
 #########################################################################################################
 #                                                                                                       #
@@ -507,14 +510,6 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
     val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
     test_mask = ((df['date'] >= allDates.index(maxDate) + ks) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
-
-    df = scale_target(df, df[train_mask], 'nbsinister', 'standard')
-    df = scale_target(df, df[train_mask], 'nbsinister', 'MinMax')
-    df = scale_target(df, df[train_mask], 'nbsinister', 'robust')
-
-    df = scale_target(df, df[train_mask], 'risk', 'standard')
-    df = scale_target(df, df[train_mask], 'risk', 'MinMax')
-    df = scale_target(df, df[train_mask], 'risk', 'robust')
 
     train_dataset_unscale = df[train_mask].reset_index(drop=True).copy(deep=True)
     test_dataset_unscale = df[test_mask].reset_index(drop=True).copy(deep=True)
@@ -562,7 +557,7 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     logger.info(f'Unique train dates: {np.unique(df[train_mask]["date"]).shape[0]}, val dates: {np.unique(df[val_mask]["date"]).shape[0]}, test dates: {np.unique(df[test_mask]["date"]).shape[0]}')
     
     logger.info(f'Train mask {df[train_mask].shape}')
-    logger.info(f'Train mask with weight > 0 {df[train_mask][df[train_mask]["weight_one"] > 0].shape}')
+    #logger.info(f'Train mask with weight > 0 {df[train_mask][df[train_mask]["weight_one"] > 0].shape}')
     logger.info(f'Val mask {df[val_mask].shape}')
     logger.info(f'Test mask {df[test_mask].shape}')
 
@@ -1557,7 +1552,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         scale = graph.scale
 
     ##################################### Create daily class ###########################################
-    graph_structure = graph.base
+    """graph_structure = graph.base
     for nameDep in test_departement:
         mask = np.argwhere((y[:, departement_index] == name2int[nameDep]))
         if mask.shape[0] == 0:
@@ -1586,20 +1581,17 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
             if pred_min is not None:
                 pred_min[mask[:,0], 1] = predictor.predict(pred_min[mask[:, 0], 0])
             if pred_max is not None:
-                pred_max[mask[:,0], 1] = predictor.predict(pred_max[mask[:, 0], 0])
+                pred_max[mask[:,0], 1] = predictor.predict(pred_max[mask[:, 0], 0])"""
 
     ############################################## Get daily metrics #######################################################
+    col_class = 'nbsinister-MinMaxClass'
+    col_nbsininster = 'nbsinister'
+
     metrics = {}
-    #metrics = add_metrics(methods, i, pred, y, test_departement, target_name, graph, name, dir_train)
-    #plot_custom_confusion_matrix(y[:, -3], pred[:, 1], [0, 1, 2, 3, 4], dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(y[:, -3], pred[:, 1], [0, 1, 2, 3, 4], dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(y[:, -3], pred[:, 1], [0, 1, 2, 3, 4], dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(y[:, -3], pred[:, 1], [0, 1, 2, 3, 4], dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
 
-    if target_name == 'binary':
-        y[:,-1] = y[:,-1] / np.nanmax(y[:,-1])
-
-    realVspredict(pred[:, 0], y, -1,
+    logger.info(f'###################### Analysis {target_name} #########################')
+ 
+    """realVspredict(pred[:, 0], y, -1,
                 dir_output / name, f'raw_{scale}',
                 pred_min, pred_max)
             
@@ -1609,245 +1601,174 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     realVspredict(pred[:, 0], y, -2,
                 dir_output / name, f'nbfire_{scale}',
+                pred_min, pred_max)"""
+    
+    realVspredict(pred[:, 0], y, -2,
+                dir_output / name, f'{target_name}_{scale}',
                 pred_min, pred_max)
     
-    plot_and_save_roc_curve(y[:, -2] > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
-    plot_and_save_pr_curve(y[:, -2] > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+    plot_and_save_roc_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+    plot_and_save_pr_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
     
     calibrated_curve(pred[:, 0], y, dir_output / name, 'calibration')
     calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
 
     shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
-
+ 
     res = pd.DataFrame(columns=ids_columns + targets_columns + ['prediction', 'class', 'mae', 'rmse'], index=np.arange(pred.shape[0]))
-    res[ids_columns + targets_columns] = y
-    res['prediction'] = pred[:, 0]
-    res['class'] = pred[:, 1]
+    res[ids_columns + targets_columns] = df_test[ids_columns + targets_columns]
+    res[target_name] = df_test[target_name]
     res['mae'] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
     res['rmse'] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
     
-    res = graph.compute_window_class(res, [1], 5, column='prediction', target_name=target_name, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='test', dir_output=dir_train / 'class_window' / prefix / target_name)
-    df_test = graph.compute_window_class(df_test, [1], 5, column='nbsinister', target_name='nbsinister', aggregate_funcs=['max'], mode='test', dir_output=dir_train / 'class_window' / prefix / 'nbsinister')
+    #res = graph.compute_window_class(res, [1], 5, column='prediction', target_name=target_name, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='test', dir_output=dir_train / 'class_window' / prefix / target_name)
+    #df_test = graph.compute_window_class(df_test, [1], 5, column='nbsinister', target_name='nbsinister', aggregate_funcs=['max'], mode='test', dir_output=dir_train / 'class_window' / prefix / 'nbsinister')
 
-    res_class_window_cols = [col for col in res.columns if col.startswith('class_window')]
-    res_window = res.groupby(['graph_id', 'date'])[res_class_window_cols + ['prediction', 'nbsinister']].mean().reset_index()
-    test_class_window_cols = [col for col in df_test.columns if col.startswith('window_nbsinister')]
-    test_window = df_test.groupby(['graph_id', 'date', 'departement'])[test_class_window_cols + ['nbsinister', 'risk']].mean().reset_index()
+    #res_class_window_cols = [col for col in res.columns if col.startswith('class_window')]
+    #res_window = res.groupby(['graph_id', 'date'])[res_class_window_cols + ['prediction', 'nbsinister']].mean().reset_index()
+    #test_class_window_cols = [col for col in df_test.columns if col.startswith('window_nbsinister')]
+    #test_window = df_test.groupby(['graph_id', 'date', 'departement'])[test_class_window_cols + ['nbsinister', 'risk']].mean().reset_index()
     
-    test_ids = set(zip(res_window['graph_id'], res_window['date']))
-    test_window = test_window[test_window[['graph_id', 'date']].apply(tuple, axis=1).isin(test_ids)]
-    test_window['saison'] = test_window['date'].apply(get_saison)
+    #test_ids = set(zip(res_window['graph_id'], res_window['date']))
+    #test_window = test_window[test_window[['graph_id', 'date']].apply(tuple, axis=1).isin(test_ids)]
+    df_test['saison'] = df_test['date'].apply(get_saison)
     res['saison'] = res['date'].apply(get_saison)
-
-    res_class_window_cols.sort()
-    test_class_window_cols.sort()
 
     ####################################### Sinister Evaluation ########################################
 
-    for i, col in enumerate(test_class_window_cols):
+    logger.info(f'###################### Analysis {col_nbsininster} #########################')
 
-        logger.info(f'###################### {col} #########################')
+    y_pred = pred[:, 0]
+    if pred_max is not None:
+        y_pred_max = pred_max[:, 0]
+        y_pred_min = pred_min[:, 0]
 
-        y_true = test_window[col].values
-        y_pred = np.copy(res_window[f'prediction'].values)
-        info = col.split('_')
+    y_true = df_test[col_nbsininster].values
+    
+    apr = round(average_precision_score(y_true > 0, y_pred), 2)
+    df_test['prediction'] = y_pred
 
-        col_for_dict = f'nbsinister_{info[-2]}_{info[-1]}'
+    ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsininster, dir_output / name)
 
-        apr = round(average_precision_score(y_true > 0, y_pred), 2)
-        test_window['prediction'] = y_pred
-        thresholds_ks = np.sort(np.unique(test_window['nbsinister']))
-        thresholds_ks = thresholds_ks[(~np.isnan(thresholds_ks)) & (thresholds_ks > 0)]
-        apr_results_df = calculate_ks(test_window, 'prediction', col, thresholds_ks, dir_output / name)
-        #apr_results_df = calculate_apr_and_optimal_threshold(test_window, 'prediction', col, thresholds_ks, dir_output / name)
-        #results_per_group = calculate_ks_per_season_and_graph_id(test_window, 'prediction', col, thresholds_ks, dir_output / name)
-        #results_per_group_version_apr = calculate_apr_per_season_and_graph_id(test_window, 'prediction', col, thresholds_ks, dir_output / name)
-        score_col = 'ks_stat'
-        thresh_col = 'optimal_score'
-        #results_per_group = results_per_group_version_apr
-        #score_col = 'f1_score'
-        #thresh_col = 'optimal_threshold'
+    r2 = r2_score(y_true, y_pred)
 
-        ks, _ = calculate_ks_continous(test_window, 'prediction', col, dir_output / name)
-        r2 = r2_score(y_true, y_pred)
+    metrics[f'nbsinister'] = df_test['nbsinister'].sum()
+    logger.info(f'Number of sinister = {df_test["nbsinister"].sum()}')
 
-        metrics[f'apr_{col_for_dict}'] = apr
-        logger.info(f'apr = {apr}')
- 
-        metrics[f'r2_{col_for_dict}'] = r2
-        logger.info(f'r2 = {r2}')
+    metrics[f'nb_{col_nbsininster}'] = df_test[col_nbsininster].sum()
+    logger.info(f'Number of {col_nbsininster} = {df_test[col_nbsininster].sum()}')
 
-        metrics[f'KS_{col_for_dict}'] = ks
-        logger.info(f'KS = {ks}')
+    metrics[f'apr_{col_nbsininster}'] = apr
+    logger.info(f'apr = {apr}')
 
-        for threshold in thresholds_ks:
-            metrics[f'ks_{threshold}_{col_for_dict}'] = apr_results_df[apr_results_df['threshold'] == threshold][score_col].values[0]
-            logger.info(f'KS_{threshold} = {metrics[f"ks_{threshold}_{col_for_dict}"]}, Optimal_threshold = {apr_results_df[apr_results_df["threshold"] == threshold][thresh_col].values[0]}')
-        
-        """for (saison, graph_id), df_ks in results_per_group.items():
-            
-            for threshold in thresholds_ks:
-                # Vérification si le seuil est présent dans le DataFrame résultant
-                if threshold in df_ks['threshold'].values:
-                    ks_stat = df_ks[df_ks['threshold'] == threshold][score_col].values[0]
-                    optimal_score = df_ks[df_ks['threshold'] == threshold][thresh_col].values[0]
-                    
-                    # Stocker la valeur du KS dans le dictionnaire des métriques
-                    metrics[f'ks_{threshold}_saison_{saison}_graph_{graph_id}'] = ks_stat
+    metrics[f'r2_{col_nbsininster}'] = r2
+    logger.info(f'r2 = {r2}')
 
-                    # Log des informations
-                    logger.info(f'KS_{threshold} (Saison: {saison}, Graph ID: {graph_id}) = {ks_stat}, Optimal Score = {optimal_score}')
-                else:
-                    # Si le seuil n'est pas trouvé, ajouter une valeur par défaut
-                    logger.warning(f'Threshold {threshold} not found for Saison: {saison}, Graph ID: {graph_id}')
-                    metrics[f'ks_{threshold}_saison_{saison}_graph_{graph_id}'] = None"""
+    metrics[f'KS_{col_nbsininster}'] = ks
+    logger.info(f'KS = {ks}')
+    
+    """mae = round(mean_absolute_error(y_true, y_pred), 2)
+    mse = round(mean_squared_error(y_true, y_pred), 2)
+    mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
+    mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
 
-        if target_name == 'nbsinister':
-                mae = round(mean_absolute_error(y_true, y_pred), 2)
-                mse = round(mean_squared_error(y_true, y_pred), 2)
-                mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-                mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
+    metrics[f'mae_raw_{col_for_dict}'] = mae
+    metrics[f'mse_raw_{col_for_dict}'] = mse
+    metrics[f'mae_fire_raw_{col_for_dict}'] = mae_fire
+    metrics[f'mse_fire_raw_{col_for_dict}'] = mse_fire
 
-                metrics[f'mae_raw_{col_for_dict}'] = mae
-                metrics[f'mse_raw_{col_for_dict}'] = mse
-                metrics[f'mae_fire_raw_{col_for_dict}'] = mae_fire
-                metrics[f'mse_fire_raw_{col_for_dict}'] = mse_fire
+    logger.info(f'mae_raw = {mae}')
+    logger.info(f'mse_raw = {mse}')
+    logger.info(f'mae_fire_raw = {mae_fire}')
+    logger.info(f'mse_fire_raw = {mse_fire}')"""
 
-                logger.info(f'mae_raw = {mae}')
-                logger.info(f'mse_raw = {mse}')
-                logger.info(f'mae_fire_raw = {mae_fire}')
-                logger.info(f'mse_fire_raw = {mse_fire}')
+    # Calcul des scores pour les signaux
+    #iou_dict = calculate_signal_scores(y_pred, y_true, test_window['graph_id'].values, test_window['saison'].values)
 
-                # Calcul des scores pour les signaux
-                iou_dict = calculate_signal_scores(y_pred, y_true, test_window['graph_id'].values)
+    # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
+    #for key, value in iou_dict.items():
+    #    metric_key = f'{key}_raw_{col_for_dict}'  # Ajouter un suffixe basé sur col_for_dict
+    #    metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
+    #    logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
 
-                # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
-                for key, value in iou_dict.items():
-                    metric_key = f'{key}_raw_{col_for_dict}'  # Ajouter un suffixe basé sur col_for_dict
-                    metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
-                    logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
+    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
+    y_true_temp[:, graph_id_index] = df_test['graph_id']
+    y_true_temp[:, id_index] = df_test['graph_id']
+    y_true_temp[:, departement_index] = df_test['departement']
+    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, -1] = y_true
+    y_true_temp[:, -2] = df_test['nbsinister']
+    y_true_temp[:, -3] = df_test[col_nbsininster]
 
-        y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-        y_true_temp[:, graph_id_index] = test_window['graph_id']
-        y_true_temp[:, id_index] = test_window['graph_id']
-        y_true_temp[:, departement_index] = test_window['departement']
-        y_true_temp[:, date_index] = test_window['date']
-        y_true_temp[:, -1] = y_true
-        y_true_temp[:, -2] = test_window['nbsinister']
-        y_true_temp[:, -3] = test_window[col]
+    realVspredict(y_pred, y_true_temp, -1,
+        dir_output / name, col_nbsininster,
+        pred_min, pred_max)
+    
+    res['prediction'] = pred[:, 0]
+    
+    logger.info(f'###################### Analysis {col_class} #########################')
 
-        realVspredict(y_pred, y_true_temp, -1,
-            dir_output / name, col_for_dict,
-            pred_min, pred_max)
+    y_pred = pred[:, 1]
+    y_true = df_test[col_class]
+    if pred_max is not None:
+        y_pred_max = pred_max[:, 1]
+        y_pred_min = pred_min[:, 1]
+    else:
+        y_pred_max = None
+        y_pred_min = None
 
-        new_pred = np.full(y_pred.shape[0], fill_value=0.0)
+    all_class = np.unique(np.concatenate((df_test[col_class].values, y_pred)))
+    all_class_label = [str(c) for c in all_class]
 
-        if pred_max is not None:
-            new_pred_min = np.full(y_pred.shape[0], fill_value=0.0)
-            new_pred_max = np.full(y_pred.shape[0], fill_value=0.0)
-            
-        #new_pred[y_pred < apr_results_df[apr_results_df['threshold'] == thresholds_ks[0]]['optimal_score']] = 0.0
-        max_value = apr_results_df[apr_results_df['threshold'] == thresholds_ks[0]][score_col].values
-        #max_value = 0.60
-        for threshold in thresholds_ks:
-            if  apr_results_df[apr_results_df['threshold'] == threshold][score_col].values[0] >= max_value:
-                new_pred[(y_pred >= apr_results_df[apr_results_df['threshold'] == threshold][thresh_col].values[0])] = threshold
-                if pred_max is not None:
-                    new_pred_min[(y_pred >= apr_results_df[apr_results_df['threshold'] == threshold][thresh_col].values[0])] = threshold
-                    new_pred_max[(y_pred >= apr_results_df[apr_results_df['threshold'] == threshold][thresh_col].values[0])] = threshold
+    #metrics = add_metrics(methods, i, pred, y, test_departement, target_name, graph, name, dir_train)
+    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
+    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
+    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
+    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
 
-        """# Boucle sur chaque combinaison unique (saison, graph_id)
-        for (saison, graph_id), df_ks in results_per_group.items():
-            max_value = 0.6  # Variable pour stocker la valeur maximale de KS
+    #mae = round(mean_absolute_error(y_true, y_pred), 2)
+    #mse = round(mean_squared_error(y_true, y_pred), 2)
+    #mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
+    #mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
+    accuracy = round(accuracy_score(y_true, y_pred), 2)
 
-            # Initialiser un sous-ensemble de prédictions pour cette combinaison spécifique
-            subset_indices = (res['saison'] == saison) & (res['graph_id'] == graph_id)
-            y_pred_subset = y_pred[subset_indices]
+    metrics[f'accuracy_{col_class}'] = accuracy
+    """metrics[f'mae_{col_for_dict}'] = mae
+    metrics[f'mse_{col_for_dict}'] = mse
+    metrics[f'mae_fire_{col_for_dict}'] = mae_fire
+    metrics[f'mse_fire_{col_for_dict}'] = mse_fire"""
 
-            if len(y_pred_subset) == 0:
-                continue  # Si aucun élément n'est présent dans le sous-ensemble, on passe au suivant
+    """logger.info(f'mae_discretization_{method} = {mae}')
+    logger.info(f'mse_discretization_{method} = {mse}')
+    logger.info(f'mae_fire_discretization_{method} = {mae_fire}')
+    logger.info(f'mse_fire_discretization_{method} = {mse_fire}')"""
+    logger.info(f'accuracy = {accuracy}')
 
-            new_pred_subset = np.zeros_like(y_pred_subset)  # Initialisation des prédictions du sous-ensemble
+    # Calcul des scores pour les signaux
+    iou_dict = calculate_signal_scores(y_pred, y_true, df_test['graph_id'].values, df_test['saison'].values)
 
-            if pred_max is not None:
-                new_pred_max_subset = np.zeros_like(y_pred_subset)
-                new_pred_min_subset = np.zeros_like(y_pred_subset)
-                y_pred_subset_max = pred_max[subset_indices, 0]
-                y_pred_subset_min = pred_min[subset_indices, 0]
+    # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
+    for key, value in iou_dict.items():
+        metric_key = f'{key}_{col_class}'  # Ajouter un suffixe basé sur col_for_dict
+        metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
+        logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
 
-            # Mettre à jour les prédictions pour les valeurs inférieures au premier seuil
-            #optimal_threshold_0 = df_ks[df_ks['threshold'] == thresholds_ks[0]][thresh_col].values[0]
-            #new_pred_subset[y_pred_subset < optimal_threshold_0] = 0.0
+    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
+    y_true_temp[:, graph_id_index] = df_test['graph_id']
+    y_true_temp[:, id_index] = df_test['graph_id']
+    y_true_temp[:, departement_index] = df_test['departement']
+    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, -1] = y_true
+    y_true_temp[:, -2] = df_test['nbsinister']
+    y_true_temp[:, -3] = df_test[col_class]
 
-            # Parcourir tous les seuils pour ce groupe (saison, graph_id)
-            for threshold in thresholds_ks:
-                if threshold in df_ks['threshold'].values:
-                    optimal_score = df_ks[df_ks['threshold'] == threshold][thresh_col].values[0]
-                    ks_stat = df_ks[df_ks['threshold'] == threshold][score_col].values[0]
+    realVspredict(y_pred, y_true_temp, -1,
+        dir_output / name, f'{col_class}',
+        y_pred_min, y_pred_max)
 
-                    # Si le KS pour ce seuil est supérieur au maximum précédent, on met à jour
-                    if ks_stat > max_value:
-                        #max_value = ks_stat
-                        new_pred_subset[(y_pred_subset >= optimal_score)] = threshold
-                        if pred_max is not None:
-                            new_pred_max_subset[(y_pred_subset_max >= optimal_score)] = threshold
-                            new_pred_min_subset[(y_pred_subset_min >= optimal_score)] = threshold
+    res[f'prediction_{col_class}'] = y_pred
 
-            # Remplacer les valeurs de `new_pred` uniquement pour les indices correspondant au sous-ensemble
-            new_pred[subset_indices] = new_pred_subset
-            if pred_max is not None:
-                new_pred_max[subset_indices] = new_pred_max_subset
-                new_pred_min[subset_indices] = new_pred_min_subset"""
-
-        y_pred = new_pred
-        if pred_max is not None:
-            y_pred_max = new_pred_max[:, np.newaxis]
-            y_pred_min = new_pred_min[:, np.newaxis]
-        else:
-            y_pred_min = None
-            y_pred_max = None
-
-        mae = round(mean_absolute_error(y_true, y_pred), 2)
-        mse = round(mean_squared_error(y_true, y_pred), 2)
-        mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-        mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-        accuracy = round(accuracy_score(y_true, y_pred), 2)
-        
-        metrics[f'accuracy_{col_for_dict}'] = mae
-        metrics[f'mae_{col_for_dict}'] = mae
-        metrics[f'mse_{col_for_dict}'] = mse
-        metrics[f'mae_fire_{col_for_dict}'] = mae_fire
-        metrics[f'mse_fire_{col_for_dict}'] = mse_fire
-
-        logger.info(f'mae_modified = {mae}')
-        logger.info(f'mse_modifie = {mse}')
-        logger.info(f'mae_fire_modified = {mae_fire}')
-        logger.info(f'mse_fire_modified = {mse_fire}')
-        logger.info(f'accuracy_modified = {accuracy}')
-
-        # Calcul des scores pour les signaux
-        iou_dict = calculate_signal_scores(y_pred, y_true, test_window['graph_id'].values)
-
-        # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
-        for key, value in iou_dict.items():
-            metric_key = f'{key}_modified_{col_for_dict}'  # Ajouter un suffixe basé sur col_for_dict
-            metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
-            logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
-
-        y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-        y_true_temp[:, graph_id_index] = test_window['graph_id']
-        y_true_temp[:, id_index] = test_window['graph_id']
-        y_true_temp[:, departement_index] = test_window['departement']
-        y_true_temp[:, date_index] = test_window['date']
-        y_true_temp[:, -1] = y_true
-        y_true_temp[:, -2] = test_window['nbsinister']
-        y_true_temp[:, -3] = test_window[col]
-
-        realVspredict(y_pred, y_true_temp, -1,
-            dir_output / name, f'{col_for_dict}_modified',
-            y_pred_min, y_pred_max)
-
-        iou_vis(y_pred, y_true_temp, -1, dir_output / name, f'{col_for_dict}_modified')
+    iou_vis(y_pred, y_true_temp, -1, dir_output / name, f'{col_class}')
 
     return metrics, res
 
@@ -2034,7 +1955,6 @@ def test_sklearn_api_model(args,
                            graphScale,
                           test_dataset_dept,
                           test_dataset_unscale_dept,
-                           methods,
                            test_name,
                            prefix_train,
                            prefix_config,
@@ -2093,21 +2013,7 @@ def test_sklearn_api_model(args,
 
         features_selected = read_object('features.pkl', model_dir)
 
-        #model.log(dir_output / name)
-        
-        pred = np.empty((y.shape[0], 2))
-
-        if autoRegression:
-            pred_max = np.empty((y.shape[0], 2))
-            pred_min = np.empty((y.shape[0], 2))
-            pred[:, 0], pred_max[:, 0], pred_min[:, 0] = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name, autoRegression)
-        else:
-            if name.find('xgboost') != -1:
-                preds = graphScale.predict_model_xgboost(test_dataset_dept, features_selected, target_name, autoRegression)
-            else:                
-                preds = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name, autoRegression)
-            pred_min = None
-            pred_max = None
+        pred, pred_max, pred_min = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name, autoRegression)
 
         if quantile:
             pred_max = np.empty((y.shape[0], 2))
@@ -2115,8 +2021,6 @@ def test_sklearn_api_model(args,
             pred_min[:, 0] = preds[:, 0]
             pred[:, 0] = preds[:, 2]
             pred_max[:, 0] = preds[:, -1]
-        else:
-            pred[:, 0] = preds
 
         if MLFLOW:
             #signature = infer_signature(test_dataset_dept[features_selected], pred[:, 0])
@@ -2168,11 +2072,11 @@ def test_sklearn_api_model(args,
         samples_name = [
         f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
         ]
-        #if isinstance(model, ModelVoting):
-        #     model.shapley_additive_explanation([test_dataset_dept[fet_i] for fet_i in features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
-        #else:
-        #    model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
-        
+        try:
+            model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
+        except:
+            pass
+
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
     
         """if scale == 'departement':

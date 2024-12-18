@@ -532,6 +532,8 @@ def calibrated_curve(ypred, y, dir_output, on):
 def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates, band,
                                            outname, dir_output, vmax_band, dept_reg, sinister,
                                            sinister_point):
+    
+    check_and_create_path(dir_output)
 
     sinister_point['departement'] = np.nan
     sinister_point['id'] = np.nan
@@ -594,10 +596,6 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
             #non_sinister_h3 = geo_spa[geo_spa['sinister'] == 0]['hex_id']
             #regions_france[regions_france['hex_id'].isin(non_sinister_h3)][band] = 0
 
-        database_in_fp = sinister_point['database'].unique()
-        colors = {'bdiff': 'red',
-                  'firemen': 'yellow'}
-        
         regions_france.loc[regions_france[~regions_france['departement'].isin(df_res.departement.unique())].index, band] = 0
         fig, ax = plt.subplots(1, figsize=(30,30))
         ax.set_title(date)
@@ -607,8 +605,7 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
         fig.colorbar(sm, ax=ax, orientation="vertical", label=band)
         if len(sinister_point_date) > 0:
             sinister_point_date = gpd.GeoDataFrame(sinister_point_date, geometry=gpd.points_from_xy(sinister_point_date.longitude, sinister_point_date.latitude))
-            for database_name in database_in_fp:
-                sinister_point_date[sinister_point_date['database'] == database_name].plot(ax=ax, marker='X', color=colors[database_name], edgecolor='black', markersize=100)
+            sinister_point_date.plot(ax=ax, marker='X', color='yellow', edgecolor='black', markersize=100)
         plt.xlabel('Longitude')
         plt.ylabel('Latitude')
         plt.savefig(dir_output / f'susectibility_map_daily_{outname}_{band}_{date}.png')
@@ -857,10 +854,10 @@ def wrapped_compare(df_metrics, dir_experiement, col_to_analyse):
         df_metrics.loc[index, 'Method'] = dico_parse.get('Method')
         df_metrics.loc[index, 'Days_in_futur'] = dico_parse.get('Days_in_futur')
 
-    metrics =  ['bad_prediction_modified_nbsinister_max_1', 'wildfire_over_predicted_modified_nbsinister_max_1', 'iou_modified_nbsinister_max_1']
+    metrics =  ['bad_prediction_nbsinister-MinMaxClass', 'wildfire_over_predicted_nbsinister-MinMaxClass', 'iou_nbsinister-MinMaxClass']
 
     compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '1')
 
-    metrics = ['apr_nbsinister_max_1', 'r2_nbsinister_max_1']
+    metrics = ['apr_nbsinister', 'r2_nbsinister']
 
     compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '2')

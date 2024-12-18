@@ -1,4 +1,5 @@
 from concurrent.futures import thread
+from re import S
 from sympy import true
 from torch import cosine_embedding_loss, fill
 from GNN.dico_departements import *
@@ -3092,7 +3093,6 @@ def calculate_ks(data, score_col, event_col, thresholds, dir_output):
     dir_output.mkdir(parents=True, exist_ok=True)  # Crée le dossier si nécessaire
 
     ks_results = []
-    optimal_thresholds = {}
 
     for threshold in thresholds:
         # Définir les groupes basés sur les seuils modifiés
@@ -3411,7 +3411,7 @@ def calculate_ks_continous(data, score_col, event_col, dir_output=None):
     
     return ks_stat, data_sorted[[score_col, 'cum_events', 'cum_non_events', 'ks_diff']]
 
-def calculate_signal_scores(y_pred, y_true, graph_id):
+def calculate_signal_scores(y_pred, y_true, graph_id, saison):
     """
     Calcule les scores (aire commune, union, sous-prédiction, sur-prédiction) entre deux signaux.
 
@@ -3435,8 +3435,8 @@ def calculate_signal_scores(y_pred, y_true, graph_id):
     over_prediction_zeros = np.trapz(np.maximum(0, y_pred[y_true == 0]))
     under_prediction_zeros = np.trapz(np.maximum(0, y_true[y_pred == 0]))
 
-    under_prediction_fire = np.trapz(np.maximum(0, y_true[y_true > 0] - y_pred[y_true > 0]))
-    over_prediction_fire = np.trapz(np.maximum(0, y_pred[y_true > 0] - y_true[y_true > 0]))
+    under_prediction_fire = np.trapz(np.maximum(0, y_true[(y_true > 0) & (y_pred > 0)] - y_pred[(y_true > 0) & (y_pred > 0)]))
+    over_prediction_fire = np.trapz(np.maximum(0, y_pred[(y_true > 0) & (y_pred > 0)] - y_true[(y_true > 0) & (y_pred > 0)]))
 
     only_true_value = np.trapz(y_true) # Air sous la courbe des prédictions
     only_pred_value = np.trapz(y_pred) # Air sous la courbe des prédictions
@@ -3452,18 +3452,20 @@ def calculate_signal_scores(y_pred, y_true, graph_id):
         "iou_under_prediction": round(under_prediction / union, 2) if union > 0 else 0,
         "iou_over_prediction": round(over_prediction / union, 2) if (union) > 0 else 0,
 
-        "wildfire_predicted" : round(intersection / only_true_value, 2) if only_true_value > 0 else 0,
-        "wildfire_supposed" : round(intersection / only_pred_value, 2) if only_true_value > 0 else 0,
-        
-        "wildfire_over_predicted": round(over_prediction_fire / union, 2) if only_true_value > 0 else 0,
-        "wildfire_under_predicted": round(under_prediction_fire / union, 2) if only_true_value > 0 else 0,
+        "wildfire_predicted_ratio" : round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
+        "wildfire_detected_ratio" : round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
+
+        "reliability" : 1 - (1 / (round((intersection + over_prediction) / intersection, 2) + round((intersection + under_prediction) / intersection, 2))),
+
+        "wildfire_over_predicted": round(over_prediction_fire / union, 2) if union > 0 else 0,
+        "wildfire_under_predicted": round(under_prediction_fire / union, 2) if union > 0 else 0,
         
         "over_bad_prediction" : round(over_prediction_zeros / union, 2) if union > 0 else 0,
         "under_bad_prediction" : round(under_prediction_zeros / union, 2) if union > 0 else 0,
         "bad_prediction" : round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
     }
 
-    # Binarisation des prédictions et vérités terrain
+    """# Binarisation des prédictions et vérités terrain
     # Binarisation des prédictions et vérités terrain
     y_pred_day = (y_pred > 0).astype(int)  # Prédictions binarisées
     y_true_day = (y_true > 0).astype(int)  # Vérités binarisées
@@ -3495,21 +3497,23 @@ def calculate_signal_scores(y_pred, y_true, graph_id):
         "iou_under_prediction_day": round(under_prediction_day / union_day, 2) if union_day > 0 else 0,
         "iou_over_prediction_day": round(over_prediction_day / union_day, 2) if union_day > 0 else 0,
 
-        "wildfire_predicted_day": round(intersection_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
-        "wildfire_supposed_day": round(intersection_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
-
         "wildfire_over_predicted_day": round(over_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
         "wildfire_under_predicted_day": round(under_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
 
         "over_bad_prediction_day": round(over_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
         "under_bad_prediction_day": round(under_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
         "bad_prediction_day": round((over_prediction_zeros_day + under_prediction_zeros_day) / union_day, 2) if union_day > 0 else 0,
-    })
+    })"""
 
     ###################################### I. For each graph_id ####################################
     unique_graph_ids = np.unique(graph_id)
 
-    for i, g_id in enumerate(unique_graph_ids):
+    # Trier les graph_id en fonction de la somme de event_col
+    graph_sums = {g_id: y_true[graph_id == g_id].sum() for g_id in unique_graph_ids}
+    sorted_graph_ids = sorted(graph_sums, key=graph_sums.get, reverse=True)
+
+    # Parcourir les graph_id triés
+    for i, g_id in enumerate(sorted_graph_ids):
         mask = graph_id == g_id
 
         y_pred_graph = y_pred[mask]
@@ -3527,30 +3531,81 @@ def calculate_signal_scores(y_pred, y_true, graph_id):
         under_prediction_fire_graph = np.trapz(np.maximum(0, y_true_graph[y_true_graph > 0] - y_pred_graph[y_true_graph > 0]))
         over_prediction_fire_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph > 0] - y_true_graph[y_true_graph > 0]))
 
-        only_true_value = np.trapz(y_true_graph) # Air sous la courbe des prédictions
-        only_pred_value = np.trapz(y_pred_graph) # Air sous la courbe des prédictions
+        only_true_value = np.trapz(y_true_graph)  # Aire sous la courbe des valeurs réelles
+        only_pred_value = np.trapz(y_pred_graph)  # Aire sous la courbe des prédictions
 
-        # Stocker les scores avec les clés précisant le graph_id
-        graph_scores= {
-            f"iou_{g_id}_{i}": round(intersection_graph / union, 2) if union_graph > 0 else 0,  # To avoid division by zero
-            f"iou_under_prediction_{g_id}_{i}": round(under_prediction_graph / union_graph, 2) if union > 0 else 0,
-            f"iou_over_prediction_{g_id}_{i}": round(over_prediction_graph / union_graph, 2) if (union) > 0 else 0,
+        # Stocker les scores avec des clés utilisant uniquement l'indice
+        graph_scores = {
+            f"iou_{i}": round(intersection_graph / union_graph, 2) if union_graph > 0 else 0,  # Pour éviter la division par zéro
+            f"iou_under_prediction_{i}": round(under_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
+            f"iou_over_prediction_{i}": round(over_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
 
-            f"wildfire_predicted_{g_id}_{i}" : round(intersection_graph / only_true_value, 2) if only_true_value > 0 else 0,
-            f"wildfire_supposed_{g_id}_{i}" : round(intersection_graph / only_pred_value, 2) if only_true_value > 0 else 0,
-            
-            f"wildfire_over_predicted_{g_id}_{i}": round(over_prediction_fire_graph / union_graph, 2) if only_true_value > 0 else 0,
-            f"wildfire_under_predicted_{g_id}_{i}": round(under_prediction_fire_graph / union_graph, 2) if only_true_value > 0 else 0,
-            
-            f"over_bad_prediction_unique_{g_id}_{i}" : round(over_prediction_zeros_graph / union_graph, 2) if union > 0 else 0,
-            f"under_bad_prediction_unique_{g_id}_{i}" : round(under_prediction_zeros_graph / union_graph, 2) if union > 0 else 0,
-            f"bad_prediction_unique_{g_id}_{i}" : round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union > 0 else 0,
+            f"wildfire_predicted_ratio_local_{i}" : round((intersection_graph + over_prediction_graph) / intersection_graph, 2) if intersection_graph != 0 else 0,
+            f"wildfire_detected_ratio_local_{i}" : round((intersection_graph + under_prediction_graph)/ intersection_graph, 2) if intersection_graph != 0 else 0,
 
-            f"over_bad_prediction_global_{g_id}_{i}" : round(over_prediction_zeros_graph / union, 2) if union > 0 else 0,
-            f"under_bad_prediction_global_{g_id}_{i}" : round(under_prediction_zeros_graph / union, 2) if union > 0 else 0,
-            f"bad_prediction_global_{g_id}_{i}" : round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union, 2) if union > 0 else 0,
+            f"reliability_{i}" : 1 - (1 / (round((intersection_graph + over_prediction_graph) / intersection_graph, 2) + round((intersection_graph + under_prediction_graph)/ intersection_graph, 2))),
+        
+            f"over_bad_prediction_local_{i}": round(over_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
+            f"under_bad_prediction_local_{i}": round(under_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
+            f"bad_prediction_local_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union_graph > 0 else 0,
+
+            f"over_bad_prediction_global_{i}": round(over_prediction_zeros_graph / union, 2) if union_graph > 0 else 0,
+            f"under_bad_prediction_global_{i}": round(under_prediction_zeros_graph / union, 2) if union_graph > 0 else 0,
+            f"bad_prediction_global_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union, 2) if union_graph > 0 else 0,
         }
         scores.update(graph_scores)
+
+    unique_seasons = np.unique(saison)
+
+    # Trier les saisons en fonction de la somme de y_true
+    season_sums = {s: y_true[saison == s].sum() for s in unique_seasons}
+    sorted_seasons = sorted(season_sums, key=season_sums.get, reverse=True)
+
+    # Parcourir les saisons triées
+    for i, s in enumerate(sorted_seasons):
+        mask = saison == s
+
+        y_pred_season = y_pred[mask]
+        y_true_season = y_true[mask]
+
+        intersection_season = np.trapz(np.minimum(y_pred_season, y_true_season))  # Aire commune
+        union_season = np.trapz(np.maximum(y_pred_season, y_true_season))         # Aire d'union
+
+        under_prediction_season = np.trapz(np.maximum(0, y_true_season - y_pred_season))
+        over_prediction_season = np.trapz(np.maximum(0, y_pred_season - y_true_season))
+
+        over_prediction_zeros_season = np.trapz(np.maximum(0, y_pred_season[y_true_season == 0]))
+        under_prediction_zeros_season = np.trapz(np.maximum(0, y_true_season[y_pred_season == 0]))
+
+        under_prediction_fire_season = np.trapz(np.maximum(0, y_true_season[y_true_season > 0] - y_pred_season[y_true_season > 0]))
+        over_prediction_fire_season = np.trapz(np.maximum(0, y_pred_season[y_true_season > 0] - y_true_season[y_true_season > 0]))
+
+        only_true_value = np.trapz(y_true_season)  # Aire sous la courbe des valeurs réelles
+        only_pred_value = np.trapz(y_pred_season)  # Aire sous la courbe des prédictions
+
+        # Stocker les scores avec des clés utilisant uniquement l'indice
+        season_scores = {
+            f"iou_{s}": round(intersection_season / union_season, 2) if union_season > 0 else 0,  # Pour éviter la division par zéro
+            f"iou_under_prediction_{s}": round(under_prediction_season / union_season, 2) if union_season > 0 else 0,
+            f"iou_over_prediction_{s}": round(over_prediction_season / union_season, 2) if union_season > 0 else 0,
+
+            f"wildfire_predicted_{s}": round(intersection_season / only_true_value, 2) if only_true_value > 0 else 0,
+            f"wildfire_supposed_{s}": round(intersection_season / only_pred_value, 2) if only_pred_value > 0 else 0,
+
+            f"wildfire_predicted_ratio_{s}" : round((intersection_season + over_prediction_season)/ over_prediction_season, 2) if intersection_season != 0 else 0,
+            f"wildfire_detected_ratio_{s}" : round((intersection_season + under_prediction_season) / under_prediction_season, 2) if intersection_season != 0 else 0,
+
+            f"reliability_{s}" : 1 - (1 / (round((intersection_season + over_prediction_season)/ over_prediction_season, 2) + round((intersection_season + under_prediction_season) / under_prediction_season, 2))),
+
+            f"over_bad_prediction_local_{s}": round(over_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
+            f"under_bad_prediction_local_{s}": round(under_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
+            f"bad_prediction_local_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union_season, 2) if union_season > 0 else 0,
+
+            f"over_bad_prediction_global_{s}": round(over_prediction_zeros_season / union, 2) if union_season > 0 else 0,
+            f"under_bad_prediction_global_{s}": round(under_prediction_zeros_season / union, 2) if union_season > 0 else 0,
+            f"bad_prediction_global_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union, 2) if union_season > 0 else 0,
+        }
+        scores.update(season_scores)
 
     return scores
 
@@ -3694,7 +3749,7 @@ def target_by_day(df: pd.DataFrame, days_range: int, method: str, target_spe='0'
             
     return df_res
 
-def scale_target(df, df_train, col , method):
+def scale_target(df, df_train, col, method):
     assert col in ['nbsinister', 'risk']
 
     if method == 'standard':
@@ -3707,6 +3762,15 @@ def scale_target(df, df_train, col , method):
         df[f'{col}-MinMax'] = min_max_scaler(df[col].values, df_train[col].values, concat=False)
         ids_columns.append(f'{col}-MinMax')
 
+    return df
+
+def min_max_class(df):
+    df['nbsinister-MinMaxClass'] = 0
+    df.loc[df['nbsinister-MinMax'] == 0, 'nbsinister-MinMaxClass'] = 0
+    df.loc[df['nbsinister-MinMax'] > 0, 'nbsinister-MinMaxClass'] = 1
+    df.loc[df['nbsinister-MinMax'] > 0.25, 'nbsinister-MinMaxClass'] = 2
+    df.loc[df['nbsinister-MinMax'] > 0.5, 'nbsinister-MinMaxClass'] = 3
+    df.loc[df['nbsinister-MinMax'] > 0.75, 'nbsinister-MinMaxClass'] = 4
     return df
 
 def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, features_name : dict, target_name : str):
@@ -3961,14 +4025,11 @@ def random_weights(df):
     rand_array = np.random.rand(df.shape[0]) * 10
     return rand_array
 
-def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, train_date, train_code):
+def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, train_mask):
 
     df = dff.copy(deep=True)
     df['nbsinister'] = dff[target_name_sinister]
     df['risk'] = dff[target_name_risk]
-
-    # Mask to identify rows based on date and department conditions
-    mask_subset = (df['date'] < train_date) & (df['departement'].isin(train_code))
 
     # Helper function to adjust weights conditionally
     def adjust_weights_for_zero_sinister(weights, df):
@@ -4001,62 +4062,62 @@ def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, tr
         return weights
 
     # Apply the appropriate weight function based on `weight_col`
-    if weight_col == 'weight_proportion_on_zero_class':
-        return calculate_weight_by_mask(calculate_proportion_weights, df, mask_subset)
+    if weight_col == 'proportion_on_zero_class':
+        return calculate_weight_by_mask(calculate_proportion_weights, df, train_mask)
     
-    elif weight_col == 'weight_class':
-        return calculate_weight_by_mask(calculate_class_weights, df, mask_subset)
+    elif weight_col == 'class':
+        return calculate_weight_by_mask(calculate_class_weights, df, train_mask)
     
-    elif weight_col == 'weight_nbsinister':
-        weights = calculate_weight_by_mask(calculate_nbsinister, df, mask_subset)
+    elif weight_col == 'nbsinister':
+        weights = calculate_weight_by_mask(calculate_nbsinister, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_one':
+    elif weight_col == 'one':
         return np.ones((df.shape[0], 1))
     
-    elif weight_col == 'weight_normalize':
-        return calculate_weight_by_mask(calculate_normalize_weights, df, mask_subset, 'risk')
+    elif weight_col == 'normalize':
+        return calculate_weight_by_mask(calculate_normalize_weights, df, train_mask, 'risk')
     
-    elif weight_col == 'weight_proportion_on_zero_sinister':
-        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, mask_subset)
+    elif weight_col == 'proportion_on_zero_sinister':
+        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_random':
-        return calculate_weight_by_mask(random_weights, df, mask_subset)
+    elif weight_col == 'random':
+        return calculate_weight_by_mask(random_weights, df, train_mask)
     
-    elif weight_col.find('weight_outlier') != -1 and weight_col.find('nbsinister') == -1:
+    elif weight_col.find('outlier') != -1 and weight_col.find('nbsinister') == -1:
         p_param = int(weight_col.split('_')[-1])
-        return calculate_weight_by_mask(calculate_outlier_weighs, df, mask_subset, 'risk', {'p' : p_param})
+        return calculate_weight_by_mask(calculate_outlier_weighs, df, train_mask, 'risk', {'p' : p_param})
     
-    elif weight_col == 'weight_proportion_on_zero_class_nbsinister':
-        weights = calculate_weight_by_mask(calculate_proportion_weights, df, mask_subset)
+    elif weight_col == 'proportion_on_zero_class_nbsinister':
+        weights = calculate_weight_by_mask(calculate_proportion_weights, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_class_nbsinister':
-        weights = calculate_weight_by_mask(calculate_class_weights, df, mask_subset)
+    elif weight_col == 'class_nbsinister':
+        weights = calculate_weight_by_mask(calculate_class_weights, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_one_nbsinister':
+    elif weight_col == 'one_nbsinister':
         return np.ones((df.shape[0], 1))
     
-    elif weight_col == 'weight_nbsinister_nbsinister':
-        weights = calculate_weight_by_mask(calculate_nbsinister, df, mask_subset)
+    elif weight_col == 'nbsinister_nbsinister':
+        weights = calculate_weight_by_mask(calculate_nbsinister, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_normalize_nbsinister':
-        return calculate_weight_by_mask(calculate_normalize_weights, df, mask_subset, 'nbsinister')
+    elif weight_col == 'normalize_nbsinister':
+        return calculate_weight_by_mask(calculate_normalize_weights, df, train_mask, 'nbsinister')
     
-    elif weight_col == 'weight_random_nbsinister':
-        weights = calculate_weight_by_mask(random_weights, df, mask_subset)
+    elif weight_col == 'random_nbsinister':
+        weights = calculate_weight_by_mask(random_weights, df, train_mask)
         return weights
     
-    elif weight_col == 'weight_proportion_on_zero_sinister_nbsinister':
-        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, mask_subset)
+    elif weight_col == 'proportion_on_zero_sinister_nbsinister':
+        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, train_mask)
         return weights
     
-    elif weight_col.find('weight_outlier') != -1 and weight_col.find('nbsinister') != -1:
+    elif weight_col.find('outlier') != -1 and weight_col.find('nbsinister') != -1:
         p_param = int(weight_col.split('_')[2])
-        return calculate_weight_by_mask(calculate_outlier_weighs, df, mask_subset, 'nbsinister', {'p' : p_param})
+        return calculate_weight_by_mask(calculate_outlier_weighs, df, train_mask, 'nbsinister', {'p' : p_param})
     else:
         logger.info(f'Unknown value of weight {weight_col}')
         exit(1)
@@ -4153,3 +4214,60 @@ def my_convolve(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False, semi2=Fa
             kernel[:,:,(dim[2]//2):] = 0.0
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
     return res
+
+def add_weigh_column(dff, train_mask, weight_col, graph_method):
+
+    df = dff.copy(deep=True)
+
+    logger.info(f'Adding weight columns')
+    target_name_nbsinister = 'nbsinister'
+    target_name_risk = 'risk'
+    target_name_class = 'nbsinister-MinMaxClass'
+
+    dataframe_graph = df[[target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
+    dataframe_graph.drop_duplicates(keep='first', inplace=True)
+
+    weigh_col_name = f'weight_{weight_col}'
+    logger.info(f'{weigh_col_name}')
+
+    df_weight = []
+
+    if graph_method == 'node':
+        df[weigh_col_name] = 0.0
+
+    for dept in df.departement.unique():
+        index_dept = df[df['departement'] == dept].index
+        if graph_method == 'graph':
+            dataframe_graph_2 = df.loc[index_dept, [target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
+            dataframe_graph_2.drop_duplicates(keep='first', inplace=True)
+            weight_dept = calculate_weighs(weight_col, dataframe_graph_2.copy(deep=True), target_name_nbsinister, target_name_risk, train_mask)
+            if weight_dept is None:
+                continue
+
+            weight_dept = weight_dept.reshape(dataframe_graph_2['weight'].values.shape)
+
+            result = np.multiply(dataframe_graph_2['weight'].values, weight_dept)
+            dataframe_graph_2[weigh_col_name] = result
+            df_weight.append(dataframe_graph_2)
+        else:
+            weight_dept = calculate_weighs(weight_col, df.copy(deep=True).loc[index_dept], target_name_nbsinister, target_name_risk, train_mask)
+            if weight_dept is None:
+                continue
+
+            weight_dept = weight_dept.reshape(df.loc[index_dept, 'weight'].values.shape)
+
+            result = np.multiply(df.loc[index_dept, 'weight'].values, weight_dept)
+
+            df.loc[index_dept, weigh_col_name] = result
+
+    if graph_method == 'graph':
+        df_weight = pd.concat(df_weight)
+        dataframe_graph = dataframe_graph.set_index(['graph_id', 'date']).join(df_weight.set_index(['graph_id', 'date'])[weigh_col_name], on=['graph_id', 'date']).reset_index()
+
+        try:
+            df.drop(weight_col_name, inplace=True, axis=1)
+        except Exception as e:
+            print(e)
+        df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[all_weights_col], how='right').reset_index()
+        
+    return df[weigh_col_name].values

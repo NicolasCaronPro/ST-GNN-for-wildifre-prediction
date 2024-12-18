@@ -3078,41 +3078,10 @@ class GraphStructure():
                     pred = torch.round(pred, decimals=1)
                 
                 return pred, y
-
-    def predict_model_xgboost(self, X : pd.DataFrame,
-                                  features : list, target_name : bool,
-                                  autoRegression : bool, quantile=False) -> np.array:
-        isBin = target_name == 'binary'
-        assert self.model is not None
-        X.reset_index(inplace=True, drop=True)
-
-        # Sélectionner les bonnes colonnes en fonction de la liste des features
-        if hasattr(self.model, 'col_id_name'):
-            col_id = self.model.col_id_name
-            if col_id not in list(X.columns):
-                X = add_aggregation_column_df(X, col_id)
-                if X is None:
-                    return np.zeros(X.shape[0])
-        else:
-            col_id = None
-
-        if not autoRegression:
-            if not isBin:
-                if col_id is not None:
-                    return self.model.predict(X[features], X[col_id])
-                else:
-                    return self.model.predict(X[features])
-            else:
-                if col_id:
-                    return self.model.predict_proba(X[features], X[col_id])[:,1]
-                else:
-                    return self.model.predict_proba(X[features])[:,1]
-        else:
-            ValueError('Not implemented')  
     
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,
-                                  autoRegression : bool) -> np.array:
+                                  autoRegression : bool, quantile=False) -> np.array:
         
         isBin = target_name == 'binary'
         assert self.model is not None
@@ -3127,19 +3096,28 @@ class GraphStructure():
         else:
             col_id = None
 
+        res = np.empty((X.shape[0], 2))
+        res_max = None
+        res_min = None
+
         if not autoRegression:
             if not isBin:
-                if col_id:
-                    return self.model.predict(X[features], X[col_id])
+                if col_id is not None:
+                    res[:, 0] = self.model.predict_nbsinister(X[features], X[col_id])
+                    res[:, 1] = self.model.predict_risk(X[features], X[col_id])
                 else:
-                    return self.model.predict(X[features])
+                    res[:, 0] = self.model.predict_nbsinister(X[features])
+                    res[:, 1] = self.model.predict_risk(X[features])
             else:
+                raise ValueError(f'Binary model are not available yet')
                 if col_id:
                     return self.model.predict_proba(X[features], X[col_id])[:,1]
                 else:
                     return self.model.predict_proba(X[features])[:,1]
         else:
-            raise ValueError('Not implemented')
+            ValueError('Not implemented')
+
+        return res, res_max, res_min
 
     def _predict_perference_with_Y(self, Y : np.array, target_name : str) -> np.array:
         res = np.empty(Y.shape[0])

@@ -204,14 +204,14 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
     target_column_name_list = ['0_0']
     df['nbsinister_0_0'] = df['nbsinister'].values
     limit_day = 9
-    shift_list = np.arange(0, 5)
+    shift_list = np.arange(0, 1)
     thresh_kmeans_list = np.arange(0.1, 1, 0.1)
     ############################ Frequency ratio / removing outliers ###########################################
 
     if (dir_output / f'df_no_weight_{prefix}.pkl').is_file():
         for thresh in thresh_kmeans_list:
             target_column_name_list += [f'{s}_{thresh}' for s in shift_list]
-
+            
         df = read_object(f'df_no_weight_{prefix}.pkl', dir_output)
     else:    
         if dataset_name == 'firemen':
@@ -257,69 +257,6 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
             df = target_by_day(df, limit_day, futur_met, target_spe)
 
         save_object(df, f'df_no_weight_{prefix}.pkl', dir_output)
-
-    ############################## Add weight columns #############################
-
-    if not find_df:
-        all_weights_col = []
-        logger.info(f'Adding weight columns')
-
-        for target_spe in target_column_name_list:
-
-            for days in range(limit_day + 1):
-
-                target_name_nbsinister = f'nbsinister_sum_{target_spe}_+{days}'
-                target_name_risk = f'risk_max_{target_spe}_+{days}'
-                target_name_class = f'class_risk_max_{target_spe}_+{days}'
-
-                dataframe_graph = df[[target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
-                dataframe_graph.drop_duplicates(keep='first', inplace=True)
-
-                for weight_col in weights_columns:
-                    df_weight = []
-                    weigh_col_name = f'{weight_col}_{target_spe}_+{days}'
-                    all_weights_col.append(weigh_col_name)
-                    logger.info(f'{weigh_col_name}')
-                    continue
-                    if graph_method == 'node':
-                        df[weigh_col_name] = 0.0
-
-                    for dept in df.departement.unique():
-                        index_dept = df[df['departement'] == dept].index
-                        if graph_method == 'graph':
-                            dataframe_graph_2 = df.loc[index_dept, [target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
-                            dataframe_graph_2.drop_duplicates(keep='first', inplace=True)
-                            weight_dept = calculate_weighs(weight_col, dataframe_graph_2.copy(deep=True), target_name_nbsinister, target_name_risk, allDates.index(trainDate), trainCode)
-                            if weight_dept is None:
-                                continue
-
-                            weight_dept = weight_dept.reshape(dataframe_graph_2['weight'].values.shape)
-
-                            result = np.multiply(dataframe_graph_2['weight'].values, weight_dept)
-                            dataframe_graph_2[weigh_col_name] = result
-                            df_weight.append(dataframe_graph_2)
-                        else:
-                            weight_dept = calculate_weighs(weight_col, df.copy(deep=True).loc[index_dept], target_name_nbsinister, target_name_risk, allDates.index(trainDate), trainCode)
-                            if weight_dept is None:
-                                continue
-
-                            weight_dept = weight_dept.reshape(df.loc[index_dept, 'weight'].values.shape)
-
-                            result = np.multiply(df.loc[index_dept, 'weight'].values, weight_dept)
-
-                            df.loc[index_dept, weigh_col_name] = result
-
-                    if graph_method == 'graph':
-                        df_weight = pd.concat(df_weight)
-                        dataframe_graph = dataframe_graph.set_index(['graph_id', 'date']).join(df_weight.set_index(['graph_id', 'date'])[weigh_col_name], on=['graph_id', 'date']).reset_index()
-        
-        df[all_weights_col] = 1
-        """if graph_method == 'graph':
-            try:
-                df.drop(all_weights_col, inplace=True, axis=1)
-            except Exception as e:
-                print(e)
-            df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[all_weights_col], how='right').reset_index()"""
     
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
@@ -1005,7 +942,7 @@ def init(args, dir_output, script):
                                             dir_output,
                                             dir_output,
                                             prefix,
-                                            values_per_class,
+                                            'full',
                                             'train',
                                             resolution,
                                             trainDate)
@@ -1029,7 +966,7 @@ def init(args, dir_output, script):
 
     ############################## Dataframe creation ###################################
 
-    prefix = f'{values_per_class}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
     if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase:
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
@@ -1042,7 +979,7 @@ def init(args, dir_output, script):
         df[ids_columns[:-1] + targets_columns] = Y
         find_df = False
 
-    prefix = f'{values_per_class}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
     ################################ Process Target ###############################################
 
@@ -1119,4 +1056,6 @@ def init(args, dir_output, script):
     save_object(features_name, f'features_name_{prefix}.pkl', dir_output)
 
     ############################## Return data, graph, sinister point and features_name ################################
+    fp['database'] = dataset_name
+
     return df, graphScale, prefix, fp, features_name
