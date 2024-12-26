@@ -119,7 +119,7 @@ else:
     from sklearn.decomposition import PCA
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc
+        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
@@ -3097,7 +3097,7 @@ def calculate_ks(data, score_col, event_col, thresholds, dir_output):
     for threshold in thresholds:
         # Définir les groupes basés sur les seuils modifiés
         data['group'] = np.where(
-            data[event_col] == threshold - 1, 'low_risk',  # Low risk pour les valeurs <= threshold - 1
+            data[event_col] < threshold, 'low_risk',  # Low risk pour les valeurs <= threshold - 1
             np.where(data[event_col] >= threshold, 'high_risk', 'other')  # High risk pour les valeurs == threshold
         )
         
@@ -3451,11 +3451,13 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
         "iou": round(intersection / union, 2) if union > 0 else 0,  # To avoid division by zero
         "iou_under_prediction": round(under_prediction / union, 2) if union > 0 else 0,
         "iou_over_prediction": round(over_prediction / union, 2) if (union) > 0 else 0,
+        f"reliability_predicted" : 1 / round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
+        f"reliability_detected" : 1 / round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
 
         "wildfire_predicted_ratio" : round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
         "wildfire_detected_ratio" : round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-        "reliability" : 1 - (1 / (round((intersection + over_prediction) / intersection, 2) + round((intersection + under_prediction) / intersection, 2))),
+        
+        f"reliability" : 1 / round((intersection + over_prediction + under_prediction) / intersection, 2) if intersection != 0 else 0,
 
         "wildfire_over_predicted": round(over_prediction_fire / union, 2) if union > 0 else 0,
         "wildfire_under_predicted": round(under_prediction_fire / union, 2) if union > 0 else 0,
@@ -3539,12 +3541,12 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
             f"iou_{i}": round(intersection_graph / union_graph, 2) if union_graph > 0 else 0,  # Pour éviter la division par zéro
             f"iou_under_prediction_{i}": round(under_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
             f"iou_over_prediction_{i}": round(over_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
+            f"reliability_predicted_{i}" : 1 / ((intersection_graph + over_prediction_graph) / intersection_graph) if intersection_graph != 0 else 0,
+            f"reliability_detected_{i}" : 1 / ((intersection_graph + under_prediction_graph) / intersection_graph) if intersection_graph != 0 else 0,
 
             f"wildfire_predicted_ratio_local_{i}" : round((intersection_graph + over_prediction_graph) / intersection_graph, 2) if intersection_graph != 0 else 0,
             f"wildfire_detected_ratio_local_{i}" : round((intersection_graph + under_prediction_graph)/ intersection_graph, 2) if intersection_graph != 0 else 0,
-
-            f"reliability_{i}" : 1 - (1 / (round((intersection_graph + over_prediction_graph) / intersection_graph, 2) + round((intersection_graph + under_prediction_graph)/ intersection_graph, 2))),
-        
+                    
             f"over_bad_prediction_local_{i}": round(over_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
             f"under_bad_prediction_local_{i}": round(under_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
             f"bad_prediction_local_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union_graph > 0 else 0,
@@ -3588,14 +3590,11 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
             f"iou_{s}": round(intersection_season / union_season, 2) if union_season > 0 else 0,  # Pour éviter la division par zéro
             f"iou_under_prediction_{s}": round(under_prediction_season / union_season, 2) if union_season > 0 else 0,
             f"iou_over_prediction_{s}": round(over_prediction_season / union_season, 2) if union_season > 0 else 0,
-
-            f"wildfire_predicted_{s}": round(intersection_season / only_true_value, 2) if only_true_value > 0 else 0,
-            f"wildfire_supposed_{s}": round(intersection_season / only_pred_value, 2) if only_pred_value > 0 else 0,
+            f"reliability_predicted_{s}" : 1 / ((intersection_season + over_prediction_season) / intersection_season) if intersection_season != 0 else 0,
+            f"reliability_detected_{s}" : 1 / ((intersection_season + under_prediction_season) / intersection_season) if intersection_season != 0 else 0,
 
             f"wildfire_predicted_ratio_{s}" : round((intersection_season + over_prediction_season)/ over_prediction_season, 2) if intersection_season != 0 else 0,
             f"wildfire_detected_ratio_{s}" : round((intersection_season + under_prediction_season) / under_prediction_season, 2) if intersection_season != 0 else 0,
-
-            f"reliability_{s}" : 1 - (1 / (round((intersection_season + over_prediction_season)/ over_prediction_season, 2) + round((intersection_season + under_prediction_season) / under_prediction_season, 2))),
 
             f"over_bad_prediction_local_{s}": round(over_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
             f"under_bad_prediction_local_{s}": round(under_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
@@ -3606,6 +3605,106 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
             f"bad_prediction_global_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union, 2) if union_season > 0 else 0,
         }
         scores.update(season_scores)
+
+    ###################################### For each graph_id in each season ####################################
+    # Get unique seasons
+    unique_seasons = np.unique(saison)
+
+    # Iterate over seasons
+    for season in unique_seasons:
+        # Mask for the current season
+        season_mask = saison == season
+
+        # Iterate over graphs in this season
+        for i, g_id in enumerate(unique_graph_ids):
+            # Mask for the current graph in the current season
+            graph_mask = (graph_id == g_id) & season_mask
+
+            y_pred_graph_season = y_pred[graph_mask]
+            y_true_graph_season = y_true[graph_mask]
+
+            intersection_graph_season = np.trapz(np.minimum(y_pred_graph_season, y_true_graph_season))  # Common area
+            union_graph_season = np.trapz(np.maximum(y_pred_graph_season, y_true_graph_season))         # Union area
+
+            under_prediction_graph_season = np.trapz(np.maximum(0, y_true_graph_season - y_pred_graph_season))
+            over_prediction_graph_season = np.trapz(np.maximum(0, y_pred_graph_season - y_true_graph_season))
+
+            over_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_pred_graph_season[y_true_graph_season == 0]))
+            under_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_true_graph_season[y_pred_graph_season == 0]))
+
+            # Compute scores for the graph in this season
+            graph_season_scores = {
+                f"iou_graph_{i}_season_{season}": round(intersection_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"iou_under_prediction_graph_{i}_season_{season}": round(under_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"iou_over_prediction_graph_{i}_season_{season}": round(over_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"reliability_predicted_graph_{i}_season_{season}": 1 / ((intersection_graph_season + over_prediction_graph_season) / intersection_graph_season) if intersection_graph_season != 0 else 0,
+                f"reliability_detected_graph_{i}_season_{season}": 1 / ((intersection_graph_season + under_prediction_graph_season) / intersection_graph_season) if intersection_graph_season != 0 else 0,
+
+                f"wildfire_predicted_ratio_graph_{i}_season_{season}": round((intersection_graph_season + over_prediction_graph_season) / intersection_graph_season, 2) if intersection_graph_season != 0 else 0,
+                f"wildfire_detected_ratio_graph_{i}_season_{season}": round((intersection_graph_season + under_prediction_graph_season) / intersection_graph_season, 2) if intersection_graph_season != 0 else 0,
+
+                f"over_bad_prediction_local_graph_{i}_season_{season}": round(over_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"under_bad_prediction_local_graph_{i}_season_{season}": round(under_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"bad_prediction_local_graph_{i}_season_{season}": round((over_prediction_zeros_graph_season + under_prediction_zeros_graph_season) / union_graph_season, 2) if union_graph_season > 0 else 0,
+            }
+
+            # Update global scores dictionary
+            scores.update(graph_season_scores)
+
+    # Parcourir les valeurs uniques de y_true
+    for unique_value in np.unique(y_true[y_true > 0]):
+        # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
+        mask = y_true == unique_value
+        
+        y_pred_sample = y_pred[mask]
+        y_true_sample = y_true[mask]
+
+        # Calculer les aires
+        intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
+        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
+
+        under_prediction = np.trapz(np.maximum(0, y_true_sample - y_pred_sample))
+        over_prediction = np.trapz(np.maximum(0, y_pred_sample - y_true_sample))
+
+        over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
+        under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
+
+        under_prediction_fire = np.trapz(
+            np.maximum(0, y_true_sample[y_true_sample > 0] - y_pred_sample[y_true_sample > 0])
+        )
+        over_prediction_fire = np.trapz(
+            np.maximum(0, y_pred_sample[y_true_sample > 0] - y_true_sample[y_true_sample > 0])
+        )
+
+        # Enregistrement dans un dictionnaire
+        scores_elt = {
+            f"common_area_elt_{unique_value}": intersection,
+            f"union_area_elt_{unique_value}": union,
+            f"under_predicted_area_elt_{unique_value}": under_prediction,
+            f"over_predicted_area_elt_{unique_value}": over_prediction,
+
+            f"iou_elt_{unique_value}": round(intersection / union, 2) if union > 0 else 0,  # Éviter la division par zéro
+            f"iou_under_prediction_elt_{unique_value}": round(under_prediction / union, 2) if union > 0 else 0,
+            f"iou_over_prediction_elt_{unique_value}": round(over_prediction / union, 2) if union > 0 else 0,
+
+            f"reliability_predicted_elt_{unique_value}": 1 / round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
+            f"reliability_detected_elt_{unique_value}": 1 / round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
+
+            f"wildfire_predicted_ratio_elt_{unique_value}": round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
+            f"wildfire_detected_ratio_elt_{unique_value}": round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
+
+            f"reliability_elt_{unique_value}": 1 / round((intersection + over_prediction + under_prediction) / intersection, 2) if intersection != 0 else 0,
+
+            f"wildfire_over_predicted_elt_{unique_value}": round(over_prediction_fire / union, 2) if union > 0 else 0,
+            f"wildfire_under_predicted_elt_{unique_value}": round(under_prediction_fire / union, 2) if union > 0 else 0,
+
+            f"over_bad_prediction_elt_{unique_value}": round(over_prediction_zeros / union, 2) if union > 0 else 0,
+            f"under_bad_prediction_elt_{unique_value}": round(under_prediction_zeros / union, 2) if union > 0 else 0,
+            f"bad_prediction_elt_{unique_value}": round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
+        }
+
+        # Ajouter les scores pour cette valeur unique à la collection globale
+        scores.update(scores_elt)
 
     return scores
 
@@ -4222,7 +4321,7 @@ def add_weigh_column(dff, train_mask, weight_col, graph_method):
     logger.info(f'Adding weight columns')
     target_name_nbsinister = 'nbsinister'
     target_name_risk = 'risk'
-    target_name_class = 'nbsinister-MinMaxClass'
+    target_name_class = 'class'
 
     dataframe_graph = df[[target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
     dataframe_graph.drop_duplicates(keep='first', inplace=True)

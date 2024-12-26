@@ -2589,11 +2589,6 @@ class GraphStructure():
         """
         self.model = model
 
-    def _load_model_from_path(self, path : Path, model : torch.nn.Module, device, model_name : str) -> None:
-        model.load_state_dict(torch.load(path, map_location=device, weights_only=True), strict=False)
-        self.model = model
-        self.model_name = model_name
-
     def _set_model_from_path(self, path : Path) -> None:
         self.modelPath = path
 
@@ -2610,7 +2605,7 @@ class GraphStructure():
         with torch.no_grad():
             return self.model(X, edges)
 
-    def _predict_dataset(self, X : Dataset) -> torch.tensor:
+    def _predict_dataset(self, X) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
         with torch.no_grad():
@@ -3000,8 +2995,7 @@ class GraphStructure():
 
         return df  
     
-    def _predict_test_loader(self, X: DataLoader, features: np.array, device, target_name: str,
-                            autoRegression: bool, features_name: list, dataset: pd.DataFrame) -> torch.tensor:
+    def _predict_test_loader(self, X: DataLoader) -> torch.tensor:
             """
             Generates predictions using the model on the provided DataLoader, with optional autoregression.
 
@@ -3023,61 +3017,9 @@ class GraphStructure():
             assert self.model is not None
             self.model.eval()
 
-            with torch.no_grad():
-                pred = []
-                y = []
+            pred, y = self.model._predict_test_loader(X)
 
-                for i, data in enumerate(X, 0):
-                    try:
-                        if self.model_name in models_hybrid:
-                            inputs_1D, inputs_2D, labels, edges, graphs = data
-                        else:
-                            inputs, orilabels, edges, graphs = data
-                    except:
-                        if self.model_name in models_hybrid:
-                            inputs_1D, inputs_2D, labels, edges = data
-                        else:
-                            inputs, orilabels, edges = data
-                        graphs = None
-
-                    orilabels = orilabels.to(device)
-                    edges = edges.to(device)
-                    labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
-
-                    # No autoregression
-                    if self.model_name in models_hybrid:
-                        inputs_1D = inputs_1D[:, features[0]]
-                        inputs_2D = inputs_2D[:, features[1]]
-                        output = self.model(inputs_1D, inputs_2D, edges, graphs)
-                    elif self.model_name in models_2D:
-                        inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges, graphs)
-                    elif self.model_name in temporal_model_list:
-                        inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges, graphs)
-                    else:
-                        inputs_model = inputs[:, features]
-                        output = self.model(inputs_model, edges, graphs)
-
-                    if target_name == 'binary':
-                        output = output[:, 1]
-                    else:
-                        output = output[:, 0]
-
-                    #output = output[weights.gt(0)]
-
-                    pred.append(output)
-                    y.append(labels)
-
-                y = torch.cat(y, 0)
-                pred = torch.cat(pred, 0)
-
-                if target_name == 'binary' or target_name == 'risk':
-                    pred = torch.round(pred, decimals=1)
-                elif target_name == 'nbsinister':
-                    pred = torch.round(pred, decimals=1)
-                
-                return pred, y
+            return pred, y
     
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,
@@ -3102,12 +3044,17 @@ class GraphStructure():
 
         if not autoRegression:
             if not isBin:
-                if col_id is not None:
-                    res[:, 0] = self.model.predict_nbsinister(X[features], X[col_id])
-                    res[:, 1] = self.model.predict_risk(X[features], X[col_id])
+                if self.model.post_process is not None and hasattr(self.model.post_process, 'col_id'):
+                    post_process_ids = X[self.model.post_process.col_id]
                 else:
-                    res[:, 0] = self.model.predict_nbsinister(X[features])
-                    res[:, 1] = self.model.predict_risk(X[features])
+                    post_process_ids = None
+
+                if col_id is not None:
+                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids)
+                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids)
+                else:
+                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids)
+                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids)
             else:
                 raise ValueError(f'Binary model are not available yet')
                 if col_id:

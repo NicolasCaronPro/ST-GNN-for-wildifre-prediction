@@ -854,10 +854,25 @@ def wrapped_compare(df_metrics, dir_experiement, col_to_analyse):
         df_metrics.loc[index, 'Method'] = dico_parse.get('Method')
         df_metrics.loc[index, 'Days_in_futur'] = dico_parse.get('Days_in_futur')
 
-    metrics =  ['bad_prediction_nbsinister-MinMaxClass', 'wildfire_over_predicted_nbsinister-MinMaxClass', 'iou_nbsinister-MinMaxClass']
+    metrics =  ['bad_prediction_class', 'wildfire_over_predicted_class', 'iou_class']
 
     compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '1')
 
-    metrics = ['apr_nbsinister', 'r2_nbsinister']
+    metrics = ['apr', 'r2']
 
     compare_models2(df_metrics, df_metrics.Department.unique(), dept_markers, metrics, col_to_analyse, dir_experiement, '2')
+
+def create_video(image_folder, video_name):
+    files = [img.split('.')[0].split('_')[-1] for img in os.listdir(image_folder) if img.endswith(".png") and img != 'Mean.png']
+    files.sort(key=lambda date: dt.strptime(date, "%Y-%m-%d"))
+    images = [date+'.png' for date in files]
+    frame = cv2.imread(os.path.join(image_folder, images[0]))
+    height, width, layers = frame.shape
+
+    video = cv2.VideoWriter(video_name, 0, 1, (width,height))
+
+    for image in images:
+        video.write(cv2.imread(os.path.join(image_folder, image)))
+
+    cv2.destroyAllWindows()
+    video.release()

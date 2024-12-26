@@ -1,18 +1,5 @@
-from asyncio import tasks
-from datetime import date
-from genericpath import isfile
-from threading import local
-from cv2 import threshold
-from numpy import dtype
-from sympy import use
-from torch_geometric.data import Dataset
-from torch.utils.data import DataLoader
-import torch
-from PIL import Image
-import torchvision.transforms.functional as TF
-from torchvision import transforms
-from GNN.discretization import *
-from feature_engine.selection import SmartCorrelatedSelection
+from zmq import device
+from GNN.pytorch_model import *
 
 #########################################################################################################
 #                                                                                                       #
@@ -21,173 +8,6 @@ from feature_engine.selection import SmartCorrelatedSelection
 #                                                                                                       #
 #########################################################################################################
 
-def graph_collate_fn(batch):
-    #node_indice_list = []
-    edge_index_list = []
-    node_features_list = []
-    node_labels_list = []
-    graph_labels_list = []
-    num_nodes_seen = 0
-    for graph_id, features_labels_edge_index_tuple in enumerate(batch):
-        # Collecter les caractéristiques et les étiquettes des nœuds
-        node_features_list.append(features_labels_edge_index_tuple[0])
-        node_labels_list.append(features_labels_edge_index_tuple[1])
-        
-        edge_index = features_labels_edge_index_tuple[2]  # Tous les composants sont dans la plage [0, N]
-        
-        # Ajuster l'index des arêtes en fonction du nombre de nœuds vus
-        if edge_index.shape[0] > 2:
-            edge_index[0] += num_nodes_seen
-            edge_index[1] += num_nodes_seen
-            edge_index_list.append(edge_index)
-        else:
-            edge_index_list.append(edge_index + num_nodes_seen)
-        
-        # Ajouter l'ID du graphe pour chaque nœud
-        num_nodes = features_labels_edge_index_tuple[1].size(0)
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs
-
-        num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
-
-    # Merge the PPI graphs into a single graph with multiple connected components
-    node_features = torch.cat(node_features_list, 0)
-    node_labels = torch.cat(node_labels_list, 0)
-    edge_index = torch.cat(edge_index_list, 1)
-    graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
-    #node_indices = torch.cat(node_indice_list, 0)
-    return node_features, node_labels, edge_index, graph_labels_list
-
-def graph_collate_fn_hybrid(batch):
-    edge_index_list = []
-    node_features_list = []
-    node_features_list_2D = []
-    node_labels_list = []
-    graph_labels_list = []
-    num_nodes_seen = 0
-
-    for graph_id, features_labels_edge_index_tuple in enumerate(batch):
-        node_features_list.append(features_labels_edge_index_tuple[0])
-        node_features_list_2D.append(features_labels_edge_index_tuple[1])
-        node_labels_list.append(features_labels_edge_index_tuple[2])
-        edge_index = features_labels_edge_index_tuple[3]  # all of the components are in the [0, N] range
-        
-        # Adjust edge indices
-        if edge_index.shape[0] > 2:
-            edge_index[0] += num_nodes_seen
-            edge_index[1] += num_nodes_seen
-            edge_index_list.append(edge_index)
-        else:
-            edge_index_list.append(edge_index + num_nodes_seen)
-        
-        # Add graph ID for each node
-        num_nodes = features_labels_edge_index_tuple[1].size(0)
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))
-
-        num_nodes_seen += num_nodes  # Update the number of nodes seen
-
-    # Merge all components into single tensors
-    node_features = torch.cat(node_features_list, 0)
-    node_features_2D = torch.cat(node_features_list_2D, 0)
-    node_labels = torch.cat(node_labels_list, 0)
-    edge_index = torch.cat(edge_index_list, 1)
-    graph_labels = torch.cat(graph_labels_list, 0).to(device)
-
-    return node_features, node_features_2D, node_labels, edge_index, graph_labels
-
-def graph_collate_fn_no_label(batch):
-    edge_index_list = []
-    node_features_list = []
-    graph_labels_list = []
-    num_nodes_seen = 0
-
-    for graph_id, features_labels_edge_index_tuple in enumerate(batch):
-        node_features_list.append(features_labels_edge_index_tuple[0])
-        edge_index = features_labels_edge_index_tuple[1]
-        
-        # Adjust edge indices
-        edge_index_list.append(edge_index + num_nodes_seen)
-        
-        # Add graph ID for each node
-        num_nodes = features_labels_edge_index_tuple[0].size(0)
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))
-
-        num_nodes_seen += len(features_labels_edge_index_tuple[0])  # Update the number of nodes seen
-
-    # Merge all components into single tensors
-    node_features = torch.cat(node_features_list, 0)
-    edge_index = torch.cat(edge_index_list, 1)
-    graph_labels = torch.cat(graph_labels_list, 0).to(device)
-
-    return node_features, edge_index, graph_labels
-
-def graph_collate_fn_adj_mat(batch):
-    node_features_list = []
-    node_labels_list = []
-    edge_index_list = []
-    graph_labels_list = []
-    num_nodes_seen = 0
-
-    for graph_id, features_labels_edge_index_tuple in enumerate(batch):
-        node_features_list.append(features_labels_edge_index_tuple[0])
-        node_labels_list.append(features_labels_edge_index_tuple[1])
-        edge_index = features_labels_edge_index_tuple[2]
-        
-        # Adjust edge indices
-        edge_index_list.append(edge_index + num_nodes_seen)
-        
-        # Add graph ID for each node
-        num_nodes = features_labels_edge_index_tuple[1].size(0)
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))
-
-        num_nodes_seen += num_nodes  # Update the number of nodes seen
-
-    # Merge all components into single tensors
-    node_features = torch.cat(node_features_list, 0)
-    node_labels = torch.cat(node_labels_list, 0)
-    edge_index = torch.cat(edge_index_list, 1)
-
-    # Create adjacency matrix
-    adjacency_matrix = torch.zeros(num_nodes_seen, num_nodes_seen)
-    for edge in edge_index.t():  # Transpose to iterate through edge pairs
-        node1, node2 = edge[0].item(), edge[1].item()
-        adjacency_matrix[node1, node2] = 1
-        adjacency_matrix[node2, node1] = 1  # Since it's an undirected graph
-
-    graph_labels = torch.cat(graph_labels_list, 0)
-
-    return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
-
-
-class InplaceGraphDataset(Dataset):
-    def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device) -> None:
-        self.X = X
-        self.Y = Y
-        self.device = device
-        self.edges = edges
-        self.leni = leni
-
-    def __getitem__(self, index) -> tuple:
-        x = self.X[index]
-        y = self.Y[index]
-
-        if len(self.edges) > 0:
-            edges = self.edges[index]
-        else:
-            edges = []
-
-        return torch.tensor(x, dtype=torch.float32, device=self.device), \
-            torch.tensor(y, dtype=torch.float32, device=self.device), \
-            torch.tensor(edges, dtype=torch.long, device=self.device),  \
-
-    def __len__(self) -> int:
-        return self.leni
-    
-    def len(self):
-        pass
-
-    def get(self):
-        pass
-    
 class ReadGraphDataset_2D(Dataset):
     def __init__(self, X : list,
                  Y : list,
@@ -647,101 +467,6 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
 #                                                                                                       #
 #########################################################################################################
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temporal_as_edges):
-    Xs, Ys, Es = [], [], []
-    
-    if graph.graph_method == 'graph':
-        # Traiter par identifiant de graph
-        graphId = np.unique(x_data[:, graph_id_index])
-        for id in graphId:
-            x_data_graph = x_data[x_data[:, graph_id_index] == id]
-            y_data_graph = y_data[y_data[:, graph_id_index] == id]
-            for date_id in date_ids:
-                if date_id not in np.unique(x_data_graph[:, date_index]):
-                    continue
-                if use_temporal_as_edges is None:
-                    x, y = construct_time_series(date_id, x_data_graph, y_data_graph, ks, len(ids_columns))
-                    if x is not None:
-                        for i in range(x.shape[0]):                
-                            Xs.append(x[i])
-                            Ys.append(y[i])
-                    continue
-                elif use_temporal_as_edges:
-                    x, y, e = construct_graph_set(graph, date_id, x_data_graph, y_data_graph, ks, len(ids_columns))
-                else:
-                    x, y, e = construct_graph_with_time_series(graph, date_id, x_data_graph, y_data_graph, ks, len(ids_columns))
-                
-                if x is None:
-                    continue
-                
-                Xs.append(x)
-                Ys.append(y)
-                Es.append(e)
-    
-    else:
-        # Traiter par date
-        for id in date_ids:
-            if use_temporal_as_edges is None:
-                x, y = construct_time_series(id, x_data, y_data, ks, len(ids_columns))
-                if x is not None:
-                    for i in range(x.shape[0]):                
-                        Xs.append(x[i])
-                        Ys.append(y[i])
-                continue
-            elif use_temporal_as_edges:
-                x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, len(ids_columns))
-            else:
-                x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, len(ids_columns))
-            
-            if x is None:
-                continue
-            
-            Xs.append(x)
-            Ys.append(y)
-            Es.append(e)
-    
-    return Xs, Ys, Es
-
-def create_dataset(graph,
-                    df_train,
-                    df_val,
-                    df_test,
-                    features_name,
-                    use_temporal_as_edges : bool,
-                    device,
-                    ks : int):
-    
-    x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns].values
-    
-    x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns].values
-
-    x_test, y_test = df_test[ids_columns + features_name].values, df_test[ids_columns + targets_columns].values
-
-    dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
-    dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
-    dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
-
-    logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges)
-
-    logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges)
-
-    logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges)
-
-    # Assurez-vous que les ensembles ne sont pas vides
-    assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
-    assert len(XsV) > 0, "Le jeu de données de validation est vide"
-    assert len(XsTe) > 0, "Le jeu de données de test est vide"
-
-    # Création des datasets finaux
-    train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
-    val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
-    test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
-
-    return train_dataset, val_dataset, test_dataset
-
 def load_x_from_pickle(date : int,
                        path : Path,
                        df_train : pd.DataFrame,
@@ -1100,6 +825,7 @@ def train_val_data_loader(graph,
                           df_val,
                           df_test,
                           features_name,
+                          target_name,
                         use_temporal_as_edges : bool,
                         batch_size,
                         device,
@@ -1110,6 +836,7 @@ def train_val_data_loader(graph,
                                                             df_val,
                                                             df_test,
                                                             features_name,
+                                                            target_name,
                                                             use_temporal_as_edges,
                                                             device, ks)
     
@@ -1341,74 +1068,6 @@ def create_test_loader_hybrid(graph,
 
     return loader
 
-def create_test_loader(graph, df,
-                       features_name,
-                       device : torch.device,
-                       use_temporal_as_edges : bool,
-                       ks :int):
-    
-    Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns].values
-
-    X = []
-    Y = []
-    E = []
-
-    if graph.graph_method == 'graph':
-        graphId = np.unique(Xset[:, graph_id_index])
-        for id in graphId:
-            Xset_graph = Xset[Xset[:, graph_id_index] == id]
-            Yset_graph = Yset[Yset[:, graph_id_index] == id]
-            udates = np.unique(Xset_graph[:, date_index])
-            for date in udates:
-                if use_temporal_as_edges is None:
-                    x, y = construct_time_series(date, Xset_graph, Yset_graph, ks, len(ids_columns))
-                    if x is not None:
-                        for i in range(x.shape[0]):
-                            X.append(x[i])
-                            Y.append(y[i])
-                    continue
-                elif use_temporal_as_edges:
-                    x, y, e = construct_graph_set(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
-                else:
-                    x, y, e = construct_graph_with_time_series(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
-
-                if x is None:
-                    continue
-
-                X.append(x)
-                Y.append(y)
-                E.append(e)
-    else:
-        graphId = np.unique(Xset[:, date_index])
-        for date in graphId:
-            if use_temporal_as_edges is None:
-                x, y = construct_time_series(date, Xset, Yset, ks, len(ids_columns))
-                if x is not None:
-                    for i in range(x.shape[0]):
-                        X.append(x[i])
-                        Y.append(y[i])
-                continue
-            elif use_temporal_as_edges:
-                x, y, e = construct_graph_set(graph, id, Xset, Yset, ks, len(ids_columns))
-            else:
-                x, y, e = construct_graph_with_time_series(graph, id, Xset, Yset, ks, len(ids_columns))
-
-            if x is None:
-                continue
-
-            X.append(x)
-            Y.append(y)
-            E.append(e)
-
-    dataset = InplaceGraphDataset(X, Y, E, len(X), device)
-    
-    if use_temporal_as_edges is None:
-        loader = DataLoader(dataset, dataset.__len__(), False)
-    else:
-        loader = DataLoader(dataset, dataset.__len__(), False, collate_fn=graph_collate_fn)
-
-    return loader
-
 def load_tensor_test(use_temporal_as_edges, graphScale, dir_output,
                      X, Y, device, encoding, features_name,
                      k_days, test, scaling, prefix, Rewrite):
@@ -1584,8 +1243,13 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
                 pred_max[mask[:,0], 1] = predictor.predict(pred_max[mask[:, 0], 0])"""
 
     ############################################## Get daily metrics #######################################################
-    col_class = 'nbsinister-MinMaxClass'
-    col_nbsininster = 'nbsinister'
+    if name.find('classification') != -1:
+        col_class = target_name
+        col_nbsinister = 'nbsinister'
+
+    elif name.find('regression') != -1:
+        col_nbsinister = target_name
+        col_class = 'nbsinister-MinMax-5-Class-Dept'
 
     metrics = {}
 
@@ -1628,7 +1292,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     #res_window = res.groupby(['graph_id', 'date'])[res_class_window_cols + ['prediction', 'nbsinister']].mean().reset_index()
     #test_class_window_cols = [col for col in df_test.columns if col.startswith('window_nbsinister')]
     #test_window = df_test.groupby(['graph_id', 'date', 'departement'])[test_class_window_cols + ['nbsinister', 'risk']].mean().reset_index()
-    
+
     #test_ids = set(zip(res_window['graph_id'], res_window['date']))
     #test_window = test_window[test_window[['graph_id', 'date']].apply(tuple, axis=1).isin(test_ids)]
     df_test['saison'] = df_test['date'].apply(get_saison)
@@ -1636,37 +1300,46 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     ####################################### Sinister Evaluation ########################################
 
-    logger.info(f'###################### Analysis {col_nbsininster} #########################')
+    logger.info(f'###################### Analysis {col_nbsinister} #########################')
 
     y_pred = pred[:, 0]
     if pred_max is not None:
         y_pred_max = pred_max[:, 0]
         y_pred_min = pred_min[:, 0]
 
-    y_true = df_test[col_nbsininster].values
+    y_true = df_test[col_nbsinister].values
     
     apr = round(average_precision_score(y_true > 0, y_pred), 2)
     df_test['prediction'] = y_pred
 
-    ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsininster, dir_output / name)
+    ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsinister, dir_output / name)
 
     r2 = r2_score(y_true, y_pred)
 
     metrics[f'nbsinister'] = df_test['nbsinister'].sum()
     logger.info(f'Number of sinister = {df_test["nbsinister"].sum()}')
 
-    metrics[f'nb_{col_nbsininster}'] = df_test[col_nbsininster].sum()
-    logger.info(f'Number of {col_nbsininster} = {df_test[col_nbsininster].sum()}')
+    metrics[f'nb'] = df_test[col_nbsinister].sum()
+    logger.info(f'Number of {col_nbsinister} = {df_test[col_nbsinister].sum()}')
 
-    metrics[f'apr_{col_nbsininster}'] = apr
+    metrics[f'apr'] = apr
     logger.info(f'apr = {apr}')
 
-    metrics[f'r2_{col_nbsininster}'] = r2
+    metrics[f'r2'] = r2
     logger.info(f'r2 = {r2}')
 
-    metrics[f'KS_{col_nbsininster}'] = ks
+    metrics[f'KS'] = ks
     logger.info(f'KS = {ks}')
-    
+
+    # Calcul des scores pour les signaux
+    iou_dict = calculate_signal_scores(y_pred, y_true, df_test['graph_id'].values, df_test['saison'].values)
+
+    """# Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
+    for key, value in iou_dict.items():
+        metric_key = f'{key}_sinister'  # Ajouter un suffixe basé sur col_for_dict
+        metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
+        logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée"""
+
     """mae = round(mean_absolute_error(y_true, y_pred), 2)
     mse = round(mean_squared_error(y_true, y_pred), 2)
     mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
@@ -1698,15 +1371,19 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_true_temp[:, date_index] = df_test['date']
     y_true_temp[:, -1] = y_true
     y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_nbsininster]
+    y_true_temp[:, -3] = df_test[col_nbsinister]
 
     realVspredict(y_pred, y_true_temp, -1,
-        dir_output / name, col_nbsininster,
+        dir_output / name, col_nbsinister,
         pred_min, pred_max)
     
     res['prediction'] = pred[:, 0]
-    
+
     logger.info(f'###################### Analysis {col_class} #########################')
+
+    _, iv = calculate_woe_iv(res, 'prediction', 'nbsinister')
+    metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
+    logger.info(f'IV = {iv}')
 
     y_pred = pred[:, 1]
     y_true = df_test[col_class]
@@ -1718,7 +1395,8 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         y_pred_min = None
 
     all_class = np.unique(np.concatenate((df_test[col_class].values, y_pred)))
-    all_class_label = [str(c) for c in all_class]
+    all_class = all_class[~np.isnan(all_class)]
+    all_class_label = [int(c) for c in all_class]
 
     #metrics = add_metrics(methods, i, pred, y, test_departement, target_name, graph, name, dir_train)
     plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
@@ -1732,7 +1410,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     #mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
     accuracy = round(accuracy_score(y_true, y_pred), 2)
 
-    metrics[f'accuracy_{col_class}'] = accuracy
+    metrics[f'accuracy'] = accuracy
     """metrics[f'mae_{col_for_dict}'] = mae
     metrics[f'mse_{col_for_dict}'] = mse
     metrics[f'mae_fire_{col_for_dict}'] = mae_fire
@@ -1749,9 +1427,15 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
-        metric_key = f'{key}_{col_class}'  # Ajouter un suffixe basé sur col_for_dict
+        metric_key = f'{key}_class'  # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
         logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
+
+    
+    for cl in np.unique(y_true):
+        logger.info(f'{cl} -> {y_true[y_true == cl].shape[0]}, {y_pred[y_pred == cl].shape[0]}')
+        metrics[f'{cl}_true'] = y_true[y_true == y_true].shape[0]
+        metrics[f'{cl}_true'] = y_pred[y_pred == y_pred].shape[0]
 
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
     y_true_temp[:, graph_id_index] = df_test['graph_id']
@@ -1979,10 +1663,11 @@ def test_sklearn_api_model(args,
     i = 0
 
     #test_dataset_dept.sort_values(by=['id', 'date'], inplace=True, axis=1)
+    autoRegression = False
 
     #################################### Traditionnal ##################################################
 
-    for name, target_name, autoRegression in models:
+    for name, target_name in models:
 
         y = test_dataset_dept[ids_columns + targets_columns].values
         model_dir = dir_train / name_exp / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
@@ -2077,6 +1762,7 @@ def test_sklearn_api_model(args,
         except:
             pass
 
+        res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
     
         """if scale == 'departement':
@@ -2117,7 +1803,6 @@ def test_sklearn_api_model(args,
             log_metrics_recursively(metrics_dept[name], prefix='departement')
             
         save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred_dept.pkl', dir_output / name)"""
-        res['model'] = name
         #res_dept['model'] = name
 
         res_scale.append(res)
@@ -2141,7 +1826,6 @@ def test_dl_model(args,
                   graphScale, test_dataset_dept,
                           test_dataset_unscale_dept,
                           train_dataset,
-                           methods,
                            test_name,
                            features_name,
                            prefix_train,
@@ -2174,7 +1858,7 @@ def test_dl_model(args,
     i = 0
 
     #################################### GNN ###################################################
-    for name, use_temporal_as_edges, target_name, autoRegression in models:
+    for name, use_temporal_as_edges, target_name, out_channels in models:
         model_name = name.split('_')[0]
 
         is_2D_model = model_name in models_2D
@@ -2193,12 +1877,9 @@ def test_dl_model(args,
         logger.info(f'       {name}          ')
         logger.info('#########################')
 
-        features_selected_str = read_object('features_str.pkl', model_dir)
-        features_selected = read_object('features.pkl', model_dir)
+        model = read_object(f'{name}.pkl', model_dir)
 
-        if features_selected is None:
-            logger.info(f'{model_dir}/features.pkl not found')
-            continue
+        assert model is not None
 
         if is_pc:
             temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
@@ -2211,39 +1892,31 @@ def test_dl_model(args,
                                                   scale=scale, graphScale=graphScale, dir_output=rootDisk / temp_dir / dir_train,
                                                 df=test_dataset_dept, df_train=train_dataset, device=device,
                                                 k_days=k_days, test=test_name,
-                                                features_name=features_selected_str,
+                                                features_name=model.features_name,
                                                 features=features,
-                                                scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=True)
+                                                scaling=scaling, encoding=encoding, prefix=prefix_train, Rewrite=True)
         elif not is_2D_model:
-            test_loader = load_loader_test(use_temporal_as_edges=use_temporal_as_edges, graphScale=graphScale, dir_output=dir_output,
-                                        df=test_dataset_dept,
-                                        device=device, k_days=k_days, test=test_name, features_name=features_selected_str,
-                                        scaling=scaling, encoding=encoding, prefix=prefix, Rewrite=True)
-
+            test_loader = model.create_test_loader(graph, df)
         else:
             test_loader = load_loader_test_2D(use_temporal_as_edges=use_temporal_as_edges,
                                               image_per_node=image_per_node, graphScale=graphScale,
                                               dir_output=rootDisk / temp_dir / dir_train,
                                               df=test_dataset_unscale_dept,
                                             df_train=train_dataset, device=device, k_days=k_days, test=test_name,
-                                            scaling=scaling, prefix=prefix, scale=scale,
+                                            scaling=scaling, prefix=prefix_train, scale=scale,
                                             features_name_2D=features_selected_str, features=features, features_name=features_name,
                                             encoding=encoding,
                                             Rewrite=True)
 
-        #print(test_dataset_dept[test_dataset_dept['date'] >= allDates.index('2024-01-01')]['weight'].unique())
-        #print(allDates.index('2024-01-01'))
+        dl_model, _ = model.make_model(graph, model.model_params)
 
-        if model_name in models_hybrid:
-            model, model_params = make_model(model_name, len(features_selected[0]), len(features_selected[1]), graphScale, dropout, 'relu', k_days, target_name == 'binary', device, num_lstm_layers)
-        else:
-            model, model_params = make_model(model_name, len(features_selected), len(features_selected), graphScale, dropout, 'relu', k_days, target_name == 'binary', device, num_lstm_layers)
-            
         if (model_dir / 'best.pt').is_file():
-            graphScale._load_model_from_path(model_dir / 'best.pt', model, device, model_name)
+            model._load_model_from_path(model_dir / 'best.pt', dl_model, device, model_name)
         else:
             logger.info(f'{model_dir}/best.pt not found')
             continue
+
+        graphScale.set_model(model)
 
         run = f'{test_name}_{name}_{prefix_train}'
 
@@ -2254,8 +1927,7 @@ def test_dl_model(args,
             else:
                 mlflow.start_run(run_name=f'{run}', nested=True)
 
-        predTensor, YTensor = graphScale._predict_test_loader(test_loader, features_selected, device=device, target_name=target_name, 
-                                                            autoRegression=autoRegression, features_name=features_selected_str, dataset=test_dataset_dept)
+        predTensor, YTensor = graphScale._predict_test_loader(test_loader, dataset=test_dataset_dept)
         
         if target_name == 'binary' or target_name == 'nbsinister':
             band = -2
@@ -2300,18 +1972,30 @@ def test_dl_model(args,
             _, _ , kmeans_features = get_features_for_sinister_prediction(dataset_name=args['dataset'], sinister=args['sinister'], isInference=args['name'] == 'inference')
             df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
             df[ids_columns] = test_dataset_dept[ids_columns]
+            df[targets_columns] = test_dataset_dept[targets_columns]
             features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
             df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
-            df[target_name] = pred[:, 0]
-            df = apply_kmeans_class_on_target(df, dir_break_point=dir_break_point, target=target_name, tresh=tresh_kmeans,
-                                            features_selected=features_selected_kmeans, new_val=0)
+            df['prediction'] = pred[:, 0]
+            shift = int(args['shift'])
+            shift_list = np.arange(0, shift+1)
+            prefix_kmeans = f'{args["nbpoint"]}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            
+            test_dataset_dept['nbsinister'] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+            test_dataset_dept['risk'] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+            pred[:, 0] = df[f"prediction_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+            y[:, risk_index] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+            y[:, nbsinister_index] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
 
             pred[:, 0] = df[target_name]
+
         y = YTensor.detach().cpu().numpy()
-        #y = test_dataset_dept[ids_columns + targets_columns].values
-        #print(y.shape, YTensor.shape)
+
         metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
-                                            methods, i, test_departement, target_name, name, test_name, dir_output)
+                                               test_departement, target_name, name,
+                                               dir_output, pred_min = None, pred_max = None)
         
         if MLFLOW:
             log_metrics_recursively(metrics[name], prefix='')
@@ -2330,55 +2014,10 @@ def test_dl_model(args,
         else:
             logger.info('Could not produce features plot')"""
         
-        if scale == 'departement':
-            continue
-        # Analyse departement prediction
-        res_dept = res.groupby(['departement', 'date'])['risk'].sum().reset_index()
-        res_dept['id'] = res_dept['departement']
-        res_dept['graph_id'] = res_dept['departement']
-        res_dept['latitude'] = res.groupby(['departement'])['latitude'].mean().reset_index()['latitude']
-        res_dept['longitude'] = res.groupby(['departement'])['longitude'].mean().reset_index()['longitude']
-        res_dept['nbsinister'] = res.groupby(['departement', 'date'])['nbsinister'].sum().reset_index()['nbsinister']
-        res_dept['nbsinister_id'] = res.groupby(['departement', 'date'])['nbsinister'].sum().reset_index()['nbsinister']
-        res_dept['days_until_next_event'] = calculate_days_until_next_event(res_dept['id'].values, res_dept['date'].values, res_dept['nbsinister'].values)
-
-        dir_predictor = dir_train / 'influenceClustering'
-        for nameDep in test_departement:
-            mask = np.argwhere(y[:, departement_index] == name2int[nameDep])
-            if mask.shape[0] == 0:
-                continue
-            predictor = read_object(nameDep+'PredictorDepartement.pkl', dir_predictor)
-            if predictor is None:
-                predictor = read_object(f'{nameDep}Predictor{name}Departement.pkl', dir_predictor)
-            break
-
-        res_dept['class_risk'] = order_class(predictor, predictor.predict(res_dept['risk'].values, 0))
-        res_dept['weight'] =  predictor.weight_array(predictor.predict(res_dept['risk'].values, 0).astype(int)).reshape(-1)
-
-        if target_name == 'binary':
-            res_dept['prediction'] = res.groupby(['departement', 'date']).apply(group_probability).reset_index()['prediction']
-        else:
-            res_dept['prediction'] = res.groupby(['departement', 'date']).sum().reset_index()['prediction']
-
-        """metrics_dept[f'{name}_departement'], res_dept = evaluate_pipeline(dir_train, prefix_train, test_dataset_dept, res_dept[['prediction', 'class_risk']].values,
-                                                                res_dept[ids_columns + targets_columns].values,
-                                                                graphScale,
-                                                                methods, i, test_departement, target_name, name, test_name,
-                                                                dir_output, departement_scale=True)"""
-        metrics_dept[f'{run}_departement'] = {'mae': None}
-        
-        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
-        save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_dept_pred.pkl', dir_output / name)
-
-        if MLFLOW:
-            log_metrics_recursively(metrics_dept[f'{name}_departement'], prefix='departement')
-            mlflow.end_run()
-
         res['model'] = name
-        res_dept['model'] = name
+        save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
 
         res_scale.append(res)
-        res_departement.append(res_dept)
         
         i += 1
 
@@ -2390,12 +2029,6 @@ def test_dl_model(args,
 
     save_object(metrics, outname, dir_output)
 
-    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_dept_dl.pkl'
-    if (dir_output / outname).is_file():
-        log_metrics = read_object(outname, dir_output)
-        metrics.update(log_metrics)
-        
-    save_object(metrics_dept, outname, dir_output)
     return metrics, metrics_dept, res_scale, res_departement
 
 def test_simple_model(args,
@@ -2613,7 +2246,6 @@ def create_inference_2D(graph, X : np.array, x_train : np.array, y_train : np.ar
 
     return
 
-
 ############################################################################################################
 #                                                                                                          #
 #                                           WRAPPED TRAIN                                                  # 
@@ -2623,16 +2255,24 @@ def create_inference_2D(graph, X : np.array, x_train : np.array, y_train : np.ar
 def wrapped_train_deep_learning_1D(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
     infos = params['infos']
-    autoRegression = params['autoRegression']
 
-    target_name, task_type, loss = infos.split('_')
+    non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
     loss_name = loss
 
     logger.info(f'Fitting model {model}')
     logger.info('Try loading loader')
 
-    train_loader = read_object(f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
+    train_dataset = params['train_dataset']
+    val_dataset = params['val_dataset']
+    test_dataset = params['test_dataset']
+
+    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, params['graph_method'])
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
+
+    """train_loader = read_object(f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
     val_loader = read_object(f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
     test_loader = read_object(f'test_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
 
@@ -2640,14 +2280,15 @@ def wrapped_train_deep_learning_1D(params):
         logger.info(f'Building loader, loading loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl')
         train_loader, val_loader, test_loader = train_val_data_loader(
             graph=params['graphScale'],
-            df_train=params['train_dataset'],
-            df_val=params['val_dataset'],
-            df_test=params['test_dataset'],
+            df_train=train_dataset,
+            df_val=val_dataset,
+            df_test=test_dataset,
             features_name=params['features_selected_str'],
             batch_size=batch_size,
             device=params['device'],
             use_temporal_as_edges=use_temporal_as_edges,
-            ks=params['k_days']
+            ks=params['k_days'],
+            target_name=target_name,
         )
         save_object(train_loader, f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
         save_object(val_loader, f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
@@ -2671,11 +2312,31 @@ def wrapped_train_deep_learning_1D(params):
         "dir_output": params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
         "target_name": target_name,
         'infos' : infos,
-        "autoRegression": autoRegression,
-        'k_days' : params['k_days']
+        'k_days' : params['k_days'],
+        'task_type' : params['task_type'],
+        'out_channels' : params['out_channels']
     }
 
-    train(train_params)
+    train(train_params)"""
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=params['features_selected_str'],
+                                    ks=params['k_days'],
+                                    dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device)
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+    
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_output)
 
 def wrapped_train_deep_learning_2D(params):
     model = params['model']

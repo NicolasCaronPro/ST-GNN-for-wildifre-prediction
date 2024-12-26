@@ -395,20 +395,28 @@ def fit(params):
             return
         name = f'{type_aggregation}-{col_id}-{name}'
         model = FederatedByID(model, loss=model.loss, model_type=model.model_type, name=f'{name}', id_train=df_train[col_id], id_val=df_val[col_id])
+    
+    if isinstance(model, DualModel):
+        name = f'Dual-{name}'
 
     save_object(features, 'features.pkl', dir_output / name)
     save_object(grid_params, 'grid_params.pkl', dir_output / name)
 
     model.dir_log = dir_output / name
-    
+
+    features = list(features)
+
     if isinstance(model, ModelVoting):
         logger.info(f'Fitting model {name}')
-        model.fit(X=df_train[features], y=df_train[target], X_test=df_test[features], y_test=df_test[target],
+        model.fit(X=df_train[features + ['weight']], y=df_train[target],
+                  X_val=df_val[features + ['weight']], y_val=df_val[target],
+                  X_test=df_test[features], y_test=df_test[target],
                     optimization=parameter_optimization_method,
                     grid_params_list=grid_params, fit_params_list=fit_params)
     else:
         logger.info(f'Fitting model {name}')
-        model.fit(X=df_train[features], y=df_train[target],
+        model.fit(X=df_train[features + ['weight']], y=df_train[target],
+                    X_val=df_val[features + ['weight']], y_val=df_val[target],
                     X_test=df_test[features], y_test=df_test[target],
                     features_search=features_search,
                     optimization=parameter_optimization_method,
@@ -1104,26 +1112,6 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     logger.info(f'Val {target} values {val_dataset[target].unique()}')
     logger.info(f'Test {target} values {test_dataset[target].unique()}')
 
-    if non_fire_number != 'full':
-        if non_fire_number.find('binary') != -1:
-            vec = non_fire_number.split('-')
-            try:
-                nb = int(vec[-1]) * len(train_dataset[train_dataset['nbsinister'] > 0])
-            except:
-                print(f'{non_fire_number} with undefined factor, set to 1 -> {len(train_dataset[train_dataset["nbsinister"] > 0])}')
-                nb = len(train_dataset[train_dataset['nbsinister'] > 0])
-
-            new_train_dataset = train_dataset.loc[train_dataset['nbsinister'] > 0]
-            non_fire_dataset = train_dataset.loc[train_dataset['nbsinister']== 0]
-            nb = min(len(non_fire_dataset), nb)
-            non_fire_dataset = non_fire_dataset.sample(nb, random_state=42)
-            train_dataset = pd.concat((new_train_dataset, non_fire_dataset)).sort_values(by=['date', 'graph_id'], axis=0)
-
-            train_dataset.reset_index(drop=True, inplace=True)
-
-            print(f'Train mask {train_dataset.shape}')
-
-
     params = {
         'df_train': train_dataset,
         'df_val': val_dataset,
@@ -1161,14 +1149,14 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
 ############################################################# Voting ######################################################################
 
 def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_dataset,
-                                    model_name, graph_method,
-                            dir_output: Path,
-                            device: str,
-                            features: list,
-                            autoRegression: bool,
-                            optimize_feature: bool,
-                            do_grid_search: bool,
-                            do_bayes_search: bool):
+                                            model_name, graph_method,
+                                            dir_output: Path,
+                                            device: str,
+                                            features: list,
+                                            autoRegression: bool,
+                                            optimize_feature: bool,
+                                            do_grid_search: bool,
+                                            do_bayes_search: bool):
     
     models_type, non_fire_number, weight_type, target, task_type, loss = model_name[0].split('_')
 
@@ -1235,7 +1223,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
 
         model, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                         features, model_name[0], model_type, task_type, 
-                                        params, loss, non_fire_number=non_fire_number)
+                                        params, loss, non_fire_number=non_fire_number, post_process=model_name[-1])
         
         grid_params = get_grid_params(model_type)
         
@@ -1253,10 +1241,115 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         'target' : target,
         'name': model_name[0],
         'model': estimator,
+        
         'fit_params': fit_params_list,
         'parameter_optimization_method': parameter_optimization_method,
         'grid_params': grid_params_list,
         'dir_output': dir_output,
+        'features' : features,
+        'type_aggregation' : None,
+        'col_id': None,
+        'features_search' : optimize_feature
+    }
+
+    fit(fit_params_dict)
+
+############################################################# DUAL #########################################################################
+def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_dataset,
+                                    model, graph_method,
+                            dir_output: Path,
+                            device: str,
+                            features: list,
+                            autoRegression: bool,
+                            optimize_feature: bool,
+                            do_grid_search: bool,
+                            do_bayes_search: bool):
+
+    name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+
+    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
+
+    train_dataset = train_dataset[train_dataset['weight'] > 0]
+    val_dataset = val_dataset[val_dataset['weight'] > 0]
+    test_dataset = test_dataset[test_dataset['weight'] > 0]
+
+    logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
+
+    if do_grid_search:
+        parameter_optimization_method = 'grid'
+    elif do_bayes_search:
+        parameter_optimization_method = 'bayes'
+    else:
+        parameter_optimization_method = 'skip'
+
+    model_type = name.split('-')[0]
+
+    params_temp = {
+        'df_train': train_dataset,
+        'df_val': val_dataset,
+        'df_test': test_dataset,
+        'features': features,
+        'optimize_feature': optimize_feature,
+        'dir_output': dir_output,
+        'device': device,
+        'post_process' : model[-1],
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'name': model[0],
+        'type_aggregation' : None,
+        'col_id' : None
+    }
+
+    if model_type == 'xgboost':
+        params = train_xgboost(params_temp, False)
+    elif model_type == 'lightgbm':
+        params = train_lightgbm(params_temp, False)
+    elif model_type == 'rf':
+        params = train_random_forest(params_temp, False)
+    elif model_type == 'svm':
+        params = train_svm(params_temp, False)
+    elif model_type == 'dt':
+        params = train_decision_tree(params_temp, False)
+    elif model_type == 'ngboost':
+        params = train_ngboost(params_temp, False)
+    elif model_type == 'poisson':
+        params = train_poisson(params_temp, False)
+    elif model_type == 'gam':
+        params = train_gam(params_temp, False)
+    else:
+        raise ValueError(f'Unknow model_type {model_type}')
+    
+    grid_params = get_grid_params(model_type)
+
+    model1, fit_params1 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
+                                    features, model[0], model_type, task_type, 
+                                    params, loss, non_fire_number=non_fire_number, post_process=None)
+    
+    model2, fit_params2 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
+                                features, model[0], model_type, task_type, 
+                                params, loss, non_fire_number=non_fire_number, post_process=None)
+    
+    models_list = [model1, model2]
+    fit_params_list = [fit_params1, fit_params2]
+    grid_params_list = [grid_params, grid_params]
+
+    estimator = DualModel(models_list, features=features, loss=loss, name=f'{model}', target_name=target, post_process=model[-1])
+
+    fit_params_dict = {
+        'df_train': train_dataset, 
+        'df_test': test_dataset,
+        'df_val': val_dataset,
+        'weight_col' : 'weight',
+        'target' : target,
+        'name': model[0],
+        'model': estimator,
+        'fit_params': fit_params_list,
+        'parameter_optimization_method': parameter_optimization_method,
+        'grid_params': grid_params_list,
+        'dir_output': dir_output,
+        'post_process' : model[-1],
         'features' : features,
         'type_aggregation' : None,
         'col_id': None,
@@ -1582,10 +1675,10 @@ def launch_train_loader(model, loader,
                 inputs, labels, edges = data
             graphs = None
 
-        if target_name == 'binary' or target_name == 'nbsinister':
-            band = -2
-        else:
-            band = -1
+        #if target_name == 'binary' or target_name == 'nbsinister':
+        #    band = -2
+        #else:
+        band = -1
 
         try:
             target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
@@ -1673,10 +1766,10 @@ def launch_val_test_loader(model, loader,
                 graphs = None
 
             # Determine the index of the target variable in labels
-            if target_name == 'binary' or target_name == 'nbsinister':
-                band = -2
-            else:
-                band = -1
+            #if target_name == 'binary' or target_name == 'nbsinister':
+            #    band = -2
+            #else:
+            band = -1
 
             try:
                 target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
@@ -1793,8 +1886,10 @@ def train(params):
     modelname = params['modelname']
     dir_output = params['dir_output']
     target_name = params['target_name']
-    autoRegression = params['autoRegression']
+    task_type = params['task_type']
+    out_channels = params['out_channels']
     k_days = params['k_days']
+
     if 'custom_model_params' in params.keys():
         custom_model_params = params['custom_model_params']
     else:
@@ -1817,16 +1912,18 @@ def train(params):
         model, _ = make_model(modelname, len(features_selected[0]), len(features_selected[1]),
                               graph, dropout, 'relu',
                               k_days,
-                              target_name == 'binary',
-                              device, num_lstm_layers,
-                              custom_model_params)
+                              out_channels=out_channels,
+                              task_type = task_type,
+                              device=device, num_lstm_layers=num_lstm_layers,
+                              custom_model_params=custom_model_params)
     else:
         model, _ = make_model(modelname, len(features_selected), len(features_selected),
                               graph, dropout, 'relu',
                               k_days,
-                              target_name == 'binary',
-                              device, num_lstm_layers,
-                              custom_model_params)
+                              out_channels=out_channels,
+                              task_type = task_type,
+                              device=device, num_lstm_layers=num_lstm_layers,
+                              custom_model_params=custom_model_params)
     
     #if (dir_output / '100.pt').is_file():
     #    model.load_state_dict(torch.load((dir_output / '100.pt'), map_location=device, weights_only=True), strict=False)

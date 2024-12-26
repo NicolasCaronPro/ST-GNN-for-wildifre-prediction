@@ -165,6 +165,7 @@ train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_uns
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
+
 if MLFLOW:
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
@@ -180,8 +181,6 @@ if MLFLOW:
 
 ######################## Training ##############################
 
-prefix += f'_{weights_version}'
-
 test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
@@ -189,40 +188,25 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 ###################### Defined ClassRisk model ######################
 
-# Min Max
-minmaxclass = MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])
+dir_post_process = dir_output / 'post_process'
 
-minmaxclass.fit(train_dataset['nbsinister'].values)
+post_process_model_dico = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process)
 
-train_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(train_dataset['nbsinister'].values)     
-val_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(val_dataset['nbsinister'].values)
-test_dataset['nbsinister-MinMaxClass'] = minmaxclass.predict_risk(test_dataset['nbsinister'].values)
-
-train_dataset['nbsinister-MinMax'] = minmaxclass.predict(train_dataset['nbsinister'].values)     
-val_dataset['nbsinister-MinMax'] = minmaxclass.predict(val_dataset['nbsinister'].values)        
-test_dataset['nbsinister-MinMax'] = minmaxclass.predict(test_dataset['nbsinister'].values)
-
-# Other...
+###################### Define models to train ######################
 
 models = [
-        #('xgboost_risk_regression_eae-1', 'risk', None),
-        #('xgboost_risk_regression_rmse', 'risk', MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])),
-        #('xgboost_nbsinister_regression_rmsle', 'nbsinister', None),
-        #('xgboost_nbsinister-MinMax_regression_rmse', 'nbsinister-robust', MinMaxClass(thresholds=[0.25, 0.5, 0.75, 1.0])),
-        #('xgboost_nbsinister-MinMaxClass_regression_rmse', 'nbsinister-MinMax', None),
-        ('xgboost_binary-1_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
-        ('xgboost_binary-2_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
-        ('xgboost_binary-3_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
-        ('xgboost_binary-4_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', minmaxclass),
-        #('xgboost_nbsinister_regression_sig2', 'nbsinister', None),
-        #('xgboost_nbsinister_regression_sig', 'nbsinister', None),
-        #('xgboost_nbsinister_regression_rmse', 'nbsinister', None),
-        #('xgboost_nbsinister_classification_softmax', 'nbsinister', None),
-        #('xgboost_nbsinister_regression_quantile', 'nbsinister', None),
-        #('xgboost_nbsinister_regression_mse', 'nbsinister', None),
-        #('xgboost_nbsinister_regression_eae-1', 'nbsinister', None),
-        #('xgboost_binary_classification_logloss', 'binary', None),
+        #('xgboost_binary-2_one_risk-nbsinister-kmeans-5-Class-Dept_classification_softmax', 'risk-nbsinister-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_risk-nbsinister']),
+        #('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister']),
+        #('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_risk']),
+        ('xgboost_binary-2_one_nbsinister-sum-7-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-7-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-7+7']),
+        ('xgboost_binary-2_one_nbsinister-sum-5-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-5-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-5+5']),
+        ('xgboost_binary-2_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-3-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-3+3']),
+        #('xgboost_binary-2_one_nbsinister-MinMax-thresholds-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-thresholds-5-Class-Dept', post_process_model_dico['ScalerClassRisk_MinMax_ThresholdRisk_[0.05, 0.15, 0.3, 0.6, 1.0]_nbsinister']),
         ]
+
+dual_models = [#('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister']),
+               #('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister'])
+               ]
 
 gam_models = [
         #('gam_binary_classification_logloss', 'binary'),
@@ -247,8 +231,7 @@ one_by_id_model = [
        #('xgboost_binary_classification_logloss', 'binary', 'unique', 'departement'),
 ]
 
-federate_model_by_id_model = [
-]
+federate_model_by_id_model = []
 
 voting_models_list = [
                     #[('xgboost_risk_regression_rmse', 'risk'),
@@ -256,11 +239,24 @@ voting_models_list = [
                     # ('dt_risk_regresion_rmse', 'risk')]
                     ]
 
-
 if doTrain:
 
     for model in models:
         wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
+                                dir_output=dir_output / name,
+                                device='gpu',
+                                autoRegression=autoRegression,
+                                features=features_selected,
+                                optimize_feature=optimize_feature,
+                                do_grid_search=do_grid_search,
+                                do_bayes_search=do_bayes_search,
+                                model=model)
+        
+    for model in dual_models:
+        wrapped_train_sklearn_api_dual_model(train_dataset=train_dataset.copy(deep=True),
                                 val_dataset=val_dataset.copy(deep=True),
                                 test_dataset=test_dataset.copy(deep=True),
                                 graph_method=graph_method,
@@ -345,37 +341,35 @@ if doTest:
     name_dir = dn + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
-    mae = my_mean_absolute_error
-    rmse = weighted_rmse_loss
-    std = standard_deviation
-    cal = quantile_prediction_error
-    fre = frequency_class_error
-    f1 = my_f1_score
-    ca = class_accuracy
-    bca = balanced_class_accuracy
-    acc = class_accuracy
-    ck = class_risk
-    po = poisson_loss
-    meac = mean_absolute_error_class
-    c_i_class = c_index_class
-    c_i = c_index
-    bacc = binary_accuracy
-
     models = [
-        #('xgboost_nbsinister-MinMax_regression_rmse', 'nbsinister', autoRegression),
-        #('xgboost_nbsinister-MinMaxClass_regression_rmse', 'nbsinister', autoRegression),
-        ('xgboost_binary-1_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
-        ('xgboost_binary-2_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
-        ('xgboost_binary-3_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
-        ('xgboost_binary-4_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass', autoRegression),
-        #('xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        #('xgboost_risk_regression_rmse', 'risk', autoRegression),
-        #('xgboost_nbsinister_regression_quantile', 'nbsinister', autoRegression),
-        #('unique-departement-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        #('unique-month-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        #('unique-dayofweek-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        #('unique-isweekend-xgboost_nbsinister_regression_rmse', 'nbsinister', autoRegression),
-        #('xgboost-xgboost-xgboost_nbsinister_nbsinister_regression_rmse', 'nbsinister', autoRegression),
+        #('xgboost_nbsinister-MinMax_regression_rmse', 'nbsinister'),
+        #('xgboost_full_one_nbsinister_regression_rmse', 'nbsinister'),
+        #('Dual-xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept'),
+        #('Dual-xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept'),
+
+        #('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_risk-zeros-kmeans-5-Class-Dept_classification_softmax', 'risk-zeros-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-MinMax-thresholds-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-thresholds-5-Class-Dept'),
+        #('xgboost_binary-2_one_risk-nbsinister-kmeans-5-Class-Dept_classification_softmax', 'risk-nbsinister-kmeans-5-Class-Dept'),
+        ('xgboost_binary-2_one_nbsinister-sum-7-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-7-kmeans-5-Class-Dept'),
+        ('xgboost_binary-2_one_nbsinister-sum-5-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-7-kmeans-5-Class-Dept'),
+        ('xgboost_binary-2_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-sum-7-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept'),
+        #('xgboost_full_one_risk-zeros-kmeans-5-Class-Dept_classification_softmax', 'risk-zeros-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-MinMax-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-MinMax-4-Class-Dept_classification_softmax', 'nbsinister-MinMax-4-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-MinMax-3-Class-Dept_classification_softmax', 'nbsinister-MinMax-3-Class-Dept'),
+        #('xgboost_binary-4_one_nbsinister-MinMaxClass_classification_softmax', 'nbsinister-MinMaxClass'),
+        #('xgboost_nbsinister_regression_rmse', 'nbsinister'),
+        #('xgboost_risk_regression_rmse', 'risk'),
+        #('xgboost_nbsinister_regression_quantile', 'nbsinister'),
+        #('unique-departement-xgboost_nbsinister_regression_rmse', 'nbsinister'),
+        #('unique-month-xgboost_nbsinister_regression_rmse', 'nbsinister'),
+        #('unique-dayofweek-xgboost_nbsinister_regression_rmse', 'nbsinister'),
+        #('unique-isweekend-xgboost_nbsinister_regression_rmse', 'nbsinister'),
+        #('xgboost-xgboost-xgboost_nbsinister_nbsinister_regression_rmse', 'nbsinister'),
         ]
 
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -432,11 +426,11 @@ if doTest:
             res = pd.concat(res).reset_index(drop=True)
         else:
             metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
-            res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / name)
             assert metrics is not None
             run = f'{dept}_{name}_{prefix}'
-            if MLFLOW:
-                for name, use_temporal_as_edges, target_name, autoRegression in models:
+            for name, target_name in models:
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
+                if MLFLOW:
                     existing_run = get_existing_run(f'{run}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
@@ -446,7 +440,6 @@ if doTest:
                         log_metrics_recursively(metrics[run], prefix='')
                     else:
                         logger.info(f'{name} not found')
-                    
                     mlflow.end_run()
 
         if 'df_metrics' not in locals():
@@ -463,10 +456,11 @@ if doTest:
     check_and_create_path(dir_output / prefix)
     df_metrics.to_csv(dir_output / prefix / 'df_metrics.csv')
 
-    wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
-    wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')
-    wrapped_compare(df_metrics,  dir_output / prefix, 'Target')
-    wrapped_compare(df_metrics,  dir_output / prefix, 'Days_in_futur')
+ 
+    #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
+    #wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')
+    #wrapped_compare(df_metrics,  dir_output / prefix, 'Target')
+    #wrapped_compare(df_metrics,  dir_output / prefix, 'Days_in_futur')
 
     """############## Prediction ######################
     for name, target_name, _ in models:
@@ -523,7 +517,7 @@ if doTest:
 
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
 
-    for name, target_name, _ in models:
+    for name, target_name in models:
         band = 'prediction'
         if target_name == 'binary':
             vmax_band = 1
@@ -547,7 +541,7 @@ if doTest:
             allDates.index('2023-05-08')
         ]
 
-        region_france = gpd.read_file('/home/caron/Bureau/csv/france/data/geo/hexagones_france.gpkg')
+        region_france = gpd.read_file(root / 'csv/france/data/geo/hexagones_france.gpkg')
         region_france['latitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.y))
         region_france['longitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.x))
 
@@ -560,9 +554,9 @@ if doTest:
         vmax_band = np.nanmax(train_dataset_dept[target_name].values)
         
         #susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
-        #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)
+        #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)"""
     
-    ######################## Ground Truth ####################
+    """######################## Ground Truth ####################
     name = 'GT'
     check_and_create_path(dir_output / name)
     susectibility_map_france_daily_geojson(aggregated_prediction, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), target_name,

@@ -239,12 +239,13 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
         assert graphScale is not None
         for target_spe in target_column_name_list:
             df = graphScale.compute_mean_sequence(df.copy(deep=True), dataset_name, maxDate, target_spe)
-            df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'nbsinister_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'nbsinister_{target_spe}')
-            df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'risk_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'risk_{target_spe}')
+            #df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'nbsinister_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'nbsinister_{target_spe}')
+            #df = graphScale.compute_window_class(df, [1], 5, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='train', column=f'risk_{target_spe}', dir_output=dir_output / 'class_window' / prefix / f'risk_{target_spe}')
         
         df['risk'] = df['risk_0_0'].values
         for target_spe in target_column_name_list:
-            df = graphScale._create_predictor(df.copy(deep=True), minDate, maxDate, dir_output, target_spe)
+            #df = graphScale._create_predictor(df.copy(deep=True), minDate, maxDate, dir_output, target_spe)
+             df[f'class_risk_{target_spe}'] = 0
 
         ############################## Global variable #######################################
 
