@@ -480,14 +480,28 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     source_ds = None
     return read_tif(output_raster)
 
-import pandas as pd
-import numpy as np
+def remove_nan_nodes(df: pd.DataFrame, features_name: list) -> pd.DataFrame:
+    """
+    Supprime les lignes contenant des valeurs NaN dans les colonnes spécifiées.
 
-def remove_nan_nodes(df: pd.DataFrame) -> pd.DataFrame:
+    Parameters:
+    - df (pd.DataFrame): Le DataFrame à nettoyer.
+    - features_name (list): Une liste des colonnes dans lesquelles rechercher les NaN.
+
+    Returns:
+    - pd.DataFrame: Un nouveau DataFrame sans lignes contenant des NaN dans les colonnes spécifiées.
     """
-    Remove rows where any NaN values are present in 'nodes' columns.
-    """
-    return df.dropna().reset_index(drop=True)
+    # Identifier les colonnes contenant des NaN parmi les colonnes spécifiées
+    nan_columns = df[features_name].isna().any()
+    nan_columns_list = nan_columns[nan_columns].index.tolist()
+
+    # Journaliser les colonnes concernées
+    logger.info(f"Colonnes contenant des NaN : {nan_columns_list}")
+
+    # Supprimer les lignes contenant des NaN et réinitialiser les index
+    cleaned_df = df.dropna(subset=features_name).reset_index(drop=True)
+    
+    return cleaned_df
 
 def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -1921,32 +1935,69 @@ def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break
         plt.savefig(dir_log / 'kmeans_feature' / f'{fet}_{date_limit}.png')
         plt.close('all')
 
-def apply_kmeans_class_on_target(df: pd.DataFrame, dir_break_point: Path, target : str, tresh : int, features_selected, new_val : int):
-    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
-    values_risk = df[target].values
-    for fet in features_selected:
-        logger.info(f'############## {fet} #################')
-        values = df[fet].values
-        predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
-        if predictor is None:
-            continue
-        predclass = order_class(predictor, predictor.predict(values))
-        cls = np.unique(predclass)
-        low = False
-        previous_class = -1
-        for c in cls:
-            mask = predclass == c
-            if dico_correlation[fet][int(c)] < tresh:
-                low = True
-                previous_class = c
-                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} -> 0')
-                values_risk[mask] = new_val
-            elif low:
-                logger.info(f'{target} : {c, dico_correlation[fet][int(c)]}, {np.unique(values_risk[mask])} due to {previous_class} -> 0')
-                values_risk[mask] = new_val
+def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path, target: str, tresh: float, features_selected, new_val: int, shifts: list, mask_df):
+    """
+    Applies KMeans classes on the target column based on thresholds and optionally considers shifts.
 
-    df[target] = values_risk
-    return df
+    Args:
+        df (pd.DataFrame): Input DataFrame.
+        dir_break_point (Path): Directory containing break points and models.
+        target (str): Target column to modify.
+        tresh (float): Threshold value for applying classes.
+        features_selected (list): List of selected features.
+        new_val (int): Value to assign for low correlation classes.
+        shifts (list): List of integer shifts to apply on the target column.
+        
+    Returns:
+        pd.DataFrame: Modified DataFrame with updated target column.
+    """
+    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
+
+    if mask_df is None:
+        df = dataframe.copy(deep=True)
+    else:
+        df = dataframe[mask_df].copy(deep=True)
+
+    values_risk = np.copy(df[target].values)
+
+    # Iterate over shifts
+    for shift in shifts:
+        logger.info(f'############## Processing shift: {shift} #################')
+
+        shifted_df = df.copy(deep=True)
+        
+        dataframe[f'{target}_{shift}_{tresh}'] = np.copy(dataframe[target].values)
+        df[f'{target}_{shift}_{tresh}'] = np.copy(df[target].values)
+
+        for fet in features_selected:
+            fet_key = f"{fet}_{shift}"
+            
+            shifted_df[fet] = shifted_df.groupby('graph_id')[fet].shift(shift)
+            values = shifted_df[fet].values
+            values[np.isnan(values)] = 0
+            
+            predictor = read_object(f'{fet}_{shift}.pkl', dir_break_point / fet)
+            if predictor is None:
+                continue
+            predclass = order_class(predictor, predictor.predict(values))
+            cls = np.sort(np.unique(predclass))
+            low = False
+
+            # Iterate over the classes
+            for c in cls:
+                mask = predclass == c
+                if dico_correlation[fet_key][int(c)] < tresh or low:
+                    low = True
+                    values_risk[mask] = new_val
+
+        df[f'{target}_{shift}_{tresh}'] = np.copy(values_risk)
+        logger.info(f'{target}_{shift}_{tresh} : {df[target].sum()} -> {df[f"{target}_{shift}_{tresh}"].sum()}')
+
+    if mask_df is None:
+        return df
+    else:
+        dataframe[mask_df] = df
+        return dataframe
 
 def est_bissextile(annee):
     return annee % 4 == 0 and (annee % 100 != 0 or annee % 400 == 0)

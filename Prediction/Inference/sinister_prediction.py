@@ -15,6 +15,8 @@ warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning
 ####################### Function #################################
 
 def create_ps(geo):
+    assert graph is not None
+
     X_kmeans = list(zip(geo.longitude, geo.latitude))
 
     if dept in graph.departements.unique():
@@ -30,7 +32,9 @@ def create_ps(geo):
 
     return geo
 
-def fire_prediction(interface, departement, features, train_features, scaling, dir_data, spec, dates, df_train, apply_break_point):
+def fire_prediction(interface, departement, features, train_features, scaling, dir_data, dates, df_train, apply_break_point):
+
+    assert graph is not None
 
     features = copy.copy(features)
     train_features = copy.copy(train_features)
@@ -76,12 +80,10 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
         model_ = read_object(f'{model_name}.pkl', dir_data / datatset_name/ dir / model_name)
         graph._set_model(model_)
 
-    logger.info(f'Load features')
-    features_selected = read_object('features.pkl', dir_data / datatset_name/ dir / model_name)
-
     logger.info('Generate X from dataframe -> could be improove')
     if USE_IMAGE:
-        X, _ = get_sub_nodes_feature_with_images(graph=graph,subNode=orinode,
+        X, features_name = get_sub_nodes_feature_with_images(graph=graph,
+                        subNode=orinode,
                         departements=[departement],
                         features=features, sinister=sinister,
                         dir_mask=dir_mask,
@@ -91,7 +93,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
                         dates=[d.strftime('%Y-%m-%d') for d in dates],
                         graph_construct=graphConstruct)
     else:
-        X, _ = get_sub_nodes_feature_with_geodataframe(graph=graph,
+        X, features_name = get_sub_nodes_feature_with_geodataframe(graph=graph,
                                 subNode=orinode,
                                 features=features,
                                 departement=departement,
@@ -99,48 +101,36 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
                                 path=dir_data,
                                 dates=[d.strftime('%Y-%m-%d') for d in dates],
                                 resolution=resolution)
-
-    if int(args.days) > 0:
-        logger.info(f'Add time vayring features from 1 -> {args.days}')
-        for k in range(1, int(args.days) + 1):
-            new_fet = [f'{v}_{k}' for v in varying_time_variables]
-            train_features += [nf for nf in new_fet if nf.split('_')[0] in train_features]
-            features += new_fet 
-            features_name, newShape = get_features_name_list(graph.scale, features, METHODS_TEMPORAL)
-            X = add_varying_time_features(X=X, Y=orinode, features=new_fet, newShape=newShape, features_name=features_name, ks=k, scale=scale, methods=METHODS_TEMPORAL)
-    
+        
     df = pd.DataFrame(columns=ids_columns + features_name, index=np.arange(0, X.shape[0]))
     df[features_name] = X
     df[ids_columns] = orinode
+    df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features)
     df.to_csv(f'{dir_log}/{date_limit}.csv', index=False)
-    
-    features_name, _ = get_features_name_list(graph.scale, train_features, METHODS_SPATIAL_TRAIN)
-    
+        
     fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
 
-    df_shape = df.shape
-    df = df[ids_columns + features_name]
-    logger.info(f'Select train feature : shape : {df_shape} -> {df.shape}')
     logger.info(f'Preprocess X (scale {scaling})')
-    print(df.date.unique(), k_limit)
 
     df = preprocess_inference(df, df_train, scaling, features_name, fire_feature,
                               apply_break_point,
-                              scale, kmeans_features, dir_break_point, dir_log, date_limit,
-                              sinister)
-    if df is None:
-        return None
-    index_to_predict = df[df['fire_prediction_raw'].isna()].index
-    logger.info(f'Found {len(df) - index_to_predict.shape[0]} values where fire has no chance')
+                              scale, kmeans_features, dir_break_point,
+                              thresh=thresh_kmeans,
+                              shift=days_in_futur)
 
     if df is None:
         return None
     
     df.to_csv(f'{dir_log}/{date_limit}_after_scale.csv', index=False)
+    index_to_predict = df[df['fire_prediction'].isna()].index
+    logger.info(f'Found {len(df) - index_to_predict.shape[0]} values where fire has no chance')
+
+    logger.info(f'Load features')
+    features_selected = read_object('features.pkl', dir_data / datatset_name/ dir / model_name)
 
     if df is not None:
         if model in traditionnal_models:
-            Y = graph.predict_model_api_sklearn(X=df.loc[index_to_predict], features=features_selected, isBin=target == 'binary', autoRegression=False)
+            Y = graph.predict_model_api_sklearn(X=df.loc[index_to_predict], features=features_selected, target_name=target, autoRegression=False)
         else:
             logger.info('Generate X and edges, use for GNN')
             # Predict Today
@@ -159,13 +149,9 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
 
     df['do_prediction']= False
     if index_to_predict.shape[0] != 0:
-        df.loc[index_to_predict, 'fire_prediction_raw'] = Y
+        df.loc[index_to_predict, 'fire_prediction'] = Y
         df.loc[index_to_predict, 'do_prediction'] = True
-
-    df['fire_prediction'] = order_class(predictor, predictor.predict(df['fire_prediction_raw'].values), 1)
-    df = df[df['date'] == k_limit].reset_index(drop=True)
-    risk = np.sum(df['fire_prediction_raw'].values)
-    df['fire_prediction_dept'] = order_class(predictor_departement, predictor_departement.predict(np.array(risk).reshape(-1,1)), 1)[0]
+    
     logger.info('Features importances')    
     if model in traditionnal_models:
         if date_limit == dt.datetime.now().date():
@@ -196,6 +182,90 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     geoDT = geoDT.set_index('id').join(df.set_index('id')[fire_feature], on='id').reset_index()
     return geoDT
 
+def prepare_data(date_limit):
+    assert graph is not None
+    # Date
+    date_ks = (date_limit - dt.timedelta(days=k_days_conv))
+
+    if 'incendie_feather_ori' in locals():
+        incendie_feather = incendie_feather_ori[(incendie_feather_ori['date'] >= date_ks) & (incendie_feather_ori['date'] <= date_limit)]
+        dates = np.sort(incendie_feather.date.unique())
+    else:
+        dates_str = find_dates_between(date_ks.strftime('%Y-%m-%d'), (d + dt.timedelta(days=1)).strftime('%Y-%m-%d'))
+        dates = [dt.datetime.strptime(d, '%Y-%m-%d').date() for d in dates_str]
+    if date_limit not in dates:
+        logger.info(f'No data for {date_limit}')
+        return None, _
+    logger.info(dates)
+    if len(dates) == 0:
+        return None, _
+    ######################### Interface ##################################
+    interface = []
+
+    for ks, date in enumerate(dates):            
+        geo_data = spatialGeo.copy(deep=True)
+        geo_data.index = geo_data.hex_id
+        if 'incendie_feather_ori' in locals():
+            geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
+                                                on='hex_id')
+            geo_data.reset_index(inplace=True)
+            geo_data[spatialGeo['population'].isna()][features_in_feather[1:]] = np.nan
+            
+        geo_data['date'] = ks
+        geo_data['date_str'] = date.strftime('%Y-%m-%d')
+        geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
+        geo_data['latitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.y))
+
+        interface.append(geo_data)
+
+    interface = pd.concat(interface).reset_index(drop=True)
+
+    if sinister == 'firepoint':
+        if 'feux' in interface.columns:
+            interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
+            interface['nbfirepoint'].fillna(0, inplace=True)
+        else:
+            interface['nbfirepoint'] = 0
+
+    logger.info('Rename features to match with train fet')
+    interface.rename({'temp12' : 'temp', 'dwpt12' : 'dwpt',
+                    'rhum12' : 'rhum', 'prcp12' : 'prcp', 'wdir12' : 'wdir',
+                    'wspd12' : 'wspd', 'prec24h12' : 'prec24h',
+                    'snow24h12': 'snow24h',
+                    'daily_severity_rating' : 'dailySeverityRating',
+                    'osmnx' : 'highway'}, inplace=True, axis=1)
+
+    ######################### Preprocess #################################
+
+    n_pixel_x = 0.02875215641173088
+    n_pixel_y = 0.020721094073767096
+
+    mask = read_object(f'{dept}rasterScale{scale}_{graphConstruct}.pkl', dir_mask)
+    if mask is None:
+        geo = interface[interface['date'] == 0].reset_index()
+        geo[f'id_{scale}'] = graph._predict_node_with_features(dept,  dir_mask, resolution,
+                                                    dir_script / 'log', dir_target,
+                                                    dir_target_bin, dir_raster, dir_encoder,
+                                                    geo)
+
+    if dept in knowed_departement: 
+        logger.info(f'Create past influence using convolution and PCA')
+        inputDep = create_spatio_temporal_sinister_image(interface,
+                                                        mask,
+                                                        sinister,
+                                                        n_pixel_y,
+                                                        n_pixel_x,
+                                                        dir_script / 'log',
+                                                        dept)
+
+        Probabilistic(n_pixel_x, n_pixel_y, 1, None, Path(__file__).absolute().parent / dir_script, resolution)._process_input_raster(dims, [inputDep], 1, True,
+                                                                                                [dept], True, dates, [dept], True)
+        
+    
+    ######################### Load autoregression ####################
+    interface['AutoRegressionReg'] = 0
+    return interface, dates
+
 if __name__ == "__main__":
 
     MACHINES_DEPLOIEMENT = {
@@ -225,6 +295,10 @@ if __name__ == "__main__":
     parser.add_argument('-abp', '--applyBreakpoint', type=str, help='Apply Kmeans on target')
     parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='Apply Kmeans on target')
     parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
+    parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='Dataset to use')
+    parser.add_argument('-graph_method', '--graph_method', type=str, help='Dataset to use')
+    parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Dataset to use')
+    
     args = parser.parse_args()
 
     # Input config
@@ -247,10 +321,16 @@ if __name__ == "__main__":
     apply_break_point = args.applyBreakpoint == 'True'
     graphConstruct = args.graphConstruct
     dataset_name = args.dataset
+    days_in_futur = args.days_in_futur
+    graph_method = args.graph_method
+    thresh_kmeans = args.thresh_kmeans
 
-    prefix_train = f'{minPoint}_{k_days}_{nbFeature}_{scale}_{graphConstruct}'
-    prefix_df = f'{minPoint}_{k_days}_{scale}_{graphConstruct}'
-    prefix_kmeans = f'{minPoint}_{k_days}_{scale}_{graphConstruct}'
+    prefix_train = f'full_{k_days}_{nbFeature}_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
+    prefix_df = f'full_{k_days}_{nbFeature}_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
+
+    prefix_kmeans =  f'full_{scale}_{graphConstruct}_{graph_method}'
+
+    spec = 'occurence'
 
     # Arborescence
     if socket.gethostname() in MACHINES_DEPLOIEMENT:
@@ -264,6 +344,7 @@ if __name__ == "__main__":
         dir_feather = root_dir / 'data' / 'dataframes'
         dir_raster = dir_incendie / 'raster' / resolution
         dir_mask = dir_data / 'raster'
+        dir_script = Path('./')
     else:
         dir_data = Path(f'../GNN/{exp}/{sinister}/{resolution}/train/')
         dir_feather = Path('interface')
@@ -277,6 +358,7 @@ if __name__ == "__main__":
         dir_target = Path(f'../Target/{dataset_name}/{sinister}/log/{resolution}')
         dir_target_bin = Path(f'../Target/{sinister}/bin/{resolution}')
         dir_raster = dir_interface / 'raster'
+        dir_script = Path('./')
 
     dir_output = dir_log / 'output'
     dir_break_point = dir_data / datatset_name/ 'check_none' / prefix_kmeans / 'kmeans'
@@ -284,17 +366,7 @@ if __name__ == "__main__":
     check_and_create_path(dir_log)
 
     graph = read_object(f'graph_{scale}_{graphConstruct}.pkl', dir_data)
-    predictor = read_object(f'{dept}Predictor{scale}_{graphConstruct}.pkl', dir_data / 'influenceClustering')
-    predictor_departement = read_object(f'{dept}PredictorDepartement.pkl', dir_data / 'influenceClustering')
-
-    if predictor is None:
-        predictor = read_object(f'general_predictor_{scale}_{graphConstruct}.pkl', dir_data / 'influenceClustering')
-    if predictor_departement is None:
-        predictor_departement = read_object(f'general_predictor_departement_{graphConstruct}.pkl', dir_data / 'influenceClustering')
-
-    if predictor is None or predictor_departement is None:
-        logger.info(f'Couldn t load predictor')
-        exit(1)
+    assert graph is not None
 
     df_train = read_object(f'df_train_{prefix_df}.pkl', dir_data / spec)
 
@@ -316,11 +388,15 @@ if __name__ == "__main__":
                 'elevation',
                 'population',
                 'sentinel',
-                'landcover',
+                'foret_encoder',
+                'argile_encoder',
+                'id_encoder',
+                'cluster_encoder',
+                'cosia_encoder',
                 'vigicrues',
                 'foret',
                 'highway',
-                'dynamicWorld',
+                'cosia',
                 'Calendar',
                 'Historical',
                 'Geo',
@@ -334,7 +410,9 @@ if __name__ == "__main__":
     train_features = [
                     'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                     'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                    'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+                    'isi', 'angstroem', 'bui',
+                    'fwi',
+                    'dailySeverityRating',
                     'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
@@ -342,56 +420,33 @@ if __name__ == "__main__":
                     'elevation',
                     'population',
                     #'sentinel',
-                    #'landcover',
-                    #'vigicrues',
-                    #'foret',
+                    'foret_encoder',
+                    'argile_encoder',
+                    'id_encoder',
+                    'cluster_encoder',
+                    'cosia_encoder',
+                    'vigicrues',
+                    'foret',
                     'highway',
-                    #'dynamicWorld',
+                    'cosia',
                     'Calendar',
-                    #'Historical',
+                    'Historical',
                     'Geo',
                     'air',
-                    #'nappes',
+                    'nappes',
                     #'AutoRegressionReg',
-                    #'AutoRegressionBin'
+                   'AutoRegressionBin',
                     ]
     
     kmeans_features = [
-            #'temp',
-            #'dwpt',
-            'rhum',
-            #'prcp', 
-            #'wdir',
-            #'wspd',
+            #'rhum',
             'prec24h',
-            #'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-            #'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-            #'temp16',
-            #'dwpt16',
-            'rhum16',
-            #'prcp16',
-            #'wdir16', 'wspd16',
+            #'rhum16',
             'prec24h16',
-            #'days_since_rain',
             'sum_consecutive_rainfall',
             'sum_rain_last_7_days',
             'sum_snow_last_7_days',
             'snow24h', 'snow24h16',
-            #'elevation',
-            #'population',
-            #'sentinel',
-            #'landcover',
-            #'vigicrues',
-            #'foret',
-            #'highway',
-            #'dynamicWorld',
-            #'Calendar',
-            #'Historical',
-            #'Geo',
-            #'air',
-            #'nappes',
-            #'AutoRegressionReg',
-            #'AutoRegressionBin'
             ]
 
     features_in_feather = ['hex_id', 'date',
@@ -484,114 +539,20 @@ if __name__ == "__main__":
         sd = dt.datetime.now().date()
         ed = dt.datetime.now().date() + dt.timedelta(days=2)
     d = sd
+
     while d != ed:
-        # Date
         date_limit = d
-        date_ks = (date_limit - dt.timedelta(days=k_days_conv))
-
-        if 'incendie_feather_ori' in locals():
-            incendie_feather = incendie_feather_ori[(incendie_feather_ori['date'] >= date_ks) & (incendie_feather_ori['date'] <= date_limit)]
-            dates = np.sort(incendie_feather.date.unique())
-        else:
-            dates_str = find_dates_between(date_ks.strftime('%Y-%m-%d'), (d + dt.timedelta(days=1)).strftime('%Y-%m-%d'))
-            dates = [dt.datetime.strptime(d, '%Y-%m-%d').date() for d in dates_str]
-        if date_limit not in dates:
-            logger.info(f'No data for {date_limit}')
+    
+        interface, dates = prepare_data(date_limit)
+        if interface is None:
             d += dt.timedelta(days=1)
             continue
-        logger.info(dates)
-        if len(dates) == 0:
-            d += dt.timedelta(days=1)
-            continue
-        ######################### Interface ##################################
-        interface = []
 
-        for ks, date in enumerate(dates):            
-            geo_data = spatialGeo.copy(deep=True)
-            geo_data.index = geo_data.hex_id
-            if 'incendie_feather_ori' in locals():
-                geo_data = geo_data.set_index('hex_id').join(incendie_feather[incendie_feather['date'] == date][features_in_feather].set_index('hex_id'),
-                                                    on='hex_id')
-                geo_data.reset_index(inplace=True)
-                geo_data[spatialGeo['population'].isna()][features_in_feather[1:]] = np.nan
-                
-            geo_data['date'] = ks
-            geo_data['date_str'] = date.strftime('%Y-%m-%d')
-            geo_data['longitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.x))
-            geo_data['latitude'] = geo_data['geometry'].apply(lambda x : float(x.centroid.y))
-
-            interface.append(geo_data)
-
-        interface = pd.concat(interface).reset_index(drop=True)
         k_limit = interface.date.max()
-
-        if sinister == 'firepoint':
-            if 'feux' in interface.columns:
-                interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
-                interface['nbfirepoint'].fillna(0, inplace=True)
-            else:
-                interface['nbfirepoint'] = 0
-
-        logger.info('Rename features to match with train fet')
-        interface.rename({'temp12' : 'temp', 'dwpt12' : 'dwpt',
-                        'rhum12' : 'rhum', 'prcp12' : 'prcp', 'wdir12' : 'wdir',
-                        'wspd12' : 'wspd', 'prec24h12' : 'prec24h',
-                        'snow24h12': 'snow24h',
-                        'daily_severity_rating' : 'dailySeverityRating',
-                        'osmnx' : 'highway'}, inplace=True, axis=1)
-
-        ######################### Preprocess #################################
-
-        n_pixel_x = 0.02875215641173088
-        n_pixel_y = 0.020721094073767096
-
-        dir_script = Path('./')
-
-        mask = read_object(f'{dept}rasterScale{scale}_{graphConstruct}.pkl', dir_mask)
-        if mask is None:
-            geo = interface[interface['date'] == 0].reset_index()
-            geo[f'id_{scale}'] = graph._predict_node_with_features(dept,  dir_mask, resolution,
-                                                        dir_script / 'log', dir_target,
-                                                        dir_target_bin, dir_raster, dir_encoder,
-                                                        geo)
-
-        if dept in knowed_departement: 
-            logger.info(f'Create past influence using convolution and PCA')
-            inputDep = create_spatio_temporal_sinister_image(interface,
-                                                            mask,
-                                                            sinister,
-                                                            n_pixel_y,
-                                                            n_pixel_x,
-                                                            dir_script / 'log',
-                                                            dept)
-
-            Probabilistic(n_pixel_x, n_pixel_y, 1, None, Path(__file__).absolute().parent / dir_script, resolution)._process_input_raster(dims, [inputDep], 1, True,
-                                                                                                    [dept], True, dates, [dept], True)
-            
-        
-        ######################### Load autoregression ####################
-        interface['AutoRegressionReg'] = 0
-        if 'AutoRegressionReg' in train_features:
-            previous_date = (date_limit - dt.timdelta(days=1)).strftime('%Y-%m-%d')
-            on = f'hexagones_{previous_date}.geojson'
-            logger.info('AutoRegressionReg mode -> loading {previous_date}')
-            if (dir_interface / '..' / 'scripts' / 'global' / 'sinister_prediction' / 'interface' / on).is_file():
-                logger.info(f'{on} found')
-                previous_log_interface = gpd.read_file(dir_interface / '..' / 'scripts' / 'global' / 'sinister_prediction' / 'interface' / on)
-                if 'fire_prediction_raw' not in previous_log_interface.columns:
-                    logger.info(f'fire_prediction_raw not found in previous_log_interface.columns. \
-                                Please launch with doHistorical at True to construct previous prediction, current {doHistorical}')
-                    logger.info('AutoRegressionReg is set to 0')
-                else:
-                    interface.loc[interface[interface['date'] == k_limit].index, 'AutoRegressionReg'] = previous_log_interface['fire_prediction_raw']
-            else:
-                logger.info(f'{on} not found. Please launch with doHistorical at True to construct previous prediction, current {doHistorical}')
-                logger.info('AutoRegressionReg is set to 0')
-
         ######################### Predict ################################
 
         logger.info(f'Launch {sinister} Prediction')
-        interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, spec, dates, df_train, apply_break_point)
+        interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, dates, df_train, apply_break_point)
         if interface is None:
             logger.info(f'Can t produce fire prediction for {dates[-1]}')
             d += dt.timedelta(days=1)

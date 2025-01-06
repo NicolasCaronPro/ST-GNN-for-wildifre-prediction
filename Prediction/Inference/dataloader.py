@@ -340,24 +340,25 @@ def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFram
     return df_XY_clean
 
 def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str, features_name : list, fire_feature : list, apply_break_point : bool, 
-                         scale, kmeans_features, dir_break_point, dir_log, date_limit, sinister):
-    df_X_clean = remove_nan_nodes(df_X)
+                         scale, kmeans_features, dir_break_point, thresh, shift):
+    
+    df_X_clean = remove_nan_nodes(df_X, features_name)
 
     logger.info(f'DataFrame shape before removal of NaNs: {df_X.shape}, after removal: {df_X_clean.shape}')
-    
-    logger.info(f'Nan columns : {df_X.columns[df_X.isna().any()].tolist()}')
 
-    if df_X_clean.shape[0] == 0:
-        return None
+    logger.info(f'Nan columns : {df_X.columns[df_X.isna().any()].tolist()}')
 
     df_X_clean[fire_feature] = np.nan
 
     if apply_break_point:
         logger.info('Apply Kmeans to remove useless node')
         features_selected_kmeans, _ = get_features_name_list(scale, kmeans_features, METHODS_SPATIAL_TRAIN)
-        plot_kmeans_class_for_inference(df_X_clean.copy(deep=True), date_limit, features_selected_kmeans, dir_break_point, dir_log, sinister)
-        df_X_clean['fire_prediction_raw'] = apply_kmeans_class_on_target(df_X_clean.copy(deep=True), dir_break_point, 'fire_prediction_raw', 0.2, features_selected_kmeans, new_val=0)['fire_prediction_raw'].values
-    
+        shift_list = np.arange(0, shift+1)
+        df_X_clean['fire_prediction'] = apply_kmeans_class_on_target(df_X_clean.copy(deep=True), dir_break_point, 'fire_prediction', thresh, features_selected_kmeans, new_val=0, mask_df=None, shifts=shift_list)['fire_prediction'].values
+
+    if df_X_clean.shape[0] == 0:
+        return None
+
     if scaling == 'MinMax':
         scaler = min_max_scaler
     elif scaling == 'z-score':
@@ -373,7 +374,6 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
     for feature in features_name:
         df_X_clean[feature] = scaler(df_X_clean[feature].values, x_train[feature].values, concat=False)
 
-
     logger.info(f'Check {scaling} standardisation inference: max {df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].max().max(), df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].max().idxmax()}')
     logger.info(f'Check {scaling} standardisation inference: min  {df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].min().min(), df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].min().idxmin()}')
     
@@ -384,7 +384,6 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
     logger.info(f'Check before xtrain: min  {x_train[features_name].min().min(), x_train[features_name].min().idxmin()}')
 
     return df_X_clean
-
 
 #########################################################################################################
 #                                                                                                       #

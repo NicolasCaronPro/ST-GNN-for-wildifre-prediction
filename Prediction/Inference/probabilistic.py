@@ -1,4 +1,8 @@
-from tools_inference import *
+from pathlib import Path
+import numpy as np
+from sklearn.metrics import log_loss
+from sklearn.isotonic import IsotonicRegression
+from tools_functions import *
 
 class Probabilistic():
     def __init__(self,
@@ -15,7 +19,7 @@ class Probabilistic():
         self.resolution = resolution
         self.config = {}
 
-    def _metrics(self, O : np.array,
+    """def _metrics(self, O : np.array,
                  Y : np.array,
                  W : np.array):
         loglossProba = np.zeros((O.shape[0], 2))
@@ -34,7 +38,7 @@ class Probabilistic():
 
         bins, ECE = expected_calibration_error(Y, O)
         self.config['ECE_bins'+self.sinisterType] = bins
-        self.config['ECE_val'+self.sinisterType] = ECE
+        self.config['ECE_val'+self.sinisterType] = ECE"""
         
     def _clustering(self, input : np.array,
                     nclass : int):
@@ -106,109 +110,194 @@ class Probabilistic():
                 low_season.append(i)
 
         for band in range(number_of_input):
+            print(f'########################### {departement[band]} #################################')
+            if np.any(input[band][~np.isnan(input[band])] > 0):
 
-            dim = dims[band]
-            med_dim = dim[0]
-            high_dim = dim[1]
-            low_dim = dim[-1]
+                dim = dims[departement[band]]
+                med_dim = dim[0]
+                high_dim = dim[1]
+                low_dim = dim[-1]
 
-            daily = np.full(input[band].shape, fill_value=np.nan)
-            seasonaly = np.full(input[band].shape, fill_value=np.nan)
+                daily = np.full(input[band].shape, fill_value=np.nan)
+                seasonaly = np.full(input[band].shape, fill_value=np.nan)
 
-            daily[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                            dimS=self.precision, mode='laplace',
-                                                            dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+                daily_past = np.full(input[band].shape, fill_value=np.nan)
+                seasonaly_past = np.full(input[band].shape, fill_value=np.nan)
 
-            seasonaly[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                          dimS=self.precision, mode='mean',
-                                                           dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+                daily_futur = np.full(input[band].shape, fill_value=np.nan)
+                seasonaly_futur = np.full(input[band].shape, fill_value=np.nan)
+
+                ######################### High #########################
+
+                daily[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='laplace',
+                                                                dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+
+                seasonaly[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                              dimS=self.precision, mode='median',
+                                                               dim=(high_dim[0], high_dim[1], high_dim[2]), semi=doPast))[:, :, high_season]
+
+                """if not doPast:
+                
+                    daily_past[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(high_dim[0], high_dim[1], high_dim[2]), semi=True))[:, :, high_season]
+
+                    seasonaly_past[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(high_dim[0], high_dim[1], high_dim[2]), semi=True))[:, :, high_season]
+
+                    daily_futur[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(high_dim[0], high_dim[1], high_dim[2]), semi2=True))[:, :, high_season]
+
+                    seasonaly_futur[:, :, high_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(high_dim[0], high_dim[1], high_dim[2]), semi2=True))[:, :, high_season]"""
+                    
+                ######################### medium #########################
+
+                daily[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='laplace',
+                                                                dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+
+                seasonaly[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                              dimS=self.precision, mode='median',
+                                                               dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+
+                """if not doPast:
+                    daily_past[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(med_dim[0], med_dim[1], med_dim[2]), semi=True))[:, :, medium_season]
+
+                    seasonaly_past[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(med_dim[0], med_dim[1], med_dim[2]), semi=True))[:, :, medium_season]
+
+                    daily_futur[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(med_dim[0], med_dim[1], med_dim[2]), semi2=True))[:, :, medium_season]
+
+                    seasonaly_futur[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(med_dim[0], med_dim[1], med_dim[2]), semi2=True))[:, :, medium_season]"""
+
+                ######################### low #########################
 
 
-            daily[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                            dimS=self.precision, mode='laplace',
-                                                            dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+                daily[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='laplace',
+                                                                dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
 
-            seasonaly[:, :, medium_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                          dimS=self.precision, mode='mean',
-                                                           dim=(med_dim[0], med_dim[1], med_dim[2]), semi=doPast))[:, :, medium_season]
+                seasonaly[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                              dimS=self.precision, mode='median',
+                                                               dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
 
-            daily[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                            dimS=self.precision, mode='laplace',
-                                                            dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
-            
-            seasonaly[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
-                                                          dimS=self.precision, mode='mean',
-                                                           dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
+                """if not doPast:
+                    daily_past[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
 
-            
-            years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
-            if departement[band] == 'departement-01-ain' or departement[band] == 'departement-69-rhone':
-                years = years[1:]
-            if departement == 'departement-69-rhone':
-                years = years[:-2]
-            
-            historical = np.zeros((daily.shape))
-            for index, date in enumerate(allDates):
-                if isinstance(date, str):
-                    vec = date.split('-')
+                    seasonaly_past[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast))[:, :, low_season]
+
+                    daily_futur[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                    dimS=self.precision, mode='laplace',
+                                                                    dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast, semi2=True))[:, :, low_season]
+
+                    seasonaly_futur[:, :, low_season] = np.array(influence_index3D(input[band], np.isnan(input[band]),
+                                                                dimS=self.precision, mode='median',
+                                                                dim=(low_dim[0], low_dim[1], low_dim[2]), semi=doPast, semi2=True))[:, :, low_season]"""
+
+                years = ['2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024']
+                if departement[band] == 'departement-01-ain' or departement[band] == 'departement-69-rhone':
+                    years = years[1:]
+                if departement == 'departement-69-rhone':
+                    years = years[:-2]
+
+                historical = np.zeros((daily.shape))
+                for index, date in enumerate(allDates):
+                    if isinstance(date, str):
+                        vec = date.split('-')
+                    else:
+                         vec = date.strftime('%Y-%m-%d').split('-')
+                    month = vec[1]
+                    day = vec[2]
+                    for y in years:
+                        newd = y+'-'+month+'-'+day
+                        if newd not in allDates:
+                            continue
+                        newindex = allDates.index(newd)
+                        if doPast and newindex > index:
+                            continue
+                        historical[:, :, index] += input[band][:, :, newindex]
+                    historical[:, :, index] /= len(years)
+
+                influence = np.full(daily.shape, np.nan)
+
+                historical[np.isnan(input[band])] = np.nan
+                seasonaly[np.isnan(input[band])] = np.nan
+                daily[np.isnan(input[band])] = np.nan
+
+                #influence = daily + historical + seasonaly
+                #influence = (daily + historical + seasonaly) / 3
+                influence = np.copy(daily)
+
+                mask = ~np.isnan(input[band])
+                df = pd.DataFrame(index=np.arange(0, historical[mask].shape[0]))
+                df['1'] = historical[mask]
+                df['2'] = seasonaly[mask]
+                df['3'] = daily[mask]
+                """if not doPast:
+                    df['daily_past'] = daily_past[mask]
+                    df['daily_futur'] = daily_futur[mask]
+                    df['seasonaly_past'] = seasonaly_past[mask]
+                    df['seasonaly_futur'] = seasonaly_futur[mask]"""
+
+                if not read_pca:
+                    pca =  PCA(n_components='mle', svd_solver='full')
+                    """components = pca.fit_transform(df.values)
+                    check_and_create_path(self.dir_output / 'pca')
+                    #show_pcs(pca, 2, components, self.dir_output / 'pca')
+                    print('99 % :',find_n_component(0.99, pca))
+                    print('95 % :', find_n_component(0.95, pca))
+                    print('90 % :' , find_n_component(0.90, pca))
+                    print('85 % :' , find_n_component(0.85, pca))
+                    print('75 % :' , find_n_component(0.75, pca))
+                    print('70 % :' , find_n_component(0.70, pca))
+                    print('60 % :' , find_n_component(0.60, pca))
+                    print('50 % :' , find_n_component(0.50, pca))"""
+
+                    pca =  PCA(n_components=1, svd_solver='full')
                 else:
-                     vec = date.strftime('%Y-%m-%d').split('-')
-                month = vec[1]
-                day = vec[2]
-                for y in years:
-                    newd = y+'-'+month+'-'+day
-                    if newd not in allDates:
-                        continue
-                    newindex = allDates.index(newd)
-                    if doPast and newindex > index:
-                        continue
-                    historical[:, :, index] += input[band][:, :, newindex]
-                historical[:, :, index] /= len(years)
-            
-            influence = np.full(daily.shape, np.nan)
+                    if not doPast:
+                        pca = read_object(f'{names[band]}Influence.pkl', self.dir_output / 'log' / self.resolution)
+                    else:
+                        pca = read_object(f'{names[band]}pastInfluence.pkl', self.dir_output / 'log' / self.resolution)
 
-            historical[np.isnan(input[band])] = np.nan
-            seasonaly[np.isnan(input[band])] = np.nan
-            daily[np.isnan(input[band])] = np.nan
-
-            #influence = daily + historical + seasonaly
-            #influence = (daily + historical + seasonaly) / 3
-            influence = np.copy(daily)
-
-            mask = ~np.isnan(input[band])
-            df = pd.DataFrame(index=np.arange(0, historical[mask].shape[0]))
-            df['1'] = historical[mask]
-            df['2'] = seasonaly[mask]
-            df['3'] = daily[mask]
-            if not read_pca:
-                pca =  PCA(n_components='mle', svd_solver='full')
-                components = pca.fit_transform(df.values)
-                check_and_create_path(self.dir_output / 'pca')
-                show_pcs(pca, 2, components, self.dir_output / 'pca')
-                print('99 % :',find_n_component(0.99, pca))
-                print('95 % :', find_n_component(0.95, pca))
-                print('90 % :' , find_n_component(0.90, pca))
-                print('85 % :' , find_n_component(0.85, pca))
-                print('75 % :' , find_n_component(0.75, pca))
-                print('70 % :' , find_n_component(0.70, pca))
-                print('60 % :' , find_n_component(0.60, pca))
-                print('50 % :' , find_n_component(0.50, pca))
-
-                pca =  PCA(n_components=1, svd_solver='full')
-            else:
+                #res = pca.fit_transform(df.values)            
+                res = np.sum(df.values, axis=-1)
+                influence[mask] = res
                 if not doPast:
-                    pca = read_object(f'{names[band]}PCA.pkl', self.dir_output / 'log' / self.resolution)
-                else:
-                    pca = read_object(f'{names[band]}pastPCA.pkl', self.dir_output / 'log' / self.resolution)
+                    scaler = MinMaxScaler((0, np.nanmax(input[band])))
+                    values = scaler.fit_transform(influence[mask].reshape(-1,1)).reshape(-1)
+                    influence[mask] = values
+                influence[np.isnan(input[band])] = np.nan
 
-            res = pca.fit_transform(df.values)
+                if np.nanmin(influence) < 0:
+                    influence += abs(np.nanmin(influence))
 
-            influence[mask] = res[:, 0]
-            influence[np.isnan(input[band])] = np.nan
-            if np.nanmin(influence) < 0:
-                influence += abs(np.nanmin(influence))
+            #influence = np.array(influence_index3D(influence, np.isnan(input[band]),
+            #                                            dimS=self.precision, mode='mean',
+            #                                            dim=(1, 1, 3), semi=doPast, semi2=False))
+            else:
+                influence = np.copy(input[band])
+                historical = np.copy(input[band])
+                daily = np.copy(input[band])
+                seasonaly = np.copy(input[band])
             
-            logger.info(f'{np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence)}')
+            print(np.nanmin(influence), np.nanmean(influence), np.nanmax(influence), np.nanstd(influence))
             if save:
                 if not doPast:
                     outputName = names[band]+'Influence.pkl'
@@ -223,7 +312,7 @@ class Probabilistic():
                     seasoname = names[band]+'pastSeason.pkl'
                     pcaname = names[band]+'pastPCA.pkl'
 
-                save_object(pca, pcaname, self.dir_output / 'log' / self.resolution)
+                #save_object(pca, pcaname, self.dir_output / 'log' / self.resolution)
                 save_object(influence, outputName ,self.dir_output / 'log' / self.resolution)
                 save_object(historical, histoname ,self.dir_output / 'log' / self.resolution)
                 save_object(daily, dailyname ,self.dir_output / 'log' / self.resolution)
