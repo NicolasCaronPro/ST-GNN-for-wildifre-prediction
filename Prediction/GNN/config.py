@@ -455,7 +455,7 @@ dropout = 0.03
 sklearn_model_list = ['xgboost', 'lightgbm', 'svm', 'rf', 'dt', 'ngboost']
 models_2D = ['Zhang', 'Unet', 'ConvLSTM']
 models_hybrid = ['ConvGraphNet', 'ST-ConvGraphNet', 'HybridConvGraphNet']
-temporal_model_list = ['LSTM', 'DST-GCN', 'ST-GCN', 'ST-GAT', 'ATGCN', 'ST-GATLSTM']
+temporal_model_list = ['LSTM', 'DST-GCN', 'ST-GCN', 'ST-GAT', 'ATGCN', 'ST-GATLSTM', 'DilatedCNN']
 daily_model_list = ['GCN', 'GAT', 'KAN']
 
     

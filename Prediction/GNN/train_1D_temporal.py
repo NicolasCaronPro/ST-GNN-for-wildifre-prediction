@@ -208,7 +208,8 @@ test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 models = [
-        ('LSTM', 'full_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('LSTM', 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('DilatedCNN', 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         ]
 
 gnn_models = [
@@ -283,7 +284,7 @@ if doTest:
     dir_output = Path(name_dir)
 
     models = [
-            ('LSTM_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-sum-3-kmeans-5-Class-Dept', 5),
+            ('LSTM_binary_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-sum-3-kmeans-5-Class-Dept', 5),
     ]
 
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'

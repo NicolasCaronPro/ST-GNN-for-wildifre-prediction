@@ -3015,7 +3015,6 @@ class GraphStructure():
             - y: Tensor containing the true labels.
             """
             assert self.model is not None
-            self.model.eval()
 
             pred, y = self.model._predict_test_loader(X)
 

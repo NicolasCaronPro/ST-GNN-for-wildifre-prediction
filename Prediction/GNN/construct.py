@@ -258,13 +258,6 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
             df = target_by_day(df, limit_day, futur_met, target_spe)
 
         save_object(df, f'df_no_weight_{prefix}.pkl', dir_output)
-    
-    if do2D:
-        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
-                                                                    sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding)
-    else:
-        features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
 
     return df
 
@@ -973,7 +966,6 @@ def init(args, dir_output, script):
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
-        return df, graphScale, prefix, fp, features_name
     else: 
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
@@ -981,6 +973,18 @@ def init(args, dir_output, script):
         find_df = False
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
+
+    ############################## Generate 2D database #######################
+
+    if do2D:
+        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
+                                                                    sinister, dataset_name, dir_output, dir_output,
+                                                                    resolution, graph_construct, sinister_encoding)
+    else:
+        features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
+
+    if not doDatabase:
+        return df, graphScale, prefix, fp, features_name
 
     ################################ Process Target ###############################################
 

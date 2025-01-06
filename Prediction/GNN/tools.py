@@ -3051,8 +3051,8 @@ def calculate_woe_iv(data, feature, target):
     total_bad = df_woe['Bad'].sum()
     
     # Calcul des proportions et du WoE
-    df_woe['Dist_Good'] = df_woe['Good'] / total_good
-    df_woe['Dist_Bad'] = df_woe['Bad'] / total_bad
+    df_woe['Dist_Good'] = df_woe['Good'] / max(total_good, 1e-10)
+    df_woe['Dist_Bad'] = df_woe['Bad'] / max(total_bad, 1e-10)
     df_woe['WoE'] = np.log(df_woe['Dist_Good'] / df_woe['Dist_Bad'].replace(0, 1e-10))
     
     # Calcul de l'IV pour chaque catégorie

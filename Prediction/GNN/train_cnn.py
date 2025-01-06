@@ -43,6 +43,8 @@ parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
 parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -161,7 +163,7 @@ if nbfeatures == 'all':
 else:
     nbfeatures = int(nbfeatures)
     
-_, varying_time_variables_2 = add_time_columns(varying_time_variables, k_days, train_dataset, train_features)
+varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
 
 features_name, newShape = get_features_name_list(6, train_features, ['mean'])
 features_name = [fet for fet in features_name if fet in train_dataset.columns]
@@ -187,23 +189,19 @@ if MLFLOW:
     mlflow.log_param('features_name_2D', features_name_2D)
     mlflow.end_run()
 
+###################### Defined ClassRisk model ######################
+
+dir_post_process = dir_output / 'post_process'
+
+post_process_model_dico = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process)
+
 ############################# Training ##################################
 
-prefix += f'_{weights_version}'
-
-train_dataset['weight'] = train_dataset[weights_version]
-val_dataset['weight'] = val_dataset[weights_version]
-train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
-val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
-
-test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'weight_outlier_nbsinister_2']
-test_dataset['weight'] = test_dataset[f'weight_outlier_nbsinister_2']
-
 cnn_models = [
-             ('Zhang', None, 'risk_regression_rmse', True, autoRegression),
-             #('ConvLSTM', None, 'nbsinister_regression_poisson', True, autoRegression),
-            #('Zhang', None, 'nbsinister_regression_poisson', True, autoRegression),
-             #('Unet', FalsNonee, 'risk_regression_rmse', False, autoRegression)
+             ('Zhang', None, 'binary_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', True),
+             #('ConvLSTM', None, 'nbsinister_regression_poisson', True),
+            #('Zhang', None, 'nbsinister_regression_poisson', True),
+             #('Unet', FalsNonee, 'risk_regression_rmse', False)
             ]
 
 train_loader = None
@@ -246,7 +244,8 @@ if doTrain:
         params['use_temporal_as_edges'] = cnn_model[1]
         params['infos'] = cnn_model[2]
         params['image_per_node'] = cnn_model[3]
-        params['autoRegression'] = cnn_model[4]
+        params['autoRegression'] = False
+        params['torch_structure'] = 'Model_CNN'
 
         wrapped_train_deep_learning_2D(params)
 
