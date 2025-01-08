@@ -193,12 +193,12 @@ if MLFLOW:
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process)
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
 
 ############################# Training ##################################
 
 cnn_models = [
-             ('Zhang', None, 'binary_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', True),
+             ('Zhang', None, 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
              #('ConvLSTM', None, 'nbsinister_regression_poisson', True),
             #('Zhang', None, 'nbsinister_regression_poisson', True),
              #('Unet', FalsNonee, 'risk_regression_rmse', False)
@@ -215,8 +215,9 @@ else:
 
 params = {
     "graph": graphScale,
-    "val_dataset": val_dataset_unscale,
-    "test_dataset": test_dataset_unscale,
+    "train_dataset": train_dataset,
+    "val_dataset": val_dataset,
+    "test_dataset": test_dataset,
     "k_days": k_days,
     "device": device,
     "optimize_feature": optimize_feature,
@@ -236,6 +237,7 @@ params = {
     'features' : features,
     "name_dir": rootDisk / temp_dir / name_dir,
     'k_days' : k_days,
+    'graph_method' : graph_method,
 }
 
 if doTrain:
@@ -244,6 +246,7 @@ if doTrain:
         params['use_temporal_as_edges'] = cnn_model[1]
         params['infos'] = cnn_model[2]
         params['image_per_node'] = cnn_model[3]
+        params['out_channels'] = cnn_model[-1]
         params['autoRegression'] = False
         params['torch_structure'] = 'Model_CNN'
 
@@ -251,7 +254,7 @@ if doTrain:
 
 if doTest:
     
-    host = 'server'
+    host = 'pc'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
@@ -278,29 +281,8 @@ if doTest:
     c_i = c_index
     bacc = binary_accuracy
 
-    methods = [
-            ('mae', mae, 'proba'),
-            ('rmse', rmse, 'proba'),
-            ('std', std, 'proba'),
-            ('cal', cal, 'cal'),
-            ('fre', fre, 'cal'),
-            ('binary', f1, 'bin'),
-            ('accuracy', bacc, 'bin'),
-            ('class', ck, 'class'),
-            #('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('maec', meac, 'class'),
-            ('acc', acc, 'class'),
-            #('c_index', c_i, 'class'),
-            #('c_index_class', c_i_class, 'class'),
-            ('kendall', kendall_coefficient, 'correlation'),
-            ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation'),
-            ('auc_roc', my_roc_auc, 'bin')
-            ]
-
-    cnn_models = [('Zhang_risk_regression_rmse', None, 'risk', autoRegression),
+    models = [
+                ('Zhang_binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
                 #('UNET_risk_regression_rmse', None, 'risk', autoRegression)
                 ]
 
@@ -329,45 +311,39 @@ if doTest:
 
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
-
         if host == 'pc':
-            test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept,
-                            test_dataset_unscale_dept=test_dataset_unscale_dept,
-                            train_dataset=train_dataset_unscale,
-                            methods=methods,
+            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+                            test_dataset_unscale_dept=test_dataset_unscale,
                             test_name=dept,
-                            features_name=features_name,
+                            features_name=features_selected_str,
                             prefix_train=prefix,
                             prefix_config=prefix_config,
-                            models=cnn_models,
+                            models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
                             k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
-                            features=features,
                             test_departement=[dept],
                             dir_train=dir_train,
+                            features=features,
                             dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                             name_exp=name_exp,
                             doKMEANS=doKMEANS)
-        
         else:
-            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
-            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
-            
-            metrics = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
-            if MLFLOW:
-                for name, use_temporal_as_edges, target_name, autoRegression in cnn_models:
-                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
+            assert metrics is not None
+            run = f'{dept}_{name}_{prefix}'
+            for name, _, target_name, _ in models:
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
+                if MLFLOW:
+                    existing_run = get_existing_run(f'{run}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
                     else:
-                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                        mlflow.start_run(run_name=f'{run}', nested=True)
                     if name in metrics.keys():
-                        log_metrics_recursively(metrics[name], prefix='')
+                        log_metrics_recursively(metrics[run], prefix='')
                     else:
                         logger.info(f'{name} not found')
                     mlflow.end_run()

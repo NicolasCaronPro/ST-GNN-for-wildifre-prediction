@@ -189,33 +189,25 @@ if MLFLOW:
 
 ############################# Training ##################################
 
-prefix += f'_{weights_version}'
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
-train_dataset['weight'] = train_dataset[f'{weights_version}_nbsinister']
-val_dataset['weight'] = val_dataset[f'{weights_version}_nbsinister']
+###################### Defined ClassRisk model ######################
 
-train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
-val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
+dir_post_process = dir_output / 'post_process'
 
-test_dataset_unscale['weight_nbsinister'] = test_dataset_unscale[f'weight_outlier_2_nbsinister']
-test_dataset['weight'] = test_dataset[f'weight_outlier_2_nbsinister']
-#test_dataset = val_dataset
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
+
+###################### Define models to train ######################
+
+test_dataset_unscale['weight_nbsinister'] = 1
+test_dataset['weight'] = 1
 
 models = [
-    #('KAN', 'risk_regression_rmse', autoRegression),
-    #('KAN', 'nbsinister_regression_rmse', autoRegression),
-    #('KAN', 'binary_classification_weightedcrossentropy', autoRegression),
-            ]
+        ]
 
 gnn_models = [
-    ('GAT', True, 'nbsinister_regression_rmse', autoRegression),
-    #('GAT', True, 'nbsinister_regression_rmse', autoRegression),
-    #('GAT', True, 'binary_classification_weightedcrossentropy', autoRegression),
-
-    #('GCN', True, 'nbsinister_regression_rmse', autoRegression),
-    #('GCN', True, 'risk_regression_rmse', autoRegression),
-    #('GCN', True, 'binary_classification_weightedcrossentropy', autoRegression),
-]
+        ('GAT', False, 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+] 
 
 train_loader = None
 val_loader = None
@@ -244,6 +236,7 @@ params = {
     "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
+    'graph_method' : graph_method
 }
 
 if doTrain:
@@ -251,17 +244,20 @@ if doTrain:
         params['model'] = gnn_model[0]
         params['use_temporal_as_edges'] = gnn_model[1]
         params['infos'] = gnn_model[2]
-        params['autoRegression'] = gnn_model[3]
+        params['out_channels'] = model[3]
+        params['torch_structure'] = 'Model_GNN'
 
         wrapped_train_deep_learning_1D(params)
 
-    for model in models:
-        params['model'] = model[0]
-        params['infos'] = model[1]
-        params['autoRegression'] = model[2]
-        params['use_temporal_as_edges'] = None
-        
-        wrapped_train_deep_learning_1D(params)
+    if graph_method != 'graph':
+        for model in models:
+            params['model'] = model[0]
+            params['infos'] = model[1]
+            params['out_channels'] = model[2]
+            params['use_temporal_as_edges'] = None
+            params['torch_structure'] = 'Model_Torch'
+            
+            wrapped_train_deep_learning_1D(params)
 
 if doTest:
 
@@ -293,43 +289,11 @@ if doTest:
     c_i = c_index
     bacc = binary_accuracy
 
-    methods = [
-            ('mae', mae, 'proba'),
-            ('rmse', rmse, 'proba'),
-            ('std', std, 'proba'),
-            ('cal', cal, 'cal'),
-            ('fre', fre, 'cal'),
-            ('binary', f1, 'bin'),
-            ('accuracy', bacc, 'bin'),
-            ('class', ck, 'class'),
-            #('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('maec', meac, 'class'),
-            ('acc', acc, 'class'),
-            #('c_index', c_i, 'class'),
-            #('c_index_class', c_i_class, 'class'),
-            ('kendall', kendall_coefficient, 'correlation'),
-            ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation'),
-            ('auc_roc', my_roc_auc, 'bin')
-            ]
-
     models = [
-                #('KAN_nbsinister_regression_rmse', None, 'nbsinister', autoRegression),
-                #('KAN_risk_regression_rmse', None, 'risk', autoRegression),
-                #('KAN_nbsinister_regression_rmse', False, 'nbsinister', autoRegression),
-              #('KAN_binary_classification_weightedcrossentropy', False, 'binary', autoRegression),
     ]
 
     gnn_models = [
-        ('GAT_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
-        #('GAT_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
-        #('GAT_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
-
-        #('GCN_nbsinister_regression_rmse', True, 'nbsinister', autoRegression),
-        #('GCN_risk_regression_rmse', True, 'risk', autoRegression),
-        #('GCN_binary_classification_weightedcrossentropy', True, 'risk', autoRegression),
+        ('GAT_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
     ]
 
     for dept in departements:
@@ -359,14 +323,13 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+           metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
-                            methods=methods,
                             test_name=dept,
                             features_name=features_selected_str,
                             prefix_train=prefix,
                             prefix_config=prefix_config,
-                            models=gnn_models,
+                            models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
                             k_days=k_days,
@@ -431,25 +394,6 @@ if doTest:
                                 resolution='0.03x0.03', region_dept=regions_test, column='prediction',
                                 dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)"""
 
-        metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
-                        test_dataset_unscale_dept=test_dataset_unscale,
-                           methods=methods,
-                           test_name=dept,
-                           features_name=features_selected_str,
-                           prefix_train=prefix,
-                           prefix_config=prefix_config,
-                           models=models,
-                           dir_output=dir_output / dept / prefix,
-                           device=device,
-                           k_days=k_days,
-                           encoding=encoding,
-                           scaling=scaling,
-                           test_departement=[dept],
-                           dir_train=dir_train,
-                           features=features,
-                           dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
-                           name_exp=name_exp,
-                           doKMEANS=doKMEANS)
         
         """if len(res) > 0:
             res = pd.concat(res).reset_index(drop=True)

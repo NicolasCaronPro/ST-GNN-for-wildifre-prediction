@@ -19,7 +19,7 @@ class Probabilistic():
         self.resolution = resolution
         self.config = {}
 
-    def _metrics(self, O : np.array,
+    """def _metrics(self, O : np.array,
                  Y : np.array,
                  W : np.array):
         loglossProba = np.zeros((O.shape[0], 2))
@@ -38,7 +38,7 @@ class Probabilistic():
 
         bins, ECE = expected_calibration_error(Y, O)
         self.config['ECE_bins'+self.sinisterType] = bins
-        self.config['ECE_val'+self.sinisterType] = ECE
+        self.config['ECE_val'+self.sinisterType] = ECE"""
         
     def _clustering(self, input : np.array,
                     nclass : int):

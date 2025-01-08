@@ -3020,6 +3020,10 @@ class GraphStructure():
 
             return pred, y
     
+    def predict_statistical(self, X):
+        assert self.model is not None
+        return self.model.predict(X, 'departement')
+    
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,
                                   autoRegression : bool, quantile=False) -> np.array:

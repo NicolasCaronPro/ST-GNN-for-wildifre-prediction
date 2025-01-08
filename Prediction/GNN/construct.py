@@ -996,7 +996,8 @@ def init(args, dir_output, script):
 
     ################################ Remove bad or correlated features #############################################
     
-    if not find_df and (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
+    if not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
+
         features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
 
         old_shape = df.shape
@@ -1045,7 +1046,8 @@ def init(args, dir_output, script):
 
     if True:
         logger.info(f'Adding time columns {7}')
-        df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
+        logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
+        #df, _ = add_time_columns(varying_time_variables, 1, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 

@@ -7,6 +7,7 @@ from GNN.weigh_predictor import *
 from GNN.features_selection import *
 from GNN.config import *
 from GNN.array_fet import *
+from sklearn.metrics import silhouette_score, silhouette_samples
 
 if is_pc:
     import datetime as dt
@@ -788,24 +789,49 @@ def construct_graph_with_time_series(graph, date : int,
     connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
     maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
-    maskts = np.asarray([index for index in maskts if index not in mask])
     
     if maskts.shape[0] == 0:
         return None, None, None
 
-    xts = X[maskts]
-    x = np.concatenate((x, xts))
+    maskts = np.asarray([index for index in maskts if index not in mask])
+
+    if maskts.shape[0] != 0:
+        xts = X[maskts]
+        x = np.concatenate((x, xts))
 
     if Y is not None:
         y = Y[mask]
-        yts = Y[maskts]
-        yts[:,weight_index] = 0
-        y = np.concatenate((y, yts))
+        if maskts.shape[0] != 0:
+            yts = Y[maskts]
+            yts[:,weight_index] = 0
+            y = np.concatenate((y, yts))
+
+    def get_unique_pair_indices(array, graph_id_index, date_index):
+        """
+        Retourne les indices des lignes uniques basées sur les paires (graph_id, date).
+        :param array: Liste de listes (tableau Python)
+        :param graph_id_index: Index de la colonne `graph_id`
+        :param date_index: Index de la colonne `date`
+        :return: Liste des indices correspondant aux lignes uniques
+        """
+        seen_pairs = set()
+        unique_indices = []
+        for i, row in enumerate(array):
+            pair = (row[graph_id_index], row[date_index])
+            if pair not in seen_pairs:
+                seen_pairs.add(pair)
+                unique_indices.append(i)
+        return unique_indices
+
+    unique_indices = get_unique_pair_indices(y, graph_id_index=graph_id_index, date_index=date_index)
+    x = x[unique_indices]
+    y = y[unique_indices]
 
     # Graph indexing
     x = concat_temporal_graph_into_time_series(x, ks, date)
     if x is None:
         return None, None, None
+    
     if Y is not None:
         y = concat_temporal_graph_into_time_series(y, ks, date)
 
@@ -3053,7 +3079,7 @@ def calculate_woe_iv(data, feature, target):
     # Calcul des proportions et du WoE
     df_woe['Dist_Good'] = df_woe['Good'] / max(total_good, 1e-10)
     df_woe['Dist_Bad'] = df_woe['Bad'] / max(total_bad, 1e-10)
-    df_woe['WoE'] = np.log(df_woe['Dist_Good'] / df_woe['Dist_Bad'].replace(0, 1e-10))
+    df_woe['WoE'] = np.log((df_woe['Dist_Good'] / df_woe['Dist_Bad'].replace(0, 1e-10)).replace(0, 1e-10))
     
     # Calcul de l'IV pour chaque catégorie
     df_woe['IV'] = (df_woe['Dist_Good'] - df_woe['Dist_Bad']) * df_woe['WoE']
@@ -3071,7 +3097,7 @@ def get_saison(x):
                 [6, 7, 8, 9],    # High season
                 [10, 11, 12, 1]  # Low season
             ]
-
+    
     if month in [2, 3, 4, 5]:
         return 'medium'
     if month in [6, 7, 8, 9]:
@@ -3139,6 +3165,61 @@ def calculate_ks(data, score_col, event_col, thresholds, dir_output):
     ks_results_df = pd.DataFrame(ks_results)
 
     return ks_results_df
+
+def silhouette_score_with_plot(y_pred, target, name, dir_output):
+    """
+    Calcule le score de silhouette et génère un graphique de silhouette.
+    :param y_pred: Clusters prédits (array-like)
+    :param target: Données d'entrée correspondantes aux clusters (array-like, features)
+    :param dir_output: Chemin du répertoire de sortie pour sauvegarder le graphique
+    :return: Score de silhouette (float)
+    """
+    # Calcul du score de silhouette
+    score = silhouette_score(target, y_pred)
+    
+    # Calcul des valeurs individuelles de silhouette
+    silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
+    cluster_labels = np.unique(y_pred)
+    
+    # Création du graphique de silhouette
+    fig, ax = plt.subplots(figsize=(10, 7))
+    y_lower = 10
+    for i, label in enumerate(cluster_labels):
+        # Valeurs de silhouette pour le cluster actuel
+        cluster_silhouette_vals = silhouette_vals[y_pred == label]
+        cluster_silhouette_vals.sort()
+        
+        # Hauteur de la barre
+        y_upper = y_lower + len(cluster_silhouette_vals)
+        color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
+        
+        ax.fill_betweenx(
+            np.arange(y_lower, y_upper),
+            0, 
+            cluster_silhouette_vals,
+            facecolor=color,
+            edgecolor=color,
+            alpha=0.7
+        )
+        
+        # Ajouter une étiquette pour le cluster
+        ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
+        y_lower = y_upper + 10  # Espacement entre les clusters
+
+    # Ligne verticale correspondant au score moyen
+    ax.axvline(x=score, color="red", linestyle="--")
+    ax.set_title("Silhouette Plot")
+    ax.set_xlabel("Silhouette Coefficient Values")
+    ax.set_ylabel("Cluster Label")
+    ax.set_yticks([])  # Pas de graduation sur l'axe Y
+    ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
+    
+    # Sauvegarde du graphique
+    plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
+    fig.savefig(plot_path)
+    plt.close(fig)
+    
+    return score
 
 def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, dir_output):
     """
@@ -3411,7 +3492,7 @@ def calculate_ks_continous(data, score_col, event_col, dir_output=None):
     
     return ks_stat, data_sorted[[score_col, 'cum_events', 'cum_non_events', 'ks_diff']]
 
-def calculate_signal_scores(y_pred, y_true, graph_id, saison):
+def calculate_signal_scores(y_pred, y_true, y_true_fire, graph_id, saison):
     """
     Calcule les scores (aire commune, union, sous-prédiction, sur-prédiction) entre deux signaux.
 
@@ -3441,6 +3522,11 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
     only_true_value = np.trapz(y_true) # Air sous la courbe des prédictions
     only_pred_value = np.trapz(y_pred) # Air sous la courbe des prédictions
 
+    mask_fire = (y_pred > 0) | (y_true_fire > 0)
+    intersection_fire = np.trapz(np.minimum(y_pred[mask_fire], y_true_fire[mask_fire]))
+    union_fire = np.trapz(np.maximum(y_pred[mask_fire], y_true_fire[mask_fire]))
+    iou_wildfire = round(intersection_fire / union_fire, 2) if union_fire > 0 else 0
+
     # Enregistrement dans un dictionnaire
     scores = {
         "common_area": intersection,
@@ -3449,6 +3535,7 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
         "over_predicted_area": over_prediction,
 
         "iou": round(intersection / union, 2) if union > 0 else 0,  # To avoid division by zero
+        "iou_wildfire": iou_wildfire,
         "iou_under_prediction": round(under_prediction / union, 2) if union > 0 else 0,
         "iou_over_prediction": round(over_prediction / union, 2) if (union) > 0 else 0,
         f"reliability_predicted" : 1 / round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
@@ -3467,46 +3554,6 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
         "bad_prediction" : round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
     }
 
-    """# Binarisation des prédictions et vérités terrain
-    # Binarisation des prédictions et vérités terrain
-    y_pred_day = (y_pred > 0).astype(int)  # Prédictions binarisées
-    y_true_day = (y_true > 0).astype(int)  # Vérités binarisées
-
-    # Calcul des différentes aires pour les données binaires
-    intersection_day = np.trapz(np.minimum(y_pred_day, y_true_day))  # Aire commune binaire
-    union_day = np.trapz(np.maximum(y_pred_day, y_true_day))         # Aire d'union binaire
-
-    under_prediction_day = np.trapz(np.maximum(0, y_true_day - y_pred_day))
-    over_prediction_day = np.trapz(np.maximum(0, y_pred_day - y_true_day))
-
-    over_prediction_zeros_day = np.trapz(np.maximum(0, y_pred_day[y_true_day == 0]))
-    under_prediction_zeros_day = np.trapz(np.maximum(0, y_true_day[y_pred_day == 0]))
-
-    under_prediction_fire_day = np.trapz(np.maximum(0, y_true_day[y_true_day > 0] - y_pred_day[y_true_day > 0]))
-    over_prediction_fire_day = np.trapz(np.maximum(0, y_pred_day[y_true_day > 0] - y_true_day[y_true_day > 0]))
-
-    only_true_value_day = np.trapz(y_true_day)  # Aire sous la courbe des vérités terrain binaires
-    only_pred_value_day = np.trapz(y_pred_day)  # Aire sous la courbe des prédictions binaires
-
-    # Enregistrement des scores pour les données binaires
-    scores.update({
-        "common_area_day": intersection_day,
-        "union_area_day": union_day,
-        "under_predicted_area_day": under_prediction_day,
-        "over_predicted_area_day": over_prediction_day,
-
-        "iou_day": round(intersection_day / union_day, 2) if union_day > 0 else 0,  # IoU binaire
-        "iou_under_prediction_day": round(under_prediction_day / union_day, 2) if union_day > 0 else 0,
-        "iou_over_prediction_day": round(over_prediction_day / union_day, 2) if union_day > 0 else 0,
-
-        "wildfire_over_predicted_day": round(over_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
-        "wildfire_under_predicted_day": round(under_prediction_fire_day / only_true_value_day, 2) if only_true_value_day > 0 else 0,
-
-        "over_bad_prediction_day": round(over_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
-        "under_bad_prediction_day": round(under_prediction_zeros_day / union_day, 2) if union_day > 0 else 0,
-        "bad_prediction_day": round((over_prediction_zeros_day + under_prediction_zeros_day) / union_day, 2) if union_day > 0 else 0,
-    })"""
-
     ###################################### I. For each graph_id ####################################
     unique_graph_ids = np.unique(graph_id)
 
@@ -3520,6 +3567,12 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
         y_pred_graph = y_pred[mask]
         y_true_graph = y_true[mask]
+        y_true_fire_graph = y_true_fire[mask]
+
+        mask_fire_graph = (y_pred_graph > 0) | (y_true_fire_graph > 0)
+        intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
+        union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
+        iou_wildfire_graph = round(intersection_fire_graph / union_fire_graph, 2) if union_fire_graph > 0 else 0
 
         intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
         union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
@@ -3538,6 +3591,7 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         graph_scores = {
+            f"iou_wildfire_{i}": iou_wildfire_graph,
             f"iou_{i}": round(intersection_graph / union_graph, 2) if union_graph > 0 else 0,  # Pour éviter la division par zéro
             f"iou_under_prediction_{i}": round(under_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
             f"iou_over_prediction_{i}": round(over_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
@@ -3569,6 +3623,13 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
         y_pred_season = y_pred[mask]
         y_true_season = y_true[mask]
+        y_true_fire_season = y_true_fire[mask]
+
+        mask_fire_season = (y_pred_season > 0) | (y_true_fire_season > 0)
+        intersection_fire_season = np.trapz(np.minimum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
+        union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
+        iou_wildfire_season = round(intersection_fire_season / union_fire_season, 2) if union_fire_season > 0 else 0
+
 
         intersection_season = np.trapz(np.minimum(y_pred_season, y_true_season))  # Aire commune
         union_season = np.trapz(np.maximum(y_pred_season, y_true_season))         # Aire d'union
@@ -3587,6 +3648,7 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         season_scores = {
+            f"iou_wildfire_{s}": iou_wildfire_season,
             f"iou_{s}": round(intersection_season / union_season, 2) if union_season > 0 else 0,  # Pour éviter la division par zéro
             f"iou_under_prediction_{s}": round(under_prediction_season / union_season, 2) if union_season > 0 else 0,
             f"iou_over_prediction_{s}": round(over_prediction_season / union_season, 2) if union_season > 0 else 0,
@@ -3622,6 +3684,12 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
             y_pred_graph_season = y_pred[graph_mask]
             y_true_graph_season = y_true[graph_mask]
+            y_true_fire_graph_season = y_true_fire[mask]
+
+            mask_fire_graph_season = (y_pred_graph_season > 0) | (y_true_fire_graph_season > 0)
+            intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
+            union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
+            iou_wildfire_graph_season = round(intersection_fire_graph_season / union_fire_graph_season, 2) if union_fire_graph_season > 0 else 0
 
             intersection_graph_season = np.trapz(np.minimum(y_pred_graph_season, y_true_graph_season))  # Common area
             union_graph_season = np.trapz(np.maximum(y_pred_graph_season, y_true_graph_season))         # Union area
@@ -3634,6 +3702,7 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
             # Compute scores for the graph in this season
             graph_season_scores = {
+                f"iou_wildfire_graph_{i}_season_{season}": iou_wildfire_graph_season,
                 f"iou_graph_{i}_season_{season}": round(intersection_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
                 f"iou_under_prediction_graph_{i}_season_{season}": round(under_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
                 f"iou_over_prediction_graph_{i}_season_{season}": round(over_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
@@ -3654,11 +3723,17 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
     # Parcourir les valeurs uniques de y_true
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
-        mask = y_true == unique_value
-        
+        mask = (y_true == unique_value) | (y_pred == mask)
+
         y_pred_sample = y_pred[mask]
         y_true_sample = y_true[mask]
+        y_true_fire_sample = y_true_fire[mask]
 
+        mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
+        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        iou_wildfire_sample = round(intersection_fire_sample / union_fire_sample, 2) if union_fire_sample > 0 else 0
+        
         # Calculer les aires
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
         union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
@@ -3678,6 +3753,7 @@ def calculate_signal_scores(y_pred, y_true, graph_id, saison):
 
         # Enregistrement dans un dictionnaire
         scores_elt = {
+            f"iou_wildfire_elt_{unique_value}": iou_wildfire_sample,
             f"common_area_elt_{unique_value}": intersection,
             f"union_area_elt_{unique_value}": union,
             f"under_predicted_area_elt_{unique_value}": under_prediction,
@@ -4362,11 +4438,10 @@ def add_weigh_column(dff, train_mask, weight_col, graph_method):
     if graph_method == 'graph':
         df_weight = pd.concat(df_weight)
         dataframe_graph = dataframe_graph.set_index(['graph_id', 'date']).join(df_weight.set_index(['graph_id', 'date'])[weigh_col_name], on=['graph_id', 'date']).reset_index()
-
         try:
-            df.drop(weight_col_name, inplace=True, axis=1)
+            df.drop(weigh_col_name, inplace=True, axis=1)
         except Exception as e:
             print(e)
-        df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[all_weights_col], how='right').reset_index()
+        df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[weigh_col_name], how='right').reset_index()
         
     return df[weigh_col_name].values

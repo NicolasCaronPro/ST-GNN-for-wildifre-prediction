@@ -903,6 +903,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
     :return: The updated DataFrame with new columns added
     """
     dataframe = dataframe.copy()
+    unode = dataframe['id'].unique()
 
     # Dictionary of available methods
     methods_dict = {
@@ -939,7 +940,6 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                 continue
 
             for col in columns:
-                unode = dataframe['id'].unique()
                 for node in unode:
                     index = dataframe[dataframe['id'] == node].index
                     if method_name in methods_dict:

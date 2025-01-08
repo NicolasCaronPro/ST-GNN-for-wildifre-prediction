@@ -6,6 +6,8 @@ import argparse
 import socket
 from array_fet import *
 from generate_database import GenerateDatabase, launch
+from itertools import product
+
 
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -65,10 +67,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     orinode[:,3] = name2int[departement]
     orinode[orinode[:, 4] == k_limit, 5] = 1
 
-    if suffix != '':
-        model_name = f'{model}_{target}_{task_type}_{loss}_{suffix}'
-    else:
-        model_name = f'{model}_{target}_{task_type}_{loss}'
+    model_name = f'{model}_{target}_{task_type}_{loss}'
     
     logger.info(f'Load model {model_name}')
     if model not in traditionnal_models:
@@ -251,8 +250,11 @@ def prepare_data(date_limit):
     if dept in knowed_departement: 
         logger.info(f'Create past influence using convolution and PCA')
         inputDep = create_spatio_temporal_sinister_image(interface,
+                                                         geo,
+                                                        list(dates),
                                                         mask,
                                                         sinister,
+                                                        'occurence',
                                                         n_pixel_y,
                                                         n_pixel_x,
                                                         dir_script / 'log',
@@ -273,110 +275,6 @@ if __name__ == "__main__":
      'ns3007021': {'name': 'ovh2', 'depts': ['01', '78']}, 
     }
 
-    parser = argparse.ArgumentParser(
-        prog='Inference',
-        description='Inference prediction',
-    )
-    parser.add_argument('-d', '--days', type=str, help='Number of days')
-    parser.add_argument('-s', '--scale', type=str, help='Scale')
-    parser.add_argument('-l', '--loss', type=str, help='Loss used from training')
-    parser.add_argument('-t', '--task_type', type=str, help='Regression or classification')
-    parser.add_argument('-ta', '--target', type=str, help='Target')
-    parser.add_argument('-dept', '--departement', type=str, help='departement')
-    parser.add_argument('-sinis', '--sinister', type=str, help='Sinister')
-    parser.add_argument('-m', '--model', type=str, help='Model')
-    parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
-    parser.add_argument('-nf', '--nbFeature', type=str, help='Number of feature')
-    parser.add_argument('-dh', '--doHistorical', type=str, help='Do Historical')
-    parser.add_argument('-r', '--resolution', type=str, help='Pixel resolution')
-    parser.add_argument('-dataset', '--dataset', type=str, help='Specifity')
-    parser.add_argument('-exp', '--experiment', type=str, help='Experiment')
-    parser.add_argument('-su', '--suffix', type=str, help='Suffix of model name')
-    parser.add_argument('-abp', '--applyBreakpoint', type=str, help='Apply Kmeans on target')
-    parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='Apply Kmeans on target')
-    parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
-    parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='Dataset to use')
-    parser.add_argument('-graph_method', '--graph_method', type=str, help='Dataset to use')
-    parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Dataset to use')
-    
-    args = parser.parse_args()
-
-    # Input config
-    k_days = int(args.days)
-    scale = int(args.scale)
-    dept = args.departement
-    sinister = args.sinister
-    model = args.model
-    minPoint = args.nbpoint
-    target = args.target
-    loss = args.loss
-    task_type = args.task_type
-    nbFeature = int(args.nbFeature)
-    resolution = args.resolution
-    doHistorical = args.doHistorical == 'True'
-    scaling = 'z-score' # Scale to used
-    datatset_name= args.dataset
-    suffix = args.suffix
-    exp = args.experiment
-    apply_break_point = args.applyBreakpoint == 'True'
-    graphConstruct = args.graphConstruct
-    dataset_name = args.dataset
-    days_in_futur = args.days_in_futur
-    graph_method = args.graph_method
-    thresh_kmeans = args.thresh_kmeans
-
-    prefix_train = f'full_{k_days}_{nbFeature}_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
-    prefix_df = f'full_{k_days}_{nbFeature}_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
-
-    prefix_kmeans =  f'full_{scale}_{graphConstruct}_{graph_method}'
-
-    spec = 'occurence'
-
-    # Arborescence
-    if socket.gethostname() in MACHINES_DEPLOIEMENT:
-        USE_IMAGE = False
-        root_dir = Path(__file__).absolute().parent.parent.parent.parent.resolve()
-        dir_data = root_dir / 'data' / 'features' / 'incendies' / exp / sinister / resolution / 'train'
-        dir_feather = root_dir / 'data' / 'dataframes' 
-        dir_interface = root_dir / 'interface'
-        dir_log = root_dir / 'scripts' / 'global' / 'sinister_prediction' / 'hexagones'
-        dir_incendie = root_dir / 'data' / 'features' / 'incendies'
-        dir_feather = root_dir / 'data' / 'dataframes'
-        dir_raster = dir_incendie / 'raster' / resolution
-        dir_mask = dir_data / 'raster'
-        dir_script = Path('./')
-    else:
-        dir_data = Path(f'../GNN/{exp}/{sinister}/{resolution}/train/')
-        dir_feather = Path('interface')
-        dir_log = Path(f'interface/{dept}')
-        dir_incendie = Path(f'/home/caron/Bureau/csv/{dept}/data/')
-        dir_incendie_disk = Path(f'/media/caron/X9 Pro/travaille/Thèse/csv/{dept}/data')
-        dir_interface = Path('interface')
-        dir_feather = Path('interface')
-        dir_mask = dir_data /'raster'
-        dir_encoder = dir_data / 'Encoder'
-        dir_target = Path(f'../Target/{dataset_name}/{sinister}/log/{resolution}')
-        dir_target_bin = Path(f'../Target/{sinister}/bin/{resolution}')
-        dir_raster = dir_interface / 'raster'
-        dir_script = Path('./')
-
-    dir_output = dir_log / 'output'
-    dir_break_point = dir_data / datatset_name/ 'check_none' / prefix_kmeans / 'kmeans'
-    check_and_create_path(dir_output)
-    check_and_create_path(dir_log)
-
-    graph = read_object(f'graph_{scale}_{graphConstruct}.pkl', dir_data)
-    assert graph is not None
-
-    df_train = read_object(f'df_train_{prefix_df}.pkl', dir_data / spec)
-
-    assert df_train is not None
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    knowed_departement = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
-
-    # mean max min std ans sum for scale > 0 else value
     features = [
                 'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
@@ -406,7 +304,7 @@ if __name__ == "__main__":
                 'AutoRegressionBin'
                 ]
 
-    # Train features 
+        # Train features 
     train_features = [
                     'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                     'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
@@ -435,136 +333,249 @@ if __name__ == "__main__":
                     'air',
                     'nappes',
                     #'AutoRegressionReg',
-                   'AutoRegressionBin',
+                'AutoRegressionBin',
                     ]
-    
+        
     kmeans_features = [
-            #'rhum',
-            'prec24h',
-            #'rhum16',
-            'prec24h16',
-            'sum_consecutive_rainfall',
-            'sum_rain_last_7_days',
-            'sum_snow_last_7_days',
-            'snow24h', 'snow24h16',
-            ]
+                #'rhum',
+                'prec24h',
+                #'rhum16',
+                'prec24h16',
+                'sum_consecutive_rainfall',
+                'sum_rain_last_7_days',
+                'sum_snow_last_7_days',
+                'snow24h', 'snow24h16',
+                ]
 
     features_in_feather = ['hex_id', 'date',
-                           'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-                           'temp12', 'dwpt12', 'rhum12', 'prcp12', 'wdir12', 'wspd12', 'prec24h12',
-                           'dc', 'ffmc', 'dmc', 'isi', 'bui', 'fwi',
-                           'daily_severity_rating', 'nesterov', 'munger', 'kbdi', 'angstroem',
-                           'days_since_rain', 'sum_consecutive_rainfall', 'sum_rain_last_7_days',
-                           'sum_snow_last_7_days', 'snow24h12', 'snow24h16',
-                           'feux',
-                           ]
-    
+                            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+                            'temp12', 'dwpt12', 'rhum12', 'prcp12', 'wdir12', 'wspd12', 'prec24h12',
+                            'dc', 'ffmc', 'dmc', 'isi', 'bui', 'fwi',
+                            'daily_severity_rating', 'nesterov', 'munger', 'kbdi', 'angstroem',
+                            'days_since_rain', 'sum_consecutive_rainfall', 'sum_rain_last_7_days',
+                            'sum_snow_last_7_days', 'snow24h12', 'snow24h16',
+                            'feux',
+                            ]
+
+    knowed_departement = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
+
     traditionnal_models = ['xgboost', 'lightgbm', 'ngboost']
+        
 
-    if socket.gethostname() in MACHINES_DEPLOIEMENT:
-        incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final.feather')
-    else:
-        if (dir_feather / f'incendie_final_{name2str[dept]}.feather').is_file():
-            incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final_{name2str[dept]}.feather')
-            USE_IMAGE = False
-        else:
-            compute_meteostat_features = False
-            compute_temporal_features = False
-            compute_spatial_features= False
-            compute_air_features = False
-            compute_trafic_features = False
-            compute_vigicrues_features = False
-            compute_nappes_features = True
-            histo = 14
-            start = (dt.datetime.now() - dt.timedelta(days=histo)).date().strftime('%Y-%m-%d')
-            stop = (dt.datetime.now() + dt.timedelta(days=2)).date().strftime('%Y-%m-%d')
-            launch(dir_incendie, dir_incendie_disk, dir_raster,
-                   dept, resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features,
-                   start, stop)
-            USE_IMAGE = True
-
-    # Load feather and spatial
-    if (dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson').is_file():
-        spatialGeo = gpd.read_file(dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson')
-    else:
-        if not (dir_incendie / 'spatial' / f'hexagones.geojson').is_file():
-            logger.info(f'{dir_incendie}/spatial/hexagones_{sinister}.geojson doesn t exist, please provide hexagones !!')
-            exit(2)
-        spatialGeo = gpd.read_file(dir_incendie / 'geo' / f'hexagones.geojson')
-        if not USE_IMAGE:
-            spatialGeo = process_department(dir_data, dir_incendie, dir_mask, dir_encoder,
-                            spatialGeo, sinister, dept, resolution,
-                            ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' ,'foret', 'dynamic_world'])
-    spa = 3
-
-    if sinister == "firepoint":
-        if dept == 'departement-01-ain':
-            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
-            k_days_conv = max(9, k_days)
-        elif dept == 'departement-25-doubs':
-            dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
-            k_days_conv = max(5, k_days)
-        elif dept == 'departement-69-rhone':
-            dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
-            k_days_conv = max(5, k_days)
-        elif dept == 'departement-78-yvelines':
-            dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)],
-            k_days_conv = max(7, k_days)
-        else:
-            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
-            k_days_conv = max(9, k_days)
-    elif sinister == "inondation":
-        if dept == 'departement-01-ain':
-            dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
-            k_days_conv = max(9, k_days)
-        elif dept == 'departement-25-doubs':
-            dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
-            k_days_conv = max(5, k_days)
-        elif dept == 'departement-69-rhone':
-            dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
-            k_days_conv = max(5, k_days)
-        elif dept == 'departement-78-yvelines':
-            dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)],
-            k_days_conv = max(7, k_days)
-    else:
-        exit(2)
-
-    if apply_break_point:
-        prefix_train += '_kmeans'
-
-    if doHistorical:
-        sd = dt.datetime.now().date() - dt.timedelta(days=8)
-        ed = dt.datetime.now().date() - dt.timedelta(days=6)
-    else:
-        sd = dt.datetime.now().date()
-        ed = dt.datetime.now().date() + dt.timedelta(days=2)
-    d = sd
-
-    while d != ed:
-        date_limit = d
+    parser = argparse.ArgumentParser(
+        prog='Inference',
+        description='Inference prediction',
+    )
+    parser.add_argument('-d', '--days', type=str, help='Number of days')
+    parser.add_argument('-l', '--loss', type=str, help='Loss used from training')
+    parser.add_argument('-t', '--task_type', type=str, help='Regression or classification')
+    parser.add_argument('-ta', '--target', type=str, help='Target')
+    parser.add_argument('-dept', '--departement', type=str, help='departement')
+    parser.add_argument('-sinis', '--sinister', type=str, help='Sinister')
+    parser.add_argument('-m', '--model', type=str, help='Model')
+    parser.add_argument('-np', '--nbpoint', type=str, help='Number of point')
+    parser.add_argument('-nf', '--nbFeature', type=str, help='Number of feature')
+    parser.add_argument('-dh', '--doHistorical', type=str, help='Do Historical')
+    parser.add_argument('-r', '--resolution', type=str, help='Pixel resolution')
+    parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='Apply Kmeans on target')
+    parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
+    parser.add_argument('-graph_method', '--graph_method', type=str, help='Dataset to use')
+    parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Dataset to use')
+    parser.add_argument('-shift_kmeans', '--shift_kmeans', type=str, help='Dataset to use')
+    parser.add_argument('-doKMEANS', '--doKMEANS', type=str, help='Dataset to use')
     
-        interface, dates = prepare_data(date_limit)
-        if interface is None:
-            d += dt.timedelta(days=1)
-            continue
+    args = parser.parse_args()
 
-        k_limit = interface.date.max()
-        ######################### Predict ################################
+    # Input config
+    k_days = int(args.days)
+    dept = args.departement
+    sinister = args.sinister
+    model = args.model
+    minPoint = args.nbpoint
+    target = args.target
+    loss = args.loss
+    task_type = args.task_type
+    nbFeature = args.nbFeature
+    resolution = args.resolution
+    doHistorical = args.doHistorical == 'True'
+    scaling = 'z-score' # Scale to used
+    datatset_name= args.dataset
+    graphConstruct = args.graphConstruct
+    dataset_name = args.dataset
+    graph_method = args.graph_method
+    thresh_kmeans = args.thresh_kmeans
+    shift = args.shift_kmeans
+    doKMEANS = args.doKMEANS == 'True'
 
-        logger.info(f'Launch {sinister} Prediction')
-        interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, dates, df_train, apply_break_point)
-        if interface is None:
-            logger.info(f'Can t produce fire prediction for {dates[-1]}')
-            d += dt.timedelta(days=1)
-            continue
+    scale_list = [4, 5, 6, 7, 'departement']
+    days_in_futur_list = [0]
+    combinations = list(product(scale_list, days_in_futur_list))
+
+    interfaces = []
+    
+    #spec = 'occurence_inference'
+    spec = 'occurence_default'
+
+    for scale, days_in_futur in combinations:
+
+        prefix_train = f'full_{k_days}_{nbFeature}_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
+        prefix_df = f'full_{scale}_{days_in_futur}_{graphConstruct}_{graph_method}'
+
+        if doKMEANS:
+            prefix_train += f'_kmeans_{shift}_{thresh_kmeans}'
+
+        prefix_kmeans =  f'full_{scale}_{graphConstruct}_{graph_method}'
+
+        # Arborescence
+        if socket.gethostname() in MACHINES_DEPLOIEMENT:
+            USE_IMAGE = False
+            root_dir = Path(__file__).absolute().parent.parent.parent.parent.resolve()
+            dir_data = root_dir / 'data' / 'features' / 'incendies' / dataset_name / sinister / resolution / 'train'
+            dir_feather = root_dir / 'data' / 'dataframes' 
+            dir_interface = root_dir / 'interface'
+            dir_log = root_dir / 'scripts' / 'global' / 'sinister_prediction' / 'hexagones'
+            dir_incendie = root_dir / 'data' / 'features' / 'incendies'
+            dir_feather = root_dir / 'data' / 'dataframes'
+            dir_raster = dir_incendie / 'raster' / resolution
+            dir_mask = dir_data / 'raster'
+            dir_script = Path('./')
+        else:
+            dir_data = Path(f'../GNN/{dataset_name}/{sinister}/{resolution}/train/')
+            dir_feather = Path('interface')
+            dir_log = Path(f'interface/{dept}')
+            dir_incendie = Path(f'/home/caron/Bureau/csv/{dept}/data/')
+            dir_incendie_disk = Path(f'/media/caron/X9 Pro/travaille/Thèse/csv/{dept}/data')
+            dir_interface = Path('interface')
+            dir_feather = Path('interface')
+            dir_mask = dir_data /'raster'
+            dir_encoder = dir_data / 'Encoder'
+            dir_target = Path(f'../Target/{dataset_name}/{sinister}/log/{resolution}')
+            dir_target_bin = Path(f'../Target/{sinister}/bin/{resolution}')
+            dir_raster = dir_interface / 'raster'
+            dir_script = Path('./')
+
+        dir_output = dir_log / 'output'
+        dir_break_point = dir_data / datatset_name/ 'check_none' / prefix_kmeans / 'kmeans'
+        check_and_create_path(dir_output)
+        check_and_create_path(dir_log)
+
+        graph = read_object(f'graph_{scale}_{graphConstruct}_{graph_method}.pkl', dir_data)
+        assert graph is not None
+
+        df_train = read_object(f'df_train_{prefix_df}.pkl', dir_data / spec)
+
+        assert df_train is not None
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        if socket.gethostname() in MACHINES_DEPLOIEMENT:
+            incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final.feather')
+        else:
+            if (dir_feather / f'incendie_final_{name2str[dept]}.feather').is_file():
+                incendie_feather_ori = pd.read_feather(dir_feather / f'incendie_final_{name2str[dept]}.feather')
+                USE_IMAGE = False
+            else:
+                compute_meteostat_features = False
+                compute_temporal_features = False
+                compute_spatial_features= False
+                compute_air_features = False
+                compute_trafic_features = False
+                compute_vigicrues_features = False
+                compute_nappes_features = True
+                histo = 14
+                start = (dt.datetime.now() - dt.timedelta(days=histo)).date().strftime('%Y-%m-%d')
+                stop = (dt.datetime.now() + dt.timedelta(days=2)).date().strftime('%Y-%m-%d')
+                launch(dir_incendie, dir_incendie_disk, dir_raster,
+                    dept, resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features,
+                    start, stop)
+                USE_IMAGE = True
+
+        # Load feather and spatial
+        if (dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson').is_file():
+            spatialGeo = gpd.read_file(dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson')
+        else:
+            if not (dir_incendie / 'spatial' / f'hexagones.geojson').is_file():
+                logger.info(f'{dir_incendie}/spatial/hexagones_{sinister}.geojson doesn t exist, please provide hexagones !!')
+                exit(2)
+            spatialGeo = gpd.read_file(dir_incendie / 'geo' / f'hexagones.geojson')
+            if not USE_IMAGE:
+                spatialGeo = process_department(dir_data, dir_incendie, dir_mask, dir_encoder,
+                                spatialGeo, sinister, dept, resolution,
+                                ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' ,'foret', 'dynamic_world', 'cosia', 'cosia_landcover', 'argile_landcover'])
+        spa = 3
+
+        if sinister == "firepoint":
+            if dept == 'departement-01-ain':
+                dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
+                k_days_conv = max(9, k_days)
+            elif dept == 'departement-25-doubs':
+                dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
+                k_days_conv = max(5, k_days)
+            elif dept == 'departement-69-rhone':
+                dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
+                k_days_conv = max(5, k_days)
+            elif dept == 'departement-78-yvelines':
+                dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)],
+                k_days_conv = max(7, k_days)
+            else:
+                dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
+                k_days_conv = max(9, k_days)
+        elif sinister == "inondation":
+            """if dept == 'departement-01-ain':
+                dims = [(spa,spa,5), (spa,spa,9), (spa,spa,3)],
+                k_days_conv = max(9, k_days)
+            elif dept == 'departement-25-doubs':
+                dims = [(spa,spa,3), (spa,spa,5), (spa,spa,3)],
+                k_days_conv = max(5, k_days)
+            elif dept == 'departement-69-rhone':
+                dims =  [(spa,spa,3), (spa,spa,5),(spa,spa,1)],
+                k_days_conv = max(5, k_days)
+            elif dept == 'departement-78-yvelines':
+                dims =  [(spa,spa,3), (spa,spa,7), (spa,spa,3)],
+                k_days_conv = max(7, k_days)"""
+            raise ValueError(f'Sinister must be firepoint got {sinister}')
+        else:
+            exit(2)
+
+        if doHistorical:
+            sd = dt.datetime.now().date() - dt.timedelta(days=8)
+            ed = dt.datetime.now().date() - dt.timedelta(days=6)
+        else:
+            sd = dt.datetime.now().date()
+            ed = dt.datetime.now().date() + dt.timedelta(days=2)
+        d = sd
+
+        while d != ed:
+            date_limit = d
+        
+            interface, dates = prepare_data(date_limit)
+            if interface is None:
+                d += dt.timedelta(days=1)
+                continue
+
+            k_limit = interface.date.max()
+            ######################### Predict ################################
+
+            logger.info(f'Launch {sinister} Prediction')
+            interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, dates, df_train, apply_break_point)
+            if interface is None:
+                logger.info(f'Can t produce fire prediction for {dates[-1]}')
+                d += dt.timedelta(days=1)
+                continue
+
+            interface['scale'] = scale
+            interface['days_in_futur'] = days_in_futur
+            interfaces.append(interface)
+
+        interfaces = pd.concat(interfaces)
 
         ######################### Saving ###############################
         if date_limit == dt.datetime.now().date():
             input = 'today'
-            output = 'today'
+            output = f'today'
         elif date_limit == dt.datetime.now().date() + dt.timedelta(days=1):
             input = 'tomorrow'
-            output = 'tomorrow'
+            output = f'tomorrow'
         else:
             input = 'today'
 
@@ -580,7 +591,7 @@ if __name__ == "__main__":
         if (dir_interface / f'hexagones_{input}.geojson').is_file():
             output_geojson = gpd.read_file(dir_interface / f'hexagones_{input}.geojson')
         else:
-            output_geojson = interface[interface['date'] == 0].reset_index()
+            output_geojson = interfaces[interfaces['date'] == 0].reset_index()
 
         for ff in fire_feature:
             if ff in output_geojson.columns:
@@ -588,7 +599,7 @@ if __name__ == "__main__":
 
         if date_limit == dt.datetime.now().date() or date_limit == dt.datetime.now().date() + dt.timedelta(days=1):
             logger.info(f'Saving to hexagones_{output}_final.geojson')
-            output_geojson = output_geojson.set_index('hex_id').join(interface[interface['date'] == k_limit].set_index('hex_id')[fire_feature],
+            output_geojson = output_geojson.set_index('hex_id').join(interfaces[interfaces['date'] == k_limit].set_index('hex_id')[fire_feature],
                                                         on='hex_id')
             output_geojson.reset_index(inplace=True)
             output_geojson.to_file(dir_interface / f'hexagones_{output}_final.geojson', driver='GeoJSON')
@@ -598,16 +609,16 @@ if __name__ == "__main__":
             on = f'hexagones_{previous_date}.geojson'
             logger.info(f'Open {on} to save last recorded fires')
             if (dir_log / on).is_file():
-                previous_log_interface = gpd.read_file(dir_log / on)
-                previous_log_interface.drop('nbfirepoint', inplace=True, axis=1)
-                previous_log_interface = previous_log_interface.set_index('hex_id').join(interface[interface['date'] == k_limit - 1].set_index('hex_id')['nbfirepoint'], on='hex_id').reset_index()
-                previous_log_interface.to_file(dir_log / on, driver='GeoJSON')                    
+                previous_log_interfaces = gpd.read_file(dir_log / on)
+                previous_log_interfaces.drop('nbfirepoint', inplace=True, axis=1)
+                previous_log_interfaces = previous_log_interfaces.set_index('hex_id').join(interfaces[interfaces['date'] == k_limit - 1].set_index('hex_id')['nbfirepoint'], on='hex_id').reset_index()
+                previous_log_interfaces.to_file(dir_log / on, driver='GeoJSON')                    
                 try:
                     fig, ax = plt.subplots(2, 2, figsize=(15, 15))
-                    previous_log_interface.plot(column='fire_prediction', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[0][0])
-                    previous_log_interface.plot(column='fire_prediction_raw', cmap='jet',  ax=ax[0][1])
-                    previous_log_interface.plot(column='fire_prediction_dept', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[1][0])
-                    previous_log_interface.plot(column='id', legend=True, categorical=True, ax=ax[1][1])
+                    previous_log_interfaces.plot(column='fire_prediction', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[0][0])
+                    previous_log_interfaces.plot(column='fire_prediction_raw', cmap='jet',  ax=ax[0][1])
+                    previous_log_interfaces.plot(column='fire_prediction_dept', vmin=1, vmax=6, cmap='jet', legend=True, ax=ax[1][0])
+                    previous_log_interfaces.plot(column='id', legend=True, categorical=True, ax=ax[1][1])
                     logger.info(f'{previous_date}, {dept}')
                     if previous_date == '2024-08-18' and dept == 'departement-34-herault':
                         lats = [43.289746816650435, 43.48800209415416]
@@ -621,19 +632,19 @@ if __name__ == "__main__":
                         fire_herault.plot(column='nbfirepoint', cmap='binary', ax=ax[0][1], vmin=0)
                         fire_herault.plot(column='nbfirepoint', cmap='binary', ax=ax[1][0], vmin=0)
                     else:
-                        if previous_log_interface['nbfirepoint'].sum() > 0:
-                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][0], vmin=0)
-                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][1], vmin=0)
-                            previous_log_interface[previous_log_interface['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[1][0], vmin=0)
+                        if previous_log_interfaces['nbfirepoint'].sum() > 0:
+                            previous_log_interfaces[previous_log_interfaces['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][0], vmin=0)
+                            previous_log_interfaces[previous_log_interfaces['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[0][1], vmin=0)
+                            previous_log_interfaces[previous_log_interfaces['nbfirepoint'] > 0].plot(column='nbfirepoint', cmap='binary', ax=ax[1][0], vmin=0)
                     check_and_create_path(dir_log / 'image')
                     plt.savefig(dir_log / 'image' / f'hexagones_{previous_date}.png')
                 except Exception as e:
                     logger.info(f'Can t produce image for {previous_date}, {e}')
 
             output = date_limit.strftime('%Y-%m-%d')
-            log_interface = interface[interface['date'] == k_limit]     
+            log_interfaces = interfaces[interfaces['date'] == k_limit]     
             on = f'hexagones_{output}.geojson'
             logger.info(f'Saving to {on}')
-            log_interface.to_file(dir_log / on, driver='GeoJSON')
+            log_interfaces.to_file(dir_log / on, driver='GeoJSON')
 
         d += dt.timedelta(days=1)

@@ -86,26 +86,37 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
     X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
 
     X[:,:subNode.shape[1]] = subNode
-
     dir_encoder = path / 'Encoder'
-    if 'landcover' in features:
-        encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-        encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
-        encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
+
+    encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
+    encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
+    encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
+    encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
+    encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
 
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
         encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
-
+        
     if 'Geo' in features:
         encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
     dir_mask = path / 'raster'
     logger.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
 
-    name = f'{departement}rasterScale{graph.scale}_{graph.base}.pkl'
+    name = f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl'
     mask = read_object(name, dir_mask)
-    print(np.unique(mask))
+
+    name_graph = f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl'
+    mask_graph = read_object(name_graph, dir_mask)
+    
+    nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
+    nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
+    print(np.unique(mask), np.unique(nodeDepartement[:, id_index]))
+    print(np.unique(mask_graph), np.unique(nodeDepartement[:, graph_id_index]))
+
     logger.info('Calendar')
     if 'Calendar' in features:
         unDate = np.unique(subNode[:,4]).astype(int)
@@ -195,11 +206,27 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
             for var in foret_variables:
                 save_values(geo[foretint2str[var]].values, foretint2str[var], index, maskNode)
 
-        if 'landcover' in features:
-            if 'foret_encoder' in landcover_variables:
+        if 'cosia' in features:
+            for i, var in enumerate(cosia_variables):
+                save_values(geo['cosia'].values, var, index, maskNode)
+
+        if 'foret_encoder' in features:
+            try:
                 save_value_with_encoding(geo['foret_encoder'].values, 'foret_encoder', index, maskNode, encoder_foret)
-            if 'highway_encoder' in landcover_variables:
-                save_value_with_encoding(geo['highway_encoder'].values, 'highway_encoder', index, maskNode, encoder_osmnx)
+            except Exception as e:
+                exit(1)
+
+        if 'highway_encoder' in features:
+            save_value_with_encoding(geo['highway_encoder'].values, 'highway_encoder', index, maskNode, encoder_osmnx)
+        
+        if 'argile_encoder' in features:
+            save_value_with_encoding(geo['argile_encoder'].values, 'argile_encoder', index, maskNode, encoder_argile)
+
+        if 'cosia_encoder' in features:
+            save_value_with_encoding(geo['cosia_encoder'].values, 'cosia_encoder', index, maskNode, encoder_cosia)
+
+        if 'id_encoder' in features:
+            save_value_with_encoding(geo['id'].values, 'id_encoder', index, maskNode, encoder_id)
 
     logger.info('Sentinel Dynamic World')
     for node in subNode:
@@ -211,8 +238,8 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
             for band, var in enumerate(sentinel_variables):
                 save_values(geo[var].values, var, index, maskNode)
         
-        if 'landcover_encoder' in features:
-            if 'landcover' in landcover_variables:
+        if 'landcover' in features:
+            if 'landcover_encoder' in landcover_variables:
                 save_value_with_encoding(geo['landcover_encoder'].values, 'landcover_encoder', index, maskNode, encoder_landcover)
 
         if 'dynamicWorld' in features:
@@ -273,69 +300,16 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
                 maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
                 save_values(geo[var].values, var, index, maskNode)
 
+    logger.info('Cluster encoder')
+    assert encoder_cluster is not None
+    if 'cluster_encoder' in features:
+        ugraph = np.unique(nodeDepartement[:, graph_id_index])
+        for graphid in ugraph:
+            index = np.argwhere((subNode[:,graph_id_index] == graphid))
+            X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[graphid]]).values[0]
+            #X[index, features_name.index('cluster_encoder')] = 0
+
     return X, features_name
-
-def add_varying_time_features(X : np.array, Y : np.array, newShape : int, features : list, features_name : list, ks : int, scale : int, methods : list):
-    res = np.empty((X.shape[0], newShape))
-    res[:, :X.shape[1]] = X
-
-    methods_dict = {'mean': np.nanmean,
-                    'max' : np.nanmax,
-                    'min' : np.nanmin,
-                    'std': np.nanstd,
-                    'sum' : np.nansum}
-    
-    unodes = np.unique(Y[: , 0])
-
-    for node in unodes:
-        index_node = np.argwhere((Y[:,0] == node))[:, 0]
-        res[index_node, X.shape[1]:] = 0
-
-        X_node_copy = []
-
-        for k in range(ks + 1):
-            roll_X = np.roll(res[index_node], shift=k, axis=0)
-            roll_X[:k] = np.nan
-            X_node_copy.append(roll_X)
-
-        X_node_copy = np.asarray(X_node_copy, dtype=float)
-
-        for feat in features:
-            vec = feat.split('_')
-            name = vec[0]
-
-            if feat.find('Calendar') != -1:
-                _, limit, _, _ = calculate_feature_range('Calendar', scale, methods)
-                index_feat = features_name.index(f'{calendar_variables[0]}')
-            elif feat.find('air') != -1:
-                _, limit, _, _ = calculate_feature_range('air', scale, methods)
-                index_feat = features_name.index(f'{air_variables[0]}')
-            elif feat.find('Historical') != -1:
-                _, limit, _, _ = calculate_feature_range('Historical', scale, methods)
-                index_feat = features_name.index(f'{historical_variables[0]}_mean')
-            else:
-                index_feat = features_name.index(f'{name}_mean')
-                limit = 1
-
-            for method in methods:
-                try:
-                    func = methods_dict[method]
-                except:
-                    raise ValueError(f'{method} unknow method, {feat}')
-                
-                if feat.find('Calendar') != -1:
-                    index_new_feat = features_name.index(f'{calendar_variables[0]}_{method}_{ks}')
-                elif feat.find('air') != -1:
-                    index_new_feat = features_name.index(f'{air_variables[0]}_{method}_{ks}')
-                elif feat.find('Historical') != -1:
-                    index_new_feat = features_name.index(f'{historical_variables[0]}_{method}_{ks}')
-                else:
-                    index_new_feat = features_name.index(feat)
-                
-                res[index_node, index_new_feat:index_new_feat+limit] = \
-                            func(X_node_copy[:, :, index_feat:index_feat+limit], axis=0)
-
-    return res
 
 def myFunctionDistanceDugrandCercle3D(outputShape, earth_radius=6371.0,
                                       resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214, resolution_altitude=10):
@@ -391,7 +365,6 @@ def influence_index3D(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False):
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
     #res = scipy_fft_conv(raster, kernel, mode='same')
     return res
-
 
 def construct_historical_meteo(acq_date, region, dir_meteostat):
     MAX_NAN = 5000

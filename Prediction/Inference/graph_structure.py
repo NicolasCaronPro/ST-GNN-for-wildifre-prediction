@@ -12,7 +12,7 @@ import geopandas as gpd
 from shapely import unary_union
 from astropy.convolution import convolve, Box2DKernel
 from shapely import Point
-from GNN.dataloader import *
+from dataloader import *
 from skimage import io, color, filters, measure, morphology
 from scipy import ndimage as ndi
 from skimage.morphology import disk
@@ -21,8 +21,7 @@ from skimage.filters import rank
 from skimage.util import img_as_ubyte
 import scipy.ndimage as ndimage
 from astropy.convolution import convolve_fft
-if is_pc:
-    from tslearn.clustering import TimeSeriesKMeans
+from tslearn.clustering import TimeSeriesKMeans
 from scipy.spatial.distance import cdist
 
 # Create graph structure from corresponding geoDataframe

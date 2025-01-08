@@ -1,10 +1,3 @@
-from asyncio import tasks
-from datetime import date
-from genericpath import isfile
-from threading import local
-from cv2 import threshold
-from numpy import dtype
-from sympy import use
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
@@ -319,9 +312,10 @@ def create_test_loader(graph, df,
                        features_name,
                        device : torch.device,
                        use_temporal_as_edges : bool,
+                       target_name,
                        ks :int):
     
-    Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns].values
+    Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
     X = []
     Y = []
@@ -389,8 +383,10 @@ def load_x_from_pickle(date : int,
                        features : list) -> np.array:
     
     features_name_2D_full, _ = get_features_name_lists_2D(6, features)
+
     leni = len(features_name_2D)
     x_2D = read_object(f'X_{date}.pkl', path)
+
     if x_2D is None:
         return None
     new_x_2D = np.empty((leni, x_2D.shape[1], x_2D.shape[2]))
@@ -631,12 +627,12 @@ def create_dataset_2D(graph,
     if True:
         train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'train')
         val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'val')
-        test_datset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
+        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
     else:
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
         test_datset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
-    return train_dataset, val_dataset, test_datset
+    return train_dataset, val_dataset, test_dataset
 
 class ModelTorch():
     def __init__(self, model_name, batch_size, lr, target_name, task_type,
@@ -724,15 +720,49 @@ class ModelTorch():
     def score(self, X, y, sample_weight=None):
         pass
 
+    def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_output):
+        # Création de la figure et des axes
+        plt.figure(figsize=(10, 6))
+
+        # Tracé de la courbe de val_loss
+        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
+
+        # Ajout de la légende
+        plt.legend()
+
+        # Ajout des labels des axes
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+
+        # Ajout d'un titre
+        plt.title('Validation Loss over Epochs')
+        plt.savefig(dir_output / 'Validation.png')
+        plt.close('all')
+
+        # Tracé de la courbe de train_loss
+        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
+
+        # Ajout de la légende
+        plt.legend()
+
+        # Ajout des labels des axes
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+
+        # Ajout d'un titre
+        plt.title('Training Loss over Epochs')
+        plt.savefig(dir_output / 'Training.png')
+        plt.close('all')
+
     def _load_model_from_path(self, path : Path, model : torch.nn.Module) -> None:
         model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True), strict=False)
         self.model = model
 
 class ModelCNN(ModelTorch):
-    def __init__(self, model_name, batch_size, lr, target_name, task_type, out_channels, dir_output, features_name, ks, loss, name, device, non_fire_number, path, features_name_1D, image_per_node):
+    def __init__(self, model_name, batch_size, lr, target_name, task_type, out_channels, dir_output, features_name, features, ks, loss, name, device, non_fire_number, path, image_per_node):
         super().__init__(model_name, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_output, loss=loss, name=name, device=device, non_fire_number=non_fire_number)
         self.path = path
-        self.features_name_1D = features_name_1D
+        self.features = features
         self.image_per_node = image_per_node
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test):
@@ -742,7 +772,7 @@ class ModelCNN(ModelTorch):
             if 'binary' in self.non_fire_number:
                 vec = self.non_fire_number.split('-')
                 try:
-                    nb = int(vec[-1]) * len(y[y > 0])
+                    nb = int(vec[-1]) * len(df_train[df_train[self.target_name] > 0])
                 except ValueError:
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
@@ -777,29 +807,43 @@ class ModelCNN(ModelTorch):
             self.val_loader = read_object('val_loader.pkl', self.dir_output)
             self.test_loader = read_object('test_loader.pkl', self.dir_output)
         else:
-            train_dataset, val_dataset, test_dataset = create_dataset(graph,
-                                                                df_train,
-                                                                df_val,
-                                                                df_test,
-                                                                self.features_name,
-                                                                self.target_name,
-                                                                None,
-                                                                self.device, self.ks)
+            train_dataset, val_dataset, test_dataset = create_dataset_2D(graph=graph,
+                                                                df_train=df_train,
+                                                                df_val=df_val,
+                                                                df_test=df_test,
+                                                                features_name_2D=self.features_name,
+                                                                features=self.features,
+                                                                target_name=self.target_name,
+                                                                use_temporal_as_edges=None,
+                                                                image_per_node=self.image_per_node,
+                                                                device=self.device, ks=self.ks,
+                                                                path=self.path)
         
-            self.train_loader = DataLoader(train_dataset, batch_size, True,)
-            self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False)
-            self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False)
+            train_loader = DataLoader(train_dataset, batch_size, True,)
+            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False)
+            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
-        save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_output)
-        save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_output)
-        save_object_torch(self.test_loader, 'test_loader.pkl', self.dir_output)
+            save_object_torch(train_loader, 'train_loader.pkl', self.dir_output)
+            save_object_torch(val_loader, 'val_loader.pkl', self.dir_output)
+            save_object_torch(test_loader, 'test_loader.pkl', self.dir_output)
+
+            self.train_loader = train_loader
+            self.val_loader = val_loader
+            self.test_loader = test_loader
 
     def create_test_loader(self, graph, df):
-        loader = create_test_loader(graph, df,
-                       self.features_name,
-                       self.device,
-                       False,
-                       self.ks)
+        
+        x_test, y_test = df[ids_columns].values, df[ids_columns + [self.target_name]].values
+
+        dateTest = np.sort(np.unique(y_test[np.argwhere(y_test[:, weight_index] > 0), date_index]))
+        
+        XsTe, YsTe, EsTe = create_dataset_2D_2(graph, x_test, y_test, self.ks, dateTest,
+                    self.features_name, self.features, self.path, None, self.image_per_node, context='test')
+        
+        sub_dir = 'image_per_node' if self.image_per_node else 'image_per_departement'
+        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, self.path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
+        
+        loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
         return loader
 
@@ -822,8 +866,7 @@ class ModelCNN(ModelTorch):
             inputs_model = inputs
             output = self.model(inputs_model, edges)
 
-            if self.target_name == 'risk' or self.target_name == 'nbsinister':
-
+            if self.task_type == 'regression':
                 target = target.view(output.shape)
                 weights = weights.view(output.shape)
                 
@@ -833,6 +876,7 @@ class ModelCNN(ModelTorch):
                 loss = criterion(output, target, weights)
             else:
                 target = torch.masked_select(target, weights.gt(0))
+                target = target.long()
                 output = output[weights.gt(0)]
                 weights = torch.masked_select(weights, weights.gt(0))
                 loss = criterion(output, target)
@@ -870,7 +914,7 @@ class ModelCNN(ModelTorch):
                 output = self.model(inputs_model, edges)
 
                 # Compute loss
-                if self.target_name == 'risk' or self.target_name == 'nbsinister':
+                if self.task_type == 'regression':
                     target = target.view(output.shape)
                     weights = weights.view(output.shape)
 
@@ -883,6 +927,7 @@ class ModelCNN(ModelTorch):
                 else:
                     valid_mask = weights.gt(0)
                     target = torch.masked_select(target, valid_mask)
+                    target = target.long()
                     output = output[valid_mask]
                     weights = torch.masked_select(weights, valid_mask)
                     loss = criterion(output, target)
@@ -914,40 +959,6 @@ class ModelCNN(ModelTorch):
         if self.model_params is None:
             self.model_params = params
         return model, params
-
-    def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_output):
-        # Création de la figure et des axes
-        plt.figure(figsize=(10, 6))
-
-        # Tracé de la courbe de val_loss
-        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Validation Loss over Epochs')
-        plt.savefig(dir_output / 'Validation.png')
-        plt.close('all')
-
-        # Tracé de la courbe de train_loss
-        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Training Loss over Epochs')
-        plt.savefig(dir_output / 'Training.png')
-        plt.close('all')
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None):
         """
@@ -1052,7 +1063,7 @@ class ModelCNN(ModelTorch):
                     #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
                     inputs_model = inputs
-                    output = self.model(inputs_model)
+                    output = self.model(inputs_model, None)
 
                     if output.shape[1] > 1:
                         output = torch.argmax(output, dim=1)
@@ -1137,6 +1148,7 @@ class ModelGNN(ModelTorch):
                        self.features_name,
                        self.device,
                        False,
+                       self.target_name,
                        self.ks)
 
         return loader
@@ -1160,8 +1172,7 @@ class ModelGNN(ModelTorch):
             inputs_model = inputs
             output = self.model(inputs_model, edges)
 
-            if self.target_name == 'risk' or self.target_name == 'nbsinister':
-
+            if self.task_type == 'regression':
                 target = target.view(output.shape)
                 weights = weights.view(output.shape)
                 
@@ -1171,6 +1182,7 @@ class ModelGNN(ModelTorch):
                 loss = criterion(output, target, weights)
             else:
                 target = torch.masked_select(target, weights.gt(0))
+                target = target.long()
                 output = output[weights.gt(0)]
                 weights = torch.masked_select(weights, weights.gt(0))
                 loss = criterion(output, target)
@@ -1208,7 +1220,7 @@ class ModelGNN(ModelTorch):
                 output = self.model(inputs_model, edges)
 
                 # Compute loss
-                if self.target_name == 'risk' or self.target_name == 'nbsinister':
+                if self.task_type == 'regression':
                     target = target.view(output.shape)
                     weights = weights.view(output.shape)
 
@@ -1222,6 +1234,7 @@ class ModelGNN(ModelTorch):
                     valid_mask = weights.gt(0)
                     target = torch.masked_select(target, valid_mask)
                     output = output[valid_mask]
+                    target = target.long()
                     weights = torch.masked_select(weights, valid_mask)
                     loss = criterion(output, target)
 
@@ -1252,40 +1265,6 @@ class ModelGNN(ModelTorch):
         if self.model_params is None:
             self.model_params = params
         return model, params
-
-    def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_output):
-        # Création de la figure et des axes
-        plt.figure(figsize=(10, 6))
-
-        # Tracé de la courbe de val_loss
-        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Validation Loss over Epochs')
-        plt.savefig(dir_output / 'Validation.png')
-        plt.close('all')
-
-        # Tracé de la courbe de train_loss
-        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Training Loss over Epochs')
-        plt.savefig(dir_output / 'Training.png')
-        plt.close('all')
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None):
         """
@@ -1382,7 +1361,7 @@ class ModelGNN(ModelTorch):
 
                 for i, data in enumerate(X, 0):
                     
-                    inputs, orilabels, _ = data
+                    inputs, orilabels, edges, graphs = data
 
                     orilabels = orilabels.to(device)
                     orilabels = orilabels[:, :, -1]
@@ -1390,7 +1369,7 @@ class ModelGNN(ModelTorch):
                     #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
                     inputs_model = inputs
-                    output = self.model(inputs_model)
+                    output = self.model(inputs_model, edges, graphs)
 
                     if output.shape[1] > 1:
                         output = torch.argmax(output, dim=1)
@@ -1421,8 +1400,8 @@ class Model_Torch(ModelTorch):
             if 'binary' in self.non_fire_number:
                 vec = self.non_fire_number.split('-')
                 try:
-                    nb = int(vec[-1]) * len(y[y > 0])
-                except ValueError:
+                    nb = int(vec[-1]) * len(df_train[df_train[self.target_name] > 0])
+                except:
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
 
@@ -1478,6 +1457,7 @@ class Model_Torch(ModelTorch):
                        self.features_name,
                        self.device,
                        None,
+                       self.target_name,
                        self.ks)
 
         return loader
@@ -1501,8 +1481,7 @@ class Model_Torch(ModelTorch):
             inputs_model = inputs
             output = self.model(inputs_model)
 
-            if self.target_name == 'risk' or self.target_name == 'nbsinister':
-
+            if self.task_type == 'regression':
                 target = target.view(output.shape)
                 weights = weights.view(output.shape)
                 
@@ -1513,6 +1492,7 @@ class Model_Torch(ModelTorch):
             else:
                 target = torch.masked_select(target, weights.gt(0))
                 output = output[weights.gt(0)]
+                target = target.long()
                 weights = torch.masked_select(weights, weights.gt(0))
                 loss = criterion(output, target)
 
@@ -1549,7 +1529,7 @@ class Model_Torch(ModelTorch):
                 output = self.model(inputs_model)
 
                 # Compute loss
-                if self.target_name == 'risk' or self.target_name == 'nbsinister':
+                if self.task_type == 'regression':
                     target = target.view(output.shape)
                     weights = weights.view(output.shape)
 
@@ -1562,6 +1542,7 @@ class Model_Torch(ModelTorch):
                 else:
                     valid_mask = weights.gt(0)
                     target = torch.masked_select(target, valid_mask)
+                    target = target.long()
                     output = output[valid_mask]
                     weights = torch.masked_select(weights, valid_mask)
                     loss = criterion(output, target)
@@ -1593,40 +1574,6 @@ class Model_Torch(ModelTorch):
         if self.model_params is None:
             self.model_params = params
         return model, params
-
-    def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_output):
-        # Création de la figure et des axes
-        plt.figure(figsize=(10, 6))
-
-        # Tracé de la courbe de val_loss
-        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Validation Loss over Epochs')
-        plt.savefig(dir_output / 'Validation.png')
-        plt.close('all')
-
-        # Tracé de la courbe de train_loss
-        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Training Loss over Epochs')
-        plt.savefig(dir_output / 'Training.png')
-        plt.close('all')
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None):
         """
@@ -1728,15 +1675,11 @@ class Model_Torch(ModelTorch):
                     orilabels = orilabels.to(device)
                     orilabels = orilabels[:, :, -1]
 
-                    #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
-
                     inputs_model = inputs
                     output = self.model(inputs_model)
 
                     if output.shape[1] > 1:
                         output = torch.argmax(output, dim=1)
-
-                    #output = output[weights.gt(0)]
 
                     pred.append(output)
                     y.append(orilabels)

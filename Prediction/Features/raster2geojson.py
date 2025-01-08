@@ -4,11 +4,24 @@ import argparse
 
 foret_variables = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18']
 sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
+cosia_variables = [
+    'Other',
+    'Building',
+    'Bare soil',
+    'Water surface',
+    'Conifer',
+    'Deciduous',
+    'Shrubland',
+    'Lawn',
+    'Crop'
+]
 osmnx_variables = ['0', '1', '2', '3', '4', '5']
 dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']
-landcover_variables = [#'landcover',
-                        'highway',
-                       'foret',
+landcover_variables = [
+                      'foret_encoder',
+                      'argile_encoder',
+                      'id_encoder',
+                      'cosia_encoder'
                         ]
 
 foretint2str = {
@@ -98,7 +111,7 @@ if __name__ == "__main__":
     sinister_encoding = args.SinisterEncoding
 
     departements = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
-    variables = ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' , 'foret', 'dynamic_world', 'sinister']
+    variables = ['sentinel', 'osmnx', 'population', 'elevation', 'foret_landcover',  'osmnx_landcover' , 'foret', 'dynamic_world', 'sinister', 'cosia', 'cosia_landcover']
 
     root_data = Path(f'/home/caron/Bureau/csv')
     root_data_disk = Path('/media/caron/X9 Pro/travaille/Thèse/csv')
@@ -128,7 +141,7 @@ if __name__ == "__main__":
                 data = read_object(f'{departement}binScale0.pkl', dir_target)
             else:
                 data = read_object(var+'.pkl', dir_raster)
-            if var in ['dynamic_world_landcover', 'foret_landcover', 'osmnx_landcover']:
+            if var in ['dynamic_world_landcover', 'foret_landcover', 'osmnx_landcover', 'cosia_landcover']:
                 vv = var.split('_')[1]
                 encoder = read_object('encoder_'+vv+'.pkl', dir_encoder)
             encoder = None
@@ -142,7 +155,7 @@ if __name__ == "__main__":
             h3 = raster2geojson(data, mask, h3, var, encoder)
 
         outname = 'hexagones_'+sinister+'.geojson'
-        h3.rename({'osmnx_landcover': 'highway_encoder', 'foret_landcover': 'foret_encoder'}, axis=1, inplace=True)
+        h3.rename({'osmnx_landcover': 'highway_encoder', 'foret_landcover': 'foret_encoder', 'cosia_landcover': 'cosia_encoder'}, axis=1, inplace=True)
         check_and_create_path(dir_data / 'spatial' / outname)
         check_and_create_path(dir_data_disk / 'spatial' / outname)
         h3.to_file(dir_data / 'spatial' / outname, driver='GeoJSON')

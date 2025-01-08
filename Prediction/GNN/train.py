@@ -591,7 +591,7 @@ def train_xgboost(params, train=True):
         'n_estimators': 10000,
         'random_state': 42,
         'tree_method': 'hist',
-        'device':"gpu"
+        'device':"cpu"
     }
 
     grid_params = {'max_depth': [6],
@@ -1086,18 +1086,21 @@ def train_gam(params, train=True):
 
 def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     model, graph_method,
-                            dir_output: Path,
-                            device: str,
-                            features: list,
-                            autoRegression: bool,
-                            optimize_feature: bool,
-                            do_grid_search: bool,
-                            do_bayes_search: bool):
+                                    dir_output: Path,
+                                    device: str,
+                                    features: list,
+                                    autoRegression: bool,
+                                    optimize_feature: bool,
+                                    do_grid_search: bool,
+                                    do_bayes_search: bool):
     
     name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
 
     #train_dataset['weight'] = train_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
     #val_dataset['weight'] = val_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
+
+    if task_type == 'classification' and target != 'binary':
+        train_dataset['class'] = train_dataset[target]
 
     train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
     val_dataset['weight'] = 1

@@ -1,8 +1,6 @@
 import sys
 import os
 
-from itsdangerous import NoneAlgorithm
-
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,7 +43,7 @@ parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
-parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of kmeans FR to remove sinister', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -54,6 +52,7 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+
 args = parser.parse_args()
 
 # Input config
@@ -88,14 +87,14 @@ sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
-
-assert graph_method == 'node'
+shift = args.shift
+thresh_kmeans = args.thresh_kmeans
 
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
 
-features, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
+features, train_features, kmeasn_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
 
 ######################## Get departments and train departments #######################
 
@@ -108,6 +107,7 @@ name_exp = f'{sinister_encoding}_{name_exp}'
 dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
 geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+
 geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
 name_dir = dataset_name + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
@@ -121,16 +121,17 @@ else:
 
 minDate = '2017-06-12' # Starting point
 
-if dataset_name == '':
-    dataset_name = 'firemen'
+if dataset_name== '':
+    dataset_name= 'firemen'
 
 autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
-    dataset_name += '_AutoRegressionReg'
+    name_exp += '_AutoRegressionReg'
 
 ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_name = init(args, dir_output, 'train_fire_index')
+df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
+save_object(df.columns, 'features_name.pkl', dir_output)
 
 if MLFLOW:
     exp_name = f"{dataset_name}_train"
@@ -142,49 +143,72 @@ if MLFLOW:
         }
 
         client.create_experiment(name=exp_name, tags=tags)
-
+        
     mlflow.set_experiment(exp_name)
     existing_run = get_existing_run('Preprocessing')
     if existing_run:
         mlflow.start_run(run_id=existing_run.info.run_id)
     else:
         mlflow.start_run(run_name='Preprocessing')
-    
+
 ############################# Train, Val, test ###########################
 dir_output = dir_output / name_exp
 
+prefix_config = deepcopy(prefix)
+
 train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
-                                                                                    features_name, train_departements,
+                                                                                    features_selected, train_departements,
                                                                                     prefix,
                                                                                     dir_output,
                                                                                     ['mean'], args)
+
+if nbfeatures == 'all':
+    nbfeatures = len(features_selected)
+else:
+    nbfeatures = int(nbfeatures)
+
+varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2, nbfeatures)
+
+features_selected_str = list(features_selected_str)
+features_selected = np.arange(0, len(features_selected_str))
+logger.info((features_selected_str, len(features_selected_str)))
 
 if MLFLOW:
     train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
     val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
     test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
-
+    
     mlflow.log_param('train_features', train_features)
     mlflow.log_param('features', features)
-    mlflow.log_param('features_selected', features_selected)
+    mlflow.log_param('features_selected_str', features_selected_str)
     mlflow.log_input(train_dataset_ml_flow, context='trainig')
     mlflow.log_input(val_dataset_ml_flow, context='validation')
     mlflow.log_input(test_dataset_ml_flow, context='testing')
+
     mlflow.end_run()
 
-######################## Training ##############################
+############################# Training ##################################
 
-train_dataset['weight'] = train_dataset[weights_version]
-val_dataset['weight'] = val_dataset[weights_version]
-train_dataset['weight_nbsinister'] = train_dataset[f'{weights_version}_nbsinister']
-val_dataset['weight_nbsinister'] = val_dataset[f'{weights_version}_nbsinister']
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
-test_dataset_unscale['weight_nbsinister'] = 1
-test_dataset['weight'] = 1
+###################### Defined ClassRisk model ######################
 
-print(test_dataset_unscale['weight_nbsinister'].unique())
+dir_post_process = dir_output / 'post_process'
 
-name = 'check_'+scaling + '/' + prefix + '/' + '/baseline'
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
+
+models = [
+        Statistical_Model('fwi_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept',  'classification'),
+        Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nesterov_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nesterov_mean', [300, 1000, 4000, 10000], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        ]
+
+for model in models:
+    model.fit(train_dataset_unscale, 'departement')
+    save_object(model, f'{model.name}.pkl', dir_output / Path('check_'+scaling + '/' + prefix + '/' + 'baseline') / model.name)
 
 if doTest:
 
@@ -197,72 +221,15 @@ if doTest:
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
-
-    mae = my_mean_absolute_error
-    rmse = weighted_rmse_loss
-    std = standard_deviation
-    cal = quantile_prediction_error
-    fre = frequency_class_error
-    f1 = my_f1_score
-    ca = class_accuracy
-    bca = balanced_class_accuracy
-    acc = class_accuracy
-    ck = class_risk
-    po = poisson_loss
-    meac = mean_absolute_error_class
-    c_i_class = c_index_class
-    c_i = c_index
-    bacc = binary_accuracy
-
-    methods = [
-            ('mae', mae, 'proba'),
-            ('rmse', rmse, 'proba'),
-            ('std', std, 'proba'),
-            ('cal', cal, 'cal'),
-            ('fre', fre, 'cal'),
-            ('binary', f1, 'bin'),
-            ('accuracy', bacc, 'bin'),
-            ('class', ck, 'class'),
-            #('poisson', po, 'proba'),
-            ('ca', ca, 'class'),
-            ('bca', bca, 'class'),
-            ('maec', meac, 'class'),
-            ('acc', acc, 'class'),
-            #('c_index', c_i, 'class'),
-            #('c_index_class', c_i_class, 'class'),
-            ('kendall', kendall_coefficient, 'correlation'),
-            ('pearson', pearson_coefficient, 'correlation'),
-            ('spearman', spearman_coefficient, 'correlation'),
-            ('roc_auc', my_roc_auc, 'bin')
-            ]
     
     models = [
-        #('pastinfluence_risk', 'indice'),
-        ('risk', 'indice'),
-        #('zero', 'nbsinister'),
-        #('one', 'nbsinister'),
-        #('fwi_max', 'indice'),
-        #('fwi_mean', 'indice'),
-        #('fwi_min', 'indice'),
-
-        #('dailySeverityRating_max', 'indice'),
-        #('dailySeverityRating_mean', 'indice'),
-        #('dailySeverityRating_min', 'indice'),
-
-        #('nesterov_max', 'indice'),
-        #('nesterov_mean', 'indice'),
-        #('nesterov_min', 'indice'),
-
-        #('bui_max', 'indice'),
-        #('bui_mean', 'indice'),
-        #('bui_min', 'indice'),
-
-        #('angstroem_max', 'indice'),
-        ##('angstroem_mean', 'indice'),
-        #('angstroem_min', 'indice'),
+        ('fwi-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        ('fwi-mean-[5, 10.5, 21.5, 34.5]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        ('nesterov-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        ('nesterov-mean-[300, 1000, 4000, 10000]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
         ]
     
-    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}'
+    prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{graph_method}'
 
     if days_in_futur > 0:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
@@ -299,12 +266,13 @@ if doTest:
 
             metrics, metrics_dept, res, res_dept = test_fire_index_model(vars(args), graphScale, test_dataset_dept,
                                 test_dataset_unscale_dept,
-                                    methods,
                                     dept,
                                     prefix,
                                     models,
                                     dir_output / dept / prefix,
+                                    prefix_config,
                                     encoding,
+                                    name_exp,
                                     scaling,
                                     [dept],
                                     dir_train,
@@ -314,7 +282,7 @@ if doTest:
             print(metrics)
             #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
             if MLFLOW:
-                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
+                for name, target_name in models:
                     existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)

@@ -1,5 +1,4 @@
 from pathlib import Path
-from cycler import V
 import vacances_scolaires_france
 import jours_feries_france
 import datetime as dt
@@ -384,8 +383,10 @@ resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
 
 shape2D = {10: (24, 24),
            30 : (30, 30),
-          4  : (15,15),
-          5  : (25,25),
+          4  : (16,16),
+          5  : (32,32),
+          6  : (32,32),
+          7  : (64,64),
             8 : (30,30),
             'departement' : (64,64)}
 
@@ -401,16 +402,6 @@ Rewrite = True
 encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
-p_coef_value = {
-    'GAT': 4,
-    'xgboost': 4,
-    'gam': 1,
-    'DST-GAT': 4,
-    'ST-GATDILATED': 1,
-    'LSTM': 1,
-    'ST-GATLSTM': 1
-}
- 
 epochs = 10000
 lr = 0.000001
 PATIENCE_CNT = 15

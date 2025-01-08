@@ -1,8 +1,4 @@
-from cProfile import label
-from curses import raw, window
-from matplotlib.pyplot import sca
-from sqlalchemy import column
-from GNN.train import *
+from GNN.statistical_model import *
 
 class KMeansRisk:
     """
@@ -145,9 +141,11 @@ class QuantileRisk:
         :param X: Données à partir desquelles calculer les seuils.
         """
         self.min_value = np.min(X)  # Déterminer la valeur minimale
-        self.thresholds = np.quantile(X[X > self.min_value].flatten(), [0.25, 0.5, 0.75])
-        self.n_clusters = len(self.thresholds) + 2  # 5 classes : 4 quartiles + classe pour la valeur minimale
-        self.name = f'QuantileRisk_{self.thresholds}_MinValue'
+        self.thresholds = np.unique(np.quantile(X[X > self.min_value].flatten(), [0.50, 0.65, 0.85]))
+
+        logger.info(f'Threshold of quantile risk : {self.thresholds}')
+
+        self.n_clusters = 5
 
     def predict(self, X):
         """
@@ -159,11 +157,15 @@ class QuantileRisk:
         if self.thresholds is None or self.min_value is None:
             raise ValueError("Les seuils (quartiles) et la valeur minimale n'ont pas été calculés. Appelez `fit` d'abord.")
         
+        result = np.empty(X.shape).reshape(-1)
+
         # Initialiser les classes avec les indices basés sur les quartiles
-        result = np.digitize(X.flatten(), self.thresholds, right=True)
+        result[X.flatten() > self.min_value] = np.digitize(X.flatten()[X.flatten() > self.min_value], self.thresholds, right=True)
         
+        result += 1
         # Assigner une classe distincte pour la valeur minimale
-        result[X.flatten() == self.min_value] = self.n_clusters - 1  # Classe pour la valeur minimale
+        result[X.flatten() == self.min_value] = 0
+
         return result
 
 class KSRisk:
@@ -206,7 +208,7 @@ class ScalerClassRisk:
         :param class_risk: An object with `fit` and `predict` methods for risk classification.
         """
         assert class_risk is not None
-        self.n_clusters = class_risk.n_clusters
+        self.n_clusters = 5
         self.col_id = col_id
         if scaler is None:
             scaler_name = None
@@ -235,6 +237,9 @@ class ScalerClassRisk:
         :param ids: Array of IDs corresponding to each value in X.
         :param sinisters: Array of sinisters values corresponding to each value in X.
         """
+
+        logger.info(f'########################################## {self.name} ##########################################')
+
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
         if len(sinisters.shape) == 1:
@@ -299,7 +304,6 @@ class ScalerClassRisk:
         output_path = os.path.join(self.dir_output, f'histogram_train.png')
         plt.savefig(output_path)
         plt.close()
-        logger.info(f'########################################## {self.name} ##########################################')
         for cl in np.unique(pred):
             logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
 
@@ -331,7 +335,8 @@ class ScalerClassRisk:
                 X_scaled = X[mask]
 
             predictions[mask] = class_risk.predict(X_scaled.astype(float))
-
+        
+        predictions[predictions >= self.n_clusters] = self.n_clusters - 1
         return predictions
     
     def fit_predict(self, X, ids, sinisters):
@@ -534,7 +539,22 @@ def class_window_max(dataset, group_col, column, shifts):
                 dataset.at[idx, column_name] = window_df[column].max()
     return dataset
 
-def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process):
+def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method):
+
+    new_cols = []
+
+    if graph_method == 'node':
+        train_dataset_ = train_dataset.copy(deep=True)
+        val_dataset_ = val_dataset.copy(deep=True)
+        test_dataset_ = test_dataset.copy(deep=True)
+    else:
+        def keep_one_per_pair(dataset):
+            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
+            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+
+        train_dataset_ = keep_one_per_pair(train_dataset)
+        val_dataset_ = keep_one_per_pair(val_dataset)
+        test_dataset_ = keep_one_per_pair(test_dataset)
 
     res = {}
 
@@ -542,462 +562,559 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     obj1 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=MinMaxScaler(), class_risk=ThresholdRisk([0.05, 0.15, 0.30, 0.60, 1.0]))
 
-    obj1.fit(train_dataset['nbsinister'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj1.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(train_dataset['nbsinister'].values, train_dataset['departement'].values)
-    val_dataset['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(val_dataset['nbsinister'].values, val_dataset['departement'].values)
-    test_dataset['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(test_dataset['nbsinister'].values, test_dataset['departement'].values)
+    train_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+    val_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
+    test_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
     
     res[obj1.name] = obj1
+
+    new_cols.append('nbsinister-MinMax-thresholds-5-Class-Dept')
 
     ####################################################################################
 
     obj11 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=RobustScaler(), class_risk=QuantileRisk())
 
-    obj11.fit(train_dataset['nbsinister'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj11.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset['nbsinister-Robust-Quantile-5-Class-Dept'] = obj1.predict(train_dataset['nbsinister'].values, train_dataset['departement'].values)
-    val_dataset['nbsinister-Robust-Quantile-5-Class-Dept'] = obj1.predict(val_dataset['nbsinister'].values, val_dataset['departement'].values)
-    test_dataset['nbsinister-Robust-Quantile-5-Class-Dept'] = obj1.predict(test_dataset['nbsinister'].values, test_dataset['departement'].values)
-
-    """fig, ax = plt.subplots(1, figsize=(15,5))
-    test_dataset[test_dataset['graph_id'] == 0]['nbsinister-Robust-Quantile-5-Class-Dept'].plot(ax=ax)
-    test_dataset[test_dataset['graph_id'] == 0]['nbsinister'].plot(ax=ax)
-    plt.show()"""
+    train_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+    val_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
+    test_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
     
     res[obj11.name] = obj11
+
+    new_cols.append('nbsinister-Robust-Quantile-5-Class-Dept')
 
     ####################################################################################
     
     obj2 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    obj2.fit(train_dataset['nbsinister'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj2.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(train_dataset['nbsinister'].values, train_dataset['departement'].values)
-    val_dataset['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(val_dataset['nbsinister'].values, val_dataset['departement'].values)
-    test_dataset['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(test_dataset['nbsinister'].values, test_dataset['departement'].values)
+    train_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+    val_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
+    test_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
     
     res[obj2.name] = obj2
 
+    new_cols.append('nbsinister-kmeans-5-Class-Dept')
+
     ###################################################################################
-    
+
     obj4 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk', scaler=None, class_risk=KMeansRisk(5))
 
-    obj4.fit(train_dataset['risk'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj4.fit(train_dataset_['risk'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset['risk-kmeans-5-Class-Dept'] = obj4.predict(train_dataset['risk'].values, train_dataset['departement'].values)
-    val_dataset['risk-kmeans-5-Class-Dept'] = obj4.predict(val_dataset['risk'].values, val_dataset['departement'].values)
-    test_dataset['risk-kmeans-5-Class-Dept'] = obj4.predict(test_dataset['risk'].values, test_dataset['departement'].values)
+    train_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(train_dataset_['risk'].values, train_dataset_['departement'].values)
+    val_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(val_dataset_['risk'].values, val_dataset_['departement'].values)
+    test_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(test_dataset_['risk'].values, test_dataset_['departement'].values)
     
     res[obj4.name] = obj4
 
+    new_cols.append('risk-kmeans-5-Class-Dept')
+
     ##################################################################################
 
-    obj3 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk-nbsinister', scaler=None, class_risk=KMeansRisk(5))
+    obj3 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk-nbsinister', scaler=RobustScaler(), class_risk=KMeansRisk(5))
 
-    obj3.fit(train_dataset[['risk', 'nbsinister']].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj3.fit(train_dataset_[['risk', 'nbsinister']].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset['risk-nbsinister-kmeans-5-Class-Dept'] = obj3.predict(train_dataset[['risk', 'nbsinister']].values, train_dataset['departement'].values)
-    val_dataset['risk-nbsinister-kmeans-5-Class-Dept'] = obj3.predict(val_dataset[['risk', 'nbsinister']].values, val_dataset['departement'].values)
-    test_dataset['risk-nbsinister-kmeans-5-Class-Dept'] = obj3.predict(test_dataset[['risk', 'nbsinister']].values, test_dataset['departement'].values)
+    train_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(train_dataset_[['risk', 'nbsinister']].values, train_dataset_['departement'].values)
+    val_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(val_dataset_[['risk', 'nbsinister']].values, val_dataset_['departement'].values)
+    test_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(test_dataset_[['risk', 'nbsinister']].values, test_dataset_['departement'].values)
 
     res[obj3.name] = obj3
 
+    new_cols.append('risk-nbsinister-Robust-kmeans-5-Class-Dept')
+
     #######################################################################################
-    shifts = 7
+    """shifts = 7
     
     obj6 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_sum(
-        dataset=train_dataset,
+    train_dataset_ = class_window_sum(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_sum(
-            dataset=val_dataset,
+    val_dataset_ = class_window_sum(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_sum(
-                dataset=test_dataset,
+    test_dataset_ = class_window_sum(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj6.fit(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj6.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(val_dataset[f'nbsinister_sum_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(test_dataset[f'nbsinister_sum_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj6.name] = obj6
+
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 5
     
     obj7 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_sum(
-        dataset=train_dataset,
+    train_dataset_ = class_window_sum(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_sum(
-            dataset=val_dataset,
+    val_dataset_ = class_window_sum(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_sum(
-                dataset=test_dataset,
+    test_dataset_ = class_window_sum(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj7.fit(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj7.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(val_dataset[f'nbsinister_sum_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(test_dataset[f'nbsinister_sum_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj7.name] = obj7
+
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 3
     
     obj8 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_sum(
-        dataset=train_dataset,
+    train_dataset_ = class_window_sum(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_sum(
-            dataset=val_dataset,
+    val_dataset_ = class_window_sum(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_sum(
-                dataset=test_dataset,
+    test_dataset_ = class_window_sum(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj8.fit(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj8.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(val_dataset[f'nbsinister_sum_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(test_dataset[f'nbsinister_sum_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj8.name] = obj8
+
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 1
     
     obj9 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_sum(
-        dataset=train_dataset,
+    train_dataset_ = class_window_sum(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_sum(
-            dataset=val_dataset,
+    val_dataset_ = class_window_sum(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_sum(
-                dataset=test_dataset,
+    test_dataset_ = class_window_sum(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj9.fit(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj9.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(val_dataset[f'nbsinister_sum_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(test_dataset[f'nbsinister_sum_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj9.name] = obj9
 
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
+    
     #######################################################################################
     shifts = 0
     
     obj10 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_sum(
-        dataset=train_dataset,
+    train_dataset_ = class_window_sum(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_sum(
-            dataset=val_dataset,
+    val_dataset_ = class_window_sum(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_sum(
-                dataset=test_dataset,
+    test_dataset_ = class_window_sum(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj10.fit(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj10.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(train_dataset[f'nbsinister_sum_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(val_dataset[f'nbsinister_sum_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(test_dataset[f'nbsinister_sum_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj10.name] = obj10
+
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 7
     
     obj12 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_max(
-        dataset=train_dataset,
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_max(
-            dataset=val_dataset,
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_max(
-                dataset=test_dataset,
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj12.fit(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj12.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(val_dataset[f'nbsinister_max_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(test_dataset[f'nbsinister_max_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj12.name] = obj12
+
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 5
     
     obj13 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_max(
-        dataset=train_dataset,
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_max(
-            dataset=val_dataset,
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_max(
-                dataset=test_dataset,
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj13.fit(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj13.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(val_dataset[f'nbsinister_max_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(test_dataset[f'nbsinister_max_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj13.name] = obj13
+    
+    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
+    
+    """
 
     #######################################################################################
     shifts = 3
-    
+
     obj14 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_max(
-        dataset=train_dataset,
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_max(
-            dataset=val_dataset,
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_max(
-                dataset=test_dataset,
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj14.fit(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj14.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(val_dataset[f'nbsinister_max_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(test_dataset[f'nbsinister_max_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
 
     res[obj14.name] = obj14
+
+    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')
+
+    #######################################################################################
+    shifts = 2
+    
+    obj15 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+
+    # Application sur les jeux de données
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
+        column='nbsinister',
+        shifts=shifts,
+        group_col='graph_id',
+    )
+
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
+            column='nbsinister',
+            shifts=shifts,
+            group_col='graph_id',
+        )
+    
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
+                column='nbsinister',
+                shifts=shifts,
+                group_col='graph_id',
+            )
+
+    obj15.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
+
+    res[obj15.name] = obj15
+
+    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 1
     
-    obj15 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+    obj16 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_max(
-        dataset=train_dataset,
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_max(
-            dataset=val_dataset,
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_max(
-                dataset=test_dataset,
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj15.fit(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj16.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(val_dataset[f'nbsinister_max_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(test_dataset[f'nbsinister_max_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
 
-    res[obj15.name] = obj15
+    res[obj16.name] = obj16
+
+    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')
 
     #######################################################################################
     shifts = 0
     
-    obj16 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+    obj17 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
 
-    train_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset.sort_values(by=['graph_id', 'date'], inplace=True)
+    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
 
     # Application sur les jeux de données
-    train_dataset = class_window_max(
-        dataset=train_dataset,
+    train_dataset_ = class_window_max(
+        dataset=train_dataset_,
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
-    val_dataset = class_window_max(
-            dataset=val_dataset,
+    val_dataset_ = class_window_max(
+            dataset=val_dataset_,
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
-    test_dataset = class_window_max(
-                dataset=test_dataset,
+    test_dataset_ = class_window_max(
+                dataset=test_dataset_,
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
             )
 
-    obj16.fit(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['nbsinister'].values, train_dataset['departement'].values)
+    obj17.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(train_dataset[f'nbsinister_max_{shifts}'].values, train_dataset['departement'].values)
-    val_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(val_dataset[f'nbsinister_max_{shifts}'].values, val_dataset['departement'].values)
-    test_dataset[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(test_dataset[f'nbsinister_max_{shifts}'].values, test_dataset['departement'].values)
+    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
+    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
+    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
 
-    res[obj16.name] = obj16
+    res[obj17.name] = obj17
+
+    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')
 
     ###############################################################################
 
     logger.info(f'Post process Model -> {res}')
 
-    return res
+    if graph_method == 'node':
+        train_dataset = train_dataset_
+        val_dataset = val_dataset_
+        test_dataset = test_dataset_
+    else:
+        def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
+            """
+            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
+            :param original_dataset: DataFrame original
+            :param updated_dataset: DataFrame avec les index et colonnes à joindre
+            :param new_cols: Liste des colonnes à ajouter
+            :return: DataFrame mis à jour avec les nouvelles colonnes
+            """
+            # Joindre les deux DataFrames sur leurs index
+            original_dataset.reset_index(drop=True, inplace=True)
+            updated_dataset.reset_index(drop=True, inplace=True)
+
+            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
+                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
+                on=['graph_id', 'date'],
+                how='left'
+            ).reset_index()
+            return joined_dataset
+
+        # Mise à jour des datasets
+        train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
+        val_dataset = join_on_index_with_new_cols(val_dataset, val_dataset_, new_cols)
+        test_dataset = join_on_index_with_new_cols(test_dataset, test_dataset_, new_cols)
+
+    return res, train_dataset, val_dataset, test_dataset
 
 class KSGraphDiscretizer(BaseEstimator):
     def __init__(self, thresholds_ks, score_col='ks_stat', thresh_col='optimal_score', dir_output=Path('./')):

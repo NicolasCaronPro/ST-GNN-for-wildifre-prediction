@@ -191,16 +191,13 @@ if MLFLOW:
 
 ############################# Training ##################################
 
-test_dataset_unscale['weight_nbsinister'] = 1
-test_dataset['weight'] = 1
-
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 ###################### Defined ClassRisk model ######################
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process)
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
 
 ###################### Define models to train ######################
 
@@ -208,12 +205,12 @@ test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 models = [
-        #('LSTM', 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        ('DilatedCNN', 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('LSTM', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('DilatedCNN', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         ]
 
 gnn_models = [
-    #('DST-GAT', False, 'nbsinister-sum-3-kmeans-5-Class-Dept_classification__classification_weightedcrossentropy'),
+        ('ST-GCN', False, 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
 ] 
 
 train_loader = None
@@ -253,7 +250,6 @@ if doTrain:
         params['infos'] = gnn_model[2]
         params['out_channels'] = model[3]
         params['torch_structure'] = 'Model_GNN'
-        #params['post_process'] = gnn_model[3]
 
         wrapped_train_deep_learning_1D(params)
 
@@ -279,12 +275,14 @@ if doTest:
 
     name_dir = dn + '/' + sinister + '/' + resolution + '/train' + '/'
     dir_train = Path(name_dir)
-
+    
     name_dir = dn + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
     models = [
-            ('LSTM_binary_one_nbsinister-sum-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-sum-3-kmeans-5-Class-Dept', 5),
+            ('LSTM_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
+            ('DilatedCNN_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
+            ('ST-GCN_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
     ]
 
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'

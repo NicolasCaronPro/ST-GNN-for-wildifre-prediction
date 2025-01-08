@@ -82,8 +82,37 @@ METHODS_SPATIAL_TRAIN = ['mean', 'min', 'max', 'std',
            #'grad'
            ]
 
-ids_columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weight']
+ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 
+targets_columns = [#'time_intervention',
+                   'nbsinister_id', 'class_risk', 'nbsinister', 'risk']
+
+weights_columns = ['proportion_on_zero_class',
+                   'class',
+                   'one',
+                   'normalize',
+                   'nbsinister',
+                   'proportion_on_zero_sinister',
+                   #'random',
+                   'outlier_1',
+                   'outlier_2',
+                   'outlier_3',
+                   'outlier_4',
+                   'outlier_5',
+                   
+                   'proportion_on_zero_class_nbsinister',
+                   'class_nbsinister',
+                   'proportion_on_zero_sinister_nbsinister',
+                   'one_nbsinister',
+                   'normalize_nbsinister',
+                   'nbsinister_nbsinister',
+                   #'random_nbsinister',
+                   'outlier_1_nbsinister',
+                   'outlier_2_nbsinister',
+                   'outlier_3_nbsinister',
+                   'outlier_4_nbsinister',
+                   'outlier_5_nbsinister',
+                   ]
 
 # Dictionnaire de gestion des départements
 int2str = {
@@ -212,6 +241,19 @@ resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
                 '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
                 '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
                 '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
+
+id_index = ids_columns.index('id')
+graph_id_index = ids_columns.index('graph_id')
+longitude_index = ids_columns.index('longitude')
+latitude_index = ids_columns.index('latitude')
+departement_index = ids_columns.index('departement')
+date_index = ids_columns.index('date')
+weight_index = ids_columns.index('weight')
+days_until_next_event_index = ids_columns.index('days_until_next_event')
+
+class_index = targets_columns.index('class_risk')
+nbsinister_index = targets_columns.index('nbsinister')
+risk_index = targets_columns.index('risk')
 
 def create_larger_scale_image(input, proba, bin, raster):
     probaImageScale = np.full(proba.shape, np.nan)
