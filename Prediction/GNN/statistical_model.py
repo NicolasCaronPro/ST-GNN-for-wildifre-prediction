@@ -66,8 +66,10 @@ class Statistical_Model:
                 # Prédit les labels et les mappe aux labels triés
                 raw_labels = model.predict(X)
                 predictions[mask] = np.vectorize(label_map.get)(raw_labels)
-        else:
+        elif self.thresholds != None:
             X = df[self.variables].values
             predictions = np.digitize(X, self.thresholds).astype(int)
+        else:
+            predictions = df[self.variables].values
 
         return predictions

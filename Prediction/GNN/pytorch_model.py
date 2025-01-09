@@ -1094,7 +1094,7 @@ class ModelGNN(ModelTorch):
             if 'binary' in self.non_fire_number:
                 vec = self.non_fire_number.split('-')
                 try:
-                    nb = int(vec[-1]) * len(y[y > 0])
+                    nb = int(vec[-1]) * len(df_train[df_train[self.target_name] > 0])
                 except ValueError:
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
@@ -1135,9 +1135,9 @@ class ModelGNN(ModelTorch):
                                                                 False,
                                                                 self.device, self.ks)
         
-            self.train_loader = DataLoader(train_dataset, batch_size, True,)
-            self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False)
-            self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False)
+            self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+            self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+            self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
 
         save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_output)
         save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_output)
@@ -1158,19 +1158,15 @@ class ModelGNN(ModelTorch):
         self.model.train()
         for i, data in enumerate(loader, 0):
 
-            inputs, labels, edges = data
-            graphs = None
+            inputs, labels, edges, graphs = data
 
             band = -1
 
-            try:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-            except Exception as e:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
 
             #inputs_model = inputs[:, features]
             inputs_model = inputs
-            output = self.model(inputs_model, edges)
+            output = self.model(inputs_model, edges, graphs)
 
             if self.task_type == 'regression':
                 target = target.view(output.shape)
@@ -1201,8 +1197,7 @@ class ModelGNN(ModelTorch):
 
             for i, data in enumerate(loader, 0):
                 
-                inputs, labels, edges = data
-                graphs = None
+                inputs, labels, edges, graphs = data
 
                 # Determine the index of the target variable in labels
                 #if target_name == 'binary' or target_name == 'nbsinister':
@@ -1210,14 +1205,10 @@ class ModelGNN(ModelTorch):
                 #else:
                 band = -1
 
-                try:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-                except Exception as e:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
 
                 inputs_model = inputs
-                #inputs_model = inputs[:, features]
-                output = self.model(inputs_model, edges)
+                output = self.model(inputs_model, edges, graphs)
 
                 # Compute loss
                 if self.task_type == 'regression':

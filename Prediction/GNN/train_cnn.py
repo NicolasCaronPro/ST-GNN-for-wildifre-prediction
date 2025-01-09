@@ -265,21 +265,6 @@ if doTest:
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
-    mae = my_mean_absolute_error
-    rmse = weighted_rmse_loss
-    std = standard_deviation
-    cal = quantile_prediction_error
-    fre = frequency_class_error
-    f1 = my_f1_score
-    ca = class_accuracy
-    bca = balanced_class_accuracy
-    acc = class_accuracy
-    ck = class_risk
-    po = poisson_loss
-    meac = mean_absolute_error_class
-    c_i_class = c_index_class
-    c_i = c_index
-    bacc = binary_accuracy
 
     models = [
                 ('Zhang_binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),

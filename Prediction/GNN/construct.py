@@ -1047,7 +1047,7 @@ def init(args, dir_output, script):
     if True:
         logger.info(f'Adding time columns {7}')
         logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-        #df, _ = add_time_columns(varying_time_variables, 1, df.copy(deep=True), train_features, features_name)
+        #df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 

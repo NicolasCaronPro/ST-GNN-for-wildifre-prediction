@@ -200,10 +200,15 @@ dir_post_process = dir_output / 'post_process'
 post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
 
 models = [
-        Statistical_Model('fwi_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept',  'classification'),
+        #Statistical_Model('fwi_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept',  'classification'),
         Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nesterov_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nesterov_mean', [300, 1000, 4000, 10000], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('nesterov_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('nesterov_mean', [300, 1000, 4000, 10000], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nbsinister-max-3-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-3-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nbsinister-max-1-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nbsinister-max-0-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-0-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('risk-kmeans-5-Class-Dept', None, 5, 'risk-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('risk-nbsinister-Robust-kmeans-5-Class-Dept', None, 5, 'risk-nbsinister-Robust-kmeans-5-Class-Dept', 'classification'),
         ]
 
 for model in models:
@@ -223,10 +228,16 @@ if doTest:
     dir_output = Path(name_dir)
     
     models = [
-        ('fwi-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('fwi-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
         ('fwi-mean-[5, 10.5, 21.5, 34.5]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('nesterov-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('nesterov-mean-[300, 1000, 4000, 10000]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('nesterov-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('nesterov-mean-[300, 1000, 4000, 10000]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        ('nbsinister-max-3-kmeans-5-Class-Dept-None-5_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-3-kmeans-5-Class-Dept'),
+        ('nbsinister-max-1-kmeans-5-Class-Dept-None-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        ('nbsinister-max-0-kmeans-5-Class-Dept-None-5_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-0-kmeans-5-Class-Dept'),
+
+        ('risk-kmeans-5-Class-Dept-None-5_one_risk-kmeans-5-Class-Dept_classification_None', 'risk-kmeans-5-Class-Dept'),
+        ('risk-nbsinister-Robust-kmeans-5-Class-Dept-None-5_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_None', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
         ]
     
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{graph_method}'
@@ -264,8 +275,8 @@ if doTest:
         if host == 'pc':
             logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["graph_id"].values)}')
 
-            metrics, metrics_dept, res, res_dept = test_fire_index_model(vars(args), graphScale, test_dataset_dept,
-                                test_dataset_unscale_dept,
+            metrics, metrics_dept, res, res_dept = test_fire_index_model(vars(args), graphScale, test_dataset_dept.copy(deep=True),
+                                test_dataset_unscale_dept.copy(deep=True),
                                     dept,
                                     prefix,
                                     models,

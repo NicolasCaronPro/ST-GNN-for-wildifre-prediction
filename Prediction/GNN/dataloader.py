@@ -973,24 +973,17 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
 
     shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
-    res = pd.DataFrame(columns=ids_columns + targets_columns + ['prediction', 'class', 'mae', 'rmse'], index=np.arange(pred.shape[0]))
-    res[ids_columns + targets_columns] = df_test[ids_columns + targets_columns]
-    res[target_name] = df_test[target_name]
-    res['mae'] = np.sqrt((y[:,-4] * (pred[:,0] - y[:,-1]) ** 2))
-    res['rmse'] = np.sqrt(((pred[:,0] - y[:,-1]) ** 2))
-
-    #res = graph.compute_window_class(res, [1], 5, column='prediction', target_name=target_name, aggregate_funcs=['sum', 'mean', 'max', 'min', 'grad', 'std'], mode='test', dir_output=dir_train / 'class_window' / prefix / target_name)
-    #df_test = graph.compute_window_class(df_test, [1], 5, column='nbsinister', target_name='nbsinister', aggregate_funcs=['max'], mode='test', dir_output=dir_train / 'class_window' / prefix / 'nbsinister')
-
-    #res_class_window_cols = [col for col in res.columns if col.startswith('class_window')]
-    #res_window = res.groupby(['graph_id', 'date'])[res_class_window_cols + ['prediction', 'nbsinister']].mean().reset_index()
-    #test_class_window_cols = [col for col in df_test.columns if col.startswith('window_nbsinister')]
-    #test_window = df_test.groupby(['graph_id', 'date', 'departement'])[test_class_window_cols + ['nbsinister', 'risk']].mean().reset_index()
-
-    #test_ids = set(zip(res_window['graph_id'], res_window['date']))
-    #test_window = test_window[test_window[['graph_id', 'date']].apply(tuple, axis=1).isin(test_ids)]
+    
     df_test['saison'] = df_test['date'].apply(get_saison)
-    res['saison'] = res['date'].apply(get_saison)
+
+    res_temp = pd.DataFrame(index=np.arange(0, pred.shape[0]))
+    res_temp['graph_id'] = y[:, graph_id_index]
+    res_temp['date'] = y[:, date_index]
+    res_temp['prediction'] = pred[:, 0]
+
+    df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])['prediction'], on=['graph_id', 'date']).reset_index()
+
+    res = df_test.copy(deep=True)
 
     ####################################### Sinister Evaluation ########################################
 
@@ -1004,16 +997,6 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_true = df_test[col_nbsinister].values
     
     apr = round(average_precision_score(y_true > 0, y_pred), 2)
-    df_test['prediction'] = y_pred
-
-    """for id in df_test[df_test['departement'] == 1]['graph_id'].unique():
-        fig, ax = plt.subplots(4, figsize=(15,5))
-        df_test[df_test['graph_id'] == id]['temp_mean'].plot(ax=ax[0])
-        df_test[df_test['graph_id'] == id][target_name].plot(ax=ax[1])
-        df_test[df_test['graph_id'] == id]['prediction'].plot(ax=ax[2])
-        ax[3].plot(y_pred[df_test['graph_id'] == id])
-        plt.title(str(id))
-        plt.show()"""
 
     ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsinister, dir_output / name)
 
@@ -1043,30 +1026,6 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
         logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée"""
 
-    """mae = round(mean_absolute_error(y_true, y_pred), 2)
-    mse = round(mean_squared_error(y_true, y_pred), 2)
-    mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-    mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-
-    metrics[f'mae_raw_{col_for_dict}'] = mae
-    metrics[f'mse_raw_{col_for_dict}'] = mse
-    metrics[f'mae_fire_raw_{col_for_dict}'] = mae_fire
-    metrics[f'mse_fire_raw_{col_for_dict}'] = mse_fire
-
-    logger.info(f'mae_raw = {mae}')
-    logger.info(f'mse_raw = {mse}')
-    logger.info(f'mae_fire_raw = {mae_fire}')
-    logger.info(f'mse_fire_raw = {mse_fire}')"""
-
-    # Calcul des scores pour les signaux
-    #iou_dict = calculate_signal_scores(y_pred, y_true, test_window['graph_id'].values, test_window['saison'].values)
-
-    # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
-    #for key, value in iou_dict.items():
-    #    metric_key = f'{key}_raw_{col_for_dict}'  # Ajouter un suffixe basé sur col_for_dict
-    #    metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
-    #    logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
-
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
     y_true_temp[:, graph_id_index] = df_test['graph_id']
     y_true_temp[:, id_index] = df_test['graph_id']
@@ -1080,8 +1039,6 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         dir_output / name, col_nbsinister,
         pred_min, pred_max)
     
-    res['prediction'] = pred[:, 0]
-
     logger.info(f'###################### Analysis {col_class} #########################')
 
     _, iv = calculate_woe_iv(res, 'prediction', 'nbsinister')
@@ -1095,9 +1052,19 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     mask_fire_pred = (y_pred > 0) | (df_test['nbsinister'].values > 0)
 
-    silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred',dir_output / name), 2)
+    silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred', dir_output / name), 2)
     metrics['SS_no_zeros'] = silhouette_score_no_zeros
     logger.info(f'SS_no_zeros = {silhouette_score_no_zeros}')
+
+    silhouette_score = round(silhouette_score_with_plot(df_test[col_class].values.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all_gt', dir_output / name), 2)
+    metrics['SS_gt'] = silhouette_score
+    logger.info(f'SS_gt = {silhouette_score}')
+
+    mask_fire_pred = (df_test[col_class].values > 0) | (df_test['nbsinister'].values > 0)
+    
+    silhouette_score_no_zeros = round(silhouette_score_with_plot(df_test[col_class][mask_fire_pred].values.reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred_gt', dir_output / name), 2)
+    metrics['SS_no_zeros_gt'] = silhouette_score_no_zeros
+    logger.info(f'SS_no_zero_gts = {silhouette_score_no_zeros}')
 
     y_true = df_test[col_class]
     if pred_max is not None:
@@ -1111,16 +1078,11 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     all_class = all_class[~np.isnan(all_class)]
     all_class_label = [int(c) for c in all_class]
 
-    #metrics = add_metrics(methods, i, pred, y, test_departement, target_name, graph, name, dir_train)
     plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
     plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
     plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
     plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
 
-    #mae = round(mean_absolute_error(y_true, y_pred), 2)
-    #mse = round(mean_squared_error(y_true, y_pred), 2)
-    #mae_fire = round(mean_absolute_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
-    #mse_fire = round(mean_squared_error(y_true[y_true > 0], y_pred[y_true > 0]), 2)
     accuracy = round(accuracy_score(y_true, y_pred), 2)
     metrics[f'accuracy'] = accuracy
     logger.info(f'accuracy = {accuracy}')
@@ -1187,8 +1149,9 @@ def test_fire_index_model(args,
 
         y = test_dataset_dept[ids_columns + targets_columns].values
 
-        test_dataset_unscale_dept[target_name] = test_dataset_dept[target_name]
-        
+        if target_name not in list(test_dataset_unscale_dept.columns):
+            test_dataset_unscale_dept = test_dataset_unscale_dept.set_index(['graph_id', 'date']).join(test_dataset_dept.set_index(['graph_id', 'date'])[target_name], on=['graph_id', 'date']).reset_index()
+                
         logger.info('#########################')
         logger.info(f'      {name}            ')
         logger.info('#########################')
@@ -1363,10 +1326,10 @@ def test_sklearn_api_model(args,
         samples_name = [
         f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
         ]
-        try:
-            model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
-        except:
-            pass
+        #try:
+        #    model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
+        #except:
+        #    pass
 
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
@@ -1897,6 +1860,7 @@ def wrapped_train_deep_learning_1D(params):
     use_temporal_as_edges = params['use_temporal_as_edges']
     torch_structure = params['torch_structure']
     infos = params['infos']
+    graph_method = params['graph_method']
 
     non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
     loss_name = loss
@@ -1911,7 +1875,13 @@ def wrapped_train_deep_learning_1D(params):
     if task_type == 'classification' and target_name != 'binary':
         train_dataset['class'] = train_dataset[target_name]
 
-    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, params['graph_method'])
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
 
@@ -2003,6 +1973,7 @@ def wrapped_train_deep_learning_2D(params):
     torch_structure = params['torch_structure']
     autoRegression = params['autoRegression']
     image_per_node = params['image_per_node']
+    graph_method = params['graph_method']
 
     non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2013,7 +1984,13 @@ def wrapped_train_deep_learning_2D(params):
     val_dataset = params['val_dataset']
     test_dataset = params['test_dataset']
 
-    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, params['graph_method'])
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
 

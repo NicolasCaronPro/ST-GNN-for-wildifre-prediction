@@ -195,11 +195,11 @@ models = [
         #('xgboost_binary-2_one_nbsinister-Robust-Quantile-5-Class-Dept_classification_softmax', 'nbsinister-Robust-Quantile-5-Class-Dept', post_process_model_dico['ScalerClassRisk_Robust_QuantileRisk_nbsinister']),
         #('xgboost_binary-2_one_nbsinister-MinMax-thresholds-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-thresholds-5-Class-Dept', post_process_model_dico['ScalerClassRisk_MinMax_ThresholdRisk_[0.05, 0.15, 0.3, 0.6, 1.0]_nbsinister']),
         
-        ('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_risk']),
+        ('xgboost_full_proportion-on-zero-class_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_risk']),
         #('xgboost_binary-2_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_softmax', 'risk-nbsinister-Robust-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_Robust_KMeansRisk_5_risk-nbsinister']),
 
-        ('xgboost_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-0+0']),
-        ('xgboost_binary-2_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-1-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-1+1']),
+        ('xgboost_full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-0+0']),
+        ('xgboost_full_proportion-on-zero-class_nbsinister-max-1-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-1-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-1+1']),
         #('xgboost_binary-2_one_nbsinister-max-2-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-2-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-2+2']),
         #('xgboost_binary-2_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-3-kmeans-5-Class-Dept', post_process_model_dico['ScalerClassRisk_None_KMeansRisk_5_nbsinister-max-3+3']),
         ]
@@ -342,16 +342,16 @@ if doTest:
     dir_output = Path(name_dir)
 
     models = [
-        ('xgboost_binary-2_one_nbsinister-Robust-Quantile-5-Class-Dept_classification_softmax', 'nbsinister-Robust-Quantile-5-Class-Dept'),
-        ('xgboost_binary-2_one_nbsinister-MinMax-thresholds-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-thresholds-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-Robust-Quantile-5-Class-Dept_classification_softmax', 'nbsinister-Robust-Quantile-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-MinMax-thresholds-5-Class-Dept_classification_softmax', 'nbsinister-MinMax-thresholds-5-Class-Dept'),
 
-        ('xgboost_binary-2_one_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept'),
-        ('xgboost_binary-2_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_softmax', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
+        ('xgboost_full_proportion-on-zero-class_risk-kmeans-5-Class-Dept_classification_softmax', 'risk-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_softmax', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
 
-        ('xgboost_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        ('xgboost_binary-2_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('xgboost_binary-2_one_nbsinister-max-2-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-2-kmeans-5-Class-Dept'),
-        ('xgboost_binary-2_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-3-kmeans-5-Class-Dept'),
+        ('xgboost_full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
+        ('xgboost_full_proportion-on-zero-class_nbsinister-max-1-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-max-2-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-2-kmeans-5-Class-Dept'),
+        #('xgboost_binary-2_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-3-kmeans-5-Class-Dept'),
         ]
 
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{top_cluster}'

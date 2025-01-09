@@ -1096,14 +1096,18 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     
     name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
 
-    #train_dataset['weight'] = train_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
-    #val_dataset['weight'] = val_dataset[f'{weights_version}_{spec}_sum_+{days_in_futur}_{target}']
-
     if task_type == 'classification' and target != 'binary':
         train_dataset['class'] = train_dataset[target]
 
-    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
     val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
     
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
