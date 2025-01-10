@@ -183,7 +183,6 @@ class KSRisk:
         test_window['y_pred'] = y_pred
         test_window['y_true'] = y_true 
         self.ks_results = calculate_ks(test_window, 'y_pred', 'y_true', self.thresholds_ks, self.dir_output)
-        print(self.ks_results)
         return self
 
     def predict(self, y_pred):
@@ -195,17 +194,195 @@ class KSRisk:
                 new_pred[y_pred >= self.ks_results[self.ks_results['threshold'] == threshold][self.thresh_col].values[0]] = threshold
         return new_pred
 
+class PreprocessorConv:
+    def __init__(self, graph, conv_type='both', id_col=None):
+        """
+        Initialize the PreprocessorConv.
+
+        :param graph: An object containing `sequences_month` data structure.
+        :param conv_type: Type of convolution to apply ('laplace', 'mean', 'both', 'sum', or 'max').
+        :param id_col: List of column names or indices representing IDs. Defaults to None.
+        """
+        assert conv_type in ['laplace', 'mean', 'both', 'sum', 'max'], \
+            "conv_type must be 'laplace', 'mean', 'both', 'sum', or 'max'."
+        self.graph = graph
+        self.conv_type = conv_type
+        self.id_col = id_col if id_col is not None else ['id']
+
+    def _get_season_name(self, month):
+        """
+        Determine the season name based on the month.
+
+        :param month: Integer representing the month (1 to 12).
+        :return: Season name as a string ('medium', 'high', or 'low').
+        """
+        group_month = [
+            [2, 3, 4, 5],    # Medium season
+            [6, 7, 8, 9],    # High season
+            [10, 11, 12, 1]  # Low season
+        ]
+        names = ['medium', 'high', 'low']
+        for i, group in enumerate(group_month):
+            if month in group:
+                return names[i]
+        raise ValueError(f"Month {month} does not belong to any season group.")
+
+    def _laplace_convolution(self, X, kernel_size):
+        """
+        Apply Laplace convolution using a custom kernel from Astropy.
+
+        :param X: Input array for convolution.
+        :param kernel_size: Size of the convolution kernel.
+        :return: Convoluted array.
+        """
+        # Create Laplace kernel
+        kernel_daily = np.abs(np.arange(-(kernel_size // 2), kernel_size // 2 + 1))
+        kernel_daily += 1
+        kernel_daily = 1 / kernel_daily
+        kernel_daily = MinMaxScaler((0, 1)).fit_transform(kernel_daily.reshape(-1, 1))
+
+        if np.unique(kernel_daily)[0] == 0 and np.unique(kernel_daily).shape[0] == 1:
+            kernel_daily += 1
+        
+        # Perform convolution using Astropy
+        #print(np.unique(X))
+        #print(np.unique(kernel_daily))
+
+        res = convolve_fft(X.reshape(-1), kernel_daily.reshape(-1), normalize_kernel=False, fill_value=0.)
+
+        return res
+    
+    def _mean_convolution(self, X, kernel_size):
+        """
+        Apply mean convolution using a custom kernel from Astropy.
+
+        :param X: Input array for convolution.
+        :param kernel_size: Size of the convolution kernel.
+        :return: Convoluted array.
+        """
+        # Create mean kernel
+        kernel_season = np.ones(kernel_size, dtype=float)
+        kernel_season /= kernel_size  # Normalize the kernel
+        #if self.conv_type == 'both':
+        #    kernel_season[kernel_size // 2] = 0
+
+        # Perform convolution using Astropy
+        return convolve_fft(X.reshape(-1), kernel_season.reshape(-1), normalize_kernel=False, fill_value=0.)
+
+    def _sum_convolution(self, X, kernel_size):
+        """
+        Apply sum operation on the input with a sliding window of size `kernel_size`.
+
+        :param X: Input array for summation (2D: samples x features).
+        :param kernel_size: Size of the sliding window.
+        :return: Array where each element is the sum of elements in the sliding window.
+        """
+        from scipy.ndimage import uniform_filter1d
+        return uniform_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0) * kernel_size
+
+    def _max_convolution(self, X, kernel_size):
+        """
+        Apply max operation on the input with a sliding window of size `kernel_size`.
+
+        :param X: Input array for max operation (2D: samples x features).
+        :param kernel_size: Size of the sliding window.
+        :return: Array where each element is the max of elements in the sliding window.
+        """
+        from scipy.ndimage import maximum_filter1d
+        
+        if kernel_size > 1:
+            fig, ax = plt.subplots(2, figsize=(15,5))
+            ax[0].plot(X)
+
+        res = maximum_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0)
+         
+        if kernel_size > 1:
+            ax[1].plot(res)
+            plt.title(str(kernel_size))
+            plt.show()
+
+        return res
+
+    def apply(self, X, ids):
+        """
+        Apply the convolution based on the given type to the input data.
+
+        :param X: Input array of shape (n_samples, n_features).
+        :param ids: Array of shape (n_samples, len(id_col)) if `id_col` is a list, otherwise (n_samples, 1).
+        :return: Processed array with convolutions applied.
+        """
+        X_processed = np.zeros_like(X, dtype=np.float32).reshape(-1)
+        unique_ids = np.unique(ids, axis=0)
+
+        for unique_id in unique_ids:
+
+            if len(self.id_col) > 1 and not isinstance(self.id_col, str):
+                mask = (ids[:, 0] == unique_id[0]) & (ids[:, 1] == unique_id[1])
+            else:
+                mask = ids[:, 0] == unique_id[0]
+
+            if not np.any(mask):
+                continue
+
+            # Handle month_non_encoder
+            if 'month_non_encoder' in self.id_col:
+                month_idx = self.id_col.index('month_non_encoder')
+                month = unique_id[month_idx]
+                season_name = self._get_season_name(month)
+                kernel_size = int(self.graph.sequences_month[season_name][unique_id[0]]['mean_size'])
+            else:
+                raise ValueError(
+                    "Error: 'month_non_encoder' is not specified in id_col. Please include it in id_col to proceed."
+                )
+
+            # Apply Laplace convolution if specified
+            if self.conv_type == 'laplace':
+                laplace_result = self._laplace_convolution(X[mask], kernel_size)
+                X_processed[mask] = laplace_result.reshape(-1)
+
+            # Apply mean convolution if specified
+            elif self.conv_type == 'mean':
+                mean_result = self._mean_convolution(X[mask], kernel_size)
+                X_processed[mask] = mean_result.reshape(-1)
+
+            # Apply both convolutions if specified
+            elif self.conv_type == 'both':
+                laplace_result = self._laplace_convolution(X[mask], kernel_size)
+                mean_result = self._mean_convolution(X[mask], kernel_size)
+                X_processed[mask] = (laplace_result + mean_result).reshape(-1)
+
+            # Apply sum operation if specified
+            elif self.conv_type == 'sum':
+                sum_result = self._sum_convolution(X[mask], kernel_size)
+                X_processed[mask] = sum_result.reshape(-1)
+
+            # Apply max operation if specified
+            elif self.conv_type == 'max':
+                max_result = self._max_convolution(X[mask], kernel_size)
+                X_processed[mask] = max_result.reshape(-1)
+            else:
+                raise ValueError(
+                    f"Error: conv_type must be in  ['laplace', 'mean', 'both', 'sum', 'max'], got {self.conv_type}"
+                )
+            
+        fig, ax = plt.subplots(2, figsize=(15,5))
+        ax[0].plot(X_processed[ids[:, 1] == 27])
+        ax[1].plot(X[ids[:, 1] == 27])
+        plt.show()
+
+        return X_processed
+
 class ScalerClassRisk:
-    def __init__(self, col_id, dir_output, target, scaler=None, class_risk=None):
+    def __init__(self, col_id, dir_output, target, scaler=None, class_risk=None, preprocessor=None):
         """
         Initialize the ScalerClassRisk.
 
-        :param n_clusters: Number of clusters for classification (if using KMeans).
         :param col_id: Column ID used to group data.
         :param dir_output: Directory to save output files (e.g., histograms).
         :param target: Target name used for labeling outputs.
         :param scaler: A scaler object (e.g., StandardScaler) for normalization. If None, no scaling is applied.
         :param class_risk: An object with `fit` and `predict` methods for risk classification.
+        :param preprocessor: An object with an `apply` method to preprocess X before fitting.
         """
         assert class_risk is not None
         self.n_clusters = 5
@@ -226,24 +403,34 @@ class ScalerClassRisk:
         self.target = target
         self.scaler = scaler
         self.class_risk = class_risk
+        self.preprocessor = preprocessor
+        self.preprocessor_id_col = preprocessor.id_col if preprocessor is not None else None
         check_and_create_path(self.dir_output)
         self.models_by_id = {}
 
-    def fit(self, X, sinisters, ids):
+    def fit(self, X, sinisters, ids, ids_preprocessor=None):
         """
         Fit models for each unique ID and calculate statistics.
 
         :param X: Array of values to scale and classify.
-        :param ids: Array of IDs corresponding to each value in X.
         :param sinisters: Array of sinisters values corresponding to each value in X.
+        :param ids: Array of IDs corresponding to each value in X.
+        :param ids_preprocessor: IDs to use for preprocessing (if preprocessor is not None).
         """
-
         logger.info(f'########################################## {self.name} ##########################################')
 
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
         if len(sinisters.shape) == 1:
             sinisters = sinisters.reshape(-1, 1)
+
+        X_ = np.copy(X)
+
+        # Apply preprocessor if provided
+        if self.preprocessor is not None:
+            if ids_preprocessor is None:
+                raise ValueError("ids_preprocessor must be provided when preprocessor is not None.")
+            X = self.preprocessor.apply(X, ids_preprocessor)
 
         self.models_by_id = {}
 
@@ -261,9 +448,15 @@ class ScalerClassRisk:
                 scaler = None
                 X_scaled = X_id
 
+            X_scaled = X_scaled.astype(np.float32)
+
             # Fit the class_risk model
             class_risk = deepcopy(self.class_risk)
-            class_risk.fit(X_scaled, sinisters[mask])
+
+            if len(X_scaled.shape) == 1:
+                X_scaled = np.reshape(X_scaled, (-1,1))
+
+            class_risk.fit(X_scaled, sinisters_id)
 
             # Predict classes for current ID
             classes = class_risk.predict(X_scaled)
@@ -292,7 +485,7 @@ class ScalerClassRisk:
                 'sinistres_max': sinisters_max
             }
 
-        pred = self.predict(X, ids)
+        pred = self.predict(X_, ids, ids_preprocessor)
         # Plot histogram of the classes in X[mask]
         plt.figure(figsize=(8, 6))
         plt.hist(pred, bins=np.unique(pred).shape[0], color='blue', alpha=0.7, edgecolor='black')
@@ -307,16 +500,23 @@ class ScalerClassRisk:
         for cl in np.unique(pred):
             logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
 
-    def predict(self, X, ids):
+    def predict(self, X, ids, ids_preprocessor=None):
         """
         Predict class labels using the appropriate model for each ID.
 
         :param X: Array of values to predict.
         :param ids: Array of IDs corresponding to each value in X.
+        :param ids_preprocessor: IDs to use for preprocessing (if preprocessor is not None).
         :return: Array of predicted class labels.
         """
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
+
+        # Apply preprocessor if provided
+        if self.preprocessor is not None:
+            if ids_preprocessor is None:
+                raise ValueError("ids_preprocessor must be provided when preprocessor is not None.")
+            X = self.preprocessor.apply(X, ids_preprocessor)
 
         predictions = np.zeros(X.shape[0], dtype=int)
 
@@ -334,14 +534,17 @@ class ScalerClassRisk:
             else:
                 X_scaled = X[mask]
 
-            predictions[mask] = class_risk.predict(X_scaled.astype(float))
+            if len(X_scaled.shape) == 1:
+                X_scaled = np.reshape(X_scaled, (-1,1))
+
+            predictions[mask] = class_risk.predict(X_scaled.astype(np.float32))
         
         predictions[predictions >= self.n_clusters] = self.n_clusters - 1
         return predictions
-    
-    def fit_predict(self, X, ids, sinisters):
-        self.fit(X, ids, sinisters)
-        return self.predict(X, ids)
+
+    def fit_predict(self, X, ids, sinisters, ids_preprocessor=None):
+        self.fit(X, ids, sinisters, ids_preprocessor)
+        return self.predict(X, ids, ids_preprocessor)
 
     def predict_stat(self, X, ids, stat_key):
         """
@@ -398,8 +601,8 @@ class ScalerClassRisk:
         """
         return self.predict_stat(X, ids, stat_key='sinistres_max')
     
-    def predict_risk(self, X, ids):
-        return self.predict(X, ids)
+    def predict_risk(self, X, ids, ids_preprocessor=None):
+        return self.predict(X, ids, ids_preprocessor)
 
 # Fonction pour calculer la somme dans une fenêtre de rolling, incluant les fenêtres inversées
 def calculate_rolling_sum(dataset, column, shifts, group_col, func):
@@ -537,9 +740,12 @@ def class_window_max(dataset, group_col, column, shifts):
                 
                 # Apply the aggregation function
                 dataset.at[idx, column_name] = window_df[column].max()
+    
     return dataset
 
-def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method):
+def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph):
+
+    graph_method = graph.graph_method
 
     new_cols = []
 
@@ -629,295 +835,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     new_cols.append('risk-nbsinister-Robust-kmeans-5-Class-Dept')
 
     #######################################################################################
-    """shifts = 7
     
-    obj6 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_sum(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_sum(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_sum(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj6.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj6.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj6.name] = obj6
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-
-    #######################################################################################
-    shifts = 5
-    
-    obj7 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_sum(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_sum(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_sum(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj7.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj7.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj7.name] = obj7
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-
-    #######################################################################################
-    shifts = 3
-    
-    obj8 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_sum(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_sum(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_sum(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj8.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj8.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj8.name] = obj8
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-
-    #######################################################################################
-    shifts = 1
-    
-    obj9 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_sum(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_sum(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_sum(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj9.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj9.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj9.name] = obj9
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-    
-    #######################################################################################
-    shifts = 0
-    
-    obj10 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-sum-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_sum(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_sum(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_sum(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj10.fit(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(train_dataset_[f'nbsinister_sum_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(val_dataset_[f'nbsinister_sum_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept'] = obj10.predict(test_dataset_[f'nbsinister_sum_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj10.name] = obj10
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-
-    #######################################################################################
-    shifts = 7
-    
-    obj12 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj12.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj12.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj12.name] = obj12
-
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-
-    #######################################################################################
-    shifts = 5
-    
-    obj13 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_,
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_,
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_,
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj13.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj13.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['departement'].values)
-
-    res[obj13.name] = obj13
-    
-    new_cols.append(f'nbsinister-sum-{shifts}-kmeans-5-Class-Dept')
-    
-    """
-
-    #######################################################################################
     shifts = 3
 
     obj14 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
@@ -928,21 +846,21 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     # Application sur les jeux de données
     train_dataset_ = class_window_max(
-        dataset=train_dataset_,
+        dataset=train_dataset_.copy(deep=True),
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
     val_dataset_ = class_window_max(
-            dataset=val_dataset_,
+            dataset=val_dataset_.copy(deep=True),
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
     test_dataset_ = class_window_max(
-                dataset=test_dataset_,
+                dataset=test_dataset_.copy(deep=True),
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
@@ -969,21 +887,21 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     # Application sur les jeux de données
     train_dataset_ = class_window_max(
-        dataset=train_dataset_,
+        dataset=train_dataset_.copy(deep=True),
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
     val_dataset_ = class_window_max(
-            dataset=val_dataset_,
+            dataset=val_dataset_.copy(deep=True),
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
     test_dataset_ = class_window_max(
-                dataset=test_dataset_,
+                dataset=test_dataset_.copy(deep=True),
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
@@ -1010,21 +928,21 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     # Application sur les jeux de données
     train_dataset_ = class_window_max(
-        dataset=train_dataset_,
+        dataset=train_dataset_.copy(deep=True),
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
     val_dataset_ = class_window_max(
-            dataset=val_dataset_,
+            dataset=val_dataset_.copy(deep=True),
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
     test_dataset_ = class_window_max(
-                dataset=test_dataset_,
+                dataset=test_dataset_.copy(deep=True),
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
@@ -1051,21 +969,21 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     # Application sur les jeux de données
     train_dataset_ = class_window_max(
-        dataset=train_dataset_,
+        dataset=train_dataset_.copy(deep=True),
         column='nbsinister',
         shifts=shifts,
         group_col='graph_id',
     )
 
     val_dataset_ = class_window_max(
-            dataset=val_dataset_,
+            dataset=val_dataset_.copy(deep=True),
             column='nbsinister',
             shifts=shifts,
             group_col='graph_id',
         )
     
     test_dataset_ = class_window_max(
-                dataset=test_dataset_,
+                dataset=test_dataset_.copy(deep=True),
                 column='nbsinister',
                 shifts=shifts,
                 group_col='graph_id',
@@ -1080,6 +998,74 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     res[obj17.name] = obj17
 
     new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')
+
+    ###############################################################################
+
+    if graph.sequences_month is None:
+        graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
+
+    # Création du préprocesseur avec les différents types de convolution
+    preprocessors = {
+        'laplace': PreprocessorConv(graph=graph, conv_type='laplace', id_col=['month_non_encoder', 'graph_id']),
+        'mean': PreprocessorConv(graph=graph, conv_type='mean', id_col=['month_non_encoder', 'graph_id']),
+        'both': PreprocessorConv(graph=graph, conv_type='both', id_col=['month_non_encoder', 'graph_id']),
+        'sum': PreprocessorConv(graph=graph, conv_type='sum', id_col=['month_non_encoder', 'graph_id']),
+        'max': PreprocessorConv(graph=graph, conv_type='max', id_col=['month_non_encoder', 'graph_id'])
+    }
+    
+    conv_types = ['max', 'laplace', 'mean', 'both', 'sum']
+
+    for conv_type in conv_types:
+        logger.info(f"Testing with convolution type: {conv_type}")
+
+        # Sélection du préprocesseur
+        preprocessor = preprocessors[conv_type]
+
+        # Définition de l'objet ScalerClassRisk
+        class_risk = KMeansRisk(n_clusters=5) if conv_type in ['laplace', 'mean', 'both'] else KMeansRiskZerosHandle(5)
+        obj = ScalerClassRisk(
+            col_id='departement',
+            dir_output=dir_post_process,
+            target='nbsinister',
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
+
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_['nbsinister'].values,
+            train_dataset_['nbsinister'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', 'graph_id']].values
+        )
+
+        train_col = f"nbsinister-kmeans-5-Class-Dept-{conv_type}"
+        val_col = f"nbsinister-kmeans-5-Class-Dept-{conv_type}"
+        test_col = f"nbsinister-kmeans-5-Class-Dept-{conv_type}"
+
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_['nbsinister'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', 'graph_id']].values
+        )
+
+        val_dataset_[val_col] = obj.predict(
+            val_dataset_['nbsinister'].values,
+            val_dataset_['departement'].values,
+            val_dataset_[['month_non_encoder', 'graph_id']].values
+        )
+        test_dataset_[test_col] = obj.predict(
+            test_dataset_['nbsinister'].values,
+            test_dataset_['departement'].values,
+            test_dataset_[['month_non_encoder', 'graph_id']].values
+        )
+
+        # Stockage des résultats
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
+
+    logger.info(f"Completed processing for convolution type: {conv_type}")
 
     ###############################################################################
 

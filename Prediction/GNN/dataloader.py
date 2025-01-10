@@ -198,13 +198,20 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     #####################################################################################################################
 
+    if graph_method == 'graph':
+        logger.info(f'{dir_output} / .. / df_full_{scale}_{graphScale.base}_node.pkl')
+        df_node = read_object(f'df_full_{scale}_{graphScale.base}_node.pkl', dir_output / '..')
+        if df_node is not None:
+            df.drop([target_name_nbsinister, target_name_risk, target_name_class], inplace=True, axis=1)
+            df = df.set_index(['graph_id', 'date']).join(df_node.set_index(['graph_id', 'date'])[[target_name_nbsinister, target_name_risk, target_name_class]], on=['graph_id', 'date']).reset_index()
+
     df['nbsinister'] = df[target_name_nbsinister]
     df['risk'] = df[target_name_risk]
     df['class_risk'] = df[target_name_class]
 
     logger.info(f'Unique sinister -> {df["nbsinister"].unique()}')
 
-    features_obligatory = ['fwi_mean', 'nesterov_mean']
+    features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder']
     columns = np.unique(ids_columns + weights_name_columns + list(np.unique(list(features_selected_kmeans) + list(features_name))) + features_obligatory + targets_columns + [col for col in df.columns if col.startswith('class_window')])
     
     df = df[columns]
@@ -249,9 +256,21 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
 
-    logger.info(f'Nb sinister in train set : {train_dataset["nbsinister"].sum()}')
-    logger.info(f'Nb sinister in val set : {val_dataset["nbsinister"].sum()}')
-    logger.info(f'Nb sinister in test set : {test_dataset["nbsinister"].sum()}')
+    if graph_method == 'node':
+        logger.info(f'Nb sinister in train set : {train_dataset["nbsinister"].sum()}')
+        logger.info(f'Nb sinister in val set : {val_dataset["nbsinister"].sum()}')
+        logger.info(f'Nb sinister in test set : {test_dataset["nbsinister"].sum()}')
+    else:
+        def keep_one_per_pair(dataset):
+            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
+            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+
+        train_dataset_ = keep_one_per_pair(train_dataset)
+        val_dataset_ = keep_one_per_pair(val_dataset)
+        test_dataset_ = keep_one_per_pair(test_dataset)
+        logger.info(f'Nb sinister in train set : {train_dataset_["nbsinister"].sum()}')
+        logger.info(f'Nb sinister in val set : {val_dataset_["nbsinister"].sum()}')
+        logger.info(f'Nb sinister in test set : {test_dataset_["nbsinister"].sum()}')
 
     return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_name
 
@@ -1156,6 +1175,8 @@ def test_fire_index_model(args,
         logger.info(f'      {name}            ')
         logger.info('#########################')
 
+        run = f'{test_name}_{name}_{prefix_train}'
+        
         model_dir = dir_train / name_exp / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
 
         model = read_object(f'{name}.pkl', model_dir)
@@ -1178,7 +1199,7 @@ def test_fire_index_model(args,
 
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
-        metrics[name], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_unscale_dept, pred, y, graphScale,
+        metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_unscale_dept, pred, y, graphScale,
                                                test_departement, target_name, name,
                                                dir_output, pred_min = None, pred_max = None)
         
@@ -1334,44 +1355,6 @@ def test_sklearn_api_model(args,
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
     
-        """if scale == 'departement':
-            continue
-        # Analyse departement prediction
-        res_dept = res.groupby(['departement', 'date'])['risk'].sum().reset_index()
-        res_dept['id'] = res_dept['departement']
-        res_dept['graph_id'] = res_dept['departement']
-        res_dept['latitude'] = res.groupby(['departement'])['latitude'].mean().reset_index()['latitude']
-        res_dept['longitude'] = res.groupby(['departement'])['longitude'].mean().reset_index()['longitude']
-        res_dept['nbsinister'] = res.groupby(['departement', 'date'])['nbsinister'].sum().reset_index()['nbsinister']
-        res_dept['days_until_next_event'] = calculate_days_until_next_event(res_dept['id'].values, res_dept['date'].values, res_dept['nbsinister'].values)
-
-        dir_predictor = dir_train / 'influenceClustering'
-        for nameDep in test_departement:
-            mask = np.argwhere(y[:, departement_index] == name2int[nameDep])
-            if mask.shape[0] == 0:
-                continue
-            predictor = read_object(nameDep+'PredictorDepartement.pkl', dir_predictor)
-            if predictor is None:
-                predictor = read_object(f'{nameDep}Predictor{name}Departement.pkl', dir_predictor)
-            break
-
-        res_dept['class_risk'] = order_class(predictor, predictor.predict(res_dept['risk'].values, 0))
-        res_dept['weight'] =  predictor.weight_array(predictor.predict(res_dept['risk'].values, 0).astype(int)).reshape(-1)
-
-        if target_name == 'binary':
-            res_dept['prediction'] = res.groupby(['departement', 'date']).apply(group_probability).reset_index()['prediction']
-        else:
-            res_dept['prediction'] = res.groupby(['departement', 'date']).sum().reset_index()['prediction']
-
-        metrics_dept[f'{run}_departement'], res_dept = evaluate_pipeline(dir_train, prefix_train, res_dept[['prediction', 'class_risk']].values,
-                                                                res_dept[ids_columns + targets_columns].values,
-                                                                graphScale,
-                                                                methods, i, test_departement, target_name, name, test_name,
-                                                                dir_output, departement_scale=True)
-        if MLFLOW:
-            log_metrics_recursively(metrics_dept[name], prefix='departement')
-            
-        save_object(res_dept, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred_dept.pkl', dir_output / name)"""
         #res_dept['model'] = name
 
         res_scale.append(res)
@@ -1476,6 +1459,33 @@ def test_dl_model(args,
         predTensor, YTensor = graphScale._predict_test_loader(test_loader)
 
         y = YTensor.detach().cpu().numpy()
+        predTensor = predTensor.detach().cpu().numpy()
+
+         # Extraire les paires de test_dataset_dept
+        test_pairs = set(zip(test_dataset_dept['date'], test_dataset_dept['graph_id']))
+
+        # Normaliser les valeurs dans YTensor
+        date_values = [item for item in y[:, date_index]]
+        graph_id_values = [item for item in y[:, graph_id_index]]
+
+        # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
+        filtered_indices = [
+            i for i, (date, graph_id) in enumerate(zip(date_values, graph_id_values)) 
+            if (date, graph_id) in test_pairs
+            ]
+
+        # Créer YTensor filtré
+        y = y[filtered_indices]
+
+        # Créer des paires et les convertir en set
+        ytensor_pairs = set(zip(date_values, graph_id_values))
+
+        # Filtrer les lignes en vérifiant si chaque couple (date, graph_id) appartient à ytensor_pairs
+        test_dataset_dept = test_dataset_dept[
+            test_dataset_dept.apply(lambda row: (row['date'], row['graph_id']) in ytensor_pairs, axis=1)
+        ].reset_index(drop=True)
+        
+        print(test_dataset_dept.shape, predTensor.shape, y.shape)
 
         if graphScale.graph_method == 'graph':
             def keep_one_per_pair(dataset):
@@ -1500,39 +1510,14 @@ def test_dl_model(args,
                 return unique_indices
 
             unique_indices = get_unique_pair_indices(y, graph_id_index=graph_id_index, date_index=date_index)
-            predTensor = predTensor[unique_indices]
+            #predTensor = predTensor[unique_indices]
             y = y[unique_indices]
             test_dataset_dept = keep_one_per_pair(test_dataset_dept)
 
-        # Extraire les paires de test_dataset_dept
-        test_pairs = set(zip(test_dataset_dept['date'], test_dataset_dept['graph_id']))
-
-        # Normaliser les valeurs dans YTensor
-        date_values = [item for item in y[:, date_index]]
-        graph_id_values = [item for item in y[:, graph_id_index]]
-
-        # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
-        filtered_indices = [
-            i for i, (date, graph_id) in enumerate(zip(date_values, graph_id_values)) 
-            if (date, graph_id) in test_pairs
-            ]
-
-        # Créer YTensor filtré
-        y = y[filtered_indices]
-
-        # Créer des paires et les convertir en set
-        ytensor_pairs = set(zip(date_values, graph_id_values))
-
-        # Filtrer les lignes en vérifiant si chaque couple (date, graph_id) appartient à ytensor_pairs
-        test_dataset_dept = test_dataset_dept[
-            test_dataset_dept.apply(lambda row: (row['date'], row['graph_id']) in ytensor_pairs, axis=1)
-        ].reset_index(drop=True)
-
-        test_dataset_dept.sort_values(['graph_id', 'date'])
-
-        pred_ = predTensor.detach().cpu().numpy()[filtered_indices]
+        test_dataset_dept.sort_values(['graph_id', 'date'], inplace=True)
         ind = np.lexsort((y[:,0], y[:,4]))
-        pred_ = pred_[ind]
+        y = y[ind]
+        #predTensor = predTensor[ind]
         
         if target_name == 'binary' or target_name == 'nbsinister':
             band = -2
@@ -1542,7 +1527,7 @@ def test_dl_model(args,
         pred = np.full((predTensor.shape[0], 2), fill_value=np.nan)
         if name in ['Unet', 'ULSTM']:
             pred = np.full((y.shape[0], 2), fill_value=np.nan)
-            pred_2D = pred_
+            pred_2D = predTensor
             Y_2D = y
             udates = np.unique(test_dataset_dept['date'].values)
             ugraph = np.unique(test_dataset_dept['graph_id'].values)
@@ -1554,8 +1539,8 @@ def test_dl_model(args,
                         continue
                     pred[mask[:, 0], 0] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
         else:
-            pred[:, 0] = pred_
-            pred[:, 1] = pred_
+            pred[:, 0] = predTensor
+            pred[:, 1] = predTensor
 
         if MLFLOW:
             mlflow.set_tag(f"Testing", f"{name}")
@@ -1868,7 +1853,7 @@ def wrapped_train_deep_learning_1D(params):
     logger.info(f'Fitting model {model}')
     logger.info('Try loading loader')
 
-    train_dataset = params['train_dataset']
+    train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
     test_dataset = params['test_dataset']
     
@@ -1879,58 +1864,14 @@ def wrapped_train_deep_learning_1D(params):
 
     if 'weight' in list(train_dataset.columns):
         train_dataset.drop('weight', inplace=True, axis=1)
+
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+    print(train_dataset[train_dataset['weight'] != -1].shape, train_dataset[train_dataset['weight'] == -1].shape)
 
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
 
-    """train_loader = read_object(f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-    val_loader = read_object(f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-    test_loader = read_object(f'test_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-
-    if (train_loader is None or val_loader is None or test_loader is None) or params['Rewrite']:
-        logger.info(f'Building loader, loading loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl')
-        train_loader, val_loader, test_loader = train_val_data_loader(
-            graph=params['graphScale'],
-            df_train=train_dataset,
-            df_val=val_dataset,
-            df_test=test_dataset,
-            features_name=params['features_selected_str'],
-            batch_size=batch_size,
-            device=params['device'],
-            use_temporal_as_edges=use_temporal_as_edges,
-            ks=params['k_days'],
-            target_name=target_name,
-        )
-        save_object(train_loader, f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-        save_object(val_loader, f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-        save_object(test_loader, f'test_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{use_temporal_as_edges}.pkl', params['dir_output'])
-
-    train_params = {
-        "train_loader": train_loader,
-        "val_loader": val_loader,
-        "test_loader": test_loader,
-        "k_days": params['k_days'],
-        "optimize_feature": params['optimize_feature'],
-        "PATIENCE_CNT": params['PATIENCE_CNT'],
-        "CHECKPOINT": params['CHECKPOINT'],
-        "epochs": params['epochs'],
-        "features_selected": params['features_selected'],
-        "features_selected_str": params['features_selected_str'],
-        "lr": params['lr'],
-        'graph': params['graph'],
-        "loss_name": loss_name,
-        "modelname": model,
-        "dir_output": params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
-        "target_name": target_name,
-        'infos' : infos,
-        'k_days' : params['k_days'],
-        'task_type' : params['task_type'],
-        'out_channels' : params['out_channels']
-    }
-
-    train(train_params)"""
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
                                     batch_size=batch_size,
@@ -1980,7 +1921,7 @@ def wrapped_train_deep_learning_2D(params):
     logger.info(f'Fitting model {model}')
     logger.info('Try loading loader')
 
-    train_dataset = params['train_dataset']
+    train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
     test_dataset = params['test_dataset']
 
@@ -1988,63 +1929,13 @@ def wrapped_train_deep_learning_2D(params):
 
     if 'weight' in list(train_dataset.columns):
         train_dataset.drop('weight', inplace=True, axis=1)
+
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
 
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
-
-    """train_loader = read_object(f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-    val_loader = read_object(f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-    test_loader = read_object(f'test_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-
-    if (train_loader is None or val_loader is None or test_loader is None) or params['Rewrite']:
-        logger.info(f'Building loader, loading loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl')
-        train_loader, val_loader, test_loader = train_val_data_loader_2D(
-            graph=params['graph'],
-            df_train=params['train_dataset_unscale'],
-            df_val=params['val_dataset'],
-            df_test=params['test_dataset'],
-            use_temporal_as_edges=use_temporal_as_edges,
-            image_per_node=image_per_node,
-            batch_size=batch_size,
-            device=params['device'],
-            scaling=params['scaling'],
-            features_name_2D=params['features_name_2D'],
-            features_name=params['features_name_1D'],
-            features=params['features'],
-            ks=params['k_days'],
-            path=Path(params['name_dir'])
-        )
-
-        save_object(train_loader, f'train_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-        save_object(val_loader, f'val_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-        save_object(test_loader, f'test_loader_{params["prefix"]}_{params["scaling"]}_{params["encoding"]}_{image_per_node}_{use_temporal_as_edges}_2D.pkl', params['dir_output'])
-
-    train_params = {
-         "train_loader": train_loader,
-        "val_loader": val_loader,
-        "test_loader": test_loader,
-        "k_days": params['k_days'],
-        "optimize_feature": params['optimize_feature'],
-        "PATIENCE_CNT": params['PATIENCE_CNT'],
-        "CHECKPOINT": params['CHECKPOINT'],
-        "epochs": params['epochs'],
-        "features_selected": params['features_selected_2D'],
-        "features_selected_str": params['features_name_2D'],
-        "lr": params['lr'],
-        'graph': params['graph'],
-        "loss_name": loss_name,
-        "modelname": model,
-        "dir_output": params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
-        "target_name": target_name,
-        'infos' : infos,
-        "autoRegression": autoRegression,
-        'k_days' : params['k_days']
-    }
-
-    train(train_params)"""
-
+    
     if torch_structure == 'Model_CNN':
         wrapped_model = ModelCNN(model_name=model,
                                     batch_size=batch_size,

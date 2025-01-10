@@ -8,6 +8,7 @@ from GNN.features_selection import *
 from GNN.config import *
 from GNN.array_fet import *
 from sklearn.metrics import silhouette_score, silhouette_samples
+from astropy.convolution import convolve_fft
 
 if is_pc:
     import datetime as dt
@@ -4431,6 +4432,8 @@ def my_convolve(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False, semi2=Fa
 def add_weigh_column(dff, train_mask, weight_col, graph_method):
 
     df = dff.copy(deep=True)
+
+    df = df[df['weight'] > 0]
 
     logger.info(f'Adding weight columns')
     target_name_nbsinister = 'nbsinister'

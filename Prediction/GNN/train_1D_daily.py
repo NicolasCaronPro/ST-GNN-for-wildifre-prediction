@@ -43,6 +43,7 @@ parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
 parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
 parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
 parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
 parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
 parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
 parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
@@ -79,13 +80,15 @@ ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
 k_days = int(args.k_days) # Size of the time series sequence use by DL models
-days_in_futur = args.days_in_futur # The target time validation
+days_in_futur = int(args.days_in_futur) # The target time validation
 scaling = args.scaling
 graph_construct = args.graphConstruct
 sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
+shift = args.shift
+thresh_kmeans = args.thresh_kmeans
 
 assert k_days == 0
 
@@ -195,7 +198,7 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph)
 
 ###################### Define models to train ######################
 
@@ -206,8 +209,9 @@ models = [
         ]
 
 gnn_models = [
-        ('GAT', False, 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-] 
+        ('GAT', False, 'full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('GCN', False, 'full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+]
 
 train_loader = None
 val_loader = None
@@ -244,8 +248,8 @@ if doTrain:
         params['model'] = gnn_model[0]
         params['use_temporal_as_edges'] = gnn_model[1]
         params['infos'] = gnn_model[2]
-        params['out_channels'] = model[3]
-        params['torch_structure'] = 'Model_GNN'
+        params['out_channels'] = gnn_model[3]
+        params['torch_structure'] = 'Model_gnn'
 
         wrapped_train_deep_learning_1D(params)
 
@@ -261,7 +265,7 @@ if doTrain:
 
 if doTest:
 
-    host = 'server'
+    host = 'pc'
     
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{graph_method}_{top_cluster}'
 
@@ -273,27 +277,9 @@ if doTest:
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
-    mae = my_mean_absolute_error
-    rmse = weighted_rmse_loss
-    std = standard_deviation
-    cal = quantile_prediction_error
-    fre = frequency_class_error
-    f1 = my_f1_score
-    ca = class_accuracy
-    bca = balanced_class_accuracy
-    acc = class_accuracy
-    ck = class_risk
-    po = poisson_loss
-    meac = mean_absolute_error_class
-    c_i_class = c_index_class
-    c_i = c_index
-    bacc = binary_accuracy
-
     models = [
-    ]
-
-    gnn_models = [
-        ('GAT_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
+        ('GAT_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-1-kmeans-5-Class-Dept', 5),
+        ('GCN_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-1-kmeans-5-Class-Dept', 5),
     ]
 
     for dept in departements:

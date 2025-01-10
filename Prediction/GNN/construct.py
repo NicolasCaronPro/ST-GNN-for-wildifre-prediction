@@ -875,7 +875,6 @@ def init(args, dir_output, script):
     departements = [dept for dept in departements if dept not in graphScale.drop_department] 
     train_departements = [dept for dept in train_departements if dept not in graphScale.drop_department] 
 
-
     ########################### Create points ################################
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
     if doPoint:

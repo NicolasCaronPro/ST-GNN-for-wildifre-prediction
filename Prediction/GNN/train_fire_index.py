@@ -197,18 +197,23 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph_method)
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
 models = [
         #Statistical_Model('fwi_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept',  'classification'),
-        Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
         #Statistical_Model('nesterov_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
         #Statistical_Model('nesterov_mean', [300, 1000, 4000, 10000], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nbsinister-max-3-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-3-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nbsinister-max-1-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nbsinister-max-0-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-0-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('risk-kmeans-5-Class-Dept', None, 5, 'risk-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('risk-nbsinister-Robust-kmeans-5-Class-Dept', None, 5, 'risk-nbsinister-Robust-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('nbsinister-max-3-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-3-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('nbsinister-max-1-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('nbsinister-max-0-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-0-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('risk-kmeans-5-Class-Dept', None, 5, 'risk-kmeans-5-Class-Dept', 'classification'),
+        #Statistical_Model('risk-nbsinister-Robust-kmeans-5-Class-Dept', None, 5, 'risk-nbsinister-Robust-kmeans-5-Class-Dept', 'classification'),
+        Statistical_Model('nbsinister-kmeans-5-Class-Dept-laplace', None, 5, 'nbsinister-kmeans-5-Class-Dept-laplace', 'classification'),
+        Statistical_Model('nbsinister-kmeans-5-Class-Dept-mean', None, 5, 'nbsinister-kmeans-5-Class-Dept-mean', 'classification'),
+        Statistical_Model('nbsinister-kmeans-5-Class-Dept-sum', None, 5, 'nbsinister-kmeans-5-Class-Dept-sum', 'classification'),
+        Statistical_Model('nbsinister-kmeans-5-Class-Dept-max', None, 5, 'nbsinister-kmeans-5-Class-Dept-max', 'classification'),
+        Statistical_Model('nbsinister-kmeans-5-Class-Dept-both', None, 5, 'nbsinister-kmeans-5-Class-Dept-both', 'classification'),
         ]
 
 for model in models:
@@ -228,18 +233,24 @@ if doTest:
     dir_output = Path(name_dir)
     
     models = [
+        ('nbsinister-kmeans-5-Class-Dept-laplace-None-5_full_one_nbsinister-kmeans-5-Class-Dept-laplace_classification_None', 'nbsinister-kmeans-5-Class-Dept-laplace'),
+        ('nbsinister-kmeans-5-Class-Dept-both-None-5_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_None', 'nbsinister-kmeans-5-Class-Dept-both'),
+        ('nbsinister-kmeans-5-Class-Dept-mean-None-5_full_one_nbsinister-kmeans-5-Class-Dept-mean_classification_None', 'nbsinister-kmeans-5-Class-Dept-mean'),
+        ('nbsinister-kmeans-5-Class-Dept-max-None-5_full_one_nbsinister-kmeans-5-Class-Dept-max_classification_None', 'nbsinister-kmeans-5-Class-Dept-max'),
+        ('nbsinister-kmeans-5-Class-Dept-sum-None-5_full_one_nbsinister-kmeans-5-Class-Dept-sum_classification_None', 'nbsinister-kmeans-5-Class-Dept-sum'),
+
         #('fwi-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('fwi-mean-[5, 10.5, 21.5, 34.5]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('fwi-mean-[5, 10.5, 21.5, 34.5]-5_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
         #('nesterov-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
         #('nesterov-mean-[300, 1000, 4000, 10000]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('nbsinister-max-3-kmeans-5-Class-Dept-None-5_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-3-kmeans-5-Class-Dept'),
-        ('nbsinister-max-1-kmeans-5-Class-Dept-None-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        ('nbsinister-max-0-kmeans-5-Class-Dept-None-5_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-0-kmeans-5-Class-Dept'),
+        #('nbsinister-max-3-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-3-kmeans-5-Class-Dept'),
+        #('nbsinister-max-1-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
+        #('nbsinister-max-0-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-0-kmeans-5-Class-Dept'),
 
-        ('risk-kmeans-5-Class-Dept-None-5_one_risk-kmeans-5-Class-Dept_classification_None', 'risk-kmeans-5-Class-Dept'),
-        ('risk-nbsinister-Robust-kmeans-5-Class-Dept-None-5_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_None', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
+        #('risk-kmeans-5-Class-Dept-None-5_full_one_risk-kmeans-5-Class-Dept_classification_None', 'risk-kmeans-5-Class-Dept'),
+        #('risk-nbsinister-Robust-kmeans-5-Class-Dept-None-5_full_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_None', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
         ]
-    
+        
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{graph_method}'
 
     if days_in_futur > 0:
@@ -290,61 +301,74 @@ if doTest:
                                     )
         else:
             metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'.pkl', dir_output / dept / prefix)
-            print(metrics)
-            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
-            if MLFLOW:
-                for name, target_name in models:
-                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+            assert metrics is not None
+            run = f'{dept}_{name}_{prefix}'
+            for name, target_name in models:
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
+                if MLFLOW:
+                    existing_run = get_existing_run(f'{run}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
                     else:
-                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                        mlflow.start_run(run_name=f'{run}', nested=True)
                     if name in metrics.keys():
-                        log_metrics_recursively(metrics[name], prefix='')
+                        log_metrics_recursively(metrics[run], prefix='')
                     else:
                         logger.info(f'{name} not found')
-                    
                     mlflow.end_run()
+
+        if 'df_metrics' not in locals():
+            df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+        else:
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
+
+        aggregated_prediction.append(res)
+            
+    df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
+    df_metrics.reset_index(drop=True, inplace=True)
+
+    check_and_create_path(dir_output / prefix)
+    df_metrics.to_csv(dir_output / prefix / 'df_metrics.csv')
+    
+    """res = pd.concat(res).reset_index(drop=True)
+    res_dept = pd.concat(res_dept).reset_index(drop=True)
+
+    ############## Prediction ######################
+    for name, target_name in models:
+        if name not in res.model.unique():
+            continue
+        if target_name == 'risk':
+            predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+        else:
+            predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+
+        vmax_band = np.nanmax(train_dataset_unscale[train_dataset_unscale['departement'] == name2int[dept]][name].values)
+
+        res_test = res[res['model'] == name]
+        res_test_dept = res_dept[res_dept['model'] == name]
+        regions_test = geo[geo['departement'] == dept]
+        dates = res_test_dept[(res_test_dept['nbsinister'] == res_test_dept['nbsinister'].max())]['date'].values
+        #dates = res_test_dept[(res_test_dept['nbsinister'] == res_test_dept['nbsinister'].max()) | (res_test_dept['risk'] >= res_test_dept['risk'].max() * 0.90)]['date'].values
         
-        """res = pd.concat(res).reset_index(drop=True)
-        res_dept = pd.concat(res_dept).reset_index(drop=True)
-
-        ############## Prediction ######################
-        for name, target_name in models:
-            if name not in res.model.unique():
-                continue
-            if target_name == 'risk':
-                predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-            else:
-                predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-
-            vmax_band = np.nanmax(train_dataset_unscale[train_dataset_unscale['departement'] == name2int[dept]][name].values)
-
-            res_test = res[res['model'] == name]
-            res_test_dept = res_dept[res_dept['model'] == name]
-            regions_test = geo[geo['departement'] == dept]
-            dates = res_test_dept[(res_test_dept['nbsinister'] == res_test_dept['nbsinister'].max())]['date'].values
-            #dates = res_test_dept[(res_test_dept['nbsinister'] == res_test_dept['nbsinister'].max()) | (res_test_dept['risk'] >= res_test_dept['risk'].max() * 0.90)]['date'].values
-            
-            susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
-                                        scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                        dept_reg=False, sinister=sinister, sinister_point=fp)
-            
-            susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
-                            resolution='0.03x0.03', region_dept=regions_test, column='prediction',
-                            dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))
-
-        ################# Ground Truth #####################
-        name = 'GT'
-        susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'risk',
-                                    f'{scale}_gt', dir_output / dept / prefix / name, vmax_band=vmax_band,
+        susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
+                                    scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
                                     dept_reg=False, sinister=sinister, sinister_point=fp)
         
-        susectibility_map_france_daily_geojson(res_test_dept,
-                                    regions_test, graphScale, np.unique(dates).astype(int),
-                                    target_name, 'departement_gt',
-                                    dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                    dept_reg=True, sinister=sinister, sinister_point=fp)
-        
-        aggregated_prediction.append(res)
-        aggregated_prediction_dept.append(res_dept)"""
+        susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
+                        resolution='0.03x0.03', region_dept=regions_test, column='prediction',
+                        dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp.copy(deep=True))
+
+    ################# Ground Truth #####################
+    name = 'GT'
+    susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'risk',
+                                f'{scale}_gt', dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                dept_reg=False, sinister=sinister, sinister_point=fp)
+    
+    susectibility_map_france_daily_geojson(res_test_dept,
+                                regions_test, graphScale, np.unique(dates).astype(int),
+                                target_name, 'departement_gt',
+                                dir_output / dept / prefix / name, vmax_band=vmax_band,
+                                dept_reg=True, sinister=sinister, sinister_point=fp)
+    
+    aggregated_prediction.append(res)
+    aggregated_prediction_dept.append(res_dept)"""

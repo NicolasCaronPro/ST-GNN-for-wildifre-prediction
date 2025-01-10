@@ -8,7 +8,7 @@ class Statistical_Model:
         self.num_clusters = num_clusters
         self.task_type = task_type
         self.target = target
-        self.name = f'{variables.replace("_", "-")}-{thresholds}-{num_clusters}_one_{target}_{task_type}_None'
+        self.name = f'{variables.replace("_", "-")}-{thresholds}-{num_clusters}_full_one_{target}_{task_type}_None'
 
     def fit(self, df_train, col_id):
         """

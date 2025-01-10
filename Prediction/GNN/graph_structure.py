@@ -20,7 +20,6 @@ from skimage import data
 from skimage.filters import rank
 from skimage.util import img_as_ubyte
 import scipy.ndimage as ndimage
-from astropy.convolution import convolve_fft
 if is_pc:
     from tslearn.clustering import TimeSeriesKMeans
 from scipy.spatial.distance import cdist
@@ -2615,6 +2614,106 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
             
+    def compute_sequence_month(self, dataframe, database_name):
+        # Define month groups representing different seasons or periods
+        group_month = [
+            [2, 3, 4, 5],    # Medium season
+            [6, 7, 8, 9],    # High season
+            [10, 11, 12, 1]  # Low season
+        ]
+
+        nbsinister_col = 'nbsinister'
+
+        logger.info(f'{nbsinister_col} -> {dataframe[nbsinister_col].sum()}')
+
+        # Names corresponding to each group of months
+        name = ['medium', 'high', 'low']
+
+        dataframe['month_non_encoder'] = dataframe['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
+
+        # Sort the dataframe by date
+        dataframe = dataframe.sort_values(by=['graph_id', 'date'])
+        #self.sequences_month = None
+
+        points = np.unique(self.nodes[:, graph_id_index])
+
+        self.sequences_month = {}
+
+        if database_name == 'firemen':
+            td = 3  # Time delta in days to consider continuity
+        elif database_name == 'bdiff':
+            td = 3
+        else:
+            td = 3
+        # Get unique points from self.nodes
+
+        fire_dataframe = dataframe[dataframe[nbsinister_col] > 0].reset_index()
+
+        # Iterate over each group of months with its index
+        for i, months in enumerate(group_month):
+
+            # Filter the dataframe for the current group of months
+            df = fire_dataframe[fire_dataframe['month_non_encoder'].isin(months)]
+
+            # Initialize the dictionary for the current season
+            self.sequences_month[name[i]] = {}
+
+            for point in points:
+                # Initialize the dictionary for the current point
+                self.sequences_month[name[i]][point] = {}
+                self.sequences_month[name[i]][point]['dates'] = []
+                self.sequences_month[name[i]][point]['mean_size'] = 1
+
+                # Get the data for the current point
+
+                df_point = df[df['graph_id'] == point]
+
+                if len(df_point) == 0:
+                    continue
+
+                uids = df_point['id'].unique()
+
+                df_point = df_point[df_point['id'] == uids[0]]
+
+                # Group the data by date for the current point
+                for date, group in df_point.groupby('date'):
+
+                    # If no sequences exist yet, create a new one
+                    if not self.sequences_month[name[i]][point]['dates']:
+                        self.sequences_month[name[i]][point]['dates'].append([date])
+                        continue
+
+                    find_seq = False
+
+                    # Iterate over existing sequences to see if the date continues any of them
+                    for sei, seq in enumerate(self.sequences_month[name[i]][point]['dates']):
+                        # Check if the date continues the sequence (within td days)
+                        if (date - seq[-1]) <= td:
+                            # Avoid duplicate dates
+                            if date in seq:
+                                continue
+                            # Add the date to the sequence
+                            seq.append(date)
+                            find_seq = True
+
+                            # Update the sequence in the list
+                            self.sequences_month[name[i]][point]['dates'][sei] = seq
+                            break
+                    # If the date does not continue any existing sequence, create a new one
+                    if not find_seq:
+                        self.sequences_month[name[i]][point]['dates'].append([date])
+
+                # Calculate the average size of sequences for the current point and season
+                total_size = sum(len(seq_dates) for seq_dates in self.sequences_month[name[i]][point]['dates'])
+                num_sequences = len(self.sequences_month[name[i]][point]['dates'])
+                mean = round(total_size / num_sequences)
+                if mean > 1:
+                    self.sequences_month[name[i]][point]['mean_size'] = 2 * mean + 1
+                else:
+                    self.sequences_month[name[i]][point]['mean_size'] = 1
+
+                logger.info(f'{point}, {name[i]} {df_point["departement"].unique()} : {mean} -> {self.sequences_month[name[i]][point]["mean_size"]}')
+            
     def compute_mean_sequence(self, dataframe, database_name, maxdate, target_spe='0_0'):
         """
         Calculates the average size of continuous date sequences without interruption for each point.
@@ -3049,15 +3148,19 @@ class GraphStructure():
             if not isBin:
                 if self.model.post_process is not None and hasattr(self.model.post_process, 'col_id'):
                     post_process_ids = X[self.model.post_process.col_id]
+                    if self.model.post_process.preprocessor is not None:
+                        post_process_preprocessor = X[self.model.post_process.preprocessor_id_col].values
+                    else:
+                        post_process_preprocessor = None
                 else:
                     post_process_ids = None
-
+                    
                 if col_id is not None:
-                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids)
-                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids)
+                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids, post_process_preprocessor)
+                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids, post_process_preprocessor)
                 else:
-                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids)
-                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids)
+                    res[:, 0] = self.model.predict_nbsinister(X[features], post_process_ids, post_process_preprocessor)
+                    res[:, 1] = self.model.predict_risk(X[features], post_process_ids, post_process_preprocessor)
             else:
                 raise ValueError(f'Binary model are not available yet')
                 if col_id:

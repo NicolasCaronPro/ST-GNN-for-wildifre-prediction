@@ -948,7 +948,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                             if new_column_name not in list(dataframe.columns):
                                 logger.info(f'{new_column_name}')
                                 dataframe[new_column_name] = np.nan
-                            dataframe.loc[index, new_column_name] = dataframe.loc[index, col].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                            dataframe.loc[index, new_column_name] = dataframe.loc[index, col].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
                             if new_column_name not in new_fet:
                                 new_fet.append(new_column_name)
                         else:
@@ -958,7 +958,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                                     if new_column_name not in list(dataframe.columns):
                                         logger.info(f'{new_column_name}')
                                         dataframe[new_column_name] = np.nan
-                                    dataframe.loc[index, new_column_name] = dataframe.loc[index, f'{col}_{spatial_method}'].rolling(window=i).apply(methods_dict[method_name], raw=True)
+                                    dataframe.loc[index, new_column_name] = dataframe.loc[index, f'{col}_{spatial_method}'].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
                                     if new_column_name not in new_fet:
                                         new_fet.append(new_column_name)
                     else:
@@ -969,9 +969,9 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                         if new_column_name_shift not in list(dataframe.columns):
                             logger.info(f'{new_column_name_shift}')
                             dataframe[new_column_name_shift] = np.nan
-                            dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, col].shift(i)
-                            if new_column_name not in new_fet:
-                                new_fet.append(new_column_name_shift)
+                        dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, col].shift(i)
+                        if new_column_name not in new_fet:
+                            new_fet.append(new_column_name_shift)
                     else:
                         for spatial_method in METHODS_SPATIAL:
                             if f'{col}_{spatial_method}' in features_name:

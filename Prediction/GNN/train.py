@@ -1152,6 +1152,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         train_poisson(params)
     elif name == 'gam':
         train_gam(params)
+    elif name == 'catboost':
+        train_catboost(params)
 
 ############################################################# Voting ######################################################################
 
