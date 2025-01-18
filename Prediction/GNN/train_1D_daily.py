@@ -198,7 +198,7 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph)
+post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
 ###################### Define models to train ######################
 
@@ -209,8 +209,12 @@ models = [
         ]
 
 gnn_models = [
-        ('GAT', False, 'full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        ('GCN', False, 'full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('GAT', False, 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('GAT', False, 'binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+        
+        ('GCN', False, 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('GCN', False, 'binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+
 ]
 
 train_loader = None
@@ -276,10 +280,15 @@ if doTest:
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
-
+    
+    aggregated_prediction = []
+    
     models = [
-        ('GAT_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-1-kmeans-5-Class-Dept', 5),
-        ('GCN_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-1-kmeans-5-Class-Dept', 5),
+        ('GAT_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+        ('GCN_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+        
+        ('GAT_binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+        ('GCN_binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
     ]
 
     for dept in departements:
@@ -326,98 +335,35 @@ if doTest:
                             features=features,
                             dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                             name_exp=name_exp,
-                            doKMEANS=doKMEANS)
+                            doKMEANS=doKMEANS,
+                            suffix='gnn')
         else:
-            #for name, use_temporal_as_edges, target_name, autoRegression in cnn_model:
-            #    res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
-            #    res_dept = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dept_pred.pkl', dir_output / dept / prefix / name)
-            
-            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_dl.pkl', dir_output / dept / prefix)
-            print(metrics)
-            #metrics_dept = read_object('metrics'+'_'+prefix+'_'+'_'+scaling+'_'+encoding+'_'+dept+'_dept_dl.pkl', dir_output / dept / prefix)
-            if MLFLOW:
-                for name, use_temporal_as_edges, target_name, autoRegression in gnn_models:
-                    existing_run = get_existing_run(f'{dept}_{name}_{prefix}')
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.gnn', dir_output / dept / prefix)
+            assert metrics is not None
+            run = f'{dept}_{name}_{prefix}'
+            for name, _, target_name, _ in models:
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+                if MLFLOW:
+                    existing_run = get_existing_run(f'{run}')
                     if existing_run:
                         mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
                     else:
-                        mlflow.start_run(run_name=f'{dept}_{name}_{prefix}', nested=True)
+                        mlflow.start_run(run_name=f'{run}', nested=True)
                     if name in metrics.keys():
-                        log_metrics_recursively(metrics[name], prefix='')
+                        log_metrics_recursively(metrics[run], prefix='')
                     else:
                         logger.info(f'{name} not found')
-                    
                     mlflow.end_run()
 
-        """if len(res) > 0:
-            res = pd.concat(res).reset_index(drop=True)
-            res_dept = pd.concat(res_dept).reset_index(drop=True)
+        if 'df_metrics' not in locals():
+            df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+        else:
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
 
-            ############## Plot ######################
-            for name, _, target_name, _ in gnn_models:
-                if name not in res.model.unique():
-                    continue
-                if target_name == 'risk':
-                    predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-                else:
-                    predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
+        aggregated_prediction.append(res)
 
-                if target_name == 'binary':
-                    vmax_band = 1
-                else:
-                    vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
-                res_test = res[res['model'] == name]
-                res_test_dept = res_dept[res_dept['model'] == name]
-                regions_test = geo[geo['departement'] == dept]
-                #dates = res_test_dept[res_test_dept['nbsinister'] > 1]['date'].values
-                dates = res[res['nbsinister'] == res['nbsinister'].max()]['date']
-                
-                susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
-                                            scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                            dept_reg=False, sinister=sinister, sinister_point=fp)
+    df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
+    df_metrics.reset_index(drop=True, inplace=True)
 
-                susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
-                                resolution='0.03x0.03', region_dept=regions_test, column='prediction',
-                                dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)"""
-
-        
-        """if len(res) > 0:
-            res = pd.concat(res).reset_index(drop=True)
-            res_dept = pd.concat(res_dept).reset_index(drop=True)
-
-            ############## Plot ######################
-            for name, _, target_name, _ in models:
-                if name not in res.model.unique():
-                    continue
-                if target_name == 'risk':
-                    predictor = read_object(f'{dept}Predictor{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-                else:
-                    predictor = read_object(f'{dept}Predictor{name}{scale}_{graphScale.base}.pkl', dir_train / 'influenceClustering')
-
-                if target_name == 'binary':
-                    vmax_band = 1
-                else:
-                    vmax_band = np.nanmax(train_dataset[train_dataset['departement'] == name2int[dept]][target_name].values)
-                    
-                res_test = res[res['model'] == name]
-                res_test_dept = res_dept[res_dept['model'] == name]
-                regions_test = geo[geo['departement'] == dept]
-                #dates = res[res['risk'] == res['risk'].max()]['date'].values
-                dates = res_test_dept[res_test_dept['nbsinister'] > 0]['date'].values
-                
-            susectibility_map_france_daily_geojson(res_test, regions_test, graphScale, np.unique(dates).astype(int), 'prediction',
-                                            scale, dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                            dept_reg=False, sinister=sinister, sinister_point=fp)
-
-                susectibility_map_france_daily_image(df=res_test, vmax=vmax_band, graph=graphScale, departement=dept, dates=dates,
-                                resolution='0.03x0.03', region_dept=regions_test, column='prediction',
-                                dir_output=dir_output / dept / prefix / name, predictor=predictor, sinister_point=fp)
-
-                train_dataset_dept = train_dataset[train_dataset['departement'] == name2int[dept]].groupby(['departement', 'date'])[target_name].sum().reset_index()
-                vmax_band = np.nanmax(train_dataset_dept[target_name].values)
-
-                susectibility_map_france_daily_geojson(res_test_dept,
-                                            regions_test, graphScale, np.unique(dates).astype(int),
-                                            target_name, 'departement',
-                                            dir_output / dept / prefix / name, vmax_band=vmax_band,
-                                            dept_reg=True, sinister=sinister, sinister_point=fp)"""
+    check_and_create_path(dir_output / prefix)
+    df_metrics.to_csv(dir_output / prefix / 'df_metrics_daily.csv')

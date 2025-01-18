@@ -398,6 +398,247 @@ def plot_custom_confusion_matrix(y_true, y_pred, labels, dir_output, figsize=(10
         
     plt.close(fig)
 
+def plot_confusion_matrix(y_test, y_pred, labels, model_name, dir_output, figsize=(10, 8), title='Confusion Matrix', filename='confusion_matrix', normalize=None):
+    """
+    Plots a confusion matrix with annotations and proper formatting.
+
+    Parameters:
+    y_test (array-like): True labels.
+    y_pred (array-like): Predicted labels.
+    labels (list): List of label names for the confusion matrix.
+    model_name (str): Name of the model for the plot title.
+
+    Returns:
+    None
+    """
+    # Compute confusion matrix with normalization
+    conf_matrix = confusion_matrix(y_test, y_pred, normalize=normalize)
+
+    # Convert confusion matrix to DataFrame for better visualization
+    cm_df = pd.DataFrame(conf_matrix, index=labels, columns=labels)
+
+    # Plotting the heatmap
+    fig = plt.figure(figsize=figsize)
+    sns.heatmap(cm_df, annot=True, cmap="Blues", fmt=".3f", xticklabels=labels, yticklabels=labels)
+    
+    # Adding titles and labels
+    plt.title("Confusion Matrix for: " + model_name)
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+    
+    # Ensure the output directory exists
+    Path(dir_output).mkdir(parents=True, exist_ok=True)
+
+    # Save the image to the specified directory
+    output_path = Path(dir_output) / f'{filename}_{normalize}.png'
+    plt.savefig(output_path)
+    
+    # If mlflow is enabled, log the figure
+    if MLFLOW:
+        mlflow.log_figure(fig, str(output_path))
+        
+    plt.close(fig)
+
+def plot_label_distribution(df, column_name, label_list, dir_output, figsize=(10, 8)):
+    """
+    Plots the percentage distribution of label categories with proper formatting.
+
+    Parameters:
+    df (DataFrame): The input dataframe containing the label data.
+    column_name (str): The column name representing labels.
+    label_list (list): List of label type labels for x-axis.
+
+    Returns:
+    None
+    """
+    # Create a color palette based on the number of unique labels
+    palette = sns.color_palette("husl", len(df[column_name].unique()))
+
+    # Calculate percentage distribution
+    percentage_distribution = (df[column_name].value_counts(normalize=True) * 100).sort_index()
+
+    # Plot the distribution of labels
+    fig = plt.figure(figsize=figsize)
+    sns.barplot(x=percentage_distribution.index, y=percentage_distribution.values, palette=palette)
+
+    # Set plot labels and titles
+    plt.xlabel('Label', fontsize=16)
+    plt.ylabel('Percentage (%)', fontsize=16)
+    plt.grid('on')
+
+    # Set ticks
+    plt.xticks(ticks=range(len(label_list)), labels=label_list, rotation=45, ha='right', fontsize=16)
+    plt.yticks(fontsize=16)
+
+    # Ensure the output directory exists
+    Path(dir_output).mkdir(parents=True, exist_ok=True)
+
+    # Save the image to the specified directory
+    output_path = Path(dir_output) / f'distribution.png'
+    plt.savefig(output_path)
+
+    # Display the plot
+    plt.close(fig)
+
+def calculate_and_plot_feature_importance(X, y, feature_names, dir_output, target):
+    """
+    Calculate and plot average feature importance from multiple tree-based models.
+
+    Parameters:
+    - X: Features as a DataFrame or 2D array.
+    - y: Labels as a 1D array or Series.
+    - feature_names: List of feature names.
+
+    Returns:
+    - A DataFrame with feature names and average importance.
+    - A bar plot showing the average feature importance.
+    """
+    # Initialize models
+    models = [
+        ("Decision Tree", DecisionTreeClassifier(random_state=42)),
+        ("Random Forest", RandomForestClassifier(random_state=42)),
+        ("ExtraTrees", ExtraTreesClassifier(random_state=42)),
+        ("XGBoost", XGBClassifier(random_state=42, use_label_encoder=False)),
+        ("CatBoost", CatBoostClassifier(silent=True, random_state=42)),
+        ("LightGBM", LGBMClassifier(random_state=42))
+    ]
+
+    # Dictionary to store feature importances
+    feature_importance = {}
+
+    # Fit models and collect feature importances
+    for model_name, model in models:
+        try:
+            model.fit(X, y)
+            importances = model.feature_importances_ / np.sum(model.feature_importances_)
+            feature_importance[model_name] = importances
+        except AttributeError:
+            print(f"Model {model_name} does not support feature importances.")
+
+    # Calculate average feature importance
+    importance_matrix = np.array(list(feature_importance.values()))
+    average_importance = np.mean(importance_matrix, axis=0)
+
+    # Create DataFrame for visualization
+    importance_df = pd.DataFrame({'Feature': feature_names, 'Average Importance': average_importance})
+    importance_df = importance_df.sort_values(by='Average Importance', ascending=False)
+
+    # Plot feature importance
+    fig = plt.figure(figsize=(25, 10))
+    plt.bar(importance_df['Feature'], importance_df['Average Importance'], color='skyblue')
+    plt.ylabel('Average Importance', fontsize=18)
+    plt.xlabel('Feature Name', fontsize=18)
+    plt.title('Average Feature Importance from Tree-Based Models', fontsize=18)
+    plt.xticks(fontsize=14, rotation=90)
+    plt.yticks(fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.6)
+    
+    # Ensure the output directory exists
+    Path(dir_output).mkdir(parents=True, exist_ok=True)
+
+    # Save the image to the specified directory
+    output_path = Path(dir_output) / f'Feature_Importance_{target}.png'
+    plt.savefig(output_path)
+    
+    # If mlflow is enabled, log the figure
+    if MLFLOW:
+        mlflow.log_figure(fig, str(output_path))
+        
+    plt.close(fig)
+
+    return importance_df
+
+def plot_ecdf_with_threshold(df, dir_output, target_name, importance_col='Average Importance', feature_col='Feature', threshold=0.95):
+    """
+    Plots the ECDF of cumulative feature importances and adds a threshold line.
+
+    Parameters:
+    - df: pandas DataFrame containing the features and their importance.
+    - importance_col: str, the name of the column containing the feature importance values.
+    - feature_col: str, the name of the column containing the feature names.
+    - threshold: float, the threshold value for the ECDF (default is 0.95).
+
+    Returns:
+    - None, but displays a plot.
+    """
+
+    # Step 1: Sort the DataFrame by importance in descending order
+    df_sorted = df.sort_values(by=importance_col, ascending=False).reset_index(drop=True)
+
+    # Step 2: Calculate the cumulative sum of importances
+    df_sorted['cumulative_importance'] = df_sorted[importance_col].cumsum()
+
+    # Normalize the cumulative importance to get the ECDF
+#     df_sorted['ecdf'] = df_sorted['cumulative_importance'] / df_sorted['cumulative_importance'].iloc[-1]
+
+    # Step 3: Determine the feature corresponding to the threshold
+    threshold_index = np.argmax(df_sorted['cumulative_importance'] >= threshold)
+    print('threshold_index:',threshold_index)
+    if threshold_index < len(df_sorted):
+        threshold_feature = df_sorted.iloc[threshold_index][feature_col]
+#         threshold_importance = df_sorted.iloc[threshold_index][importance_col]
+    else:
+        threshold_feature = None
+        threshold_importance = None
+
+    # Step 4: Plot the ECDF
+    fig = plt.figure(figsize=(20, 10))
+    plt.plot(df_sorted[feature_col], df_sorted['cumulative_importance'], color='blue', label='ECDF',marker='s')
+    plt.xticks(rotation=90,fontsize=14)  # Rotate x-axis labels for better readability
+    plt.yticks(fontsize=14)
+    plt.xlabel('Feature',fontsize=14)
+    plt.ylabel('ECDF',fontsize=14)
+    plt.title('ECDF of Cumulative Feature Importances')
+    plt.grid(True)
+
+    # Step 5: Add the threshold line
+    if threshold_feature is not None:
+        plt.axhline(y=threshold, color='red', linestyle='--', label=f'Threshold {threshold}')
+        plt.axvline(x=threshold_feature, color='red', linestyle='--')
+        plt.text(threshold_index + 0.02, threshold + 0.02, f'{threshold_index+1}',
+                 color='black', ha='center', va='bottom',fontsize=14)
+
+    plt.legend()
+    plt.tight_layout()
+
+    # Ensure the output directory exists
+    Path(dir_output).mkdir(parents=True, exist_ok=True)
+
+    # Save the image to the specified directory
+    output_path = Path(dir_output) / f'Feature_Importance_with_thresholds_{target_name}.png'
+    plt.savefig(output_path)
+    
+    # If mlflow is enabled, log the figure
+    if MLFLOW:
+        mlflow.log_figure(fig, str(output_path))
+        
+    plt.close(fig)
+
+    return df_sorted.head(threshold_index + 1)[feature_col].tolist(), df_sorted[feature_col].tolist()
+
+# function to add value labels
+def addlabels(x,y):
+    for i in range(len(x)):
+        plt.text(i-0.25,y[i]+0.05*y[i],round(y[i],3),fontsize=14,rotation=90)
+
+def plot_importance(importance_data):
+
+  plt.figure(figsize=(12, 8))
+
+  plt.bar(importance_data['Feature'].values, importance_data['Average Importance'].values)
+  plt.xticks(rotation=90,fontsize=16)
+  plt.yticks(fontsize=16)
+  addlabels(importance_data['Feature'].values, importance_data['Average Importance'].values)
+  min_val=np.min(importance_data['Average Importance'])
+  max_val=np.max(importance_data['Average Importance'])+0.1* np.max(importance_data['Average Importance'])
+  plt.ylim([0,max_val])
+  # plt.xticks(rotation=90)
+  plt.grid('on')
+
+  # Save the bar plot for the article
+  plt.show()
+
+
 def realVspredict2d(ypred : np.array,
                     ytrue : np.array,
                     isBin : np.array,

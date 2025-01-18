@@ -20,6 +20,9 @@ class Statistical_Model:
         ids = df_train[col_id].values
         self.models = {}
 
+        if self.thresholds is None:
+            return
+
         if self.thresholds == 'auto':
             for unique_id in np.unique(ids):
                 # Sélectionne les échantillons correspondant à l'ID courant

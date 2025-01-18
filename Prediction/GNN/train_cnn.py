@@ -198,8 +198,9 @@ post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process
 ############################# Training ##################################
 
 cnn_models = [
-             ('Zhang', None, 'binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
-             #('ConvLSTM', None, 'nbsinister_regression_poisson', True),
+             #('Zhang', None, 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
+             #('Zhang', None, 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', True, 5),
+             ('ConvLSTM',  None, 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', True, 5),
             #('Zhang', None, 'nbsinister_regression_poisson', True),
              #('Unet', FalsNonee, 'risk_regression_rmse', False)
             ]
@@ -211,7 +212,7 @@ last_bool = None
 if is_pc:
     temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
 else:
-    temp_dir = '.'
+    temp_dir = 'GNN/'
 
 params = {
     "graph": graphScale,
@@ -265,9 +266,12 @@ if doTest:
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
-
+    aggregated_prediction = []
+    
     models = [
-                ('Zhang_binary_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
+                #('ConvLSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                ('ConvLSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+                
                 #('UNET_risk_regression_rmse', None, 'risk', autoRegression)
                 ]
 
@@ -314,13 +318,14 @@ if doTest:
                             features=features,
                             dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                             name_exp=name_exp,
-                            doKMEANS=doKMEANS)
+                            doKMEANS=doKMEANS,
+                            suffix='cnn')
         else:
-            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_cnn.pkl', dir_output / dept / prefix)
             assert metrics is not None
             run = f'{dept}_{name}_{prefix}'
             for name, _, target_name, _ in models:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
                 if MLFLOW:
                     existing_run = get_existing_run(f'{run}')
                     if existing_run:
@@ -332,3 +337,16 @@ if doTest:
                     else:
                         logger.info(f'{name} not found')
                     mlflow.end_run()
+
+        if 'df_metrics' not in locals():
+            df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+        else:
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
+
+        aggregated_prediction.append(res)
+
+    df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
+    df_metrics.reset_index(drop=True, inplace=True)
+    
+    check_and_create_path(dir_output / prefix)
+    df_metrics.to_csv(dir_output / prefix / 'df_metrics_cnn.csv')

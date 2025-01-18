@@ -320,6 +320,8 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
 
     if save:
         save_object(df[train_mask], 'df_unscaled_train_'+prefix+'.pkl', dir_output)
+        save_object(df[test_mask], 'df_unscaled_test_'+prefix+'.pkl', dir_output)
+        save_object(df[val_mask], 'df_unscaled_val_'+prefix+'.pkl', dir_output)
 
     # Define the scale method
     if scaling == 'MinMax':
@@ -1037,7 +1039,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     logger.info(f'KS = {ks}')
 
     # Calcul des scores pour les signaux
-    iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    #iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
 
     """# Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
@@ -1097,10 +1099,14 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     all_class = all_class[~np.isnan(all_class)]
     all_class_label = [int(c) for c in all_class]
 
-    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
-    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
-    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
-    plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
+    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
+    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
+    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
+    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
+    plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='true')
+    plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='all')
+    plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='pred')
+    plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize=None)
 
     accuracy = round(accuracy_score(y_true, y_pred), 2)
     metrics[f'accuracy'] = accuracy
@@ -1394,6 +1400,7 @@ def test_dl_model(args,
                            dir_break_point,
                            name_exp,
                            doKMEANS,
+                           suffix,
                            ):
     
     res_scale = []
@@ -1485,8 +1492,6 @@ def test_dl_model(args,
             test_dataset_dept.apply(lambda row: (row['date'], row['graph_id']) in ytensor_pairs, axis=1)
         ].reset_index(drop=True)
         
-        print(test_dataset_dept.shape, predTensor.shape, y.shape)
-
         if graphScale.graph_method == 'graph':
             def keep_one_per_pair(dataset):
                 # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
@@ -1517,7 +1522,7 @@ def test_dl_model(args,
         test_dataset_dept.sort_values(['graph_id', 'date'], inplace=True)
         ind = np.lexsort((y[:,0], y[:,4]))
         y = y[ind]
-        #predTensor = predTensor[ind]
+        predTensor = predTensor[ind]
         
         if target_name == 'binary' or target_name == 'nbsinister':
             band = -2
@@ -1610,7 +1615,7 @@ def test_dl_model(args,
         i += 1
 
     ########################################## Save metrics ################################
-    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_dl.pkl'
+    outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_'+suffix+'.pkl'
     if (dir_output / outname).is_file():
         log_metrics = read_object(outname, dir_output)
         metrics.update(log_metrics)
@@ -1846,8 +1851,15 @@ def wrapped_train_deep_learning_1D(params):
     torch_structure = params['torch_structure']
     infos = params['infos']
     graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
 
     non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
+
+    ###############################################  Feature importance  ###########################################################
+    importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
     loss_name = loss
 
     logger.info(f'Fitting model {model}')
@@ -1866,8 +1878,8 @@ def wrapped_train_deep_learning_1D(params):
         train_dataset.drop('weight', inplace=True, axis=1)
 
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
-    print(train_dataset[train_dataset['weight'] != -1].shape, train_dataset[train_dataset['weight'] == -1].shape)
 
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
@@ -1878,7 +1890,7 @@ def wrapped_train_deep_learning_1D(params):
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
-                                    features_name=params['features_selected_str'],
+                                    features_name=features,
                                     ks=params['k_days'],
                                     dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
@@ -1892,7 +1904,7 @@ def wrapped_train_deep_learning_1D(params):
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
-                                    features_name=params['features_selected_str'],
+                                    features_name=features,
                                     ks=params['k_days'],
                                     dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
@@ -1917,6 +1929,9 @@ def wrapped_train_deep_learning_2D(params):
     graph_method = params['graph_method']
 
     non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
+
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
 
     logger.info(f'Fitting model {model}')
     logger.info('Try loading loader')

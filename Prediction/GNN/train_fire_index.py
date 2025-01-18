@@ -197,24 +197,12 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
-models = [
-        #Statistical_Model('fwi_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept',  'classification'),
-        #Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('nesterov_mean', 'auto', 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('nesterov_mean', [300, 1000, 4000, 10000], 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('nbsinister-max-3-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-3-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('nbsinister-max-1-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-1-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('nbsinister-max-0-kmeans-5-Class-Dept', None, 5, 'nbsinister-max-0-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('risk-kmeans-5-Class-Dept', None, 5, 'risk-kmeans-5-Class-Dept', 'classification'),
-        #Statistical_Model('risk-nbsinister-Robust-kmeans-5-Class-Dept', None, 5, 'risk-nbsinister-Robust-kmeans-5-Class-Dept', 'classification'),
-        Statistical_Model('nbsinister-kmeans-5-Class-Dept-laplace', None, 5, 'nbsinister-kmeans-5-Class-Dept-laplace', 'classification'),
-        Statistical_Model('nbsinister-kmeans-5-Class-Dept-mean', None, 5, 'nbsinister-kmeans-5-Class-Dept-mean', 'classification'),
-        Statistical_Model('nbsinister-kmeans-5-Class-Dept-sum', None, 5, 'nbsinister-kmeans-5-Class-Dept-sum', 'classification'),
-        Statistical_Model('nbsinister-kmeans-5-Class-Dept-max', None, 5, 'nbsinister-kmeans-5-Class-Dept-max', 'classification'),
-        Statistical_Model('nbsinister-kmeans-5-Class-Dept-both', None, 5, 'nbsinister-kmeans-5-Class-Dept-both', 'classification'),
-        ]
+models = []
+
+for col in new_cols:
+    models.append(Statistical_Model(col, None, int(col.split('-')[2]), col, 'classification'))
 
 for model in models:
     model.fit(train_dataset_unscale, 'departement')
@@ -232,25 +220,10 @@ if doTest:
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
     
-    models = [
-        ('nbsinister-kmeans-5-Class-Dept-laplace-None-5_full_one_nbsinister-kmeans-5-Class-Dept-laplace_classification_None', 'nbsinister-kmeans-5-Class-Dept-laplace'),
-        ('nbsinister-kmeans-5-Class-Dept-both-None-5_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_None', 'nbsinister-kmeans-5-Class-Dept-both'),
-        ('nbsinister-kmeans-5-Class-Dept-mean-None-5_full_one_nbsinister-kmeans-5-Class-Dept-mean_classification_None', 'nbsinister-kmeans-5-Class-Dept-mean'),
-        ('nbsinister-kmeans-5-Class-Dept-max-None-5_full_one_nbsinister-kmeans-5-Class-Dept-max_classification_None', 'nbsinister-kmeans-5-Class-Dept-max'),
-        ('nbsinister-kmeans-5-Class-Dept-sum-None-5_full_one_nbsinister-kmeans-5-Class-Dept-sum_classification_None', 'nbsinister-kmeans-5-Class-Dept-sum'),
+    str_models = []
+    for model in models:
+        str_models.append((model.name, model.target))
 
-        #('fwi-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        #('fwi-mean-[5, 10.5, 21.5, 34.5]-5_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        #('nesterov-mean-auto-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        #('nesterov-mean-[300, 1000, 4000, 10000]-5_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        #('nbsinister-max-3-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-3-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-3-kmeans-5-Class-Dept'),
-        #('nbsinister-max-1-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-1-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-1-kmeans-5-Class-Dept'),
-        #('nbsinister-max-0-kmeans-5-Class-Dept-None-5_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_None', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-
-        #('risk-kmeans-5-Class-Dept-None-5_full_one_risk-kmeans-5-Class-Dept_classification_None', 'risk-kmeans-5-Class-Dept'),
-        #('risk-nbsinister-Robust-kmeans-5-Class-Dept-None-5_full_one_risk-nbsinister-Robust-kmeans-5-Class-Dept_classification_None', 'risk-nbsinister-Robust-kmeans-5-Class-Dept'),
-        ]
-        
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{graph_method}'
 
     if days_in_futur > 0:
@@ -290,7 +263,7 @@ if doTest:
                                 test_dataset_unscale_dept.copy(deep=True),
                                     dept,
                                     prefix,
-                                    models,
+                                    str_models,
                                     dir_output / dept / prefix,
                                     prefix_config,
                                     encoding,

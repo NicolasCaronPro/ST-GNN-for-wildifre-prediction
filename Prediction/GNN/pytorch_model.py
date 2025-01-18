@@ -46,6 +46,36 @@ class ReadGraphDataset_2D(Dataset):
     def get(self):
         pass
 
+class InplaceGraphDataset(Dataset):
+    def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device) -> None:
+        self.X = X
+        self.Y = Y
+        self.device = device
+        self.edges = edges
+        self.leni = leni
+
+    def __getitem__(self, index) -> tuple:
+        x = self.X[index]
+        y = self.Y[index]
+
+        if len(self.edges) > 0:
+            edges = self.edges[index]
+        else:
+            edges = []
+        
+        return torch.tensor(x, dtype=torch.float32, device=self.device), \
+            torch.tensor(y, dtype=torch.float32, device=self.device), \
+            torch.tensor(edges, dtype=torch.long, device=self.device),  \
+
+    def __len__(self) -> int:
+        return self.leni
+    
+    def len(self):
+        pass
+
+    def get(self):
+        pass
+
 def graph_collate_fn(batch):
     #node_indice_list = []
     edge_index_list = []
@@ -182,36 +212,6 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-class InplaceGraphDataset(Dataset):
-    def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device) -> None:
-        self.X = X
-        self.Y = Y
-        self.device = device
-        self.edges = edges
-        self.leni = leni
-
-    def __getitem__(self, index) -> tuple:
-        x = self.X[index]
-        y = self.Y[index]
-
-        if len(self.edges) > 0:
-            edges = self.edges[index]
-        else:
-            edges = []
-
-        return torch.tensor(x, dtype=torch.float32, device=self.device), \
-            torch.tensor(y, dtype=torch.float32, device=self.device), \
-            torch.tensor(edges, dtype=torch.long, device=self.device),  \
-
-    def __len__(self) -> int:
-        return self.leni
-    
-    def len(self):
-        pass
-
-    def get(self):
-        pass
-
 def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temporal_as_edges):
     Xs, Ys, Es = [], [], []
     
@@ -238,7 +238,10 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
                 
                 if x is None:
                     continue
-                
+
+                if x.shape[0] == 0:
+                    continue
+
                 Xs.append(x)
                 Ys.append(y)
                 Es.append(e)
@@ -259,6 +262,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
                 x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, len(ids_columns))
             
             if x is None:
+                continue
+
+            if x.shape[0] == 0:
                 continue
             
             Xs.append(x)
@@ -320,7 +326,6 @@ def create_test_loader(graph, df,
     X = []
     Y = []
     E = []
-
     if graph.graph_method == 'graph':
         graphId = np.unique(Xset[:, graph_id_index])
         for id in graphId:
@@ -343,6 +348,9 @@ def create_test_loader(graph, df,
                 if x is None:
                     continue
 
+                if x.shape[0] == 0:
+                    continue
+
                 X.append(x)
                 Y.append(y)
                 E.append(e)
@@ -362,6 +370,9 @@ def create_test_loader(graph, df,
                 x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
 
             if x is None:
+                continue
+
+            if x.shape[0] == 0:
                 continue
 
             X.append(x)
@@ -699,6 +710,73 @@ class ModelTorch():
 
         return labels
 
+    def split_dataset(self, dataset, nb):
+        # Separate the positive and zero classes based on y
+        positive_mask = dataset[self.target_name] > 0
+        non_fire_mask = dataset[self.target_name] == 0
+
+        # Filtrer les données positives et non feu
+        df_positive = dataset[positive_mask]
+        df_non_fire = dataset[non_fire_mask]
+
+        # Échantillonner les données non feu
+        nb = min(len(df_non_fire), nb)
+        sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
+        df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
+
+        # Combiner les données positives et non feu échantillonnées
+        df_combined = pd.concat([df_positive, df_non_fire_sampled])
+
+        # Réinitialiser les index du DataFrame combiné
+        df_combined.reset_index(drop=True, inplace=True)
+        return df_combined
+
+    def score(self, X, y, sample_weight=None):
+        """
+        Evaluate the model's performance for each ID.
+
+        Parameters:
+        - X_val: Validation data.
+        - y_val: True labels.
+        - id_val: List of IDs corresponding to validation data.
+
+        Returns:
+        - Mean score across all IDs.
+        """
+        predictions = self.predict(X)
+        return self.score_with_prediction(predictions, y, sample_weight)
+
+    def score_with_prediction(self, y_pred, y, sample_weight=None):
+        #return calculate_signal_scores(y, y_pred)
+        
+        return iou_score(y, y_pred)
+        if self.loss == 'area':
+            return calculate_signal_scores(y, y_pred)
+        if self.loss == 'logloss':
+            return -log_loss(y, y_pred)
+        elif self.loss == 'hinge_loss':
+            return -hinge_loss(y, y_pred, sample_weight=sample_weight)
+        elif self.loss == 'accuracy':
+            return accuracy_score(y, y_pred, sample_weight=sample_weight)
+        elif self.loss == 'mse':
+            return -mean_squared_error(y, y_pred, sample_weight=sample_weight)
+        elif self.loss == 'rmse':
+            return -math.sqrt(mean_squared_error(y, y_pred, sample_weight=sample_weight))
+        elif self.loss == 'rmsle':
+            pass
+        elif self.loss == 'poisson':
+            pass
+        elif self.loss == 'huber_loss':
+            pass
+        elif self.loss == 'log_cosh_loss':
+            pass
+        elif self.loss == 'tukey_biweight_loss':
+            pass
+        elif self.loss == 'exponential_loss':
+            pass
+        else:
+            raise ValueError(f"Unknown loss function: {self.loss}")
+
     def create_loader(self):
         pass
 
@@ -773,35 +851,67 @@ class ModelCNN(ModelTorch):
                 vec = self.non_fire_number.split('-')
                 try:
                     nb = int(vec[-1]) * len(df_train[df_train[self.target_name] > 0])
-                except ValueError:
+                except:
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
 
-                # Separate the positive and zero classes based on y
-                positive_mask = df_train[self.target_name] > 0
-                non_fire_mask = df_train[self.target_name] == 0
-
-                # Filtrer les données positives et non feu
-                df_positive = df_train[positive_mask]
-                df_non_fire = df_train[non_fire_mask]
-
-                # Échantillonner les données non feu
-                nb = min(len(df_non_fire), nb)
-                sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
-                df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
-
-                # Combiner les données positives et non feu échantillonnées
-                df_combined = pd.concat([df_positive, df_non_fire_sampled])
-
-                # Réinitialiser les index du DataFrame combiné
-                df_combined.reset_index(drop=True, inplace=True)
+                df_combined = self.split_dataset(df_train, nb)
 
                 # Mettre à jour df_train pour l'entraînement
                 df_train = df_combined
 
                 print(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
-        
-        #if (self.dir_output / 'train_loader.pkl').is_file():
+
+        elif self.non_fire_number == 'search' or 'percentage' in self.non_fire_number:
+                if self.non_fire_number == 'search':
+                    test_percentage = [0.05, 0.1, 0.15, 0.2, 0.3, 0.40, 0.5, 0.60, 0.7, 0.8, 0.9, 1.0]
+                    scores = []
+                    for tp in test_percentage:
+
+                        nb = int(tp * len(y[y == 0]))
+
+                        print(f'Trained with {tp} -> {nb} sample of class 0')
+
+                        df_combined = self.split_dataset(df_train, nb)
+
+                        copy_model = copy.deepcopy(self)
+                        copy_model.non_fire_number = 'full'
+                        copy_model.create_train_val_test_loader(graph, df_combined, df_val, df_test)
+                        copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs)
+                        test_loader = self.create_test_loader(graph, df_test)
+                        test_output = self._predict_test_loader(test_loader)
+                        test_output = test_output.detach().cpu().numpy()
+                        score = round(copy_model.score(test_output, df_test[self.target_name]), 2)
+                        scores.append(score)
+
+                        print(f'Score achieved : {score}')
+
+                    index_max = np.argmax(scores)
+                    best_tp = test_percentage[index_max]
+
+                    plt.figure(figsize=(15,7))
+                    plt.plot(test_percentage, scores)
+                    plt.xticks(test_percentage)
+                    plt.xlabel('Percentage of Binary sample')
+                    plt.ylabel('IOU Score')
+                    plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
+                    plt.close()
+    
+                    save_object([test_percentage, scores], 'test_percentage_scores.pkl', self.dir_log)
+
+                else:
+                    vec = self.non_fire_number.split('-')
+                    try:
+                        best_tp = float(vec[-1])
+                    except ValueError:
+                        print(f'{self.non_fire_number} with undefined factor, set to 0.4 -> {0.4 * len(y[y == 0])}')
+                        best_tp = 0.4
+
+                    nb = int(best_tp * len(y[y == 0]))
+
+                df_combined = self.split_dataset(df_train, nb)
+                df_train = df_combined
+                
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_output)
             self.val_loader = read_object('val_loader.pkl', self.dir_output)
@@ -819,9 +929,9 @@ class ModelCNN(ModelTorch):
                                                                 device=self.device, ks=self.ks,
                                                                 path=self.path)
         
-            train_loader = DataLoader(train_dataset, batch_size, True,)
-            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False)
-            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False)
+            train_loader = DataLoader(train_dataset, 16, True,)
+            val_loader = DataLoader(val_dataset, 16, False)
+            test_loader = DataLoader(test_dataset, 16, False)
 
             save_object_torch(train_loader, 'train_loader.pkl', self.dir_output)
             save_object_torch(val_loader, 'val_loader.pkl', self.dir_output)
@@ -879,6 +989,7 @@ class ModelCNN(ModelTorch):
                 target = target.long()
                 output = output[weights.gt(0)]
                 weights = torch.masked_select(weights, weights.gt(0))
+                #output = torch.reshape(output, target.shape)
                 loss = criterion(output, target)
 
             optimizer.zero_grad()
@@ -930,6 +1041,7 @@ class ModelCNN(ModelTorch):
                     target = target.long()
                     output = output[valid_mask]
                     weights = torch.masked_select(weights, valid_mask)
+                    #output = torch.reshape(output, target.shape)
                     loss = criterion(output, target)
 
                 total_loss += loss.item()
@@ -982,8 +1094,12 @@ class ModelCNN(ModelTorch):
         
         #if (dir_output / '100.pt').is_file():
         #    model.load_state_dict(torch.load((dir_output / '100.pt'), map_location=device, weights_only=True), strict=False)
-            
-        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        parameters = self.model.parameters()
+        if criterion.hasattr('get_learnable_parameters'):
+            loss_parameters = criterion.get_learnable_parameters().values()
+            parameters = list(parameters) + list(loss_parameters)
+
+        optimizer = optim.Adam(parameters, lr=self.lr)
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
         patience_cnt = 0
@@ -1088,37 +1204,74 @@ class ModelGNN(ModelTorch):
         super().__init__(model_name, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_output, loss=loss, name=name, device=device, non_fire_number=non_fire_number)
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test):
-
+        
         if self.non_fire_number != 'full':
             old_shape = df_train.shape
             if 'binary' in self.non_fire_number:
                 vec = self.non_fire_number.split('-')
                 try:
                     nb = int(vec[-1]) * len(df_train[df_train[self.target_name] > 0])
-                except ValueError:
+                except:
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
 
-                # Separate the positive and zero classes based on y
-                positive_mask = df_train[self.target_name] > 0
-                non_fire_mask = df_train[self.target_name] == 0
-
-                # Filtrer les données positives et non feu
-                df_positive = df_train[positive_mask]
-                df_non_fire = df_train[non_fire_mask]
-
-                # Échantillonner les données non feu
-                nb = min(len(df_non_fire), nb)
-                sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
-                df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
-
-                # Combiner les données positives et non feu échantillonnées
-                df_combined = pd.concat([df_positive, df_non_fire_sampled])
+                df_combined = self.split_dataset(df_train, nb)
 
                 # Mettre à jour df_train pour l'entraînement
                 df_train.loc[df_combined.index, 'weight'] = 0
 
-                print(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
+                print(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
+
+        elif self.non_fire_number == 'search' or 'percentage' in self.non_fire_number:
+                if self.non_fire_number == 'search':
+                    test_percentage = [0.05, 0.1, 0.15, 0.2, 0.3, 0.40, 0.5, 0.60, 0.7, 0.8, 0.9, 1.0]
+                    scores = []
+                    for tp in test_percentage:
+
+                        nb = int(tp * len(y[y == 0]))
+
+                        print(f'Trained with {tp} -> {nb} sample of class 0')
+
+                        df_combined = self.split_dataset(df_train, nb)
+                        df_train.loc[df_combined.index, 'weight'] = 0
+
+                        copy_model = copy.deepcopy(self)
+                        copy_model.non_fire_number = 'full'
+                        copy_model.create_train_val_test_loader(graph, df_combined, df_val, df_test)
+                        copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs)
+                        test_loader = self.create_test_loader(graph, df_test)
+                        test_output = self._predict_test_loader(test_loader)
+                        test_output = test_output.detach().cpu().numpy()
+                        score = round(copy_model.score(test_output, df_test[self.target_name]), 2)
+                        scores.append(score)
+
+                        print(f'Score achieved : {score}')
+
+                    index_max = np.argmax(scores)
+                    best_tp = test_percentage[index_max]
+
+                    plt.figure(figsize=(15,7))
+                    plt.plot(test_percentage, scores)
+                    plt.xticks(test_percentage)
+                    plt.xlabel('Percentage of Binary sample')
+                    plt.ylabel('IOU Score')
+                    plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
+                    plt.close()
+    
+                    save_object([test_percentage, scores], 'test_percentage_scores.pkl', self.dir_log)
+
+                else:
+                    vec = self.non_fire_number.split('-')
+                    try:
+                        best_tp = float(vec[-1])
+                    except ValueError:
+                        print(f'{self.non_fire_number} with undefined factor, set to 0.4 -> {0.4 * len(y[y == 0])}')
+                        best_tp = 0.4
+
+                    nb = int(best_tp * len(y[y == 0]))
+
+                df_combined = self.split_dataset(df_train, nb)
+                df_train.loc[df_combined.index, 'weight'] = 0
         
         #if (self.dir_output / 'train_loader.pkl').is_file():
         if False:
@@ -1181,6 +1334,7 @@ class ModelGNN(ModelTorch):
                 target = target.long()
                 output = output[weights.gt(0)]
                 weights = torch.masked_select(weights, weights.gt(0))
+                #output = torch.reshape(output, target.shape)
                 loss = criterion(output, target)
 
             optimizer.zero_grad()
@@ -1227,6 +1381,7 @@ class ModelGNN(ModelTorch):
                     output = output[valid_mask]
                     target = target.long()
                     weights = torch.masked_select(weights, valid_mask)
+                    #output = torch.reshape(output, target.shape)
                     loss = criterion(output, target)
 
                 total_loss += loss.item()
@@ -1396,29 +1551,62 @@ class Model_Torch(ModelTorch):
                     print(f'{self.non_fire_number} with undefined factor, set to 1 -> {len(df_train[df_train[self.target_name] > 0])}')
                     nb = len(df_train[df_train[self.target_name] > 0])
 
-                # Separate the positive and zero classes based on y
-                positive_mask = df_train[self.target_name] > 0
-                non_fire_mask = df_train[self.target_name] == 0
-
-                # Filtrer les données positives et non feu
-                df_positive = df_train[positive_mask]
-                df_non_fire = df_train[non_fire_mask]
-
-                # Échantillonner les données non feu
-                nb = min(len(df_non_fire), nb)
-                sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
-                df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
-
-                # Combiner les données positives et non feu échantillonnées
-                df_combined = pd.concat([df_positive, df_non_fire_sampled])
-
-                # Réinitialiser les index du DataFrame combiné
-                df_combined.reset_index(drop=True, inplace=True)
+                df_combined = self.split_dataset(df_train, nb)
 
                 # Mettre à jour df_train pour l'entraînement
                 df_train = df_combined
 
                 print(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
+
+        elif self.non_fire_number == 'search' or 'percentage' in self.non_fire_number:
+                if self.non_fire_number == 'search':
+                    test_percentage = [0.05, 0.1, 0.15, 0.2, 0.3, 0.40, 0.5, 0.60, 0.7, 0.8, 0.9, 1.0]
+                    scores = []
+                    for tp in test_percentage:
+
+                        nb = int(tp * len(y[y == 0]))
+
+                        print(f'Trained with {tp} -> {nb} sample of class 0')
+
+                        df_combined = self.split_dataset(df_train, nb)
+
+                        copy_model = copy.deepcopy(self)
+                        copy_model.non_fire_number = 'full'
+                        copy_model.create_train_val_test_loader(graph, df_combined, df_val, df_test)
+                        copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs)
+                        test_loader = self.create_test_loader(graph, df_test)
+                        test_output = self._predict_test_loader(test_loader)
+                        test_output = test_output.detach().cpu().numpy()
+                        score = round(copy_model.score(test_output, df_test[self.target_name]), 2)
+                        scores.append(score)
+
+                        print(f'Score achieved : {score}')
+
+                    index_max = np.argmax(scores)
+                    best_tp = test_percentage[index_max]
+
+                    plt.figure(figsize=(15,7))
+                    plt.plot(test_percentage, scores)
+                    plt.xticks(test_percentage)
+                    plt.xlabel('Percentage of Binary sample')
+                    plt.ylabel('IOU Score')
+                    plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
+                    plt.close()
+    
+                    save_object([test_percentage, scores], 'test_percentage_scores.pkl', self.dir_log)
+
+                else:
+                    vec = self.non_fire_number.split('-')
+                    try:
+                        best_tp = float(vec[-1])
+                    except ValueError:
+                        print(f'{self.non_fire_number} with undefined factor, set to 0.4 -> {0.4 * len(y[y == 0])}')
+                        best_tp = 0.4
+
+                    nb = int(best_tp * len(y[y == 0]))
+
+                df_combined = self.split_dataset(df_train, nb)
+                df_train = df_combined
         
         #if (self.dir_output / 'train_loader.pkl').is_file():
         if False:
@@ -1479,13 +1667,13 @@ class Model_Torch(ModelTorch):
                 target = torch.masked_select(target, weights.gt(0))
                 output = torch.masked_select(output, weights.gt(0))
                 weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target, weights)
+                loss = criterion(output, target, weights, update_matrix=True)
             else:
                 target = torch.masked_select(target, weights.gt(0))
                 output = output[weights.gt(0)]
                 target = target.long()
                 weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target)
+                loss = criterion(output, target, update_matrix=True)
 
             optimizer.zero_grad()
             loss.backward()
@@ -1537,7 +1725,7 @@ class Model_Torch(ModelTorch):
                     output = output[valid_mask]
                     weights = torch.masked_select(weights, valid_mask)
                     loss = criterion(output, target)
-
+                    
                 total_loss += loss.item()
 
         return total_loss
@@ -1548,7 +1736,6 @@ class Model_Torch(ModelTorch):
 
         if val_loader is not None:
             val_loss = self.launch_val_test_loader(val_loader, criterion)
-        
         else:
             val_loss = train_loss
 
@@ -1586,10 +1773,13 @@ class Model_Torch(ModelTorch):
 
         self.model, _ = self.make_model(graph, custom_model_params)
         
-        #if (dir_output / '100.pt').is_file():
-        #    model.load_state_dict(torch.load((dir_output / '100.pt'), map_location=device, weights_only=True), strict=False)
-            
-        optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        parameters = self.model.parameters()
+        if criterion.hasattr('get_learnable_parameters'):
+            loss_parameters = criterion.get_learnable_parameters().values()
+            parameters = list(parameters) + list(loss_parameters)
+
+        optimizer = optim.Adam(parameters, lr=self.lr)
+
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
         patience_cnt = 0

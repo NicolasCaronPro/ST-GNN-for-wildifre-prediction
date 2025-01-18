@@ -9,6 +9,7 @@ from GNN.config import *
 from GNN.array_fet import *
 from sklearn.metrics import silhouette_score, silhouette_samples
 from astropy.convolution import convolve_fft
+from scipy.ndimage import generic_filter
 
 if is_pc:
     import datetime as dt
@@ -2190,149 +2191,179 @@ def mode_filter(image, kernel_size=3):
     return filtered_image
 
 def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_size=math.inf, oridata=None, exclude_label=None, background=-1):
+    """
+    Fusionne les clusters adjacents dans une image en fonction de critères définis.
+    
+    Paramètres :
+    - image : Image labellisée contenant des clusters.
+    - mode : Critère de fusion ('size', 'time_series_similarity', 'time_series_similarity_fast').
+    - min_cluster_size : Taille minimale d'un cluster avant fusion.
+    - max_cluster_size : Taille maximale autorisée après fusion.
+    - oridata : Données supplémentaires utilisées pour la fusion basée sur des séries temporelles (facultatif).
+    - exclude_label : Label à exclure de la fusion.
+    - background : Label représentant le fond (par défaut -1).
+    """
+
+    # Copie de l'image d'entrée pour éviter de la modifier directement
     labeled_image = np.copy(image)
 
     # Obtenir les propriétés des régions labellisées
     regions = measure.regionprops(labeled_image)
+    # Trier les régions par taille croissante
     regions = sorted(regions, key=lambda r: r.area)
 
-    # Masque pour les clusters à fusionner
-    mask = np.copy(labeled_image)
+    # Masque pour stocker les labels mis à jour après fusion
+    res = np.copy(labeled_image)
 
+    # Liste des labels qui ont été modifiés
     changed_labels = []
 
+    # Nombre d'essais pour dilater un cluster avant abandon
     nb_attempt = 3
 
-    # Fusionner les clusters de petite taille
+    # Longueur initiale des régions
     len_regions = len(regions)
     i = 0
-    while i < len_regions:
 
+    # Boucle pour traiter chaque région
+    while i < len_regions:
         region = regions[i]
 
+        # Vérifier si le cluster est à exclure ou est un fond
         if region.label == exclude_label or region.label == background:
-            # Si le cluster est à exclure, on le conserve tel quel
-            mask[labeled_image == region.label] = region.label
+            # On conserve ces clusters tels quels
+            res[labeled_image == region.label] = region.label
             i += 1
             continue
-    
+
         label = region.label
 
+        # Si le label a déjà été modifié, passer au suivant
         if label in changed_labels:
             i += 1
             continue
-        
-        ones = np.argwhere(mask == label).shape[0]
+
+        # Vérifier la taille du cluster actuel
+        ones = np.argwhere(res == label).shape[0]
         if ones < min_cluster_size:
+            # Si la taille est inférieure au minimum, essayer de fusionner avec un voisin
             nb_test = 0
             find_neighbor = False
-            dilated_image = np.copy(mask)
+            dilated_image = np.copy(res)
             while nb_test < nb_attempt and not find_neighbor:
 
-                # Obtenir les labels des voisins
+                # Trouver les voisins du cluster actuel
                 mask_label = dilated_image == label
-                mask_label_ori = mask == label
+                mask_label_ori = res == label
                 neighbors = segmentation.find_boundaries(mask_label, connectivity=1, mode='outer', background=background)
                 neighbor_labels = np.unique(dilated_image[neighbors])
-                neighbor_labels = neighbor_labels[(neighbor_labels != exclude_label) & (neighbor_labels != background) & (neighbor_labels != label)]  # Exclure le fond et le label à exclure
+                # Exclure les labels indésirables
+                neighbor_labels = neighbor_labels[(neighbor_labels != exclude_label) & (neighbor_labels != background) & (neighbor_labels != label)]
                 dilate = True
                 changed_labels.append(label)
 
                 if len(neighbor_labels) > 0:
-
-                    neighbors_size = np.sort([[neighbor_label, np.sum(mask == neighbor_label)] for neighbor_label in neighbor_labels])
+                    # Trier les voisins par taille
+                    neighbors_size = np.sort([[neighbor_label, np.sum(res == neighbor_label)] for neighbor_label in neighbor_labels])
                     best_neighbor = None
+
                     if mode == 'size':
+                        # Mode basé sur la taille des clusters
                         max_neighbor_size = -math.inf
                         for nei, neighbor in enumerate(neighbors_size):
                             if neighbor[0] == label:
                                 continue
-                            neighbor_size = neighbor[1] + np.sum(mask == label)
-
-                            # Enregistrer le voisin le plus grand si min_cluster_size n'est pas atteint
-                            if neighbor_size > max_neighbor_size:
-                                best_neighbor = neighbor[0]
-                                max_neighbor_size = neighbor_size
+                            neighbor_size = neighbor[1] + np.sum(res == label)
 
                             # Vérifier si le voisin satisfait min_cluster_size
                             if neighbor_size > min_cluster_size:
-                                # Vérifier aussi que la taille est en dessous de max_cluster_size
+                                # Vérifier si la taille reste sous max_cluster_size
                                 if neighbor_size < max_cluster_size:
                                     dilate = False
-                                    mask[mask_label_ori] = neighbor[0]
+                                    res[mask_label_ori] = neighbor[0]
                                     dilated_image[mask_label] = neighbor[0]
                                     logger.info(f'Use neighbord label {label} -> {neighbor[0]}')
                                     label = neighbor[0]
                                     find_neighbor = True
                                     break
+                                
+                                best_neighbor = neighbor[0]
+                                max_neighbor_size = neighbor_size
+                                break
 
-                        # Si aucun voisin n'a permis d'atteindre min_cluster_size, utiliser le voisin le plus grand
+                            # Enregistrer le plus grand voisin si min_cluster_size n'est pas atteint
+                            if neighbor_size > max_neighbor_size:
+                                best_neighbor = neighbor[0]
+                                max_neighbor_size = neighbor_size
+
+                        # Si aucun voisin ne satisfait les critères, utiliser le plus grand
                         if not find_neighbor and best_neighbor is not None:
                             if max_neighbor_size < max_cluster_size:
-                                mask[mask_label] = best_neighbor
+                                res[mask_label] = best_neighbor
                                 dilated_image[mask_label] = best_neighbor
                                 dilate = False
                                 logger.info(f'Use biggest neighbord label {label} -> {best_neighbor}')
                                 label = best_neighbor
                                 find_neighbor = True
+                                # Si la taille après fusion dépasse la taille maximal, appliquer l'érosion (peut être ne pas fusionner)
+                                if max_neighbor_size < max_cluster_size:
+                                    mask_label = dilated_image == label
+                                    ones = np.argwhere(mask_label == 1).shape[0]
+                                    while ones > max_cluster_size:
+                                        mask_label = morphology.erosion(mask_label, morphology.disk(3))
+                                        ones = np.argwhere(mask_label == 1).shape[0]
 
                     elif mode == 'time_series_similarity':
+                        # Mode basé sur la similarité de séries temporelles (DTW)
                         assert oridata is not None
                         time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
                         best_neighbord = None
-                        min_dst = math.inf  # On cherche à maximiser la similarité
+                        min_dst = math.inf  # Cherche à minimiser la distance
                         dst_thresh = 50
 
-                        # Construire une matrice contenant le label et tous ses voisins
                         for neighbor in neighbors_size:
-
                             if neighbor[0] == label:
                                 continue
 
                             time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
                             distance = dtw.distance(time_series_data, time_series_data_neighbor)
 
-                            # Debug : Afficher la similarité avec ce voisin
-                            #print(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
                             if distance < min_dst and distance < dst_thresh:
                                 best_neighbord = neighbor[0]
-                                min_dst = distance  # Mettre à jour le voisin le plus similaire et la similarité max
-                                
-                        # Si on a trouvé un voisin, on met à jour le label
+                                min_dst = distance
+
                         if best_neighbord is not None:
                             dilate = False
-                            mask[mask_label_ori] = best_neighbord
+                            res[mask_label_ori] = best_neighbord
                             logger.info(f'label {label} -> {best_neighbord}')
                             changed_labels.append(label)
                             label = best_neighbord
                             find_neighbor = True
 
                     elif mode == 'time_series_similarity_fast':
+                        # Mode basé sur une version rapide de DTW
                         assert oridata is not None
                         time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
                         best_neighbord = None
-                        min_simi = math.inf  # On cherche à maximiser la similarité
+                        min_simi = math.inf  # Cherche à minimiser la similarité
                         dst_thresh = 100
-                        # Construire une matrice contenant le label et tous ses voisins
+
                         for neighbor in neighbors_size:
                             time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
                             _, simi = dtw_functions.dtw(time_series_data, time_series_data_neighbor, local_dissimilarity=d.euclidean)
 
-                            # Debug : Afficher la similarité avec ce voisin
-                            #print(f"Similarity between label {label} and neighbor {neighbor[0]}: {simi}")
                             if simi < min_simi and simi < dst_thresh:
                                 best_neighbord = neighbor[0]
-                                min_simi = simi  # Mettre à jour le voisin le plus similaire et la similarité max
+                                min_simi = simi
 
-                        # Si on a trouvé un voisin, on met à jour le label
                         if best_neighbord is not None:
                             dilate = False
-                            mask[mask_label_ori] = best_neighbord
+                            res[mask_label_ori] = best_neighbord
                             changed_labels.append(label)
                             label = best_neighbord
                             find_neighbor = True
 
-                # Si on a pas de voisin
+                # Si aucun voisin trouvé, dilater la région
                 if dilate:
                     mask_label = morphology.dilation(mask_label, morphology.square(3))
                     dilated_image[(mask_label)] = label
@@ -2340,36 +2371,46 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
 
                 if not dilate:
                     break
-
-            # Si la taille est petite et qu'on a jamais trouvé de voisin -> région isolée.
+                
+            # Si aucun voisin trouvé après nb_attempt, supprimer ou conserver la région
             if not find_neighbor:
                 if ones < min_cluster_size:
                     mask_label = dilated_image == label
-                    ones = np.argwhere(mask_label == 1).shape[0]
+                    ones = np.argwhere(mask_label == 1).shape[0] 
+                    # Si l'objet dilaté ne vérifie pas la condition minimum
                     if ones < min_cluster_size:
-                        mask[mask_label] = 0
+                        res[mask_label] = 0
                         logger.info(f'Remove label {region.label}')
                     else:
+                        # Si l'objet dilaté ne vérifie pas la condition maximum
                         while ones > max_cluster_size:
                             mask_label = morphology.erosion(mask_label, morphology.square(3))
                             ones = np.argwhere(mask_label == 1).shape[0]
                         
-                        mask[mask_label] = region.label
+                        res[mask_label] = region.label
                         logger.info(f'Keep label dilated {region.label}')
 
-            regions = measure.regionprops(mask)
+            # Mettre à jour les régions pour tenir compte des changements
+            regions = measure.regionprops(res)
             regions = sorted(regions, key=lambda r: r.area)
             len_regions = len(regions)
             i = 0
             continue
         else:
-            # Si le cluster est assez grand, on le conserve tel quel
-            #mask[labeled_image == region.label] = region.label
-            logger.info(f'Keep label {region.label}')
+            mask_label = res == region.label
+            mask_before_erosion = np.copy(mask_label)
+            while ones > max_cluster_size:
+                mask_label = morphology.erosion(mask_label, morphology.square(3))
+                ones = np.argwhere(mask_label == 1).shape[0]
 
+            res[mask_before_erosion & ~mask_label] = background
+
+            # Si le cluster est assez grand, on le conserve tel quel
+            logger.info(f'Keep label {region.label}')
+            
         i += 1
 
-    return mask
+    return res
 
 def variance_threshold(df,th):
     var_thres=VarianceThreshold(threshold=th)
@@ -3175,52 +3216,55 @@ def silhouette_score_with_plot(y_pred, target, name, dir_output):
     :param dir_output: Chemin du répertoire de sortie pour sauvegarder le graphique
     :return: Score de silhouette (float)
     """
-    # Calcul du score de silhouette
-    score = silhouette_score(target, y_pred)
-    
-    # Calcul des valeurs individuelles de silhouette
-    silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
-    cluster_labels = np.unique(y_pred)
-    
-    # Création du graphique de silhouette
-    fig, ax = plt.subplots(figsize=(10, 7))
-    y_lower = 10
-    for i, label in enumerate(cluster_labels):
-        # Valeurs de silhouette pour le cluster actuel
-        cluster_silhouette_vals = silhouette_vals[y_pred == label]
-        cluster_silhouette_vals.sort()
+    try:
+        # Calcul du score de silhouette
+        score = silhouette_score(target, y_pred)
         
-        # Hauteur de la barre
-        y_upper = y_lower + len(cluster_silhouette_vals)
-        color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
+        # Calcul des valeurs individuelles de silhouette
+        silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
+        cluster_labels = np.unique(y_pred)
         
-        ax.fill_betweenx(
-            np.arange(y_lower, y_upper),
-            0, 
-            cluster_silhouette_vals,
-            facecolor=color,
-            edgecolor=color,
-            alpha=0.7
-        )
-        
-        # Ajouter une étiquette pour le cluster
-        ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
-        y_lower = y_upper + 10  # Espacement entre les clusters
+        # Création du graphique de silhouette
+        fig, ax = plt.subplots(figsize=(10, 7))
+        y_lower = 10
+        for i, label in enumerate(cluster_labels):
+            # Valeurs de silhouette pour le cluster actuel
+            cluster_silhouette_vals = silhouette_vals[y_pred == label]
+            cluster_silhouette_vals.sort()
+            
+            # Hauteur de la barre
+            y_upper = y_lower + len(cluster_silhouette_vals)
+            color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
+            
+            ax.fill_betweenx(
+                np.arange(y_lower, y_upper),
+                0, 
+                cluster_silhouette_vals,
+                facecolor=color,
+                edgecolor=color,
+                alpha=0.7
+            )
+            
+            # Ajouter une étiquette pour le cluster
+            ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
+            y_lower = y_upper + 10  # Espacement entre les clusters
 
-    # Ligne verticale correspondant au score moyen
-    ax.axvline(x=score, color="red", linestyle="--")
-    ax.set_title("Silhouette Plot")
-    ax.set_xlabel("Silhouette Coefficient Values")
-    ax.set_ylabel("Cluster Label")
-    ax.set_yticks([])  # Pas de graduation sur l'axe Y
-    ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
-    
-    # Sauvegarde du graphique
-    plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
-    fig.savefig(plot_path)
-    plt.close(fig)
-    
-    return score
+        # Ligne verticale correspondant au score moyen
+        ax.axvline(x=score, color="red", linestyle="--")
+        ax.set_title("Silhouette Plot")
+        ax.set_xlabel("Silhouette Coefficient Values")
+        ax.set_ylabel("Cluster Label")
+        ax.set_yticks([])  # Pas de graduation sur l'axe Y
+        ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
+        
+        # Sauvegarde du graphique
+        plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
+        fig.savefig(plot_path)
+        plt.close(fig)
+        
+        return score
+    except:
+        return 0
 
 def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, dir_output):
     """
@@ -3536,33 +3580,43 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     union_fire = np.trapz(np.maximum(y_pred[mask_fire], y_true_fire[mask_fire]))
     iou_wildfire_and_pred = round(intersection_fire / union_fire, 2) if union_fire > 0 else 0
 
+    # Limitation des signaux à un maximum de 1
+    y_pred_clipped = np.clip(y_pred, 0, 1)  # Limiter y_pred à 1
+    y_true_fire_clipped = np.clip(y_true_fire, 0, 1)  # Limiter y_true_fire à 1
+
+    # Masque pour les valeurs pertinentes
+    mask_fire_detected = (y_true_fire_clipped > 0)
+
+    # Calcul de l'intersection et de l'union
+    intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+    union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+
+    # Calcul de la métrique IOU
+    iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+
+    y_pred_clipped_ytrue = np.copy(y_pred)
+    y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
+    intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true))  # Aire commune
+    union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true))         # Aire d'union
+    iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+
+    # Calcul du Dice coefficient
+    dice_coefficient = round(2 * intersection / (union + intersection), 2) if union + intersection > 0 else 0
+
     # Enregistrement dans un dictionnaire
     scores = {
-        "common_area": intersection,
-        "union_area": union,
-        "under_predicted_area": under_prediction,
-        "over_predicted_area": over_prediction,
-
         "iou": round(intersection / union, 2) if union > 0 else 0,  # To avoid division by zero
         "iou_wildfire_or_pred": iou_wildfire_or_pred,
         "iou_wildfire_and_pred": iou_wildfire_and_pred,
-
-        "iou_under_prediction": round(under_prediction / union, 2) if union > 0 else 0,
-        "iou_over_prediction": round(over_prediction / union, 2) if (union) > 0 else 0,
-        f"reliability_predicted" : 1 / round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
-        f"reliability_detected" : 1 / round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-        "wildfire_predicted_ratio" : round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
-        "wildfire_detected_ratio" : round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
-        
-        f"reliability" : 1 / round((intersection + over_prediction + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-        "wildfire_over_predicted": round(over_prediction_fire / union, 2) if union > 0 else 0,
-        "wildfire_under_predicted": round(under_prediction_fire / union, 2) if union > 0 else 0,
+        "iou_wildfire_detected": iou_wildfire_detected,
+        "iou_no_overestimation" : iou_no_overestimation,
         
         "over_bad_prediction" : round(over_prediction_zeros / union, 2) if union > 0 else 0,
         "under_bad_prediction" : round(under_prediction_zeros / union, 2) if union > 0 else 0,
         "bad_prediction" : round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
+        
+        # Ajout du Dice coefficient
+        "dice_coefficient": dice_coefficient
     }
 
     ###################################### I. For each graph_id ####################################
@@ -3590,6 +3644,26 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
         iou_wildfire_and_pred_graph = round(intersection_fire_graph / union_fire_graph, 2) if union_fire_graph > 0 else 0
 
+        # Limitation des signaux à un maximum de 1
+        y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
+        y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+
+        # Masque pour les valeurs pertinentes
+        mask_fire_detected = y_true_fire_clipped > 0
+
+        # Calcul de l'intersection et de l'union
+        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+
+        # Calcul de la métrique IOU
+        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+
+        y_pred_clipped_ytrue = np.copy(y_pred_graph)
+        y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
+        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph))  # Aire commune
+        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph))         # Aire d'union
+        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+
         intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
         union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
 
@@ -3607,19 +3681,15 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         graph_scores = {
-            f"iou_wildfire_or_pred{i}": iou_wildfire_or_pred_graph,
-            f"iou_wildfire_and_pred{i}": iou_wildfire_and_pred_graph,
-
+            f"iou_wildfire_or_pred_{i}": iou_wildfire_or_pred_graph,
+            f"iou_wildfire_and_pred_{i}": iou_wildfire_and_pred_graph,
+            f"iou_no_overestimation_{i}": iou_no_overestimation,
             f"iou_{i}": round(intersection_graph / union_graph, 2) if union_graph > 0 else 0,  # Pour éviter la division par zéro
+            f"iou_wildfire_detected_{i}": iou_wildfire_detected,
 
-            f"iou_under_prediction_{i}": round(under_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
-            f"iou_over_prediction_{i}": round(over_prediction_graph / union_graph, 2) if union_graph > 0 else 0,
-            f"reliability_predicted_{i}" : 1 / ((intersection_graph + over_prediction_graph) / intersection_graph) if intersection_graph != 0 else 0,
-            f"reliability_detected_{i}" : 1 / ((intersection_graph + under_prediction_graph) / intersection_graph) if intersection_graph != 0 else 0,
+            # Ajout du Dice coefficient pour chaque itération
+            f"dice_coefficient_{i}": round(2 * intersection_graph / (union_graph + intersection_graph), 2) if (union_graph + intersection_graph) > 0 else 0,
 
-            f"wildfire_predicted_ratio_local_{i}" : round((intersection_graph + over_prediction_graph) / intersection_graph, 2) if intersection_graph != 0 else 0,
-            f"wildfire_detected_ratio_local_{i}" : round((intersection_graph + under_prediction_graph)/ intersection_graph, 2) if intersection_graph != 0 else 0,
-                    
             f"over_bad_prediction_local_{i}": round(over_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
             f"under_bad_prediction_local_{i}": round(under_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
             f"bad_prediction_local_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union_graph > 0 else 0,
@@ -3628,6 +3698,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"under_bad_prediction_global_{i}": round(under_prediction_zeros_graph / union, 2) if union_graph > 0 else 0,
             f"bad_prediction_global_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union, 2) if union_graph > 0 else 0,
         }
+
         scores.update(graph_scores)
 
     unique_seasons = np.unique(saison)
@@ -3654,38 +3725,45 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
         iou_wildfire_and_pred_season = round(intersection_fire_season / union_fire_season, 2) if union_fire_season > 0 else 0
 
+        # Limitation des signaux à un maximum de 1
+        y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
+        y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+
+        # Masque pour les valeurs pertinentes
+        mask_fire_detected = y_true_fire_clipped > 0
+
+        # Calcul de l'intersection et de l'union
+        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+
+        # Calcul de la métrique IOU
+        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+
+        y_pred_clipped_ytrue = np.copy(y_pred_season)
+        y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
+        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_season))  # Aire commune
+        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_season))         # Aire d'union
+        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+
         intersection_season = np.trapz(np.minimum(y_pred_season, y_true_season))  # Aire commune
         union_season = np.trapz(np.maximum(y_pred_season, y_true_season))         # Aire d'union
 
-        under_prediction_season = np.trapz(np.maximum(0, y_true_season - y_pred_season))
-        over_prediction_season = np.trapz(np.maximum(0, y_pred_season - y_true_season))
-
         over_prediction_zeros_season = np.trapz(np.maximum(0, y_pred_season[y_true_season == 0]))
         under_prediction_zeros_season = np.trapz(np.maximum(0, y_true_season[y_pred_season == 0]))
-
-        under_prediction_fire_season = np.trapz(np.maximum(0, y_true_season[y_true_season > 0] - y_pred_season[y_true_season > 0]))
-        over_prediction_fire_season = np.trapz(np.maximum(0, y_pred_season[y_true_season > 0] - y_true_season[y_true_season > 0]))
-
-        only_true_value = np.trapz(y_true_season)  # Aire sous la courbe des valeurs réelles
-        only_pred_value = np.trapz(y_pred_season)  # Aire sous la courbe des prédictions
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         season_scores = {
             f"iou_wildfire_or_pred_{s}": iou_wildfire_or_pred_season,
             f"iou_wildfire_and_pred_{s}": iou_wildfire_and_pred_season,
-
+            f"iou_no_overestimation_{s}": iou_no_overestimation,
             f"iou_{s}": round(intersection_season / union_season, 2) if union_season > 0 else 0,  # Pour éviter la division par zéro
-            f"iou_under_prediction_{s}": round(under_prediction_season / union_season, 2) if union_season > 0 else 0,
-            f"iou_over_prediction_{s}": round(over_prediction_season / union_season, 2) if union_season > 0 else 0,
-            f"reliability_predicted_{s}" : 1 / ((intersection_season + over_prediction_season) / intersection_season) if intersection_season != 0 else 0,
-            f"reliability_detected_{s}" : 1 / ((intersection_season + under_prediction_season) / intersection_season) if intersection_season != 0 else 0,
-
-            f"wildfire_predicted_ratio_{s}" : round((intersection_season + over_prediction_season)/ over_prediction_season, 2) if intersection_season != 0 else 0,
-            f"wildfire_detected_ratio_{s}" : round((intersection_season + under_prediction_season) / under_prediction_season, 2) if intersection_season != 0 else 0,
+            f"iou_wildfire_detected_{s}": iou_wildfire_detected,
 
             f"over_bad_prediction_local_{s}": round(over_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
             f"under_bad_prediction_local_{s}": round(under_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
             f"bad_prediction_local_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union_season, 2) if union_season > 0 else 0,
+            
+            f"dice_coefficient_{s}": round(2 * intersection_season / (union_season + intersection_season), 2) if (union_season + intersection_season) > 0 else 0,
 
             f"over_bad_prediction_global_{s}": round(over_prediction_zeros_season / union, 2) if union_season > 0 else 0,
             f"under_bad_prediction_global_{s}": round(under_prediction_zeros_season / union, 2) if union_season > 0 else 0,
@@ -3705,11 +3783,11 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         # Iterate over graphs in this season
         for i, g_id in enumerate(sorted_graph_ids):
             # Mask for the current graph in the current season
-            graph_mask = (graph_id == g_id) & season_mask
+            mask = (graph_id == g_id) & season_mask
 
-            y_pred_graph_season = y_pred[graph_mask]
-            y_true_graph_season = y_true[graph_mask]
-            y_true_fire_graph_season = y_true_fire[graph_mask]
+            y_pred_graph_season = y_pred[mask]
+            y_true_graph_season = y_true[mask]
+            y_true_fire_graph_season = y_true_fire[mask]
 
             mask_fire_graph_season = (y_pred_graph_season > 0) | (y_true_fire_graph_season > 0)
             intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
@@ -3721,11 +3799,28 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
             iou_wildfire_and_pred_graph_season = round(intersection_fire_graph_season / union_fire_graph_season, 2) if union_fire_graph_season > 0 else 0
 
+            # Limitation des signaux à un maximum de 1
+            y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
+            y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+
+            # Masque pour les valeurs pertinentes
+            mask_fire_detected = y_true_fire_clipped > 0
+
+            # Calcul de l'intersection et de l'union
+            intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+            union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+
+            # Calcul de la métrique IOU
+            iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+
+            y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
+            y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
+            intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph_season))  # Aire commune
+            union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph_season))         # Aire d'union
+            iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+
             intersection_graph_season = np.trapz(np.minimum(y_pred_graph_season, y_true_graph_season))  # Common area
             union_graph_season = np.trapz(np.maximum(y_pred_graph_season, y_true_graph_season))         # Union area
-
-            under_prediction_graph_season = np.trapz(np.maximum(0, y_true_graph_season - y_pred_graph_season))
-            over_prediction_graph_season = np.trapz(np.maximum(0, y_pred_graph_season - y_true_graph_season))
 
             over_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_pred_graph_season[y_true_graph_season == 0]))
             under_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_true_graph_season[y_pred_graph_season == 0]))
@@ -3734,15 +3829,11 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             graph_season_scores = {
                 f"iou_wildfire_or_pred_graph_{i}_season_{season}": iou_wildfire_or_pred_graph_season,
                 f"iou_wildfire_and_pred_graph_{i}_season_{season}": iou_wildfire_and_pred_graph_season,
-
+                f"iou_no_overestimation_graph_{i}_season_{season}": iou_no_overestimation,
                 f"iou_graph_{i}_season_{season}": round(intersection_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
-                f"iou_under_prediction_graph_{i}_season_{season}": round(under_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
-                f"iou_over_prediction_graph_{i}_season_{season}": round(over_prediction_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
-                f"reliability_predicted_graph_{i}_season_{season}": 1 / ((intersection_graph_season + over_prediction_graph_season) / intersection_graph_season) if intersection_graph_season != 0 else 0,
-                f"reliability_detected_graph_{i}_season_{season}": 1 / ((intersection_graph_season + under_prediction_graph_season) / intersection_graph_season) if intersection_graph_season != 0 else 0,
-
-                f"wildfire_predicted_ratio_graph_{i}_season_{season}": round((intersection_graph_season + over_prediction_graph_season) / intersection_graph_season, 2) if intersection_graph_season != 0 else 0,
-                f"wildfire_detected_ratio_graph_{i}_season_{season}": round((intersection_graph_season + under_prediction_graph_season) / intersection_graph_season, 2) if intersection_graph_season != 0 else 0,
+                f"iou_wildfire_detected_graph_{i}_season_{season}": iou_wildfire_detected,
+                
+                f"dice_coefficient_graph_{i}_season_{season}": round(2 * intersection_graph_season / (union_graph_season + intersection_graph_season), 2) if (union_graph_season + intersection_graph_season) > 0 else 0,
 
                 f"over_bad_prediction_local_graph_{i}_season_{season}": round(over_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
                 f"under_bad_prediction_local_graph_{i}_season_{season}": round(under_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
@@ -3761,6 +3852,14 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_sample = y_true[mask]
         y_true_fire_sample = y_true_fire[mask]
 
+        if y_pred_sample.shape[0] == 0:
+            continue
+
+        if y_pred_sample.shape[0] == 1:
+            y_pred_sample = np.concatenate((y_pred_sample, y_pred_sample))
+            y_true_sample = np.concatenate((y_true_sample, y_true_sample))
+            y_true_fire_sample = np.concatenate((y_true_fire_sample, y_true_fire_sample))
+
         mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
         intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
         union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
@@ -3770,7 +3869,27 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
         union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
         iou_wildfire_and_pred_sample = round(intersection_fire_sample / union_fire_sample, 2) if union_fire_sample > 0 else 0
-        
+
+        # Limitation des signaux à un maximum de 1
+        y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
+        y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
+
+        # Masque pour les valeurs pertinentes
+        mask_fire_detected = y_true_fire_clipped > 0
+
+        # Calcul de l'intersection et de l'union
+        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
+
+        # Calcul de la métrique IOU
+        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+
+        y_pred_clipped_ytrue = np.copy(y_pred_sample)
+        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
+        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
+        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
+        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+
         # Calculer les aires
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
         union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
@@ -3789,29 +3908,14 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         )
 
         # Enregistrement dans un dictionnaire
-        scores_elt = {
+        scores_elt = {            
+            f"iou_elt_{unique_value}": round(intersection / union, 2) if union > 0 else 0,  # Éviter la division par zéro
+            f"iou_wildfire_detected_elt_{unique_value}": iou_wildfire_detected,
             f"iou_wildfire_or_pred_elt_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_{unique_value}": iou_wildfire_and_pred_sample,
-            
-            f"common_area_elt_{unique_value}": intersection,
-            f"union_area_elt_{unique_value}": union,
-            f"under_predicted_area_elt_{unique_value}": under_prediction,
-            f"over_predicted_area_elt_{unique_value}": over_prediction,
+            f"iou_no_overestimation_elt_{unique_value}": iou_no_overestimation,
 
-            f"iou_elt_{unique_value}": round(intersection / union, 2) if union > 0 else 0,  # Éviter la division par zéro
-            f"iou_under_prediction_elt_{unique_value}": round(under_prediction / union, 2) if union > 0 else 0,
-            f"iou_over_prediction_elt_{unique_value}": round(over_prediction / union, 2) if union > 0 else 0,
-
-            f"reliability_predicted_elt_{unique_value}": 1 / round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
-            f"reliability_detected_elt_{unique_value}": 1 / round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-            f"wildfire_predicted_ratio_elt_{unique_value}": round((intersection + over_prediction) / intersection, 2) if intersection != 0 else 0,
-            f"wildfire_detected_ratio_elt_{unique_value}": round((intersection + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-            f"reliability_elt_{unique_value}": 1 / round((intersection + over_prediction + under_prediction) / intersection, 2) if intersection != 0 else 0,
-
-            f"wildfire_over_predicted_elt_{unique_value}": round(over_prediction_fire / union, 2) if union > 0 else 0,
-            f"wildfire_under_predicted_elt_{unique_value}": round(under_prediction_fire / union, 2) if union > 0 else 0,
+            f"dice_coefficient_elt_{unique_value}": round(2 * intersection / (union + intersection), 2) if (union + intersection) > 0 else 0,
 
             f"over_bad_prediction_elt_{unique_value}": round(over_prediction_zeros / union, 2) if union > 0 else 0,
             f"under_bad_prediction_elt_{unique_value}": round(under_prediction_zeros / union, 2) if union > 0 else 0,
@@ -4194,12 +4298,12 @@ def get_features_selected_for_time_series_for_2D(features, features_name, time_v
 def calculate_proportion_weights(df):
     res = np.empty((df.shape[0], 1))
 
-    uclass = np.unique(df['class_risk'].values)
+    uclass = np.unique(df['class'].values)
 
-    mask_zero_class = np.argwhere(df['class_risk'].values == 0)
+    mask_zero_class = np.argwhere(df['class'].values == 0)
 
     for c in uclass:
-        mask_class = np.argwhere(df['class_risk'].values == c)[:, 0]
+        mask_class = np.argwhere(df['class'].values == c)[:, 0]
         w =  mask_zero_class.shape[0] / mask_class.shape[0]
         res[mask_class, 0] = w
 
@@ -4209,7 +4313,7 @@ def calculate_proportion_weights(df):
     return res
 
 def calculate_class_weights(df):
-    return df['weight'].values
+    return df['class'].values + 1
 
 def calculate_nbsinister(df):
     return df['nbsinister'].values + 1

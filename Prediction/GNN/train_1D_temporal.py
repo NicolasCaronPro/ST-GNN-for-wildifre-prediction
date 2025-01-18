@@ -208,12 +208,21 @@ test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 models = [
+        #('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_dice', 5),
+        ('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropylearnable', 5),
+        ('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+        #('DilatedCNN', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+        
+        #('LSTM', 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('DilatedCNN', 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+
         #('LSTM', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         #('DilatedCNN', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         ]
 
 gnn_models = [
-        ('ST-GCN', False, 'full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+        #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
 ]
 
 train_loader = None
@@ -282,11 +291,27 @@ if doTest:
     name_dir = dn + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
-    models = [
-            #('LSTM_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
-            #('DilatedCNN_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
-            ('ST-GCN_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-3-kmeans-5-Class-Dept', 5),
-    ]
+    if graph_method == 'node':
+
+        models = [
+                #('LSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_dice', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                #('LSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                #('DilatedCNN_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                
+                ('LSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_dice', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+                ('LSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+                #('DilatedCNN_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+
+                #('ST-GCN_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                #('ST-GCN_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', False, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+        ]
+    
+    elif graph_method == 'graph':
+
+        models = [
+                ('ST-GCN_full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                ('ST-GCN_full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', False, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+        ]
 
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
@@ -340,13 +365,35 @@ if doTest:
                             features=features,
                             dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
                             name_exp=name_exp,
-                            doKMEANS=doKMEANS)
+                            doKMEANS=doKMEANS,
+                            suffix='temp')
+            
+            aggregated_prediction.append(res)
         else:
-            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
+            metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_temp.pkl', dir_output / dept / prefix)
+            #metrics_gnn = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_temp_gnn.pkl', dir_output / dept / prefix)
+            metrics.update(metrics_gnn)
             assert metrics is not None
-            run = f'{dept}_{name}_{prefix}'
             for name, _, target_name, _ in models:
-                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+                aggregated_prediction.append(res)
+                run = f'{dept}_{name}_{prefix}'
+                if MLFLOW:
+                    existing_run = get_existing_run(f'{run}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{run}', nested=True)
+                    if name in metrics.keys():
+                        log_metrics_recursively(metrics[run], prefix='')
+                    else:
+                        logger.info(f'{name} not found')
+                    mlflow.end_run()
+
+            for name, _, target_name, _ in gnn_models:
+                res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / prefix / name)
+                aggregated_prediction.append(res)
+                run = f'{dept}_{name}_{prefix}'
                 if MLFLOW:
                     existing_run = get_existing_run(f'{run}')
                     if existing_run:
@@ -363,16 +410,13 @@ if doTest:
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
-
-        aggregated_prediction.append(res)
         #aggregated_prediction_dept.append(res_dept)
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)
     
     check_and_create_path(dir_output / prefix)
-    df_metrics.to_csv(dir_output / prefix / 'df_metrics.csv')
-
+    df_metrics.to_csv(dir_output / prefix / f'df_metrics_{graph_method}.csv')
  
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')

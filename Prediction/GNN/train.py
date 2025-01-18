@@ -86,7 +86,17 @@ def get_grid_params(model_type):
             'degree': [2, 3, 4, 5],  # Applicable uniquement pour 'poly'
             'tol': [1e-3, 1e-4, 1e-5]
         }
-
+    
+    elif model_type.lower() == 'catboost':
+        return {
+            'iterations': 10000,
+            'learning_rate': 0.01,
+            'depth': 6,
+            'l2_leaf_reg': 3,
+            'random_seed': 42,
+            'early_stopping_rounds': 15,
+            'verbose': False,
+        }
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     
@@ -164,7 +174,7 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
         dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
         dtrain = xgb.DMatrix(df_train[features], label=df_train[target], weight=df_train[weight_col])
         fit_params = {
-            'eval_set': [(dtrain, 'train'), (dval, 'validation')],
+            'eval_set': [(df_train[features], df_train[target]), (df_val[features], df_val[target])],
             'sample_weight': df_train[weight_col],
             'verbose': False,
             'early_stopping_rounds' : 15
@@ -389,7 +399,9 @@ def fit(params):
                 logger.info(f'Can t add {col_id} in dataset. Skip')
                 return
         name = f'{type_aggregation}-{col_id}-{name}'
-        model = OneByID(model, loss=model.loss, model_type=model.model_type, name=f'{name}', id_train=df_train[col_id], id_val=df_val[col_id], id_test=df_test[col_id], col_id_name=col_id)
+        model = OneByID(model, loss=model.loss, model_type=model.model_type, name=f'{name}', \
+                        id_train=df_train[col_id], id_val=df_val[col_id], id_test=df_test[col_id], \
+                            col_id_name=col_id, task_type=model.task_type, target_name=model.target_name, post_process=model.post_process)
     elif type_aggregation == 'federated':
         if col_id not in df_train.columns:
             return
@@ -538,7 +550,7 @@ def train_sklearn_api_model(params):
 
             # Initialiser la grille de paramètres pour les termes
             grid_params = {'terms': []}
-
+            
             # Boucle pour tester toutes les combinaisons de formes fonctionnelles
             for combination in all_combinations:
                 terms = [func(i) for i, func in enumerate(combination)]  # Appliquer chaque fonction aux variables
@@ -591,7 +603,7 @@ def train_xgboost(params, train=True):
         'n_estimators': 10000,
         'random_state': 42,
         'tree_method': 'hist',
-        'device':"cpu"
+        'device':"gpu"
     }
 
     grid_params = {'max_depth': [6],
@@ -642,8 +654,8 @@ def train_catboost(params, train=True):
     do_bayes_search = params['do_bayes_search']
     model = params['name']
     post_process = params['post_process']
-
-    name, non_fire_number, target, task_type, loss = model.split('_')
+    
+    name, non_fire_number, weight_type, target, task_type, loss = model.split('_')
     
     # Map loss to CatBoost objectives
     catboost_objective = {
@@ -651,7 +663,7 @@ def train_catboost(params, train=True):
         'rmse': 'RMSE',
         'mae': 'MAE',
         'crossentropy': 'CrossEntropy',
-        'multi_logloss': 'MultiClass',
+        'softmax': 'MultiClass',
     }.get(loss, 'RMSE')  # Default to RMSE if not specified
 
     model_params = {
@@ -1094,7 +1106,14 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     do_grid_search: bool,
                                     do_bayes_search: bool):
     
+    
     name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+
+    ###############################################  Feature importance  ###########################################################
+    importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target], features, dir_output, target)
+    features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target)
+
+    features = features95
 
     if task_type == 'classification' and target != 'binary':
         train_dataset['class'] = train_dataset[target]
@@ -1103,6 +1122,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
 
     if 'weight' in list(train_dataset.columns):
         train_dataset.drop('weight', inplace=True, axis=1)
+
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
 
@@ -1131,8 +1151,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'do_bayes_search': do_bayes_search,
         'name': model[0],
         'post_process' : model[-1],
-        'type_aggregation' : None,
-        'col_id' : None
+        'type_aggregation' : model[-3],
+        'col_id' : model[-2]
     }
 
     name, _, _, _,_ ,_ = model[0].split('_')
@@ -1205,8 +1225,9 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'name': model_name[0],
-        'type_aggregation' : model_name[-2],
-        'col_id' : model_name[-1] if model_name[-2] is not None else None
+        'post_process' : model_name[-1],
+        'type_aggregation' :model_name[-2],
+        'col_id' : model_name[-3]
     }
 
     for model_type in models_type:
@@ -1276,15 +1297,29 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
 
     name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
 
-    train_dataset['weight'] = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+    if task_type == 'classification' and target != 'binary':
+        train_dataset['class'] = train_dataset[target]
+
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
-
+    
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
     test_dataset = test_dataset[test_dataset['weight'] > 0]
-
+    
     logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
+
+    logger.info(f'Train {target} values : {train_dataset[target].unique()}')
+    logger.info(f'Val {target} values {val_dataset[target].unique()}')
+    logger.info(f'Test {target} values {test_dataset[target].unique()}')
 
     if do_grid_search:
         parameter_optimization_method = 'grid'
@@ -1293,7 +1328,8 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
     else:
         parameter_optimization_method = 'skip'
 
-    model_type = name.split('-')[0]
+    model_type_1 = name.split('-')[0]
+    model_type_2 = name.split('-')[1]
 
     params_temp = {
         'df_train': train_dataset,
@@ -1307,47 +1343,77 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'name': model[0],
-        'type_aggregation' : None,
-        'col_id' : None
+        'post_process' : model[-1],
+        'type_aggregation' : model[-2],
+        'col_id' : model[-3]
     }
 
-    if model_type == 'xgboost':
+    ##################################### Binary model ################################
+
+    if model_type_1 == 'xgboost':
         params = train_xgboost(params_temp, False)
-    elif model_type == 'lightgbm':
+    elif model_type_1 == 'lightgbm':
         params = train_lightgbm(params_temp, False)
-    elif model_type == 'rf':
+    elif model_type_1 == 'rf':
         params = train_random_forest(params_temp, False)
-    elif model_type == 'svm':
+    elif model_type_1 == 'svm':
         params = train_svm(params_temp, False)
-    elif model_type == 'dt':
+    elif model_type_1 == 'dt':
         params = train_decision_tree(params_temp, False)
-    elif model_type == 'ngboost':
+    elif model_type_1 == 'ngboost':
         params = train_ngboost(params_temp, False)
-    elif model_type == 'poisson':
+    elif model_type_1 == 'poisson':
         params = train_poisson(params_temp, False)
-    elif model_type == 'gam':
+    elif model_type_1 == 'gam':
         params = train_gam(params_temp, False)
+    elif model_type_1 == 'catboost':
+        params = train_catboost(params_temp, False)
     else:
-        raise ValueError(f'Unknow model_type {model_type}')
+        raise ValueError(f'Unknow model_type {model_type_1}')
     
-    grid_params = get_grid_params(model_type)
+    grid_params1 = get_grid_params(model_type_1)
 
     model1, fit_params1 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
-                                    features, model[0], model_type, task_type, 
+                                    features, model[0], model_type_1, task_type,
                                     params, loss, non_fire_number=non_fire_number, post_process=None)
     
+    ##########################################  Multi classification ###########################
+
+    if model_type_2 == 'xgboost':
+        params = train_xgboost(params_temp, False)
+    elif model_type_2 == 'lightgbm':
+        params = train_lightgbm(params_temp, False)
+    elif model_type_2 == 'rf':
+        params = train_random_forest(params_temp, False)
+    elif model_type_2 == 'svm':
+        params = train_svm(params_temp, False)
+    elif model_type_2 == 'dt':
+        params = train_decision_tree(params_temp, False)
+    elif model_type_2 == 'ngboost':
+        params = train_ngboost(params_temp, False)
+    elif model_type_2 == 'poisson':
+        params = train_poisson(params_temp, False)
+    elif model_type_2 == 'gam':
+        params = train_gam(params_temp, False)
+    elif model_type_2 == 'catboost':
+        params = train_catboost(params_temp, False)
+    else:
+        raise ValueError(f'Unknow model_type {model_type_2}')
+    
+    grid_params2 = get_grid_params(model_type_2)
+
     model2, fit_params2 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
-                                features, model[0], model_type, task_type, 
-                                params, loss, non_fire_number=non_fire_number, post_process=None)
+                                    features, model[0], model_type_2, task_type, 
+                                    params, loss, non_fire_number='full', post_process=None)
     
     models_list = [model1, model2]
     fit_params_list = [fit_params1, fit_params2]
-    grid_params_list = [grid_params, grid_params]
+    grid_params_list = [grid_params1, grid_params2]
 
-    estimator = DualModel(models_list, features=features, loss=loss, name=f'{model}', target_name=target, post_process=model[-1])
+    estimator = DualModel(models_list, features=features, loss=loss, name=f'{model}', target_name=target, post_process=model[-1], task_type=task_type, non_fire_number=non_fire_number)
 
     fit_params_dict = {
-        'df_train': train_dataset, 
+        'df_train': train_dataset,
         'df_test': test_dataset,
         'df_val': val_dataset,
         'weight_col' : 'weight',
