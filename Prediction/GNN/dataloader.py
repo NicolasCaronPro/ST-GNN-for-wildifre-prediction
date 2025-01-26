@@ -272,7 +272,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         logger.info(f'Nb sinister in val set : {val_dataset_["nbsinister"].sum()}')
         logger.info(f'Nb sinister in test set : {test_dataset_["nbsinister"].sum()}')
 
-    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_name
+    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, list(features_name)
 
 #########################################################################################################
 #                                                                                                       #
@@ -959,8 +959,10 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
                 pred_max[mask[:,0], 1] = predictor.predict(pred_max[mask[:, 0], 0])"""
 
     ############################################## Get daily metrics #######################################################
-    if name.find('classification') != -1:
+    if name.find('classification') != -1 or name.find('binary'):
         col_class = target_name
+        col_class_1 = 'nbsinister-kmeans-5-Class-Dept'
+        col_class_2 = 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'
         col_nbsinister = 'nbsinister'
 
     elif name.find('regression') != -1:
@@ -1087,7 +1089,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     metrics['SS_no_zeros_gt'] = silhouette_score_no_zeros
     logger.info(f'SS_no_zero_gts = {silhouette_score_no_zeros}')
 
-    y_true = df_test[col_class]
+    y_true = df_test[target_name]
     if pred_max is not None:
         y_pred_max = pred_max[:, 1]
         y_pred_min = pred_min[:, 1]
@@ -1111,15 +1113,44 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     accuracy = round(accuracy_score(y_true, y_pred), 2)
     metrics[f'accuracy'] = accuracy
     logger.info(f'accuracy = {accuracy}')
+    
+    ori_compare = np.copy(y_pred)
 
-    # Calcul des scores pour les signaux
-    iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    #y_true_to_compare = np.minimum(df_test[col_class_1].values, df_test[col_class_2].values)
+    y_true_to_compare = df_test[col_class_1].values
+    #y_pred_to_compare = np.copy(y_pred)
+    mask_unknowed_sample = (df_test[col_class_1] == 0) & (df_test[col_class_2] > 0)
+    #metrics['unknow_sample_proportion'] = y_true_to_compare[mask_unknowed_sample].shape[0] / y_true_to_compare.shape[0]
+    #mask_knowned_sample = df_test[col_class_1] > 0
+    #y_pred_to_compare[mask_unknowed_sample] = 0
+    #y_pred_to_compare[mask_knowned_sample] = np.minimum(y_pred[mask_knowned_sample], y_true_to_compare[mask_knowned_sample])
+    
+    #logger.info(f'unknowed masked shape : {mask_unknowed_sample.shape}')
 
+    iou_dict = calculate_signal_scores(ori_compare, y_true_to_compare, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
-        metric_key = f'{key}_class'  # Ajouter un suffixe basé sur col_for_dict
+        metric_key = f'{key}_class_hard' # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
-        logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
+        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+            logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
+
+    iou_dict = calculate_signal_scores(ori_compare, df_test[col_class_2].values, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    for key, value in iou_dict.items():
+        metric_key = f'{key}_risk'  # Ajouter un suffixe basé sur col_for_dict
+        metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
+        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+            logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
+
+    y_pred_to_compare = np.copy(y_pred)
+    y_pred_to_compare[mask_unknowed_sample] = 0
+    iou_dict = calculate_signal_scores(y_pred_to_compare, y_true_to_compare, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
+    for key, value in iou_dict.items():
+        metric_key = f'{key}_class_ez'  # Ajouter un suffixe basé sur col_for_dict
+        metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
+        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+            logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée
 
     for cl in np.unique(y_true):
         logger.info(f'{cl} -> {y_true[y_true == cl].shape[0]}, {y_pred[y_pred == cl].shape[0]}')
@@ -1131,17 +1162,39 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_true_temp[:, id_index] = df_test['graph_id']
     y_true_temp[:, departement_index] = df_test['departement']
     y_true_temp[:, date_index] = df_test['date']
-    y_true_temp[:, -1] = y_true
+    y_true_temp[:, -1] = y_true_to_compare
     y_true_temp[:, -2] = df_test['nbsinister']
     y_true_temp[:, -3] = df_test[col_class]
 
-    realVspredict(y_pred, y_true_temp, -1,
-        dir_output / name, f'{col_class}',
+    realVspredict(ori_compare, y_true_temp, -1,
+        dir_output / name, f'{col_class}_hard',
         y_pred_min, y_pred_max)
 
     res[f'prediction_{col_class}'] = y_pred
 
-    iou_vis(y_pred, y_true_temp, -1, dir_output / name, f'{col_class}')
+    iou_vis(ori_compare, y_true_temp, -1, dir_output / name, f'{col_class}_hard')
+
+    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
+    y_true_temp[:, graph_id_index] = df_test['graph_id']
+    y_true_temp[:, id_index] = df_test['graph_id']
+    y_true_temp[:, departement_index] = df_test['departement']
+    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, -1] = y_true_to_compare
+    y_true_temp[:, -2] = df_test['nbsinister']
+    y_true_temp[:, -3] = df_test[col_class]
+
+    iou_vis(y_pred_to_compare, y_true_temp, -1, dir_output / name, f'{col_class}_ez')
+
+    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
+    y_true_temp[:, graph_id_index] = df_test['graph_id']
+    y_true_temp[:, id_index] = df_test['graph_id']
+    y_true_temp[:, departement_index] = df_test['departement']
+    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, -1] = df_test[col_class_2]
+    y_true_temp[:, -2] = df_test['nbsinister']
+    y_true_temp[:, -3] = df_test[col_class]
+
+    iou_vis(ori_compare, y_true_temp, -1, dir_output / name, f'{col_class}_risk')
 
     return metrics, res
 
@@ -1264,7 +1317,7 @@ def test_sklearn_api_model(args,
 
     #################################### Traditionnal ##################################################
 
-    for name, target_name in models:
+    for name in models:
 
         y = test_dataset_dept[ids_columns + targets_columns].values
         model_dir = dir_train / name_exp / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + name + '/')
@@ -1272,6 +1325,8 @@ def test_sklearn_api_model(args,
         logger.info('#########################')
         logger.info(f'      {name}            ')
         logger.info('#########################')
+
+        _, _, _, target_name, _, _ = name.split('_')
 
         model = read_object(name+'.pkl', model_dir)
         quantile = name.find('quantile') != -1
@@ -1417,9 +1472,11 @@ def test_dl_model(args,
     i = 0
 
     #################################### GNN ###################################################
-    for name, use_temporal_as_edges, target_name, out_channels in models:
+    for name in models:
         model_name = name.split('_')[0]
 
+        _, _, _, target_name, _, _ = name.split('_')
+        
         is_2D_model = model_name in models_2D
         if is_2D_model:
             if model_name in ['Zhang', 'ConvLSTM', 'Zhang3D']:
@@ -1856,22 +1913,21 @@ def wrapped_train_deep_learning_1D(params):
 
     non_fire_number, weight_type, target_name, task_type, loss = infos.split('_')
 
-    ###############################################  Feature importance  ###########################################################
-    importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
-    features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
-
-    loss_name = loss
-
-    logger.info(f'Fitting model {model}')
-    logger.info('Try loading loader')
-
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
     test_dataset = params['test_dataset']
     
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}')
+    logger.info('Try loading loader')
+
     if task_type == 'classification' and target_name != 'binary':
         train_dataset['class'] = train_dataset[target_name]
-
+    
+    print('weight')
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
     if 'weight' in list(train_dataset.columns):
@@ -1892,7 +1948,7 @@ def wrapped_train_deep_learning_1D(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=params['k_days'],
-                                    dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -1906,7 +1962,7 @@ def wrapped_train_deep_learning_1D(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=params['k_days'],
-                                    dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -1917,7 +1973,7 @@ def wrapped_train_deep_learning_1D(params):
     
     wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
-    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_output)
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_2D(params):
     model = params['model']
@@ -1961,7 +2017,7 @@ def wrapped_train_deep_learning_2D(params):
                                     features=params['features'],
                                     path=Path(params['name_dir']),
                                     ks=params['k_days'],
-                                    dir_output=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -1973,7 +2029,7 @@ def wrapped_train_deep_learning_2D(params):
     
     wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
-    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_output)
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_hybrid(params):
     model = params['model']
@@ -2039,3 +2095,179 @@ def wrapped_train_deep_learning_hybrid(params):
     }
 
     train(train_params)
+
+def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_dataset, test_dataset,
+                                            model, graph_method,
+                                            dir_output: Path,
+                                            device: str,
+                                            features: list,
+                                            autoRegression: bool,
+                                            training_mode: bool,
+                                            do_grid_search: bool,
+                                            do_bayes_search: bool,
+                                            scale : int,
+                                            params):
+    
+    graph_method = params['graph_method']
+    dir_output = params['dir_output']
+    
+    model_name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+   
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
+
+    train_dataset = train_dataset[train_dataset['weight'] > 0]
+    val_dataset = val_dataset[val_dataset['weight'] > 0]
+    test_dataset = test_dataset[test_dataset['weight'] > 0]
+
+    logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
+
+    if do_grid_search:
+        parameter_optimization_method = 'grid'
+    elif do_bayes_search:
+        parameter_optimization_method = 'bayes'
+    else:
+        parameter_optimization_method = 'skip'
+
+    models_type = model[1]
+    
+    models_list = []
+    fit_params_list = []
+    grid_params_list = []
+    target_list = []
+
+    for modelt in models_type:
+        params_temp = {
+            'df_train': train_dataset,
+            'df_val': val_dataset,
+            'df_test': test_dataset,
+            'features': features,
+            'training_mode': training_mode,
+            'dir_output': dir_output,
+            'device': device,
+            'do_grid_search': do_grid_search,
+            'do_bayes_search': do_bayes_search,
+            'name': modelt,
+            'post_process' : None,
+            'type_aggregation' : None,
+            'col_id' : None
+        }
+        print(modelt)
+        model_type, non_fire_number, weight_type, target, task_type, loss = modelt.split('_')
+
+        if model_type['xgboost', 'lightgbm', 'rf', 'svm', 'dt', 'ngboost', 'poisson', 'gam']:
+        
+            if model_type == 'xgboost':
+                params = train_xgboost(params_temp, False)
+            elif model_type == 'lightgbm':
+                params = train_lightgbm(params_temp, False)
+            elif model_type == 'rf':
+                params = train_random_forest(params_temp, False)
+            elif model_type == 'svm':
+                params = train_svm(params_temp, False)
+            elif model_type == 'dt':
+                params = train_decision_tree(params_temp, False)
+            elif model_type == 'ngboost':
+                params = train_ngboost(params_temp, False)
+            elif model_type == 'poisson':
+                params = train_poisson(params_temp, False)
+            elif model_type == 'gam':
+                params = train_gam(params_temp, False)
+            else:
+                raise ValueError(f'Unknow model_type {model_type}')
+            
+            model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
+                                            features, modelt, model_type, task_type, 
+                                            params, loss, non_fire_number=non_fire_number, post_process=None)
+        
+            grid_params = get_grid_params(model_type)
+            
+            fit_params_list.append(fit_params)
+            grid_params_list.append(grid_params)
+        
+        elif model_type in ['LSTM', 'DilatedCNN']:
+            model_i = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=params['k_days'],
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{modelt}'),
+                                    name=f'{modelt}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    non_fire_number=non_fire_number)
+        elif model_type in ['GNN']:
+            model_i = ModelGNN(model_name=model,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=params['k_days'],
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{modelt}'),
+                                    name=f'{modelt}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    non_fire_number=non_fire_number)
+        elif model_type in ['Zhang']:
+            model_i = ModelCNN(model_name=model,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target,
+                                    out_channels=params['out_channels'],
+                                    features_name=params['features_name_2D'],
+                                    features=params['features'],
+                                    path=Path(params['name_dir']),
+                                    ks=params['k_days'],
+                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{modelt}'),
+                                    name=f'{modelt}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    non_fire_number=non_fire_number,
+                                    image_per_node=True)
+
+        models_list.append(model_i)
+        target_list.append(target)
+        
+    custom_model_params_list = None
+    params_dict = {
+    'PATIENCE_CNT': params['PATIENCE_CNT'],
+    'CHECKPOINT': params['CHECKPOINT'],
+    'epochs': params['epochs'],
+    'custom_model_params_list': custom_model_params_list,
+    'graph': params['graph'],
+    'training_mode': params['training_mode'],
+    'optimization': parameter_optimization_method,
+    'grid_params_list': grid_params_list,
+    'fit_params_list': fit_params_list,
+    'cv_folds': 10
+    }
+
+    X=train_dataset[features + ['weight', 'potential_risk']]
+    y=train_dataset[target],
+    X_val=val_dataset[features + ['weight', 'potential_risk']]
+    y_val=val_dataset[target],
+    X_test=test_dataset[features]
+    y_test=test_dataset[target]
+
+    all_vote = ModelVotingPytorchAndSklearn(models_list, features=features, loss=loss, task_type=task_type, name=f'{model_name}', \
+                            target_name=target, dir_log=dir_output / model_name, non_fire_number=non_fire_number, post_process = model[-1])
+
+    all_vote.fit(X, y, X_val, y_val, X_test, y_test, params_dict)
+
+    save_object(model, name + '.pkl', dir_output / name)
+
+    logger.info(f'Model score {model.score(test_dataset[features], test_dataset[model.target_name], test_dataset["weight"])}')

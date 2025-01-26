@@ -54,8 +54,19 @@ class Statistical_Model:
         """
         predictions = np.zeros(df.shape[0], dtype=int)
         ids = df[col_id].values
+        ids_graph = df['graph_id'].values
 
-        if self.thresholds == 'auto':
+        if self.thresholds == 'shift':
+            res = np.zeros_like(df[self.variables].values).reshape(-1)
+            for unique_id in np.unique(ids_graph):
+                mask = ids_graph == unique_id
+                shifted_values = np.roll(df[self.variables].values[mask], shift=1)
+                shifted_values[0] = 0
+                res[mask] = shifted_values
+
+            return res
+
+        elif self.thresholds == 'auto':
             for unique_id in np.unique(ids):
                 # Sélectionne les échantillons correspondant à l'ID courant
                 mask = ids == unique_id

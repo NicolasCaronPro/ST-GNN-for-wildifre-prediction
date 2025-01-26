@@ -97,6 +97,9 @@ class KMeansRiskZerosHandle:
         if self.model is None:
             return res.reshape(-1,1)
         X_val = X[X > 0].reshape(-1,1)
+        
+        if X_val.shape[0] == 0:
+            return res.reshape(-1)
         kmeans_labels = self.model.predict(X_val)
         res[X > 0] = np.vectorize(self.label_map.get)(kmeans_labels)
         return res.reshape(-1)
@@ -203,7 +206,7 @@ class KSRisk:
         return new_pred
 
 class PreprocessorConv:
-    def __init__(self, graph, kernel='Specialized', conv_type='laplace+mean', id_col=None):
+    def __init__(self, graph, kernel='Specialized', conv_type='laplace+mean', id_col=None, persistence=False,):
         """
         Initialize the PreprocessorConv.
 
@@ -217,6 +220,7 @@ class PreprocessorConv:
         self.conv_type = conv_type
         self.id_col = id_col if id_col is not None else ['id']
         self.kernel = kernel
+        self.persistence = persistence
 
     def _get_season_name(self, month):
         """
@@ -248,16 +252,20 @@ class PreprocessorConv:
         kernel_daily = np.abs(np.arange(-(kernel_size // 2), kernel_size // 2 + 1))
         kernel_daily += 1
         kernel_daily = 1 / kernel_daily
-        #kernel_daily = MinMaxScaler((0, 1)).fit_transform(kernel_daily.reshape(-1, 1))
         kernel_daily = kernel_daily.reshape(-1,1)
+
+        if self.persistence:
+            if kernel_size > 1:
+                kernel_daily[:kernel_size // 2] = 0
+            else:
+                return np.zeros(X.shape).reshape(-1)
 
         if np.unique(kernel_daily)[0] == 0 and np.unique(kernel_daily).shape[0] == 1:
             kernel_daily += 1
-
+            
         # Perform convolution using Astropy
         #print(np.unique(X))
         #print(np.unique(kernel_daily))
-
         res = convolve_fft(X.reshape(-1), kernel_daily.reshape(-1), normalize_kernel=False, fill_value=0.)
 
         return res
@@ -271,17 +279,19 @@ class PreprocessorConv:
         :return: Convoluted array.
         """
         # Create mean kernel
-
         if kernel_size == 1:
             return np.zeros_like(X).reshape(-1)
         
         kernel_season = np.ones(kernel_size, dtype=float)
         kernel_season /= kernel_size  # Normalize the kernel
 
+        if self.persistence:
+            kernel_season[:kernel_size // 2] = 0
+ 
         #kernel_season[kernel_size // 2] = 0
+        res = convolve_fft(X.reshape(-1), kernel_season.reshape(-1), normalize_kernel=False, fill_value=0.)
 
-        # Perform convolution using Astropy
-        return convolve_fft(X.reshape(-1), kernel_season.reshape(-1), normalize_kernel=False, fill_value=0.)
+        return res
     
     def median_convolution(self, X, kernel_size):
         """
@@ -304,11 +314,14 @@ class PreprocessorConv:
         def custom_median_filter(window):
             # Exclude the center element from the kernel (middle pixel)
             center = len(window) // 2
+            if self.persistence:
+                window[center:] = np.nan  # Exclude earlier values
             window = np.delete(window, center)  # Remove center element
-            return np.median(window)
+            return np.nanmedian(window)
         
         # Apply the custom median filter
         return generic_filter(X, custom_median_filter, size=kernel_size).reshape(-1)
+
 
     def _sum_convolution(self, X, kernel_size):
         """
@@ -319,6 +332,13 @@ class PreprocessorConv:
         :return: Array where each element is the sum of elements in the sliding window.
         """
         from scipy.ndimage import uniform_filter1d
+
+        if self.persistence:
+            mask = np.zeros_like(X, dtype=float)
+            mask[kernel_size // 2:] = 0
+            mask[:kernel_size // 2] = 1  # Persistence applies only to later values
+            X = X * mask
+
         return uniform_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0) * kernel_size
 
     def _max_convolution(self, X, kernel_size):
@@ -330,8 +350,16 @@ class PreprocessorConv:
         :return: Array where each element is the max of elements in the sliding window.
         """
         from scipy.ndimage import maximum_filter1d
-        res = maximum_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0)         
+
+        if self.persistence:
+            mask = np.zeros_like(X, dtype=float)
+            mask[kernel_size // 2:] = 0
+            mask[:kernel_size // 2] = 1
+            X = X * mask
+
+        res = maximum_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0)
         return res
+
 
     def apply(self, X, ids):
         """
@@ -382,6 +410,11 @@ class PreprocessorConv:
             # Apply laplace+mean convolutions if specified
             elif self.conv_type == 'laplace+mean':
                 laplace_result = self._laplace_convolution(X[mask], kernel_size)
+                """if unique_id[1] == 4:
+                    fig, ax = plt.subplots(1, figsize=(15,6))
+                    ax.plot(laplace_result)
+                    ax.plot(X[mask])
+                    plt.show()"""
                 mean_result = self._mean_convolution(X[mask], kernel_size)
                 X_processed[mask] = (laplace_result + mean_result).reshape(-1)
 
@@ -410,13 +443,8 @@ class PreprocessorConv:
                     f"Error: conv_type must be in  ['laplace', 'mean', 'laplace+mean', 'sum', 'max'], got {self.conv_type}"
                 )
             
-        """fig, ax = plt.subplots(2, figsize=(15,5))
-        ax[0].plot(X_processed[ids[:, 1] == 27])
-        ax[1].plot(X[ids[:, 1] == 27])
-        plt.show()"""
-
         return X_processed
-
+    
 class ScalerClassRisk:
     def __init__(self, col_id, dir_output, target, scaler=None, class_risk=None, preprocessor=None):
         """
@@ -455,6 +483,7 @@ class ScalerClassRisk:
         self.preprocessor_id_col = preprocessor.id_col if preprocessor is not None else None
         check_and_create_path(self.dir_output)
         self.models_by_id = {}
+        self.is_fit = False
 
     def fit(self, X, sinisters, ids, ids_preprocessor=None):
         """
@@ -465,12 +494,14 @@ class ScalerClassRisk:
         :param ids: Array of IDs corresponding to each value in X.
         :param ids_preprocessor: IDs to use for preprocessing (if preprocessor is not None).
         """
+        self.is_fit = True
         logger.info(f'########################################## {self.name} ##########################################')
 
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
-        if len(sinisters.shape) == 1:
-            sinisters = sinisters.reshape(-1, 1)
+
+        if sinisters is not None and len(sinisters.shape) == 1:
+            sinisters = sinisters.reshape(-1)
 
         X_ = np.copy(X)
 
@@ -480,15 +511,17 @@ class ScalerClassRisk:
                 raise ValueError("ids_preprocessor must be provided when preprocessor is not None.")
             X = self.preprocessor.apply(X, ids_preprocessor)
 
-        sinisters = sinisters.reshape(-1)
-        
         lambda_function = lambda x: max(x, 1)
         self.models_by_id = {}
 
         for unique_id in np.unique(ids):
             mask = ids == unique_id
             X_id = X[mask]
-            sinisters_id = sinisters[mask]
+
+            if sinisters is not None:
+                sinisters_id = sinisters[mask]
+            else:
+                sinisters_id = None
 
             # Scale data if scaler is provided
             if self.scaler is not None:
@@ -511,26 +544,32 @@ class ScalerClassRisk:
 
             # Predict classes for current ID
             classes = class_risk.predict(X_scaled)
+
+            if sinisters is not None:
             
-            sinisters = sinisters.reshape(-1)
-            # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
-            classes[sinisters[mask] > 0] = np.vectorize(lambda_function)(classes[sinisters[mask] > 0])
+                sinisters = sinisters.reshape(-1)
+                # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
+                classes[sinisters[mask] > 0] = np.vectorize(lambda_function)(classes[sinisters[mask] > 0])
 
-            # Calculate statistics for each class
-            sinisters_mean = []
-            sinisters_min = []
-            sinisters_max = []
+                # Calculate statistics for each class
+                sinisters_mean = []
+                sinisters_min = []
+                sinisters_max = []
 
-            for cls in np.unique(classes):
-                class_mask = classes == cls
-                sinisters_class = sinisters_id[class_mask]
-                sinisters_mean.append(np.mean(sinisters_class))
-                sinisters_min.append(np.min(sinisters_class))
-                sinisters_max.append(np.max(sinisters_class))
+                for cls in np.unique(classes):
+                    class_mask = classes == cls
+                    sinisters_class = sinisters_id[class_mask]
+                    sinisters_mean.append(np.mean(sinisters_class))
+                    sinisters_min.append(np.min(sinisters_class))
+                    sinisters_max.append(np.max(sinisters_class))
 
-            sinisters_mean = np.array(sinisters_mean)
-            sinisters_min = np.array(sinisters_min)
-            sinisters_max = np.array(sinisters_max)
+                sinisters_mean = np.array(sinisters_mean)
+                sinisters_min = np.array(sinisters_min)
+                sinisters_max = np.array(sinisters_max)
+            else:
+                sinisters_mean = None
+                sinisters_min = None
+                sinisters_max = None
 
             self.models_by_id[unique_id] = {
                 'scaler': scaler,
@@ -540,12 +579,10 @@ class ScalerClassRisk:
                 'sinistres_max': sinisters_max
             }
 
+        if sinisters is None:
+            return
+
         pred = self.predict(X_, sinisters, ids, ids_preprocessor)
-        
-        """fig, ax = plt.subplots(2, figsize=(15,5))
-        ax[0].plot(pred[ids_preprocessor[:, 1] == 27])
-        ax[1].plot(X[ids_preprocessor[:, 1] == 27])
-        plt.show()"""
 
         # Plot histogram of the classes in X[mask]
         plt.figure(figsize=(8, 6))
@@ -605,9 +642,16 @@ class ScalerClassRisk:
         # Define the lambda function
         lambda_function = lambda x: max(x, 1)
 
-        sinisters = sinisters.reshape(-1)
-        # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
-        predictions[sinisters > 0] = np.vectorize(lambda_function)(predictions[sinisters > 0])
+        if sinisters is not None:
+            sinisters = sinisters.reshape(-1)
+            # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
+            predictions[sinisters > 0] = np.vectorize(lambda_function)(predictions[sinisters > 0])
+
+        """if ids_preprocessor is not None:
+            fig, ax = plt.subplots(2, figsize=(15,5))
+            ax[0].plot(predictions[ids_preprocessor[:, 1] == 4])
+            ax[1].plot(X[ids_preprocessor[:, 1] == 4])
+            plt.show()"""
 
         return predictions
 
@@ -671,7 +715,10 @@ class ScalerClassRisk:
         return self.predict_stat(X, ids, stat_key='sinistres_max')
     
     def predict_risk(self, X, sinisters, ids, ids_preprocessor=None):
-        return self.predict(X, sinisters, ids, ids_preprocessor)
+        if self.is_fit:
+            return self.predict(X, sinisters, ids, ids_preprocessor)
+        else:
+            return self.fit_predict(X, sinisters, ids, ids_preprocessor)
 
 # Fonction pour calculer la somme dans une fenêtre de rolling, incluant les fenêtres inversées
 def calculate_rolling_sum(dataset, column, shifts, group_col, func):
@@ -1073,7 +1120,6 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     if graph.sequences_month is None:
         graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
 
-
     conv_types = ['laplace', 'mean', 'laplace+mean', 'median', 'laplace+median', 'max', 'sum']
 
     kernels = ['Specialized', 1, 3, 5]
@@ -1195,9 +1241,56 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             res[obj.name] = deepcopy(obj)
             new_cols.append(train_col)
 
-        logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")
+            train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+    
+            # Sélection du préprocesseur
+            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
 
-    for conv_type in conv_types:
+            # Définition de l'objet ScalerClassRisk
+            class_risk = KMeansRisk(n_clusters=n_clusters) if conv_type in ['laplace', 'mean', 'laplace+mean', 'laplace+median'] else KMeansRiskZerosHandle(n_clusters)
+            obj = ScalerClassRisk(
+                col_id='departement',
+                dir_output=dir_post_process,
+                target='nbsinister',
+                scaler=None,
+                class_risk=class_risk,
+                preprocessor=preprocessor
+            )
+
+            # Application du fit et prédictions
+            obj.fit(
+                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinister'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            train_dataset_[train_col] = obj.predict(
+                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinister'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            val_dataset_[train_col] = obj.predict(
+                val_dataset_['nbsinister'].values,
+                val_dataset_['nbsinister'].values,
+                val_dataset_['departement'].values,
+                val_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+            test_dataset_[train_col] = obj.predict(
+                test_dataset_['nbsinister'].values,
+                test_dataset_['nbsinister'].values,
+                test_dataset_['departement'].values,
+                test_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            res[obj.name] = deepcopy(obj)
+            new_cols.append(train_col)
+
+    logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")
+
+    """for conv_type in conv_types:
         for kernel in kernels:
             logger.info(f"Testing with convolution type: {conv_type}")
 
@@ -1249,8 +1342,27 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
             # Stockage des résultats
             res[obj.name] = deepcopy(obj)
-            new_cols.append(train_col)
+            new_cols.append(train_col)"""
     
+    ##################### Union des risk ###########################
+    col_raw = 'nbsinister-kmeans-5-Class-Dept'
+    col_derived = 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'
+
+    train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+    train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0
+    train_dataset_['potential_risk'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+
+    test_dataset_['union'] = np.maximum(test_dataset_[col_derived].values, test_dataset_[col_raw].values)
+    test_dataset_.loc[test_dataset_[(test_dataset_[col_derived] > 0) & (test_dataset_[col_raw] == 0)].index, 'union'] = 0
+    test_dataset_['potential_risk'] = np.maximum(test_dataset_[col_derived].values, test_dataset_[col_raw].values)
+
+    val_dataset_['union'] = np.maximum(val_dataset_[col_derived].values, val_dataset_[col_raw].values)
+    val_dataset_.loc[val_dataset_[(val_dataset_[col_derived] > 0) & (val_dataset_[col_raw] == 0)].index, 'union'] = 0
+    val_dataset_['potential_risk'] = np.maximum(val_dataset_[col_derived].values, val_dataset_[col_raw].values)
+
+    new_cols.append('union')
+    new_cols.append('potential_risk')
+
     ################################################
 
     logger.info(f'Post process Model -> {res}')

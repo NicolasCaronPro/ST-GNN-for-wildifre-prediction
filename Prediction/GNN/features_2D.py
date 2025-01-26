@@ -248,7 +248,8 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                     #logger.info(var)
                     name = var +'raw.pkl'
                     array = read_object(name, dir_data)
-                    X[features_name.index(var), :, :] = array[:, :, unDate]
+                    if array is not None:
+                        X[features_name.index(var), :, :] = array[:, :, unDate]
 
             #logger.info('Sentinel Dynamic World')
             ### Sentinel
@@ -256,12 +257,14 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 #logger.info('Sentinel')
                 name = 'sentinel.pkl'
                 arraySent = read_object(name, dir_data)
-                X[features_name.index(sentinel_variables[0]) : features_name.index(sentinel_variables[-1]) + 1, :, :] = arraySent[:, :, :, unDate]
+                if arraySent is not None:
+                    X[features_name.index(sentinel_variables[0]) : features_name.index(sentinel_variables[-1]) + 1, :, :] = arraySent[:, :, :, unDate]
                 del arraySent
 
             if 'dynamicWorld' in features:
                 arrayDW = read_object('dynamic_world.pkl', dir_data)
-                X[features_name.index(dynamic_world_variables[0]) : features_name.index(dynamic_world_variables[-1]) + 1, :, :] = arrayDW[:, :, :, unDate]
+                if arrayDW is not None:
+                    X[features_name.index(dynamic_world_variables[0]) : features_name.index(dynamic_world_variables[-1]) + 1, :, :] = arrayDW[:, :, :, unDate]
                 del arrayDW
 
             #logger.info('Historical')

@@ -282,31 +282,31 @@ ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date',
 targets_columns = [#'time_intervention',
                    'nbsinister_id', 'class_risk', 'nbsinister', 'risk']
 
-weights_columns = ['proportion-on-zero-class',
+weights_columns = ['proportion_on_zero_class',
                    'class',
                    'one',
                    'normalize',
                    'nbsinister',
-                   'proportion-on-zero-sinister',
+                   'proportion_on_zero_sinister',
                    #'random',
-                   'outlier-1',
-                   'outlier-2',
-                   'outlier-3',
-                   'outlier-4',
-                   'outlier-5',
+                   'outlier_1',
+                   'outlier_2',
+                   'outlier_3',
+                   'outlier_4',
+                   'outlier_5',
                    
-                   'proportion-on-zero-class-nbsinister',
-                   'class-nbsinister',
-                   'proportion-on-zero-sinister-nbsinister',
-                   'one-nbsinister',
-                   'normalize-nbsinister',
-                   'nbsinister-nbsinister',
-                   #'random-nbsinister',
-                   'outlier-1-nbsinister',
-                   'outlier-2-nbsinister',
-                   'outlier-3-nbsinister',
-                   'outlier-4-nbsinister',
-                   'outlier-5-nbsinister',
+                   'proportion_on_zero_class_nbsinister',
+                   'class_nbsinister',
+                   'proportion_on_zero_sinister_nbsinister',
+                   'one_nbsinister',
+                   'normalize_nbsinister',
+                   'nbsinister_nbsinister',
+                   #'random_nbsinister',
+                   'outlier_1_nbsinister',
+                   'outlier_2_nbsinister',
+                   'outlier_3_nbsinister',
+                   'outlier_4_nbsinister',
+                   'outlier_5_nbsinister',
                    ]
 
 id_index = ids_columns.index('id')
@@ -404,7 +404,7 @@ encoding='Catboost' # How we encode the categorical variable
 
 epochs = 10000
 lr = 0.000001
-PATIENCE_CNT = 15
+PATIENCE_CNT = 50
 CHECKPOINT = 50
 batch_size = 256
 

@@ -351,7 +351,7 @@ if doTest:
 
         aggregated_prediction = aggregated_prediction[aggregated_prediction['model'] == name]
         #aggregated_prediction_dept = aggregated_prediction_dept[aggregated_prediction_dept['model'] == name]
-
+        
         #dates = aggregated_prediction[aggregated_prediction['nbsinister'] == aggregated_prediction['nbsinister'].max()]['date'].values
         dates = [allDates.index('2023-06-14')]
 

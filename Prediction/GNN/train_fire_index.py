@@ -199,10 +199,62 @@ dir_post_process = dir_output / 'post_process'
 
 post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
+def plot_unknowed_sample(df, dir_output, outname):
+    index_to_drop = df[(df['nbsinister-kmeans-5-Class-Dept'] == 0) & (df['nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'] > 0)].index
+    risky_day = df.loc[index_to_drop]
+    risky_day.sort_values('month_non_encoder')
+
+    plt.figure(figsize=(10, 6))
+    sns.histplot(risky_day['month_non_encoder'], bins=12, kde=False, color='blue', edgecolor='black')
+    plt.xlabel('Month', fontsize=14)
+    plt.ylabel('Frquency of unknowed risk', fontsize=14)
+    plt.xticks(rotation=45)  # Rotation des labels des mois si nécessaire
+    
+    # Affichage du graphique
+    plt.tight_layout()
+    plt.savefig(dir_output / f'{outname}_risk_day_month.png')
+
+    plt.figure(figsize=(10, 6))
+    sns.histplot(risky_day['graph_id'], bins=12, kde=False, color='blue', edgecolor='black')
+    plt.xlabel('Graph_id', fontsize=14)
+    plt.ylabel('Frquency of unknowed risk', fontsize=14)
+    plt.xticks(rotation=45)  # Rotation des labels des mois si nécessaire
+    
+    # Affichage du graphique
+    plt.tight_layout()
+    plt.savefig(dir_output / f'{outname}_risk_graph_id.png')
+    plt.close('all')
+    
+    dff = df.copy(deep=True)
+    
+    y_true_temp = np.ones((dff.shape[0], 7))
+    y_true_temp[:, graph_id_index] = dff['graph_id']
+    y_true_temp[:, id_index] = dff['graph_id']
+    y_true_temp[:, departement_index] = dff['departement']
+    y_true_temp[:, date_index] = dff['date']
+    y_true_temp[:, -1] = dff['nbsinister-kmeans-5-Class-Dept'].values
+    y_true_temp[:, -2] = dff['nbsinister']
+    y_true_temp[:, -3] = dff['nbsinister']
+
+    iou_vis(dff['nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'].values, y_true_temp, -1, dir_output, f'{outname}_unknowed_samples')
+
+plot_unknowed_sample(train_dataset, dir_output, f'train_dataset_{scale}_{graph_construct}_{graph_method}')
+plot_unknowed_sample(test_dataset, dir_output, f'test_dataset_{scale}_{graph_construct}_{graph_method}')
+plot_unknowed_sample(val_dataset, dir_output, f'val_dataset_{scale}_{graph_construct}_{graph_method}')
+
 models = []
 
-for col in new_cols:
-    models.append(Statistical_Model(col, None, int(col.split('-')[2]), col, 'classification'))
+#for col in new_cols:
+#    models.append(Statistical_Model(col, None, int(col.split('-')[2]), col, 'classification'))
+    #test_dataset_unscale[col] = test_dataset[col]
+#    
+
+models.append(Statistical_Model('nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past', 'shift', 5, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized', 'classification'))
+models.append(Statistical_Model('nbsinister-kmeans-5-Class-Dept', 'shift', 5, 'nbsinister-kmeans-5-Class-Dept', 'classification'))
+models.append(Statistical_Model('union', None, 5, 'union', 'classification'))
+
+cols = ['nbsinister-kmeans-5-Class-Dept', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized',  'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past']
+test_dataset_unscale = test_dataset_unscale.set_index(['graph_id', 'date']).join(test_dataset.set_index(['graph_id', 'date'])[cols], on=['graph_id', 'date']).reset_index()
 
 for model in models:
     model.fit(train_dataset_unscale, 'departement')
@@ -212,7 +264,7 @@ if doTest:
 
     host = 'pc'
 
-    logger.info('############################# TEST ###############################')
+    logger.info('############################# TEST ############## #################')
 
     name_dir = dataset_name + '/' + sinister + '/' + resolution + '/train' + '/'
     dir_train = Path(name_dir)

@@ -1,7 +1,3 @@
-from concurrent.futures import thread
-from re import S
-from sympy import true
-from torch import cosine_embedding_loss, fill
 from GNN.dico_departements import *
 from GNN.weigh_predictor import *
 from GNN.features_selection import *
@@ -43,7 +39,7 @@ if is_pc:
     from lightgbm import LGBMClassifier, LGBMRegressor
     from lifelines.utils import concordance_index
     from ngboost import NGBClassifier, NGBRegressor
-    from osgeo import gdal, ogr
+    #from osgeo import gdal, ogr
     from pathlib import Path
     from scipy import ndimage as ndi
     from scipy.interpolate import griddata
@@ -227,7 +223,7 @@ def save_object_torch(obj, filename : str, path : Path):
 
 def read_object(filename: str, path : Path):
     if not (path / filename).is_file():
-        logger.info(f'{path / filename} not found')
+        #logger.info(f'{path / filename} not found')
         return None
     return pickle.load(open(path / filename, 'rb'))
 
@@ -2594,6 +2590,8 @@ def get_features_name_list(scale, features, methods):
             features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
         elif var == 'region_class':
             features_name += [var]
+        elif var == 'Past_risk':
+            features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
         elif var == 'temporal_prediction' or var == 'spatial_prediction':
@@ -2644,6 +2642,8 @@ def get_features_name_lists_2D(shape, features):
         elif var == 'AutoRegressionBin':
             features_name.extend([f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin])
         elif var == 'cluster_encoder':
+            features_name.extend([var])
+        elif var == 'Past_risk':
             features_name.extend([var])
         elif True in [tv in var for tv in varying_time_variables]:
             k = var.split('_')[-1]
@@ -3558,27 +3558,18 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     intersection = np.trapz(np.minimum(y_pred, y_true))  # Aire commune
     union = np.trapz(np.maximum(y_pred, y_true))         # Aire d'union
 
-    under_prediction = np.trapz(np.maximum(0, y_true - y_pred))
-    over_prediction = np.trapz(np.maximum(0, y_pred - y_true))
-
     over_prediction_zeros = np.trapz(np.maximum(0, y_pred[y_true == 0]))
     under_prediction_zeros = np.trapz(np.maximum(0, y_true[y_pred == 0]))
-
-    under_prediction_fire = np.trapz(np.maximum(0, y_true[(y_true > 0) & (y_pred > 0)] - y_pred[(y_true > 0) & (y_pred > 0)]))
-    over_prediction_fire = np.trapz(np.maximum(0, y_pred[(y_true > 0) & (y_pred > 0)] - y_true[(y_true > 0) & (y_pred > 0)]))
-
-    only_true_value = np.trapz(y_true) # Air sous la courbe des prédictions
-    only_pred_value = np.trapz(y_pred) # Air sous la courbe des prédictions
 
     mask_fire = (y_pred > 0) | (y_true_fire > 0)
     intersection_fire = np.trapz(np.minimum(y_pred[mask_fire], y_true_fire[mask_fire]))
     union_fire = np.trapz(np.maximum(y_pred[mask_fire], y_true_fire[mask_fire]))
-    iou_wildfire_or_pred = round(intersection_fire / union_fire, 2) if union_fire > 0 else 0
+    iou_wildfire_or_pred = intersection_fire / union_fire if union_fire > 0 else np.nan
 
     mask_fire = (y_pred > 0) & (y_true_fire > 0)
     intersection_fire = np.trapz(np.minimum(y_pred[mask_fire], y_true_fire[mask_fire]))
     union_fire = np.trapz(np.maximum(y_pred[mask_fire], y_true_fire[mask_fire]))
-    iou_wildfire_and_pred = round(intersection_fire / union_fire, 2) if union_fire > 0 else 0
+    iou_wildfire_and_pred = intersection_fire / union_fire if union_fire > 0 else np.nan
 
     # Limitation des signaux à un maximum de 1
     y_pred_clipped = np.clip(y_pred, 0, 1)  # Limiter y_pred à 1
@@ -3592,28 +3583,32 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
 
     # Calcul de la métrique IOU
-    iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+    iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+    #iou_wildfire_detected = y_pred_clipped[y_true_fire_clipped > 0].shape[0] / y_true_fire_clipped[y_true_fire_clipped > 0].shape[0] if y_true_fire_clipped[y_true_fire_clipped > 0].shape[0] > 0 else np.nan
+    #iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
 
     y_pred_clipped_ytrue = np.copy(y_pred)
     y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
     intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true))  # Aire commune
     union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true))         # Aire d'union
-    iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+    iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
 
     # Calcul du Dice coefficient
-    dice_coefficient = round(2 * intersection / (union + intersection), 2) if union + intersection > 0 else 0
+    dice_coefficient = 2 * intersection / (union + intersection) if union + intersection > 0 else np.nan
+
+    dice_coefficient = 2 * intersection / (union + intersection) if union + intersection > 0 else np.nan
 
     # Enregistrement dans un dictionnaire
     scores = {
-        "iou": round(intersection / union, 2) if union > 0 else 0,  # To avoid division by zero
+        "iou": intersection / union if union > 0 else np.nan,  # To avoid division by zero
         "iou_wildfire_or_pred": iou_wildfire_or_pred,
         "iou_wildfire_and_pred": iou_wildfire_and_pred,
         "iou_wildfire_detected": iou_wildfire_detected,
         "iou_no_overestimation" : iou_no_overestimation,
         
-        "over_bad_prediction" : round(over_prediction_zeros / union, 2) if union > 0 else 0,
-        "under_bad_prediction" : round(under_prediction_zeros / union, 2) if union > 0 else 0,
-        "bad_prediction" : round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
+        "over_bad_prediction" : over_prediction_zeros / union if union > 0 else np.nan,
+        "under_bad_prediction" : under_prediction_zeros / union if union > 0 else np.nan,
+        "bad_prediction" : (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
         
         # Ajout du Dice coefficient
         "dice_coefficient": dice_coefficient
@@ -3637,12 +3632,12 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         mask_fire_graph = (y_pred_graph > 0) | (y_true_fire_graph > 0)
         intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
         union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        iou_wildfire_or_pred_graph = round(intersection_fire_graph / union_fire_graph, 2) if union_fire_graph > 0 else 0
+        iou_wildfire_or_pred_graph = intersection_fire_graph / union_fire_graph if union_fire_graph > 0 else np.nan
 
         mask_fire_graph = (y_pred_graph > 0) & (y_true_fire_graph > 0)
         intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
         union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        iou_wildfire_and_pred_graph = round(intersection_fire_graph / union_fire_graph, 2) if union_fire_graph > 0 else 0
+        iou_wildfire_and_pred_graph = intersection_fire_graph / union_fire_graph if union_fire_graph > 0 else np.nan
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
@@ -3656,13 +3651,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
 
         # Calcul de la métrique IOU
-        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
 
         y_pred_clipped_ytrue = np.copy(y_pred_graph)
         y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
         intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph))  # Aire commune
         union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph))         # Aire d'union
-        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
 
         intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
         union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
@@ -3684,19 +3679,19 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_or_pred_{i}": iou_wildfire_or_pred_graph,
             f"iou_wildfire_and_pred_{i}": iou_wildfire_and_pred_graph,
             f"iou_no_overestimation_{i}": iou_no_overestimation,
-            f"iou_{i}": round(intersection_graph / union_graph, 2) if union_graph > 0 else 0,  # Pour éviter la division par zéro
+            f"iou_{i}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
             f"iou_wildfire_detected_{i}": iou_wildfire_detected,
 
             # Ajout du Dice coefficient pour chaque itération
-            f"dice_coefficient_{i}": round(2 * intersection_graph / (union_graph + intersection_graph), 2) if (union_graph + intersection_graph) > 0 else 0,
+            f"dice_coefficient_{i}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
 
-            f"over_bad_prediction_local_{i}": round(over_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
-            f"under_bad_prediction_local_{i}": round(under_prediction_zeros_graph / union_graph, 2) if union_graph > 0 else 0,
-            f"bad_prediction_local_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph, 2) if union_graph > 0 else 0,
+            f"over_bad_prediction_local_{i}": over_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
+            f"under_bad_prediction_local_{i}": under_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
+            f"bad_prediction_local_{i}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph if union_graph > 0 else np.nan,
 
-            f"over_bad_prediction_global_{i}": round(over_prediction_zeros_graph / union, 2) if union_graph > 0 else 0,
-            f"under_bad_prediction_global_{i}": round(under_prediction_zeros_graph / union, 2) if union_graph > 0 else 0,
-            f"bad_prediction_global_{i}": round((over_prediction_zeros_graph + under_prediction_zeros_graph) / union, 2) if union_graph > 0 else 0,
+            f"over_bad_prediction_global_{i}": over_prediction_zeros_graph / union if union_graph > 0 else np.nan,
+            f"under_bad_prediction_global_{i}": under_prediction_zeros_graph / union if union_graph > 0 else np.nan,
+            f"bad_prediction_global_{i}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union if union_graph > 0 else np.nan,
         }
 
         scores.update(graph_scores)
@@ -3718,12 +3713,12 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         mask_fire_season = (y_pred_season > 0) | (y_true_fire_season > 0)
         intersection_fire_season = np.trapz(np.minimum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
         union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        iou_wildfire_or_pred_season = round(intersection_fire_season / union_fire_season, 2) if union_fire_season > 0 else 0
+        iou_wildfire_or_pred_season = intersection_fire_season / union_fire_season if union_fire_season > 0 else np.nan
 
         mask_fire_season = (y_pred_season > 0) & (y_true_fire_season > 0)
         intersection_fire_season = np.trapz(np.minimum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
         union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        iou_wildfire_and_pred_season = round(intersection_fire_season / union_fire_season, 2) if union_fire_season > 0 else 0
+        iou_wildfire_and_pred_season = intersection_fire_season / union_fire_season if union_fire_season > 0 else np.nan
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
@@ -3737,13 +3732,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
 
         # Calcul de la métrique IOU
-        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
 
         y_pred_clipped_ytrue = np.copy(y_pred_season)
         y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
         intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_season))  # Aire commune
         union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_season))         # Aire d'union
-        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
 
         intersection_season = np.trapz(np.minimum(y_pred_season, y_true_season))  # Aire commune
         union_season = np.trapz(np.maximum(y_pred_season, y_true_season))         # Aire d'union
@@ -3756,18 +3751,18 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_or_pred_{s}": iou_wildfire_or_pred_season,
             f"iou_wildfire_and_pred_{s}": iou_wildfire_and_pred_season,
             f"iou_no_overestimation_{s}": iou_no_overestimation,
-            f"iou_{s}": round(intersection_season / union_season, 2) if union_season > 0 else 0,  # Pour éviter la division par zéro
+            f"iou_{s}": intersection_season / union_season if union_season > 0 else np.nan,  # Pour éviter la division par zéro
             f"iou_wildfire_detected_{s}": iou_wildfire_detected,
 
-            f"over_bad_prediction_local_{s}": round(over_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
-            f"under_bad_prediction_local_{s}": round(under_prediction_zeros_season / union_season, 2) if union_season > 0 else 0,
-            f"bad_prediction_local_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union_season, 2) if union_season > 0 else 0,
+            f"over_bad_prediction_local_{s}": over_prediction_zeros_season / union_season if union_season > 0 else np.nan,
+            f"under_bad_prediction_local_{s}": under_prediction_zeros_season / union_season if union_season > 0 else np.nan,
+            f"bad_prediction_local_{s}": (over_prediction_zeros_season + under_prediction_zeros_season) / union_season if union_season > 0 else np.nan,
             
-            f"dice_coefficient_{s}": round(2 * intersection_season / (union_season + intersection_season), 2) if (union_season + intersection_season) > 0 else 0,
+            f"dice_coefficient_{s}": 2 * intersection_season / (union_season + intersection_season) if (union_season + intersection_season) > 0 else np.nan,
 
-            f"over_bad_prediction_global_{s}": round(over_prediction_zeros_season / union, 2) if union_season > 0 else 0,
-            f"under_bad_prediction_global_{s}": round(under_prediction_zeros_season / union, 2) if union_season > 0 else 0,
-            f"bad_prediction_global_{s}": round((over_prediction_zeros_season + under_prediction_zeros_season) / union, 2) if union_season > 0 else 0,
+            f"over_bad_prediction_global_{s}": over_prediction_zeros_season / union if union_season > 0 else np.nan,
+            f"under_bad_prediction_global_{s}": under_prediction_zeros_season / union if union_season > 0 else np.nan,
+            f"bad_prediction_global_{s}": (over_prediction_zeros_season + under_prediction_zeros_season) / union if union_season > 0 else np.nan,
         }
         scores.update(season_scores)
 
@@ -3792,12 +3787,12 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             mask_fire_graph_season = (y_pred_graph_season > 0) | (y_true_fire_graph_season > 0)
             intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
             union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            iou_wildfire_or_pred_graph_season = round(intersection_fire_graph_season / union_fire_graph_season, 2) if union_fire_graph_season > 0 else 0
+            iou_wildfire_or_pred_graph_season = intersection_fire_graph_season / union_fire_graph_season if union_fire_graph_season > 0 else np.nan
 
             mask_fire_graph_season = (y_pred_graph_season > 0) & (y_true_fire_graph_season > 0)
             intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
             union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            iou_wildfire_and_pred_graph_season = round(intersection_fire_graph_season / union_fire_graph_season, 2) if union_fire_graph_season > 0 else 0
+            iou_wildfire_and_pred_graph_season = intersection_fire_graph_season / union_fire_graph_season if union_fire_graph_season > 0 else np.nan
 
             # Limitation des signaux à un maximum de 1
             y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
@@ -3811,13 +3806,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
 
             # Calcul de la métrique IOU
-            iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+            iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
 
             y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
             y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
             intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph_season))  # Aire commune
             union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph_season))         # Aire d'union
-            iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+            iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
 
             intersection_graph_season = np.trapz(np.minimum(y_pred_graph_season, y_true_graph_season))  # Common area
             union_graph_season = np.trapz(np.maximum(y_pred_graph_season, y_true_graph_season))         # Union area
@@ -3830,14 +3825,14 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
                 f"iou_wildfire_or_pred_graph_{i}_season_{season}": iou_wildfire_or_pred_graph_season,
                 f"iou_wildfire_and_pred_graph_{i}_season_{season}": iou_wildfire_and_pred_graph_season,
                 f"iou_no_overestimation_graph_{i}_season_{season}": iou_no_overestimation,
-                f"iou_graph_{i}_season_{season}": round(intersection_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"iou_graph_{i}_season_{season}": intersection_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
                 f"iou_wildfire_detected_graph_{i}_season_{season}": iou_wildfire_detected,
                 
-                f"dice_coefficient_graph_{i}_season_{season}": round(2 * intersection_graph_season / (union_graph_season + intersection_graph_season), 2) if (union_graph_season + intersection_graph_season) > 0 else 0,
+                f"dice_coefficient_graph_{i}_season_{season}": 2 * intersection_graph_season / (union_graph_season + intersection_graph_season) if (union_graph_season + intersection_graph_season) > 0 else np.nan,
 
-                f"over_bad_prediction_local_graph_{i}_season_{season}": round(over_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
-                f"under_bad_prediction_local_graph_{i}_season_{season}": round(under_prediction_zeros_graph_season / union_graph_season, 2) if union_graph_season > 0 else 0,
-                f"bad_prediction_local_graph_{i}_season_{season}": round((over_prediction_zeros_graph_season + under_prediction_zeros_graph_season) / union_graph_season, 2) if union_graph_season > 0 else 0,
+                f"over_bad_prediction_local_graph_{i}_season_{season}": over_prediction_zeros_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
+                f"under_bad_prediction_local_graph_{i}_season_{season}": under_prediction_zeros_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
+                f"bad_prediction_local_graph_{i}_season_{season}": (over_prediction_zeros_graph_season + under_prediction_zeros_graph_season) / union_graph_season if union_graph_season > 0 else np.nan,
             }
 
             # Update global scores dictionary
@@ -3846,7 +3841,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     # Parcourir les valeurs uniques de y_true
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
-        mask = (y_true == unique_value) | (y_pred == unique_value)
+        mask = (y_true == unique_value)
 
         y_pred_sample = y_pred[mask]
         y_true_sample = y_true[mask]
@@ -3863,12 +3858,12 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
         intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
         union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_or_pred_sample = round(intersection_fire_sample / union_fire_sample, 2) if union_fire_sample > 0 else 0
+        iou_wildfire_or_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
 
         mask_fire_sample = (y_pred_sample > 0) & (y_true_fire_sample > 0)
         intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
         union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_and_pred_sample = round(intersection_fire_sample / union_fire_sample, 2) if union_fire_sample > 0 else 0
+        iou_wildfire_and_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
@@ -3882,13 +3877,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
 
         # Calcul de la métrique IOU
-        iou_wildfire_detected = round(intersection_fire_detected / union_fire_detected, 2) if union_fire_detected > 0 else 0
+        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
         intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
         union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
-        iou_no_overestimation = round(intersection_clipped / union_clipped, 2) if union_clipped > 0 else 0
+        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
 
         # Calculer les aires
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
@@ -3909,17 +3904,17 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
         # Enregistrement dans un dictionnaire
         scores_elt = {            
-            f"iou_elt_{unique_value}": round(intersection / union, 2) if union > 0 else 0,  # Éviter la division par zéro
+            f"iou_elt_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
             f"iou_wildfire_detected_elt_{unique_value}": iou_wildfire_detected,
             f"iou_wildfire_or_pred_elt_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_{unique_value}": iou_no_overestimation,
 
-            f"dice_coefficient_elt_{unique_value}": round(2 * intersection / (union + intersection), 2) if (union + intersection) > 0 else 0,
+            f"dice_coefficient_elt_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
 
-            f"over_bad_prediction_elt_{unique_value}": round(over_prediction_zeros / union, 2) if union > 0 else 0,
-            f"under_bad_prediction_elt_{unique_value}": round(under_prediction_zeros / union, 2) if union > 0 else 0,
-            f"bad_prediction_elt_{unique_value}": round((over_prediction_zeros + under_prediction_zeros) / union, 2) if union > 0 else 0,
+            f"over_bad_prediction_elt_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
+            f"under_bad_prediction_elt_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
+            f"bad_prediction_elt_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
         }
 
         # Ajouter les scores pour cette valeur unique à la collection globale
@@ -4590,3 +4585,16 @@ def add_weigh_column(dff, train_mask, weight_col, graph_method):
     
     df['weight'] = df[weigh_col_name]
     return df
+
+def has_method(obj, method_name):
+    """
+    Vérifie si un objet ou une classe possède une méthode spécifique.
+
+    Args:
+        obj: L'objet ou la classe à tester.
+        method_name (str): Le nom de la méthode à vérifier.
+
+    Returns:
+        bool: True si la méthode existe, False sinon.
+    """
+    return callable(getattr(obj, method_name, None))

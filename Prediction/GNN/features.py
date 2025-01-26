@@ -1227,3 +1227,49 @@ def process_departments(root_data: Path, root_raster: Path, dir_mask: Path, dir_
         outname = 'hexagones_' + sinister + '.geojson'
         h3.rename({'osmnx_landcover': 'highway_encoder', 'foret_landcover': 'foret_encoder'}, axis=1, inplace=True)
         h3.to_file(dir_data / 'spatial' / outname, driver='GeoJSON')
+
+def add_fire_zone_or_not(df, scale):
+    if scale == 4:
+        ids = [0, 1, 2, 3, 4, 11, 12, 13, 14, 27, 28, 22, 23, 24]
+    elif scale == 5:
+        ids = [0, 1, 2, 8, 9, 10, 16, 17, 18]
+    elif scale == 6:
+        ids = [0, 1, 2, 5, 6, 7, 13, 14, 15]
+    elif scale == 7:
+        ids = [0, 1, 4, 5, 8, 11]
+    elif scale == 'departement':
+        return df
+        
+    df['fire_zone'] = 0
+    df.loc[df[df['graph_id'].isin(ids)].index, 'fire_zone'] = 1
+    return df
+
+def add_past_risk(df, col_pas):
+    ids_graph = df['graph_id'].unique()
+    df['Past_risk'] = 0
+    for id in ids_graph:
+        index = df[df['graph_id'] == id].index
+        df.loc[index, 'Past_risk'] = df.loc[index, col_pas].shift(1)
+
+    df.dropna(subset='Past_risk', inplace=True)
+    return df
+
+def raster_past_risk(df, raster_name, dir_raster, dir_output):
+    udepts = np.unique(df['departement'].values)
+    for dept in udepts:
+        raster = read_object(f'{int2name[int(dept)]}{raster_name}.pkl', dir_raster)
+        assert raster is not None
+        dept_df = df[(df['departement'] == dept)]
+        udates = np.unique(dept_df['date'].values)
+        uids = np.unique(raster)
+        for date in udates:
+            res = np.zeros(raster.shape)
+            for id in uids:
+                df_date = dept_df[(dept_df['date'] == date) & (dept_df['graph_id'] == id)]
+                if len(df_date) == 0:
+                    continue
+                val = df_date['Past_risk'].values[0]
+                mask = raster == id
+                res[mask] = val
+
+            save_object(res, f'X_past_risk_{int(date)}.pkl', dir_output / int2name[int(dept)])             

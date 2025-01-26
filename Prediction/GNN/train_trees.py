@@ -54,6 +54,7 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
 
 args = parser.parse_args()
 
@@ -68,7 +69,7 @@ doGraph = args.graph == "True"
 doDatabase = args.database == "True"
 do2D = args.database2D == "True"
 doFet = args.featuresSelection == "True"
-optimize_feature = args.optimizeFeature == "True"
+training_mode = args.optimizeFeature == "True"
 doTest = args.doTest == "True"
 doTrain = args.doTrain == "True"
 nbfeatures = args.NbFeatures
@@ -91,6 +92,7 @@ top_cluster = args.top_cluster
 graph_method = args.graph_method
 shift = args.shift
 thresh_kmeans = args.thresh_kmeans
+training_mode = args.training_mode
 
 assert values_per_class == 'full'
 assert graph_method == 'node'
@@ -188,6 +190,11 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 dir_post_process = dir_output / 'post_process'
 
 post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+features_selected.append('Past_risk')
+
+train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
 
 save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
 save_object(val_dataset, 'df_test_'+prefix+'.pkl', dir_output)
@@ -195,31 +202,24 @@ save_object(test_dataset, 'df_val_'+prefix+'.pkl', dir_output)
 
 ###################### Define models to train ######################
 
-models = [
-        #('catboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary-3_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+if name_exp.find('voting') != -1: 
+    voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
+    models = []
+    staking_models = []
 
-        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both', None, None, post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary-3_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both', None, None, post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both, None, None, post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized', None, None, post_process_model_dico['ScalerClassRisk_laplace+median_Specialized_None_KMeansRisk_5_nbsinister']),
-        
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-1_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-1', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_1_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-3_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-3', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_3_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-5_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-5', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_5_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        ('xgboost_percentage-0.4_one_nbsinister-kmeans-5-Class-Dept_classification_weighted', 'nbsinister-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        ('xgboost_percentage-0.4_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-        ]
+elif name_exp.find('stacking') != -1:
+    staking_models = define_staking_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
+    models = []
+    voting_models = []
+
+else:
+    models = define_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
+    voting_models = []
+    staking_models = []
+
 
 dual_models = [
-               #('xgboost_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+               #('xgboost_binary_one_nbsinister-max-0-k means-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
                #('catboost-xgboost_binary_class_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both', None, None, post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister'])
                ]
 
@@ -228,12 +228,6 @@ gam_models = [
         #('gam_risk_regression_rmse', 'risk'),
         #('gam_nbsinister_regression_rmse', 'nbsinister'),
 ]
-
-voting_models = [
-                #('xgboost_risk_regression_rmse', 'risk'),
-                #('xgboost_binary_classification_logloss', 'binary')
-                #('xgboost-xgboost-xgboost_nbsinister_regression_rmse', 'nbsinister')
-                ]
 
 one_by_id_model = [
        #('xgboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'unique', 'id', post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
@@ -259,10 +253,11 @@ if doTrain:
                                 device='gpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model=model)
+                                model=model,
+                                scale=scale)
         
     for model in dual_models:
         wrapped_train_sklearn_api_dual_model(train_dataset=train_dataset.copy(deep=True),
@@ -273,10 +268,11 @@ if doTrain:
                                 device='gpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model=model)
+                                model=model,
+                                scale=scale)
         
     for model in voting_models:
         wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset.copy(deep=True),
@@ -287,10 +283,26 @@ if doTrain:
                                 device='cpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model_name=model)
+                                model=model,
+                                scale=scale)
+        
+    for model in staking_models:
+        wrapped_train_sklearn_api_stacked_model_list(train_dataset=train_dataset.copy(deep=True),
+                                val_dataset=val_dataset.copy(deep=True),
+                                test_dataset=test_dataset.copy(deep=True),
+                                graph_method=graph_method,
+                                dir_output=dir_output / name,
+                                device='cpu',
+                                autoRegression=autoRegression,
+                                features=features_selected,
+                                training_mode=training_mode,
+                                do_grid_search=do_grid_search,
+                                do_bayes_search=do_bayes_search,
+                                model=model,
+                                scale=scale)
         
     for model in gam_models:
          wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
@@ -301,10 +313,11 @@ if doTrain:
                                 device='cpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model=model)
+                                model=model,
+                                scale=scale)
         
     for model in one_by_id_model:
         wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
@@ -315,10 +328,11 @@ if doTrain:
                                 device='cpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model=model)
+                                model=model,
+                                scale=scale)
         
     for model in federate_model_by_id_model:
         wrapped_train_sklearn_api_model(train_dataset=train_dataset.copy(deep=True),
@@ -329,10 +343,11 @@ if doTrain:
                                 device='cpu',
                                 autoRegression=autoRegression,
                                 features=features_selected,
-                                optimize_feature=optimize_feature,
+                                training_mode=training_mode,
                                 do_grid_search=do_grid_search,
                                 do_bayes_search=do_bayes_search,
-                                model=model)
+                                model=model,
+                                scale=scale)
 
 if doTest:
 
@@ -350,39 +365,83 @@ if doTest:
     name_dir = dn + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
-    models = [
-        #('catboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_binary_class_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_binary_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('Dual-catboost-xgboost_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('unique-id-xgboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_binary-3_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
-        #('xgboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept'),
+    #if training_mode == 'normal':
+    """if graph_construct == 'risk-size-watershed':
+            if scale == 4:
+                models = [
+                ('xgboost_percentage-0.20-0.0_one_union_classification_softmax'),
+                ('xgboost_percentage-0.25-0.0_one_union_classification_softmax'),
+                #('xgboost_percentage-0.25-1.0_one_union_classification_softmax'),
+                #('xgboost_percentage-0.25_one_union_classification_softmax'),
+                #('xgboost_percentage-0.40_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ('xgboost_percentage-0.40-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ]
 
-        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('xgboost_binary_class_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('xgboost_binary_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        ('xgboost_percentage-0.4_one_nbsinister-kmeans-5-Class-Dept_classification_weighted', 'nbsinister-kmeans-5-Class-Dept'),
-        ('xgboost_percentage-0.4_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept'),
-        ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'),
-        #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', 'nbsinister-kmeans-5-Class-Dept'),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-1_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-1'),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-3_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-3'),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-5_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-5'),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'),
-        #('xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-laplace+median_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-laplace+median'),
-        #('xgboost_binary_one_nbsinister-kmeans-3-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-3-Class-Dept-both'),
-        #('Dual-catboost-xgboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('Dual-catboost-xgboost_binary_class_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('unique-departement-xgboost_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('unique-id-xgboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('xgboost_binary-2_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('xgboost_binary-3_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'nbsinister-kmeans-5-Class-Dept-both'),
-        ]
-    
+            elif scale == 5:
+                models = [
+                    ('xgboost_percentage-0.20-0.0_one_union_classification_softmax'),
+                    ('xgboost_percentage-0.60-0.0_one_union_classification_softmax'),
+                    #('xgboost_percentage-0.35_one_union_classification_softmax'),
+                    #('xgboost_percentage-0.45_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    ('xgboost_npercentage-0.45-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ]
+
+            elif scale == 6:
+                models = [
+                    ('xgboost_percentage-0.20-0.0_one_union_classification_weighted'),
+                    #('xgboost_percentage-0.70_one_union_classification_weighted'),
+                    #('xgboost_percentage-0.30_one_union_classification_softmax'),
+                    #('xgboost_percentage-0.30_one_union_classification_softmax'),
+                    ('xgboost_percentage-0.6-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ]
+
+            elif scale == 7:
+                models = [
+                    ('xgboost_percentage-0.15-0.0_one_union_classification_softmax'),
+                    ('xgboost_percentage-0.40-1.0_one_union_classification_softmax'),
+                    #('xgboost_percentage-0.40_one_union_classification_softmax'),
+                    #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    ('xgboost_percentage-0.90-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ]
+        elif scale == 'departement':
+                models = [
+                    ('xgboost_full_one_union_classification_softmax'),                    
+                    ('xgboost_full_one_union_classification_softmax'),                    
+                    ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                ]
+        else:
+            if scale == 4:
+                models = [
+                    ('xgboost_percentage-0.15-0.0_one_union_classification_softmax'),
+                ]
+
+            elif scale == 5: 
+                models = [
+                    ('xgboost_percentage-0.20-0.0_one_union_classification_softmax'),
+                ]
+
+            elif scale == 6:
+                models = [
+                    ('xgboost_percentage-0.20-0.0_one_union_classification_softmax'),
+                ]
+
+            elif scale == 7:
+                models = [
+                    ('xgboost_percentage-0.30-0.0_one_union_classification_softmax'),
+                ]
+    else:"""
+    models = [
+        #('xgboost_search_one_union_classification_weighted'),
+        ('filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        ('staking_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
+        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+    ]
+        
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
     if days_in_futur > 0:
@@ -439,7 +498,7 @@ if doTest:
             metrics = read_object('metrics'+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_tree.pkl', dir_output / dept / prefix)
             assert metrics is not None
             run = f'{dept}_{name}_{prefix}'
-            for name, target_name in models:
+            for name in models:
                 res = read_object(name+'_'+prefix+'_'+scaling+'_'+encoding+'_'+dept+'_pred.pkl', dir_output / dept / name / prefix)
                 if MLFLOW:
                     existing_run = get_existing_run(f'{run}')

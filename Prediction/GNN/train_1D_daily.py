@@ -52,6 +52,7 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
 
 args = parser.parse_args()
 
@@ -89,7 +90,7 @@ top_cluster = args.top_cluster
 graph_method = args.graph_method
 shift = args.shift
 thresh_kmeans = args.thresh_kmeans
-
+training_mode = args.training_mode
 assert k_days == 0
 
 ######################## Get features and train features list ######################
@@ -198,7 +199,12 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+features_selected.append('Past_risk')
+
+train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
 
 ###################### Define models to train ######################
 

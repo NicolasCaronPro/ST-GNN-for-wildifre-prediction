@@ -70,13 +70,13 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             'days_since_rain', 'sum_consecutive_rainfall',
                                             'sum_rain_last_7_days',
                                             'sum_snow_last_7_days', 'snow24h', 'snow24h16']
-    if dataset_name == 'bdiff':
+    """if dataset_name == 'bdiff':
         graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
                                                 departements=departements,
                                                 variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
                                                 root_data=rootDisk / 'csv',
                                                 root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                                dir_output=dir_output)
+                                                dir_output=dir_output)"""
     #else:
     #pass
         
@@ -203,9 +203,9 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
     train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
     target_column_name_list = ['0_0']
     df['nbsinister_0_0'] = df['nbsinister'].values
-    limit_day = 9
+    limit_day = 1
     shift_list = np.arange(0, 1)
-    thresh_kmeans_list = np.arange(0.1, 1, 0.1)
+    thresh_kmeans_list = np.arange(0.1, 1, 0.5)
     ############################ Frequency ratio / removing outliers ###########################################
 
     if (dir_output / f'df_no_weight_{prefix}.pkl').is_file():
@@ -253,9 +253,9 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
         global varying_time_variables_name
 
         ########################################### Add futur risk/nbsinister #############################
-        for target_spe in target_column_name_list:
-            logger.info(f'Add {target_spe} in {limit_day} days in future')
-            df = target_by_day(df, limit_day, futur_met, target_spe)
+        #for target_spe in target_column_name_list:
+        #    logger.info(f'Add {target_spe} in {limit_day} days in future')
+        #    df = target_by_day(df, limit_day, futur_met, target_spe)
 
         save_object(df, f'df_no_weight_{prefix}.pkl', dir_output)
 
@@ -883,7 +883,7 @@ def init(args, dir_output, script):
         logger.info('#      Get hexagones point          #')
         logger.info('#      for departement              #')
         logger.info('#####################################')
-
+        
         check_and_create_path(dir_output)
 
         #construct_non_point(fp, geo, maxDate, sinister, Path(dataset_name))
@@ -894,7 +894,7 @@ def init(args, dir_output, script):
 
     ######################### Encoding ######################################
 
-    if doEncoder:
+    if True:
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
@@ -995,9 +995,12 @@ def init(args, dir_output, script):
 
     ################################ Remove bad or correlated features #############################################
     
-    if not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file():
+    if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()): #or doDatabase:
 
-        features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
+        if name_exp == 'occurence_less_feature':
+            features_name, _ = get_features_name_list(scale, train_features, ['mean'])
+        else:
+            features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
 
         old_shape = df.shape
         df = remove_nan_nodes(df, features_name)
@@ -1011,7 +1014,7 @@ def init(args, dir_output, script):
         features_name = list(df_features.columns)
         logger.info(f'Remove low Variance {leni} -> {len(features_name)}')
         leni = len(features_name)
-        
+
         logger.info('Removing correlated feature')
         tr = SmartCorrelatedSelection(
                 variables=None,
@@ -1022,9 +1025,42 @@ def init(args, dir_output, script):
                 estimator=XGBRegressor(random_state=42),
                 scoring='r2'
         )
-            
+        df['binary'] = df['nbsinister'] > 0
+
         df_features = tr.fit_transform(df_features, df['nbsinister'])
         features_name = list(df_features.columns)
+        logger.info(f'Smart Correlated Selection with Pearson {leni} -> {len(features_name)}')
+        leni = len(features_name)
+
+        tr = SmartCorrelatedSelection(
+                variables=None,
+                method="spearman",
+                threshold=0.8,
+                missing_values="raise",
+                selection_method="model_performance",
+                estimator=XGBRegressor(random_state=42),
+                scoring='r2'
+        )
+
+        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        features_name = list(df_features.columns)
+        logger.info(f'Smart Correlated Selection with Spearman {leni} -> {len(features_name)}')
+        leni = len(features_name)
+
+        tr = SmartCorrelatedSelection(
+                variables=None,
+                method="kendall",
+                threshold=0.8,
+                missing_values="raise",
+                selection_method="model_performance",
+                estimator=XGBRegressor(random_state=42),
+                scoring='r2'
+        )
+        
+        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        features_name = list(df_features.columns)
+        logger.info(f'Smart Correlated Selection with Kendall {leni} -> {len(features_name)}')
+        leni = len(features_name)
         
         check_and_create_path(dir_output / 'features_correlation')
 
@@ -1046,7 +1082,7 @@ def init(args, dir_output, script):
     if True:
         logger.info(f'Adding time columns {7}')
         logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-        #df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
+        df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 

@@ -89,6 +89,7 @@ for code, _ in departements_list:
 def select_departments(database, sinister):
 
     if database == 'bdiff':
+        
         departements = [
             'departement-01-ain',
             'departement-02-aisne',
@@ -156,7 +157,9 @@ def select_departments(database, sinister):
         #train_departements = random.sample(departements, sample_size)
         train_departements = departements
         print(f' Train departement selected : {train_departements}')
-
+        departements = ['departement-13-bouches-du-rhone', 'departement-34-herault']
+        train_departements = ['departement-13-bouches-du-rhone', 'departement-34-herault']
+        
     elif database == 'georisques':
         departements = [
             'departement-01-ain',
@@ -402,6 +405,7 @@ def select_departments(database, sinister):
                                   'departement-69-rhone',
                                   'departement-78-yvelines'
                                   ]
+            
         elif sinister == 'inondation':
             departements = ['departement-25-doubs']
             train_departements = ['departement-25-doubs']
@@ -410,6 +414,9 @@ def select_departments(database, sinister):
     elif database == 'vigicrues':
         departements = ['departement-01-ain']
         train_departements = ['departement-01-ain']
+    elif database == 'bouches_du_rhone':
+        departements = ['departement-13-bouches-du-rhone']
+        train_departements = ['departement-13-bouches-du-rhone']
     else:
         pass
 

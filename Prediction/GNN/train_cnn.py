@@ -53,6 +53,7 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
 
 args = parser.parse_args()
 
@@ -88,7 +89,7 @@ sinister_encoding = args.sinisterEncoding
 weights_version = args.weights
 top_cluster = args.top_cluster
 graph_method = args.graph_method
-
+training_mode = args.training_mode
 
 ######################## Get features and train features list ######################
 
@@ -191,28 +192,54 @@ if MLFLOW:
 
 ###################### Defined ClassRisk model ######################
 
+if is_pc:
+    temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
+else:
+    temp_dir = 'GNN/'
+
+
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
+features_name.append('Past_risk')
+features_selected_str.append('Past_risk')
+features_selected = np.arange(0, len(features_selected_str))
+features.append('Past_risk')
+
+train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+
+raster_past_risk(train_dataset, f'rasterScale{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}', \
+                  dir_output / '../raster', \
+                rootDisk / temp_dir / name_dir / f'2D_database_{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}')
+
+raster_past_risk(test_dataset, f'rasterScale{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}', \
+                  dir_output / '../raster', \
+                rootDisk / temp_dir / name_dir / f'2D_database_{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}')
+
+raster_past_risk(val_dataset, f'rasterScale{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}', \
+                  dir_output / '../raster', \
+                rootDisk / temp_dir / name_dir / f'2D_database_{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}')
+
+save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+save_object(val_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+save_object(test_dataset, 'df_val_'+prefix+'.pkl', dir_output)
 ############################# Training ##################################
 
 cnn_models = [
-             #('Zhang', None, 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
+             #('ConvLSTM', None, 'ConvLSTM_binary_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
+             ('Zhang', None, 'search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
              #('Zhang', None, 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', True, 5),
-             ('ConvLSTM',  None, 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', True, 5),
-            #('Zhang', None, 'nbsinister_regression_poisson', True),
-             #('Unet', FalsNonee, 'risk_regression_rmse', False)
+             #('Zhang',  None, 'percentage-0.3_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', True, 5),
+             #('Zhang', None, 'nbsinister_regression_poisson', True),
+             #('Unet', FalsNonee, 'risk_regression_rmse', False),
             ]
 
 train_loader = None
 val_loader = None
 last_bool = None
-
-if is_pc:
-    temp_dir = 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'
-else:
-    temp_dir = 'GNN/'
 
 params = {
     "graph": graphScale,
@@ -269,9 +296,8 @@ if doTest:
     aggregated_prediction = []
     
     models = [
-                #('ConvLSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
-                ('ConvLSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
-                
+                ('Zhang_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('Zhang_percentage-0.3_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 #('UNET_risk_regression_rmse', None, 'risk', autoRegression)
                 ]
 

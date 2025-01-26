@@ -52,6 +52,7 @@ parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help=''
 parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
 
 args = parser.parse_args()
 
@@ -89,7 +90,7 @@ top_cluster = args.top_cluster
 graph_method = args.graph_method
 shift = args.shift
 thresh_kmeans = args.thresh_kmeans
-
+training_mode = args.training_mode
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
@@ -200,7 +201,17 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 dir_post_process = dir_output / 'post_process'
 
-post_process_model_dico, train_dataset, val_dataset, test_dataset = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+features_selected_str.append('Past_risk')
+features_selected = np.arange(0, len(features_selected_str))
+
+train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
+
+save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+save_object(val_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+save_object(test_dataset, 'df_val_'+prefix+'.pkl', dir_output)
 
 ###################### Define models to train ######################
 
@@ -208,16 +219,12 @@ test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 models = [
-        #('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_dice', 5),
-        ('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropylearnable', 5),
-        ('LSTM', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
-        #('DilatedCNN', 'binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+        ('LSTM', 'search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('LSTM', 'search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
         
-        #('LSTM', 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('DilatedCNN', 'binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('DilatedCNN', 'search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ('DilatedCNN', 'search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
 
-        #('LSTM', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('DilatedCNN', 'binary-2_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         ]
 
 gnn_models = [
@@ -294,23 +301,16 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                #('LSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_dice', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
-                #('LSTM_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
-                #('DilatedCNN_binary_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', None, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
+                  ('LSTM_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                 ('LSTM_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
                 
-                ('LSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_dice', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
-                ('LSTM_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
-                #('DilatedCNN_binary_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', None, 'nbsinister-kmeans-5-Class-Dept-both', 5),
-
-                #('ST-GCN_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
-                #('ST-GCN_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', False, 'nbsinister-kmeans-5-Class-Dept-both', 5),
+                ('DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
         ]
     
     elif graph_method == 'graph':
 
         models = [
-                ('ST-GCN_full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', False, 'nbsinister-max-0-kmeans-5-Class-Dept', 5),
-                ('ST-GCN_full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', False, 'nbsinister-kmeans-5-Class-Dept-both', 5),
         ]
 
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
