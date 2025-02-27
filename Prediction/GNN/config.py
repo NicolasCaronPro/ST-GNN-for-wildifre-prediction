@@ -1,4 +1,3 @@
-from pathlib import Path
 import vacances_scolaires_france
 import jours_feries_france
 import datetime as dt
@@ -7,20 +6,7 @@ from forecasting_models.pytorch.loss import *
 from forecasting_models.sklearn.sklearn_api_models_config import *
 import logging
 import socket
-
-def get_machine_info():
-    try:
-        # Obtenir le nom d'hôte de la machine
-        hostname = socket.gethostname()
-        print(f"Nom de l'hôte : {hostname}")
-
-        # Obtenir l'adresse IP locale
-        local_ip = socket.gethostbyname(hostname)
-        print(f"Adresse IP locale : {local_ip}")
-    except Exception as e:
-        print(f"Une erreur est survenue : {e}")
-
-    return hostname
+from arborescence import *
 
 is_pc = get_machine_info() == 'caron-Precision-7780'
 
@@ -403,7 +389,7 @@ encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
 epochs = 10000
-lr = 0.000001
+lr = 0.00001
 PATIENCE_CNT = 50
 CHECKPOINT = 50
 batch_size = 256

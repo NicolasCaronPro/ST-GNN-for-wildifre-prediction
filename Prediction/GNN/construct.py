@@ -148,8 +148,8 @@ def export_to_all_date(df, dataset_name, sinister, departements, maxDate):
                 else:
                     start_date = '2023-01-01'
 
-        elif dataset_name == 'bdiff':
-            end_date =  allDates[-1]
+        elif dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
+            end_date =  '2023-12-31'
             start_date = '2017-06-12'
         elif dataset_name == 'georisques':
             end_date =  allDates[-1]
@@ -982,20 +982,34 @@ def init(args, dir_output, script):
     else:
         features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
 
-    if not doDatabase:
-        return df, graphScale, prefix, fp, features_name
+    df['nbsinister_0_0'] = df['nbsinister'].values
+    df['risk_0_0'] = df['nbsinister'].values
+    df['class_risk_0_0'] = 1
+    df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
+    trainCode = [name2int[d] for d in train_departements]
+    train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
+    df['nbsinister_0_0'] = df['nbsinister'].values
+    shift_list = np.arange(0, 1)
+    train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
+    
+
+    if dataset_name.find('bdiff') !=-1:
+        df = df[df['date'] <= allDates.index('2023-12-31')]
+
+    #if not doDatabase:
+    #    return df, graphScale, prefix, fp, features_name
 
     ################################ Process Target ###############################################
 
-    if (dir_output / f'df_mid_{prefix}.pkl').is_file():
+    """if (dir_output / f'df_mid_{prefix}.pkl').is_file():
         df = read_object(f'df_mid_{prefix}.pkl', dir_output)
     else:
         df = process_target(df, graphScale, prefix, find_df, minDate, departements, train_departements, features_name, kmeans_features, features, dir_output, args)
-        save_object(df, f'df_mid_{prefix}.pkl', dir_output)
+        save_object(df, f'df_mid_{prefix}.pkl', dir_output)"""
 
     ################################ Remove bad or correlated features #############################################
-    
-    if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()): #or doDatabase:
+    if True:
+    #if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
 
         if name_exp == 'occurence_less_feature':
             features_name, _ = get_features_name_list(scale, train_features, ['mean'])
@@ -1015,15 +1029,16 @@ def init(args, dir_output, script):
         logger.info(f'Remove low Variance {leni} -> {len(features_name)}')
         leni = len(features_name)
 
+        thresholds = 0.95
+
         logger.info('Removing correlated feature')
         tr = SmartCorrelatedSelection(
                 variables=None,
                 method="pearson",
-                threshold=0.8,
+                threshold=thresholds,
                 missing_values="raise",
-                selection_method="model_performance",
-                estimator=XGBRegressor(random_state=42),
-                scoring='r2'
+                selection_method="variance",
+                estimator=None,
         )
         df['binary'] = df['nbsinister'] > 0
 
@@ -1035,11 +1050,10 @@ def init(args, dir_output, script):
         tr = SmartCorrelatedSelection(
                 variables=None,
                 method="spearman",
-                threshold=0.8,
+                threshold=thresholds,
                 missing_values="raise",
-                selection_method="model_performance",
-                estimator=XGBRegressor(random_state=42),
-                scoring='r2'
+                selection_method="variance",
+                estimator=None,
         )
 
         df_features = tr.fit_transform(df_features, df['nbsinister'])
@@ -1050,11 +1064,10 @@ def init(args, dir_output, script):
         tr = SmartCorrelatedSelection(
                 variables=None,
                 method="kendall",
-                threshold=0.8,
+                threshold=thresholds,
                 missing_values="raise",
-                selection_method="model_performance",
-                estimator=XGBRegressor(random_state=42),
-                scoring='r2'
+                selection_method="variance",
+                estimator=None,
         )
         
         df_features = tr.fit_transform(df_features, df['nbsinister'])
@@ -1079,7 +1092,7 @@ def init(args, dir_output, script):
 
     ############################## Add varying time features #############################
 
-    if True:
+    if dataset_name != 'bdiff':
         logger.info(f'Adding time columns {7}')
         logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
         df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)

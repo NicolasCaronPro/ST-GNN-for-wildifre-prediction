@@ -55,6 +55,8 @@ parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x clu
 
 args = parser.parse_args()
 
+QUICK = False
+
 # Input config
 dataset_name = args.dataset
 name_exp = args.name
@@ -128,119 +130,124 @@ autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     name_exp += '_AutoRegressionReg'
 
-####################### INIT ################################
+if not QUICK:
+    ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
-save_object(df.columns, 'features_name.pkl', dir_output)
+    df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
+    save_object(df.columns, 'features_name.pkl', dir_output)
 
-if MLFLOW:
-    exp_name = f"{dataset_name}_train"
-    experiments = client.search_experiments()
+    if MLFLOW:
+        exp_name = f"{dataset_name}_train"
+        experiments = client.search_experiments()
 
-    if exp_name not in list(map(lambda x: x.name, experiments)):
-        tags = {
-            "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
-        }
+        if exp_name not in list(map(lambda x: x.name, experiments)):
+            tags = {
+                "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+            }
 
-        client.create_experiment(name=exp_name, tags=tags)
-        
-    mlflow.set_experiment(exp_name)
-    existing_run = get_existing_run('Preprocessing')
-    if existing_run:
-        mlflow.start_run(run_id=existing_run.info.run_id)
+            client.create_experiment(name=exp_name, tags=tags)
+
+        mlflow.set_experiment(exp_name)
+        existing_run = get_existing_run('Preprocessing')
+        if existing_run:
+            mlflow.start_run(run_id=existing_run.info.run_id)
+        else:
+            mlflow.start_run(run_name='Preprocessing')
+
+    ############################# Train, Val, test ###########################
+    dir_output = dir_output / name_exp
+
+    prefix_config = deepcopy(prefix)
+
+    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                        features_selected, train_departements,
+                                                                                        prefix,
+                                                                                        dir_output,
+                                                                                        args)
+
+    if nbfeatures == 'all':
+        nbfeatures = len(features_selected)
     else:
-        mlflow.start_run(run_name='Preprocessing')
+        nbfeatures = int(nbfeatures)
 
-############################# Train, Val, test ###########################
-dir_output = dir_output / name_exp
+    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+    features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
 
-prefix_config = deepcopy(prefix)
+    features_selected_str = list(features_selected_str)
+    features_selected = np.arange(0, len(features_selected_str))
+    logger.info((features_selected_str, len(features_selected_str)))
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
-                                                                                    features_selected, train_departements,
-                                                                                    prefix,
-                                                                                    dir_output,
-                                                                                    ['mean'], args)
+    if MLFLOW:
+        train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
+        val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
+        test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
 
-if nbfeatures == 'all':
-    nbfeatures = len(features_selected)
+        mlflow.log_param('train_features', train_features)
+        mlflow.log_param('features', features)
+        mlflow.log_param('features_selected_str', features_selected_str)
+        mlflow.log_input(train_dataset_ml_flow, context='trainig')
+        mlflow.log_input(val_dataset_ml_flow, context='validation')
+        mlflow.log_input(test_dataset_ml_flow, context='testing')
+
+        mlflow.end_run()
+
+    ############################# Training ##################################
+
+    test_dataset_unscale['weight_nbsinister'] = 1
+    test_dataset['weight'] = 1
+
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+
+    ###################### Defined ClassRisk model ######################
+
+    dir_post_process = dir_output / 'post_process'
+
+    post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+    features_selected_str.append('Past_risk')
+    features_selected = np.arange(0, len(features_selected_str))
+
+    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+
+    save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+    save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+    save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
 else:
-    nbfeatures = int(nbfeatures)
+    post_process_model_dico = None
 
-varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
-features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2, nbfeatures)
-
-features_selected_str = list(features_selected_str)
-features_selected = np.arange(0, len(features_selected_str))
-logger.info((features_selected_str, len(features_selected_str)))
-
-if MLFLOW:
-    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
-    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
-    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+    prefix = f'full_{k_days}_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
     
-    mlflow.log_param('train_features', train_features)
-    mlflow.log_param('features', features)
-    mlflow.log_param('features_selected_str', features_selected_str)
-    mlflow.log_input(train_dataset_ml_flow, context='trainig')
-    mlflow.log_input(val_dataset_ml_flow, context='validation')
-    mlflow.log_input(test_dataset_ml_flow, context='testing')
-
-    mlflow.end_run()
-
-############################# Training ##################################
-
-name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
-
-###################### Defined ClassRisk model ######################
-
-dir_post_process = dir_output / 'post_process'
-
-post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-
-def plot_unknowed_sample(df, dir_output, outname):
-    index_to_drop = df[(df['nbsinister-kmeans-5-Class-Dept'] == 0) & (df['nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'] > 0)].index
-    risky_day = df.loc[index_to_drop]
-    risky_day.sort_values('month_non_encoder')
-
-    plt.figure(figsize=(10, 6))
-    sns.histplot(risky_day['month_non_encoder'], bins=12, kde=False, color='blue', edgecolor='black')
-    plt.xlabel('Month', fontsize=14)
-    plt.ylabel('Frquency of unknowed risk', fontsize=14)
-    plt.xticks(rotation=45)  # Rotation des labels des mois si nécessaire
+    prefix_config = deepcopy(prefix)
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
     
-    # Affichage du graphique
-    plt.tight_layout()
-    plt.savefig(dir_output / f'{outname}_risk_day_month.png')
+    graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
 
-    plt.figure(figsize=(10, 6))
-    sns.histplot(risky_day['graph_id'], bins=12, kde=False, color='blue', edgecolor='black')
-    plt.xlabel('Graph_id', fontsize=14)
-    plt.ylabel('Frquency of unknowed risk', fontsize=14)
-    plt.xticks(rotation=45)  # Rotation des labels des mois si nécessaire
+    dir_output = dir_output / name_exp
     
-    # Affichage du graphique
-    plt.tight_layout()
-    plt.savefig(dir_output / f'{outname}_risk_graph_id.png')
-    plt.close('all')
-    
-    dff = df.copy(deep=True)
-    
-    y_true_temp = np.ones((dff.shape[0], 7))
-    y_true_temp[:, graph_id_index] = dff['graph_id']
-    y_true_temp[:, id_index] = dff['graph_id']
-    y_true_temp[:, departement_index] = dff['departement']
-    y_true_temp[:, date_index] = dff['date']
-    y_true_temp[:, -1] = dff['nbsinister-kmeans-5-Class-Dept'].values
-    y_true_temp[:, -2] = dff['nbsinister']
-    y_true_temp[:, -3] = dff['nbsinister']
+    train_dataset = read_object(f'df_train_{prefix}.pkl', dir_output)
+    val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
+    test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
 
-    iou_vis(dff['nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'].values, y_true_temp, -1, dir_output, f'{outname}_unknowed_samples')
+    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-plot_unknowed_sample(train_dataset, dir_output, f'train_dataset_{scale}_{graph_construct}_{graph_method}')
-plot_unknowed_sample(test_dataset, dir_output, f'test_dataset_{scale}_{graph_construct}_{graph_method}')
-plot_unknowed_sample(val_dataset, dir_output, f'val_dataset_{scale}_{graph_construct}_{graph_method}')
+    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_selected_str = np.asarray(features_selected_str)
+    features_selected_str = list(features_selected_str[:,0])
+
+    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+    features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
+
+    features_selected_str = list(features_selected_str)
+    features_selected = np.arange(0, len(features_selected_str))
+    logger.info((features_selected_str, len(features_selected_str)))
+
+    features_selected_str.append('Past_risk')
 
 models = []
 
@@ -249,13 +256,10 @@ models = []
     #test_dataset_unscale[col] = test_dataset[col]
 #    
 
-models.append(Statistical_Model('nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past', 'shift', 5, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized', 'classification'))
-models.append(Statistical_Model('nbsinister-kmeans-5-Class-Dept', 'shift', 5, 'nbsinister-kmeans-5-Class-Dept', 'classification'))
-models.append(Statistical_Model('union', None, 5, 'union', 'classification'))
-
-cols = ['nbsinister-kmeans-5-Class-Dept', 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized',  'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past']
+models.append(Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-kmeans-5-Class-Dept', 'classification'))
+cols = ['nbsinister-kmeans-5-Class-Dept', 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized',  'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past']
 test_dataset_unscale = test_dataset_unscale.set_index(['graph_id', 'date']).join(test_dataset.set_index(['graph_id', 'date'])[cols], on=['graph_id', 'date']).reset_index()
-
+test_dataset_unscale.dropna(subset=cols, inplace=True)
 for model in models:
     model.fit(train_dataset_unscale, 'departement')
     save_object(model, f'{model.name}.pkl', dir_output / Path('check_'+scaling + '/' + prefix + '/' + 'baseline') / model.name)
@@ -274,7 +278,7 @@ if doTest:
     
     str_models = []
     for model in models:
-        str_models.append((model.name, model.target))
+        str_models.append(model.name)
 
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{graph_method}'
 
@@ -304,6 +308,9 @@ if doTest:
             test_dataset_unscale_dept = test_dataset_unscale[(test_dataset_unscale['departement'] == name2int[dept])].reset_index(drop=True)
         else:
             test_dataset_unscale_dept = None
+
+        if dataset_name.find('bdiff') != -1:
+            test_dataset_unscale_dept = test_dataset_unscale_dept[test_dataset_unscale_dept['date'] <= allDates.index('2023-12-31')]
 
         if test_dataset_dept.shape[0] < 5:
             continue

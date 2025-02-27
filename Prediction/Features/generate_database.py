@@ -495,7 +495,7 @@ class GenerateDatabase():
 
         n_pixel_x = resolutions[resolution]['x']
         n_pixel_y = resolutions[resolution]['y']
-
+        
         self.resLon = n_pixel_x
         self.resLat = n_pixel_y
         self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')

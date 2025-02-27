@@ -4,13 +4,14 @@ import meteostat
 import datetime as dt
 from pathlib import Path
 import random
-random.seed(0)
+random.seed(42)
 import pandas as pd
 import geopandas as gpd
 from sklearn.cluster import KMeans
 import skimage as ski
 import matplotlib.pyplot as plt
 import numpy as np
+np.random.seed(42)
 from geocube.api.core import make_geocube
 from geocube.rasterize import rasterize_points_griddata
 from sklearn.preprocessing import MinMaxScaler

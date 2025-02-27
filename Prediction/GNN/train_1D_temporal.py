@@ -56,6 +56,8 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
+QUICK = True
+
 # Input config
 dataset_name = args.dataset
 name_exp = args.name
@@ -107,10 +109,6 @@ name_exp = f'{sinister_encoding}_{name_exp}'
 
 dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
-geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
-
-geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
-
 name_dir = dataset_name + '/' + sinister + '/' + resolution + '/' + 'train' +  '/'
 dir_output = Path(name_dir)
 check_and_create_path(dir_output)
@@ -129,108 +127,164 @@ autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     name_exp += '_AutoRegressionReg'
 
-####################### INIT ################################
+if not QUICK:
+    ####################### INIT ################################
 
-df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
-save_object(df.columns, 'features_name.pkl', dir_output)
+    df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
+    save_object(df.columns, 'features_name.pkl', dir_output)
 
-if MLFLOW:
-    exp_name = f"{dataset_name}_train"
-    experiments = client.search_experiments()
+    if MLFLOW:
+        exp_name = f"{dataset_name}_train"
+        experiments = client.search_smote_experiments()
 
-    if exp_name not in list(map(lambda x: x.name, experiments)):
-        tags = {
-            "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
-        }
+        if exp_name not in list(map(lambda x: x.name, experiments)):
+            tags = {
+                "mlflow.note.content": "This experiment is an example of how to use mlflow. The project allows to predict housing prices in california.",
+            }
 
-        client.create_experiment(name=exp_name, tags=tags)
-        
-    mlflow.set_experiment(exp_name)
-    existing_run = get_existing_run('Preprocessing')
-    if existing_run:
-        mlflow.start_run(run_id=existing_run.info.run_id)
-    else:
-        mlflow.start_run(run_name='Preprocessing')
+            client.create_experiment(name=exp_name, tags=tags)
 
-############################# Train, Val, test ###########################
-dir_output = dir_output / name_exp
+        mlflow.set_experiment(exp_name)
+        existing_run = get_existing_run('Preprocessing')
+        if existing_run:
+            mlflow.start_run(run_id=existing_run.info.run_id)
+        else:
+            mlflow.start_run(run_name='Preprocessing')
 
-prefix_config = deepcopy(prefix)
+    ############################# Train, Val, test ###########################
+    dir_output = dir_output / name_exp
 
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
-                                                                                    features_selected, train_departements,
-                                                                                    prefix,
-                                                                                    dir_output,
-                                                                                    ['mean'], args)
+    prefix_config = deepcopy(prefix)
 
-if nbfeatures == 'all':
-    nbfeatures = len(features_selected)
+    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                        features_selected, train_departements,
+                                                                                        prefix,
+                                                                                        dir_output,
+                                                                                        args)
+
+    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+    features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
+
+    features_selected_str = list(features_selected_str)
+    features_selected = np.arange(0, len(features_selected_str))
+    logger.info((features_selected_str, len(features_selected_str)))
+
+    if MLFLOW:
+        train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
+        val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
+        test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+
+        mlflow.log_param('train_features', train_features)
+        mlflow.log_param('features', features)
+        mlflow.log_param('features_selected_str', features_selected_str)
+        mlflow.log_input(train_dataset_ml_flow, context='trainig')
+        mlflow.log_input(val_dataset_ml_flow, context='validation')
+        mlflow.log_input(test_dataset_ml_flow, context='testing')
+
+        mlflow.end_run()
+
+    ############################# Training ##################################
+
+    test_dataset_unscale['weight_nbsinister'] = 1
+    test_dataset['weight'] = 1
+
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+
+    ###################### Defined ClassRisk model ######################
+
+    dir_post_process = dir_output / 'post_process'
+
+    post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+    features_selected_str.append('Past_risk')
+    features_selected = np.arange(0, len(features_selected_str))
+
+    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+
+    save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+    save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+    save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
 else:
-    nbfeatures = int(nbfeatures)
+    post_process_model_dico = None
 
-varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
-features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2, nbfeatures)
+    prefix = f'full_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
-features_selected_str = list(features_selected_str)
-features_selected = np.arange(0, len(features_selected_str))
-logger.info((features_selected_str, len(features_selected_str)))
-
-if MLFLOW:
-    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
-    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
-    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
     
-    mlflow.log_param('train_features', train_features)
-    mlflow.log_param('features', features)
-    mlflow.log_param('features_selected_str', features_selected_str)
-    mlflow.log_input(train_dataset_ml_flow, context='trainig')
-    mlflow.log_input(val_dataset_ml_flow, context='validation')
-    mlflow.log_input(test_dataset_ml_flow, context='testing')
+    graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
 
-    mlflow.end_run()
+    dir_output = dir_output / name_exp
+    
+    train_dataset = read_object(f'df_train_{prefix}.pkl', dir_output)
+    val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
+    test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
 
-############################# Training ##################################
+    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-test_dataset_unscale['weight_nbsinister'] = 1
-test_dataset['weight'] = 1
+    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_selected_str = np.asarray(features_selected_str)
+    features_selected_str = list(features_selected_str[:,0])
 
+    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
+    features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
+
+    features_selected_str = list(features_selected_str)
+    features_selected = np.arange(0, len(features_selected_str))
+    logger.info((features_selected_str, len(features_selected_str)))
+
+    features_selected_str.append('Past_risk')
+
+prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+prefix_config = deepcopy(prefix)
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
-
-###################### Defined ClassRisk model ######################
-
-dir_post_process = dir_output / 'post_process'
-
-post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-features_selected_str.append('Past_risk')
-features_selected = np.arange(0, len(features_selected_str))
-
-train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-
-save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
-save_object(val_dataset, 'df_test_'+prefix+'.pkl', dir_output)
-save_object(test_dataset, 'df_val_'+prefix+'.pkl', dir_output)
 
 ###################### Define models to train ######################
 
+if name_exp.find('voting') != -1:
+    #voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
+    voting_models = []
+    models = [#('DilatedCNN', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_smote_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+              ]
+    
+    federated_models = [('NetMLP', False, 'departement', 'full_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),]
+
+    gnn_models = []
+    staking_models = []
+    gnn_models = [
+                #('STGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGAT', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGATLSTM', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGAT', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('NetGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ]
+else:
+    models = [
+            #('LSTM', 'search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM', 'search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
+
+            #('DilatedCNN', 'search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ]
+
+    gnn_models = [
+            #('net', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
+            #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+    ]
+
+    voting_models = []
+
 test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
-
-models = [
-        ('LSTM', 'search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        ('LSTM', 'search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
-        
-        ('DilatedCNN', 'search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        ('DilatedCNN', 'search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
-
-        ]
-
-gnn_models = [
-        #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
-        #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-]
 
 train_loader = None
 val_loader = None
@@ -259,6 +313,7 @@ params = {
     "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
+    'nbfeatures':nbfeatures,
     'graph_method' : graph_method
 }
 
@@ -282,6 +337,36 @@ if doTrain:
             
             wrapped_train_deep_learning_1D(params)
 
+    for models in voting_models:
+        params['model'] = models[0]
+        params['out_channels'] = models[2]
+        params['use_temporal_as_edges'] = None
+        params['torch_structure'] = 'Model_Torch'
+        
+        wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
+                            val_dataset=val_dataset.copy(deep=True),
+                            test_dataset=test_dataset.copy(deep=True),
+                            graph_method=graph_method,
+                            dir_output=dir_output / name,
+                            autoRegression=autoRegression,
+                            training_mode=training_mode,
+                            do_grid_search=do_grid_search,
+                            do_bayes_search=do_bayes_search,
+                            model=models,
+                            scale=scale,
+                            input_params=params)
+
+    for models in federated_models:
+        params['model'] = models[0]
+        params['use_temporal_as_edges'] = models[1]
+        params['federated_cluster'] = models[2]
+        params['infos'] = models[3]
+        params['aggregation_method'] = 'mean'
+        params['out_channels'] = models[-1]
+        params['torch_structure'] = 'Model_Torch'
+
+        wrapped_train_deep_learning_1D_federated(params)
+
 if doTest:
 
     host = 'pc'
@@ -301,13 +386,20 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                  ('LSTM_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                 ('LSTM_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
-                
-                ('DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
+                #('LSTM_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                # ('LSTM_search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
+                #('filter-soft-weight-all_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('DilatedCNN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('LSTM_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('federated-NetMLP-departement_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('DSTGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('DSTGAT_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('STGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('STGAT_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('STGATLSTM_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
-    
     elif graph_method == 'graph':
 
         models = [
@@ -321,13 +413,38 @@ if doTest:
     aggregated_prediction = []
     aggregated_prediction_dept = []
 
+    ####################################################### Test on all Dataset ####################################################
+    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
+                            test_dataset_unscale_dept=test_dataset_unscale,
+                            test_name='all',
+                            features_name=features_selected_str,
+                            prefix_train=prefix,
+                            prefix_config=prefix_config,
+                            models=models,
+                            dir_output=dir_output / 'all' / prefix,
+                            device=device,
+                            k_days=k_days,
+                            encoding=encoding,
+                            scaling=scaling,
+                            test_departement=['all'],
+                            dir_train=dir_train,
+                            features=features,
+                            dir_break_point=dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                            name_exp=name_exp,
+                            doKMEANS=doKMEANS,
+                            suffix='temp')
+
+    df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+
+    ####################################################### Test by departmenent ###################################################
+
     for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
                 dn += '2'
             exp_name = f"{name_exp}_{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
-            experiments = client.search_experiments()
+            experiments = client.search_smote_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
                 tags = {

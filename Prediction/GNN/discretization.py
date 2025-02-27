@@ -1,4 +1,6 @@
 from GNN.statistical_model import *
+from scipy.ndimage import gaussian_filter1d
+
 
 class KMeansRisk:
     """
@@ -214,8 +216,8 @@ class PreprocessorConv:
         :param conv_type: Type of convolution to apply ('laplace', 'mean', 'laplace+mean', 'sum', or 'max').
         :param id_col: List of column names or indices representing IDs. Defaults to None.
         """
-        assert conv_type in ['laplace', 'laplace+median', 'mean', 'laplace+mean', 'sum', 'max', 'median'], \
-            "conv_type must be 'laplace', 'mean', 'laplace+mean', 'sum', or 'max'."
+        assert conv_type in ['laplace', 'laplace+median', 'mean', 'laplace+mean', 'sum', 'max', 'median', 'gradient', 'gaussian', 'cubic', 'quartic', 'circular'], \
+            "conv_type must be 'laplace', 'mean', 'laplace+mean', 'sum', 'gradient' or 'max'."
         self.graph = graph
         self.conv_type = conv_type
         self.id_col = id_col if id_col is not None else ['id']
@@ -269,13 +271,79 @@ class PreprocessorConv:
         res = convolve_fft(X.reshape(-1), kernel_daily.reshape(-1), normalize_kernel=False, fill_value=0.)
 
         return res
+
+    # Convolution avec un noyau Gaussien
+    def _gaussian_convolution(self, X, kernel_size):
+        if kernel_size <= 1:
+            return np.zeros_like(X).reshape(-1)
+        
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # S'assurer que kernel_size est impair
+
+        sigma = (kernel_size - 1) / 6  # Relation approx. : kernel_size ≈ 6 * sigma
+        #x = np.linspace(-1, 1, kernel_size)
+        x = np.linspace(-kernel_size // 2, kernel_size // 2 + 1, kernel_size)
+        kernel = np.exp(-0.5 * (x / sigma) ** 2)
+        #plt.plot(kernel, label='Gaussian')
+        if self.persistence:
+            kernel[:kernel_size // 2] = 0
+
+        return convolve_fft(X.reshape(-1), kernel.reshape(-1), fill_value=0.0).reshape(-1)
+    
+    # Convolution avec un noyau cubique
+    def _cubic_convolution(self, X, kernel_size):
+        if kernel_size <= 1:
+            return np.zeros_like(X).reshape(-1)
+        
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # S'assurer que kernel_size est impair
+
+        x = np.linspace(-1, 1, kernel_size)
+        kernel = (1 - np.abs(x))**3
+        kernel = np.clip(kernel, 0, None)
+
+        if self.persistence:
+            kernel[:kernel_size // 2] = 0
+
+        return convolve_fft(X.reshape(-1), kernel.reshape(-1), fill_value=0.0).reshape(-1)
+    
+    # Convolution avec un noyau quartique
+    def _quartic_convolution(self, X, kernel_size):
+        if kernel_size <= 1:
+            return np.zeros_like(X).reshape(-1)
+        
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # S'assurer que kernel_size est impair
+
+        x = np.linspace(-1, 1, kernel_size)
+        kernel = (1 - x**2)**2
+        kernel = np.clip(kernel, 0, None)
+        #plt.plot(kernel, label='Quartic')
+        if self.persistence:
+            kernel[:kernel_size // 2] = 0
+        return convolve_fft(X.reshape(-1), kernel.reshape(-1), fill_value=0.0).reshape(-1)
+    
+    # Convolution avec un noyau circulaire
+    def _circular_convolution(self, X, kernel_size):
+        if kernel_size <= 1:
+            return np.zeros_like(X).reshape(-1)
+        
+        if kernel_size % 2 == 0:
+            kernel_size += 1  # S'assurer que kernel_size est impair
+
+        x = np.linspace(-1, 1, kernel_size)
+        kernel = np.sqrt(1 - x**2)
+        kernel = np.clip(kernel, 0, None)
+        #plt.plot(kernel, label='Circular')
+        if self.persistence:
+            kernel[:kernel_size // 2] = 0
+        return convolve_fft(X.reshape(-1), kernel.reshape(-1), fill_value=0.0).reshape(-1)
     
     def _mean_convolution(self, X, kernel_size):
         """
-        Apply mean convolution using a custom kernel from Astropy.
-
         :param X: Input array for convolution.
-        :param kernel_size: Size of the convolution kernel.
+        :param kernel_size: Size
+        Apply mean convolution using a custom kernel from Astropy.of the convolution kernel.
         :return: Convoluted array.
         """
         # Create mean kernel
@@ -289,7 +357,7 @@ class PreprocessorConv:
             kernel_season[:kernel_size // 2] = 0
  
         #kernel_season[kernel_size // 2] = 0
-        res = convolve_fft(X.reshape(-1), kernel_season.reshape(-1), normalize_kernel=False, fill_value=0.)
+        res = convolve_fft(X.reshape(-1), kernel_season.reshape(-1), normalize_kernel=False, fill_value=0.).reshape(-1)
 
         return res
     
@@ -307,7 +375,7 @@ class PreprocessorConv:
         # Ensure kernel size is odd
         if kernel_size % 2 == 0:
             raise ValueError("kernel_size must be an odd integer.")
-
+        
         if kernel_size == 1:
             return np.zeros(X.shape).reshape(-1)
 
@@ -322,6 +390,21 @@ class PreprocessorConv:
         # Apply the custom median filter
         return generic_filter(X, custom_median_filter, size=kernel_size).reshape(-1)
 
+    def _gradient_convolution(self, X, kernel_size):
+        """
+        Applique une convolution de gradient sur l'entrée avec une fenêtre de taille `kernel_size`.
+
+        :param X: Tableau d'entrée (2D: samples x features).
+        :param kernel_size: Taille de la fenêtre de convolution.
+        :return: Tableau du gradient calculé sur la fenêtre glissante.
+        """
+        from scipy.ndimage import convolve1d
+
+        # Création d'un noyau de gradient centré
+        kernel = np.arange(-(kernel_size // 2), kernel_size // 2 + 1)
+        kernel = kernel / np.sum(np.abs(kernel))  # Normalisation
+
+        return convolve1d(X, kernel, mode='nearest', axis=0).reshape(-1)
 
     def _sum_convolution(self, X, kernel_size):
         """
@@ -360,7 +443,6 @@ class PreprocessorConv:
         res = maximum_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0)
         return res
 
-
     def apply(self, X, ids):
         """
         Apply the convolution based on the given type to the input data.
@@ -394,10 +476,13 @@ class PreprocessorConv:
                         "Error: 'month_non_encoder' is not specified in id_col. Please include it in id_col to proceed."
                     )
             else:
-                kernel_size = int(self.kernel) + 2 # Add 2 as self.kernel == num_day before and after
-            
+                kernel_size = (int(self.kernel) * 2 + 1) + 2 # Add 2 to make 0 bound
+
+            if kernel_size == 1:
+                X_processed[mask] = 0.0
+
             # Apply Laplace convolution if specified
-            if self.conv_type == 'laplace':
+            elif self.conv_type == 'laplace':
                 laplace_result = self._laplace_convolution(X[mask], kernel_size)
                 X_processed[mask] = laplace_result.reshape(-1)
 
@@ -410,11 +495,6 @@ class PreprocessorConv:
             # Apply laplace+mean convolutions if specified
             elif self.conv_type == 'laplace+mean':
                 laplace_result = self._laplace_convolution(X[mask], kernel_size)
-                """if unique_id[1] == 4:
-                    fig, ax = plt.subplots(1, figsize=(15,6))
-                    ax.plot(laplace_result)
-                    ax.plot(X[mask])
-                    plt.show()"""
                 mean_result = self._mean_convolution(X[mask], kernel_size)
                 X_processed[mask] = (laplace_result + mean_result).reshape(-1)
 
@@ -437,6 +517,26 @@ class PreprocessorConv:
                 laplace_result = self._laplace_convolution(X[mask], kernel_size)
                 med_result = self.median_convolution(X[mask], kernel_size)
                 X_processed[mask] = (laplace_result + med_result).reshape(-1)
+            
+            elif self.conv_type == 'gradient':
+                gradient_result = self._gradient_convolution(X[mask], kernel_size)
+                X_processed[mask] = gradient_result
+
+            elif self.conv_type == 'gaussian':
+                result = self._gaussian_convolution(X[mask], kernel_size)
+                X_processed[mask] = result.reshape(-1)
+
+            elif self.conv_type == 'cubic':
+                result = self._cubic_convolution(X[mask], kernel_size)
+                X_processed[mask] = result.reshape(-1)
+            
+            elif self.conv_type == 'quartic':
+                result = self._quartic_convolution(X[mask], kernel_size)
+                X_processed[mask] = result.reshape(-1)
+            
+            elif self.conv_type == 'circular':
+                result = self._circular_convolution(X[mask], kernel_size)
+                X_processed[mask] = result.reshape(-1)
 
             else:
                 raise ValueError(
@@ -457,7 +557,6 @@ class ScalerClassRisk:
         :param class_risk: An object with `fit` and `predict` methods for risk classification.
         :param preprocessor: An object with an `apply` method to preprocess X before fitting.
         """
-        assert class_risk is not None
         self.n_clusters = 5
         self.col_id = col_id
 
@@ -472,7 +571,7 @@ class ScalerClassRisk:
         else:
             raise ValueError(f'{scaler} wrong value')
         
-        class_risk_name = class_risk.name
+        class_risk_name = class_risk.name if class_risk is not None else ''
         preprocessor_name = f'{preprocessor.conv_type}_{preprocessor.kernel}' if preprocessor is not None else None
         self.name = f'ScalerClassRisk_{preprocessor_name}_{scaler_name}_{class_risk_name}_{target}'
         self.dir_output = dir_output / self.name
@@ -540,36 +639,36 @@ class ScalerClassRisk:
             if len(X_scaled.shape) == 1:
                 X_scaled = np.reshape(X_scaled, (-1,1))
 
-            class_risk.fit(X_scaled, sinisters_id)
+            sinisters_mean = None
+            sinisters_min = None
+            sinisters_max = None
+            if class_risk is not None:
+                class_risk.fit(X_scaled, sinisters_id)
 
-            # Predict classes for current ID
-            classes = class_risk.predict(X_scaled)
+                # Predict classes for current ID
+                classes = class_risk.predict(X_scaled)
 
-            if sinisters is not None:
-            
-                sinisters = sinisters.reshape(-1)
-                # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
-                classes[sinisters[mask] > 0] = np.vectorize(lambda_function)(classes[sinisters[mask] > 0])
+                if sinisters is not None:
+                
+                    # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
+                    if True in np.unique(sinisters_id > 0):
+                        classes[sinisters_id > 0] = np.vectorize(lambda_function)(classes[sinisters_id > 0])
 
-                # Calculate statistics for each class
-                sinisters_mean = []
-                sinisters_min = []
-                sinisters_max = []
+                    # Calculate statistics for each class
+                    sinisters_mean = []
+                    sinisters_min = []
+                    sinisters_max = []
 
-                for cls in np.unique(classes):
-                    class_mask = classes == cls
-                    sinisters_class = sinisters_id[class_mask]
-                    sinisters_mean.append(np.mean(sinisters_class))
-                    sinisters_min.append(np.min(sinisters_class))
-                    sinisters_max.append(np.max(sinisters_class))
+                    for cls in np.unique(classes):
+                        class_mask = (classes == cls).reshape(-1)
+                        sinisters_class = sinisters_id[class_mask]
+                        sinisters_mean.append(np.mean(sinisters_class))
+                        sinisters_min.append(np.min(sinisters_class))
+                        sinisters_max.append(np.max(sinisters_class))
 
-                sinisters_mean = np.array(sinisters_mean)
-                sinisters_min = np.array(sinisters_min)
-                sinisters_max = np.array(sinisters_max)
-            else:
-                sinisters_mean = None
-                sinisters_min = None
-                sinisters_max = None
+                    sinisters_mean = np.array(sinisters_mean)
+                    sinisters_min = np.array(sinisters_min)
+                    sinisters_max = np.array(sinisters_max)
 
             self.models_by_id[unique_id] = {
                 'scaler': scaler,
@@ -595,8 +694,10 @@ class ScalerClassRisk:
         output_path = os.path.join(self.dir_output, f'histogram_train.png')
         plt.savefig(output_path)
         plt.close()
-        for cl in np.unique(pred):
-            logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
+        
+        if self.class_risk is not None:
+            for cl in np.unique(pred):
+                logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
 
     def predict(self, X, sinisters, ids, ids_preprocessor=None):
         """
@@ -616,7 +717,10 @@ class ScalerClassRisk:
                 raise ValueError("ids_preprocessor must be provided when preprocessor is not None.")
             X = self.preprocessor.apply(X, ids_preprocessor)
 
-        predictions = np.zeros(X.shape[0], dtype=int)
+        if self.class_risk is not None:
+            predictions = np.zeros_like(ids, dtype=int)
+        else:    
+            predictions = np.zeros_like(ids, dtype=np.float32)
 
         for unique_id, model in self.models_by_id.items():
             if unique_id not in np.unique(ids):
@@ -635,14 +739,18 @@ class ScalerClassRisk:
             if len(X_scaled.shape) == 1:
                 X_scaled = np.reshape(X_scaled, (-1,1))
 
-            predictions[mask] = class_risk.predict(X_scaled.astype(np.float32))
+            if class_risk is not None:
+                predictions[mask] = class_risk.predict(X_scaled.astype(np.float32)).reshape(-1)
+            else:
+                predictions[mask] = X_scaled.astype(np.float32).reshape(-1)
         
-        predictions[predictions >= self.n_clusters] = self.n_clusters - 1
+        if class_risk is not None:
+            predictions[predictions >= self.n_clusters] = self.n_clusters - 1
 
         # Define the lambda function
         lambda_function = lambda x: max(x, 1)
 
-        if sinisters is not None:
+        if sinisters is not None and class_risk is not None:
             sinisters = sinisters.reshape(-1)
             # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
             predictions[sinisters > 0] = np.vectorize(lambda_function)(predictions[sinisters > 0])
@@ -1120,7 +1228,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     if graph.sequences_month is None:
         graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
 
-    conv_types = ['laplace', 'mean', 'laplace+mean', 'median', 'laplace+median', 'max', 'sum']
+    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum']
 
     kernels = ['Specialized', 1, 3, 5]
     """
@@ -1195,7 +1303,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'])
 
             # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters) if conv_type in ['laplace', 'mean', 'laplace+mean', 'laplace+median'] else KMeansRiskZerosHandle(n_clusters)
+            class_risk = KMeansRisk(n_clusters=n_clusters)
             obj = ScalerClassRisk(
                 col_id='departement',
                 dir_output=dir_post_process,
@@ -1247,7 +1355,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
 
             # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters) if conv_type in ['laplace', 'mean', 'laplace+mean', 'laplace+median'] else KMeansRiskZerosHandle(n_clusters)
+            class_risk = KMeansRisk(n_clusters=n_clusters)
             obj = ScalerClassRisk(
                 col_id='departement',
                 dir_output=dir_post_process,
@@ -1346,7 +1454,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     
     ##################### Union des risk ###########################
     col_raw = 'nbsinister-kmeans-5-Class-Dept'
-    col_derived = 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized'
+    col_derived = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
 
     train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
     train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0

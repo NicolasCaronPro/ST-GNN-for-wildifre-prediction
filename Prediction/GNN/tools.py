@@ -29,7 +29,6 @@ if is_pc:
     import sys
     import torch
     import warnings
-    from arborescence import *
     from array_fet import *
     from category_encoders import TargetEncoder, CatBoostEncoder
     from collections import Counter
@@ -92,7 +91,6 @@ else:
     import sys
     import torch
     import warnings
-    from arborescence import *
     from array_fet import *
     from category_encoders import TargetEncoder, CatBoostEncoder
     from collections import Counter
@@ -223,7 +221,7 @@ def save_object_torch(obj, filename : str, path : Path):
 
 def read_object(filename: str, path : Path):
     if not (path / filename).is_file():
-        #logger.info(f'{path / filename} not found')
+        logger.info(f'{path / filename} not found')
         return None
     return pickle.load(open(path / filename, 'rb'))
 
@@ -756,8 +754,11 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
         
         # Extraire les données dans l'intervalle de date
         cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date)]
-        cur_array = np.unique(cur_array, axis=0)
-        
+        if cur_array.shape[0] > 1:
+            cur_array = np.unique(cur_array, axis=0)
+        else:
+            cur_array = cur_array.astype(np.float32)
+                
         res.append(cur_array[:ks+1])
 
     if len(res) == 0:
@@ -3551,7 +3552,6 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     """
 
     y_true_fire = np.copy(y_true)
-    y_true_fire[y_fire == 0] = 0
 
     ###################################### I. For the all signal ####################################
     # Calcul des différentes aires
@@ -3575,26 +3575,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     y_pred_clipped = np.clip(y_pred, 0, 1)  # Limiter y_pred à 1
     y_true_fire_clipped = np.clip(y_true_fire, 0, 1)  # Limiter y_true_fire à 1
 
-    # Masque pour les valeurs pertinentes
-    mask_fire_detected = (y_true_fire_clipped > 0)
-
-    # Calcul de l'intersection et de l'union
-    intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-    union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-
-    # Calcul de la métrique IOU
-    iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
-    #iou_wildfire_detected = y_pred_clipped[y_true_fire_clipped > 0].shape[0] / y_true_fire_clipped[y_true_fire_clipped > 0].shape[0] if y_true_fire_clipped[y_true_fire_clipped > 0].shape[0] > 0 else np.nan
-    #iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
+    iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
 
     y_pred_clipped_ytrue = np.copy(y_pred)
     y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
     intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true))  # Aire commune
     union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true))         # Aire d'union
     iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
-
-    # Calcul du Dice coefficient
-    dice_coefficient = 2 * intersection / (union + intersection) if union + intersection > 0 else np.nan
 
     dice_coefficient = 2 * intersection / (union + intersection) if union + intersection > 0 else np.nan
 
@@ -3643,15 +3630,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-        # Masque pour les valeurs pertinentes
-        mask_fire_detected = y_true_fire_clipped > 0
-
-        # Calcul de l'intersection et de l'union
-        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-
-        # Calcul de la métrique IOU
-        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_graph)
         y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
@@ -3724,15 +3703,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-        # Masque pour les valeurs pertinentes
-        mask_fire_detected = y_true_fire_clipped > 0
-
-        # Calcul de l'intersection et de l'union
-        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-
-        # Calcul de la métrique IOU
-        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_season)
         y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
@@ -3798,15 +3769,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
             y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-            # Masque pour les valeurs pertinentes
-            mask_fire_detected = y_true_fire_clipped > 0
-
-            # Calcul de l'intersection et de l'union
-            intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-            union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-
-            # Calcul de la métrique IOU
-            iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+            iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
             y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
             y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
@@ -3841,7 +3804,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     # Parcourir les valeurs uniques de y_true
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
-        mask = (y_true == unique_value)
+        mask = (y_true == unique_value) | (y_pred == unique_value)
 
         y_pred_sample = y_pred[mask]
         y_true_sample = y_true[mask]
@@ -3869,15 +3832,9 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
 
-        # Masque pour les valeurs pertinentes
-        mask_fire_detected = y_true_fire_clipped > 0
-
-        # Calcul de l'intersection et de l'union
-        intersection_fire_detected = np.trapz(np.minimum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-        union_fire_detected = np.trapz(np.maximum(y_pred_clipped[mask_fire_detected], y_true_fire_clipped[mask_fire_detected]))
-
         # Calcul de la métrique IOU
-        iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
@@ -4207,12 +4164,10 @@ def remove_0_risk_pixel(dir_target, dir_bin, rasterImage, dept, on, val):
 
     return rasterImage
 
-def get_features_selected_for_time_series(features, features_name, time_varying_features, nbfeatures):
+def get_features_selected_for_time_series(features, features_name, time_varying_features):
     features_selected = []
     features_selected_str = []
     for fet in features:
-        if len(features_selected_str) == nbfeatures:
-            break
         if fet in features_name:
             features_selected.append(features_name.index(fet))
             if fet not in features_selected_str:

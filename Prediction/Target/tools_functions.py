@@ -34,6 +34,9 @@ from sklearn.decomposition import PCA
 from osgeo import gdal, ogr
 import plotly.express as px
 import plotly.io as pio
+from skimage.feature import peak_local_max
+from scipy import ndimage as ndi
+import math
 
 def haversine(p1, p2, unit = 'kilometer'):
     import math
@@ -438,7 +441,8 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
                                           n_pixel_y : float, 
                                           n_pixel_x : float,
                                           dir_output : Path,
-                                          dept : str):
+                                          dept : str,
+                                          log_file):
     firepoints = firepoints.copy(deep=True)
     
     nonNanMask = np.argwhere(~np.isnan(mask))
@@ -448,7 +452,7 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
     for i, date in enumerate(dates):
 
         if i % 200 == 0:
-            print(date)
+            print(date)           
 
         if date in fdate:
             fdataset = firepoints[(firepoints['date'] == date)]
@@ -460,13 +464,57 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
         if sinister_encoding == 'occurence':
             hexaFire['is'+sinisterType] = 0
             hexaFire['nb'+sinisterType] = 0
+            
+            #if date == '2023-03-11':
+            #    print(fdataset)
 
             for _, row in fdataset.iterrows():
+                """print(row['scale0'])
+                print(hexaFire.scale0.unique())
+                print(hexaFire[hexaFire['scale0'] == row['scale0']])"""
+
                 hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'is'+sinisterType] = 1
                 hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'nb'+sinisterType] += 1
 
+            #if date == '2023-03-11':
+            
+            #print(hexaFire['nb'+sinisterType].unique())
+            
             rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
-             
+            if np.all(rasterVar[~np.isnan(rasterVar)] == 0):
+                rasterVar2, _, _ = rasterization(hexaFire, 0.0002694945852326214, 0.0002694945852352859, 'nb'+sinisterType, dir_output, dept+'_bin0')
+                rasterVar2 = rasterVar2[0]
+                rasterVar2[np.isnan(rasterVar2)] = 0
+                val_res = resize_no_dim(rasterVar2, rasterVar.shape[1], rasterVar.shape[2])
+                coordinates = peak_local_max(val_res, min_distance=1)
+                val_res_2 = np.copy(val_res)
+                val_res = np.zeros_like(val_res).astype(int)
+                
+                #plt.imshow(rasterVar2)
+                #plt.show()
+                
+                for coord in coordinates:
+                    val_res[coord[0], coord[1]] = math.ceil(val_res_2[coord[0], coord[1]])
+
+                #plt.imshow(val_res)
+                #plt.show()
+                mask_nan = np.isnan(rasterVar)
+                rasterVar[0] = val_res
+                rasterVar[mask_nan] = np.nan
+                if np.all(rasterVar[~np.isnan(rasterVar)] == 0):
+                    print(f'Unique values of scale0 {fdataset.scale0.unique()}')
+                    rasterVar = np.full(rasterVar.shape, fill_value=np.nan)
+                    log_message = f'{date} Unique values of scale0 {len(fdataset)} {fdataset.scale0.unique()}\n'
+                    print(log_message.strip())  # Affiche dans la console
+
+                    # Enregistrement dans le fichier log (concatène si existe)
+                    with open(log_file, "a") as f:
+                        f.write(log_message)
+
+            #if date == '2023-03-11':
+            #    plt.imshow(rasterVar[0])
+            #    plt.show()
+
         elif sinister_encoding == 'burned_area':
             hexaFire['Surface parcourue (m2)'] = 0
 
@@ -485,7 +533,7 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
             rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'hours_difference', dir_output, dept+'_bin0')
 
         if sinister_encoding == 'occurence':
-            spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]].astype(int)
+            spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]]
         else:
             spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]]
 

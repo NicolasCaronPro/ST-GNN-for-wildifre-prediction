@@ -1,0 +1,8 @@
+2019-03-30 Unique values of scale0 1 ['871fb5c0affffff']
+2020-07-13 Unique values of scale0 1 ['871f90d2effffff']
+2017-08-24 Unique values of scale0 1 ['87396d6f5ffffff']
+2017-10-11 Unique values of scale0 1 [4822]
+2018-03-23 Unique values of scale0 1 [5043]
+2018-08-16 Unique values of scale0 1 ['87396d574ffffff']
+2019-05-07 Unique values of scale0 1 ['87396d6f5ffffff']
+2019-07-22 Unique values of scale0 1 ['87396d40cffffff']

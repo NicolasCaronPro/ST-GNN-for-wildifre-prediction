@@ -48,7 +48,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
             'snow24h', 'snow24h16',
             ]
     
-    if dataset_name == 'bdiff' or dataset_name == 'georisques':
+    if dataset_name == 'bdiff' or dataset_name == 'georisques' or dataset_name == 'bdiff_small':
         train_features = [
                     'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                     'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
@@ -63,14 +63,14 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'foret_encoder',
                     'argile_encoder',
                     'id_encoder',
-                    #'cluster_encoder',
-                    #'cosia_encoder',
+                    'cluster_encoder',
+                    'cosia_encoder',
                     'vigicrues',
                     'foret',
                     'highway',
-                    #'cosia',
+                    'cosia',
                     'Calendar',
-                    'Historical',
+                    #'Historical',
                     'Geo',
                     #'air',
                     'nappes',
@@ -103,7 +103,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'highway',
                     'cosia',
                     'Calendar',
-                    'Historical',
+                    #'Historical',
                     'Geo',
                     'air',
                     'nappes',
@@ -129,7 +129,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'highway',
                     'cosia',
                     'Calendar',
-                    'Historical',
+                    #'Historical',
                     'Geo',
                     'air',
                     'nappes',
@@ -157,7 +157,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'highway',
                     #'cosia',
                     'Calendar',
-                    'Historical',
+                    #'Historical',
                     'Geo',
                     #'air',
                     'nappes',
@@ -946,7 +946,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                         if col in features_name:
                             new_column_name = f"{col}_{method_name}_{i}"
                             if new_column_name not in list(dataframe.columns):
-                                logger.info(f'{new_column_name}')
+                                #logger.info(f'{new_column_name}')
                                 dataframe[new_column_name] = np.nan
                             dataframe.loc[index, new_column_name] = dataframe.loc[index, col].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
                             if new_column_name not in new_fet:
@@ -956,7 +956,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                                 if f'{col}_{spatial_method}' in features_name:
                                     new_column_name = f"{col}_{spatial_method}_{method_name}_{i}"
                                     if new_column_name not in list(dataframe.columns):
-                                        logger.info(f'{new_column_name}')
+                                        #logger.info(f'{new_column_name}')
                                         dataframe[new_column_name] = np.nan
                                     dataframe.loc[index, new_column_name] = dataframe.loc[index, f'{col}_{spatial_method}'].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
                                     if new_column_name not in new_fet:
@@ -967,7 +967,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                     if col in features_name:
                         new_column_name_shift = f"{col}_-{i}"
                         if new_column_name_shift not in list(dataframe.columns):
-                            logger.info(f'{new_column_name_shift}')
+                            #logger.info(f'{new_column_name_shift}')
                             dataframe[new_column_name_shift] = np.nan
                         dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, col].shift(i)
                         if new_column_name not in new_fet:
@@ -978,7 +978,7 @@ def add_time_columns(array, integer_param, dataframe, train_features, features_n
                                 new_column_name_shift = f"{col}_{spatial_method}_-{i}"
                                 if new_column_name_shift not in list(dataframe.columns):
                                     dataframe[new_column_name_shift] = np.nan
-                                    logger.info(f'{new_column_name_shift}')
+                                    #logger.info(f'{new_column_name_shift}')
                                 dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, f'{col}_{spatial_method}'].shift(i)
                                 if new_column_name not in new_fet:
                                     new_fet.append(new_column_name_shift)

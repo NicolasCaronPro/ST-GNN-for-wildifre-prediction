@@ -157,6 +157,8 @@ def select_departments(database, sinister):
         #train_departements = random.sample(departements, sample_size)
         train_departements = departements
         print(f' Train departement selected : {train_departements}')
+
+    elif database == 'bdiff_small':
         departements = ['departement-13-bouches-du-rhone', 'departement-34-herault']
         train_departements = ['departement-13-bouches-du-rhone', 'departement-34-herault']
         

@@ -58,6 +58,8 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
+QUICK = True
+
 # Input config
 dataset_name = args.dataset
 name_exp = args.name
@@ -123,9 +125,6 @@ name_exp = f'{sinister_encoding}_{name_exp}'
 
 dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
-geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
-geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
-
 minDate = '2017-06-12' # Starting point
 
 if dataset_name == '':
@@ -135,81 +134,141 @@ autoRegression = 'AutoRegressionReg' in train_features
 if autoRegression:
     name_exp += '_AutoRegressionReg'
 
-####################### INIT ################################
-
-df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_trees')
-
-if MLFLOW:
-    exp_name = f"{dataset_name}_train"
-    experiments = client.search_experiments()
-
-    if exp_name not in list(map(lambda x: x.name, experiments)):
-        tags = {
-            "",
-        }
-
-        client.create_experiment(name=exp_name, tags=tags)
-
-    mlflow.set_experiment(exp_name)
-    existing_run = get_existing_run('Preprocessing')
-    if existing_run:
-        mlflow.start_run(run_id=existing_run.info.run_id)
-    else:
-        mlflow.start_run(run_name='Preprocessing')
+if not QUICK:
+    #geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+    #geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
     
-############################# Train, Val, test ###########################
-dir_output = dir_output / name_exp
+    ####################### INIT ################################
 
+    df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_trees')
+
+    if MLFLOW:
+        exp_name = f"{dataset_name}_train"
+        experiments = client.search_experiments()
+
+        if exp_name not in list(map(lambda x: x.name, experiments)):
+            tags = {
+                "",
+            }
+
+            client.create_experiment(name=exp_name, tags=tags)
+
+        mlflow.set_experiment(exp_name)
+        existing_run = get_existing_run('Preprocessing')
+        if existing_run:
+            mlflow.start_run(run_id=existing_run.info.run_id)
+        else:
+            mlflow.start_run(run_name='Preprocessing')
+        
+    ############################# Train, Val, test ###########################
+    dir_output = dir_output / name_exp
+
+    prefix_config = deepcopy(prefix)
+
+    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+                                                                                        features_selected, train_departements,
+                                                                                        prefix,
+                                                                                        dir_output,
+                                                                                        args)
+    if MLFLOW:
+        train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
+        val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
+        test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
+
+        mlflow.log_param('train_features', train_features)
+        mlflow.log_param('features', features)
+        mlflow.log_param('features_selected', features_selected)
+        mlflow.log_input(train_dataset_ml_flow, context='trainig')
+        mlflow.log_input(val_dataset_ml_flow, context='validation')
+        mlflow.log_input(test_dataset_ml_flow, context='testing')
+        mlflow.end_run()
+
+    ######################## Training ##############################
+
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+
+    ###################### Defined ClassRisk model ######################
+
+    dir_post_process = dir_output / 'post_process'
+
+    post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+    features_selected.append('Past_risk')
+
+    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+
+    save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+    save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+    save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
+else:
+    post_process_model_dico = None
+
+    prefix = f'full_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+
+    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+    
+    graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
+
+    dir_output = dir_output / name_exp
+    
+    train_dataset = read_object(f'df_train_{prefix}.pkl', dir_output)
+    val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
+    test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
+
+    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+    
+    #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+
+    features_selected = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_importance = np.asarray(features_selected)
+    features_selected = list(features_importance[:,0])
+    features_selected.append('Past_risk')
+
+prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 prefix_config = deepcopy(prefix)
-
-train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
-                                                                                    features_selected, train_departements,
-                                                                                    prefix,
-                                                                                    dir_output,
-                                                                                    ['mean'], args)
-
-if MLFLOW:
-    train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
-    val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
-    test_dataset_ml_flow = mlflow.data.from_pandas(test_dataset)
-
-    mlflow.log_param('train_features', train_features)
-    mlflow.log_param('features', features)
-    mlflow.log_param('features_selected', features_selected)
-    mlflow.log_input(train_dataset_ml_flow, context='trainig')
-    mlflow.log_input(val_dataset_ml_flow, context='validation')
-    mlflow.log_input(test_dataset_ml_flow, context='testing')
-    mlflow.end_run()
-
-######################## Training ##############################
-
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
-
-###################### Defined ClassRisk model ######################
-
-dir_post_process = dir_output / 'post_process'
-
-post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-features_selected.append('Past_risk')
-
-train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized-Past')
-
-save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
-save_object(val_dataset, 'df_test_'+prefix+'.pkl', dir_output)
-save_object(test_dataset, 'df_val_'+prefix+'.pkl', dir_output)
 
 ###################### Define models to train ######################
 
 if name_exp.find('voting') != -1: 
     voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
-    models = []
+    voting_models = []
+    models = [
+            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax-dual', None, None, None),
+            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
+            
+            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax-dual', None, None, None),
+            
+            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+            #('catboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+            #('catboost_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+
+            ('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
+            ('xgboost_full_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
+            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+    ]
     staking_models = []
 
 elif name_exp.find('stacking') != -1:
     staking_models = define_staking_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     models = []
+    voting_models = []
+
+elif name_exp.find('exp') != -1:
+    staking_models = []
+    models = [('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+            ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
+    ]
     voting_models = []
 
 else:
@@ -433,10 +492,34 @@ if doTest:
     else:"""
     models = [
         #('xgboost_search_one_union_classification_weighted'),
-        ('filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
-        ('staking_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('filter-catboost-soft-departement-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-graphid-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('filter-catboost-soft-None-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-hard-None-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-hard-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        
+        #('filter-catboost-soft-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-weight-5_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-weight-1_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('filter-xgboost-soft-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-5_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-1_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),
+        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax-dual'),
+
+        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
+        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax'),
+
+        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        #('staking_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
         #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
         #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
@@ -446,6 +529,28 @@ if doTest:
 
     if days_in_futur > 0:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
+
+    ####################################################### Test on all Dataset ####################################################
+    metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset,
+                                test_dataset_unscale,
+                                    'all',
+                                    prefix,
+                                    prefix_config,
+                                    models,
+                                    dir_output / 'all' / prefix,
+                                    device,
+                                    encoding,
+                                    scaling,
+                                    test_dataset_unscale.departement.unique(),
+                                    dir_train,
+                                    name_exp,
+                                    dir_train / 'check_none' / prefix_kmeans / 'kmeans',
+                                    doKMEANS
+                                    )
+
+    df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+
+    ####################################################### Test by departmenent ###################################################
 
     aggregated_prediction = []
     aggregated_prediction_dept = []
@@ -581,12 +686,15 @@ if doTest:
                                     dir_output / dept / prefix / name, vmax_band=vmax_band,
                                     dept_reg=True, sinister=sinister, sinister_point=fp)"""
 
-    """aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
+    if dataset_name != 'bdiff':
+        exit(1)
+    aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
     #aggregated_prediction_dept = pd.concat(aggregated_prediction_dept).reset_index(drop=True)
 
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
 
-    for name, target_name in models:
+    for name in models:
+        model_name, v1, v2, target_name, v3, v4 = name.split('_')
         band = 'prediction'
         if target_name == 'binary':
             vmax_band = 1

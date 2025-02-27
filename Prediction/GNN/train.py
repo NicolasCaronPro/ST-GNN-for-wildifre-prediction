@@ -168,13 +168,13 @@ def get_model_params(model_type):
 
 def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                       features, name, model_type, task_type, 
-                      params, loss, non_fire_number, post_process):
+                      params, loss, under_sampling, over_sampling, post_process):
     
     if model_type == 'xgboost':
-        dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
-        dtrain = xgb.DMatrix(df_train[features], label=df_train[target], weight=df_train[weight_col])
+        #dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
+        #dtrain = xgb.DMatrix(df_train[features], label=df_train[target], weight=df_train[weight_col])
         fit_params = {
-            'eval_set': [(df_train[features], df_train[target]), (df_val[features], df_val[target])],
+            'eval_set': [(df_val[features], df_val[target])],
             'sample_weight': df_train[weight_col],
             'verbose': False,
             'early_stopping_rounds' : 15
@@ -237,7 +237,7 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
     else:
         raise ValueError(f"Unsupported model model_type: {model_type}")
 
-    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss, non_fire_number=non_fire_number, target_name=target, post_process=post_process)
+    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss, under_sampling=under_sampling, over_sampling=over_sampling, target_name=target, post_process=post_process)
     return model, fit_params
 
 def explore_features(model,
@@ -424,12 +424,16 @@ def fit(params):
                   X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[target],
                   X_test=df_test[features], y_test=df_test[target],
                     optimization=parameter_optimization_method,
-                    grid_params_list=grid_params, fit_params_list=fit_params)
+                    grid_params_list=grid_params, fit_params_list=fit_params,
+                    id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values), ('month_non_encoder', df_val['month_non_encoder'].values)])
     else:
         logger.info(f'Fitting model {name}')
         model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[target],
                     X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[target],
                     X_test=df_test[features], y_test=df_test[target],
+                    y_test_score=df_test['nbsinister-kmeans-5-Class-Dept'],
+                    y_train_score=df_train['nbsinister-kmeans-5-Class-Dept'],
+                    y_val_score=df_val['nbsinister-kmeans-5-Class-Dept'],
                     training_mode=training_mode,
                     optimization=parameter_optimization_method,
                     grid_params=grid_params, fit_params=fit_params)
@@ -437,13 +441,13 @@ def fit(params):
     check_and_create_path(dir_output / name)
     
     save_object(model, name + '.pkl', dir_output / name)
-
+    
     if isinstance(model, OneByID):
-        logger.info(f'Model score {model.score(df_test[features], df_test[model.target_name], df_test[col_id], df_test[weight_col])}')
+        logger.info(f'Model score {model.score(df_test[features], df_test["nbsinister-kmeans-5-Class-Dept"], df_test[col_id], df_test[weight_col])}')
     elif isinstance(model, ModelStacking):
-        logger.info(f'Model score {model.score(df_test, df_test[target])}')
+        logger.info(f'Model score {model.score(df_test, df_test["nbsinister-kmeans-5-Class-Dept"])}')
     else:
-        logger.info(f'Model score {model.score(df_test[features], df_test[model.target_name], df_test[weight_col])}')
+        logger.info(f'Model score {model.score(df_test[features], df_test["nbsinister-kmeans-5-Class-Dept"], df_test[weight_col])}')
 
     if isinstance(model, Model):
         if name.find('features') != -1:
@@ -488,7 +492,8 @@ def train_sklearn_api_model(params):
     required_params = [
         'df_train', 'df_val', 'df_test', 'features', 'target',
         'training_mode', 'dir_output', 'device',
-        'do_grid_search', 'do_bayes_search', 'task_type', 'loss', 'model_type', 'name', 'model_params', 'grid_params'
+        'do_grid_search', 'do_bayes_search', 'task_type', 'loss', 'model_type', 'name', 'model_params', 'grid_params',
+        'over_sampling'
     ]
 
     # Ensure all required parameters are present
@@ -507,7 +512,8 @@ def train_sklearn_api_model(params):
     do_bayes_search = params['do_bayes_search']
     task_type = params['task_type']
     loss = params['loss']
-    non_fire_number = params['non_fire_number']
+    under_sampling = params['under_sampling']
+    over_sampling = params['over_sampling']
     model_type = params['model_type']
     name = params['name']
     model_params = params['model_params']
@@ -521,7 +527,7 @@ def train_sklearn_api_model(params):
     relevant_features = features
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                                         relevant_features, name, model_type, task_type, 
-                                        model_params, loss, non_fire_number, post_process)
+                                        model_params, loss, under_sampling, over_sampling, post_process)
     
     fit_params_dict = {
         'df_train': df_train,
@@ -590,7 +596,7 @@ def train_xgboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, non_fire_number, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, weight_type, target, task_type, loss = model.split('_')
     objective = loss
 
     model_params = {
@@ -607,9 +613,14 @@ def train_xgboost(params, train=True):
         'n_estimators': 10000,
         'random_state': 42,
         'tree_method': 'hist',
-        'device':"cpu"
+        'early_stopping_rounds' : 15,
+        'device':"cuda" if torch.cuda.is_available() else "cpu"
     }
 
+    if loss in ['softprob-dual', 'softmax-dual']:
+        model_params['y_train_origin'] = df_train['nbsinister-kmeans-5-Class-Dept'].values
+        model_params['y_val_origin'] = df_val['nbsinister-kmeans-5-Class-Dept'].values
+    
     grid_params = {'max_depth': [6],
                     'min_child_weight': [1.0,1.5,3.5,5,10],
                     'reg_lambda' : [1.0,2.0,3.0,5.0],
@@ -628,7 +639,8 @@ def train_xgboost(params, train=True):
         'target': target,
         'training_mode': training_mode,
         'dir_output': dir_output,
-        'non_fire_number' : non_fire_number,
+        'under_sampling' : under_sampling,
+        'over_sampling' : over_sampling,
         'device': device,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
@@ -659,7 +671,7 @@ def train_catboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
     
-    name, non_fire_number, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, weight_type, target, task_type, loss = model.split('_')
     
     # Map loss to CatBoost objectives
     catboost_objective = {
@@ -668,21 +680,26 @@ def train_catboost(params, train=True):
         'mae': 'MAE',
         'crossentropy': 'CrossEntropy',
         'softmax': 'MultiClass',
+        'softmax-dual' : 'MultiClass'
     }.get(loss, 'RMSE')  # Default to RMSE if not specified
 
     model_params = {
-        'loss_function': catboost_objective,
+        'loss_function': loss,
         'learning_rate': 0.001,
         'depth': 6,
         'l2_leaf_reg': 3.0,
         'iterations': 10000,
         'random_seed': 42,
-        'task_type': 'GPU' if device == 'gpu' else 'CPU',
+        'task_type': 'CPU',
         'bootstrap_type': 'Bayesian',
         'od_type': 'Iter',
-        'od_wait': 100,
+        'od_wait': 15,
         'eval_metric': catboost_objective,
     }
+
+    if loss in ['softprob-dual', 'softmax-dual']:
+        model_params['y_train_origin'] = df_train['nbsinister-kmeans-5-Class-Dept'].values
+        model_params['y_val_origin'] = df_val['nbsinister-kmeans-5-Class-Dept'].values
 
     grid_params = {
         'depth': [6, 8, 10],
@@ -702,7 +719,8 @@ def train_catboost(params, train=True):
         'target': target,
         'training_mode': training_mode,
         'dir_output': dir_output,
-        'non_fire_number': non_fire_number,
+        'under_sampling': under_sampling,
+        'over_sampling': over_sampling,
         'device': device,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
@@ -791,10 +809,10 @@ def train_lightgbm(params, train=True):
     
     _, target, task_type, loss = model.split('_')
 
-    if loss == 'rmse':
-        objective = 'regression'
+    if task_type == 'classification':
+        objective = 'multiclass'
     else:
-        objective = 'binary'
+        objective = task_type
 
     max_depth = 6
     name = f'lightgbm_{target}_{task_type}_{loss}'
@@ -1055,24 +1073,23 @@ def train_gam(params, train=True):
     do_bayes_search = params['do_bayes_search']
     model = params['name']
 
-    model_type, target, task_type, loss = model.split('_')
+    name, under_sampling, weight_type, target, task_type, loss = model.split('_')
     
-    if target == 'nbsinister':
+    if task_type == 'regression':
         model_params = {
             'distribution' : 'poisson',
             'link' : 'log'
             }
-    elif target == 'risk':
-        model_params = {'distribution' : 'normal',
-                    'link': 'identity'
-                }
-    elif target == 'binary':
-        model_params = {
+
+    elif task_type == 'classification':
+        """model_params = {
                 'distribution' : 'binomial',
                 'link': 'log'
-                }
+                }"""
     else:
-        ValueError(f'Unknow {target}, select in [risk, nbsinister, binary]')
+        ValueError(f'Unknow {task_type}, select in [regression, classification]')
+
+    features = ['fwi_mean', 'foret_encoder']
 
     grid_params = {'terms' : []}
 
@@ -1092,7 +1109,7 @@ def train_gam(params, train=True):
         'do_bayes_search': do_bayes_search,
         'task_type': task_type,
         'loss': loss,
-        'model_type': model_type,
+        'model_type': name,
         'name': model,
         'model_params': model_params,
         'grid_params': grid_params,
@@ -1111,7 +1128,7 @@ def search_best_model(model_list, config, train_dataset, val_dataset, test_datas
                                     do_bayes_search: bool,
                                     scale : int):
     
-    non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+    under_sampling, weight_type, target, task_type, loss = model[0].split('_')
 
     score_models = []
     
@@ -1133,7 +1150,7 @@ def search_best_model(model_list, config, train_dataset, val_dataset, test_datas
         score_models.append(score_model)
 
     score_models = pd.concat(score_models)
-    score_models['non_fire_number'] = non_fire_number
+    score_models['under_sampling'] = under_sampling
     score_models['weight_type'] = weight_type
     score_models['target'] = target
     score_models['task_type'] = task_type
@@ -1151,15 +1168,15 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     scale : int):
     
     
-    name, non_fire_number, weight_type, final_target, task_type, loss = model[0].split('_')
+    name, under_sampling, over_sampling, weight_type, final_target, task_type, loss = model[0].split('_')
     ###############################################  Feature importance  ###########################################################
-    importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[final_target], features, dir_output, final_target)
-    features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=final_target)
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[final_target], features, dir_output, final_target)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=final_target)
 
-    importance_df['Scale'] = scale
-    save_object(importance_df, f'importance_df_{final_target}_{scale}.pkl', dir_output)
+    #importance_df['Scale'] = scale
+    #save_object(importance_df, f'importance_df_{final_target}_{scale}.pkl', dir_output)
     
-    features = features95
+    #features = features95
 
     if task_type == 'classification':
         train_dataset['class'] = train_dataset[final_target]
@@ -1203,7 +1220,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'col_id' : model[-2]
     }
 
-    name, _, _, _,_ ,_ = model[0].split('_')
+    name, _, _, _, _,_ ,_ = model[0].split('_')
     if name == 'xgboost':
         score = train_xgboost(params)
     elif name == 'lightgbm':
@@ -1238,7 +1255,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                                             do_bayes_search: bool,
                                             scale : int):
     
-    model_name, non_fire_number, weight_type, final_target, task_type, loss = model[0].split('_')
+    model_name, under_sampling, over_sampling, weight_type, final_target, task_type, loss = model[0].split('_')
    
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
@@ -1288,7 +1305,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             'col_id' : None
         }
         print(modelt)
-        model_type, non_fire_number, weight_type, target, task_type, loss = modelt.split('_')
+        model_type, under_sampling, over_sampling, weight_type, target, task_type, loss = modelt.split('_')
         
         if model_type == 'xgboost':
             params = train_xgboost(params_temp, False)
@@ -1306,12 +1323,14 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             params = train_poisson(params_temp, False)
         elif model_type == 'gam':
             params = train_gam(params_temp, False)
+        elif model_type == 'catboost':
+            params = train_catboost(params_temp, False)
         else:
             raise ValueError(f'Unknow model_type {model_type}')
         
         model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                         features, modelt, model_type, task_type, 
-                                        params, loss, non_fire_number=non_fire_number, post_process=None)
+                                        params, loss, under_sampling=under_sampling, over_sampling=over_sampling, post_process=None)
         
         grid_params = get_grid_params(model_type)
         
@@ -1320,8 +1339,11 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         grid_params_list.append(grid_params)
         target_list.append(target)
     
+    if final_target not in target_list:
+        target_list.append(final_target)
+    
     estimator = ModelVoting(models_list, features=features, loss=loss, task_type=task_type, name=f'{model_name}', \
-                            target_name=final_target, dir_log=dir_output / model_name, non_fire_number=non_fire_number, post_process = model[-1])
+                            target_name=final_target, dir_log=dir_output / model_name, under_sampling=under_sampling, over_sampling=over_sampling, post_process = model[-1])
 
     fit_params_dict = {
         'df_train': train_dataset, 
@@ -1354,7 +1376,7 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
                             do_grid_search: bool,
                             do_bayes_search: bool):
 
-    name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+    name, under_sampling, weight_type, target, task_type, loss = model[0].split('_')
 
     if task_type == 'classification' and target != 'binary':
         train_dataset['class'] = train_dataset[target]
@@ -1434,7 +1456,7 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
 
     model1, fit_params1 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                     features, model[0], model_type_1, task_type,
-                                    params, loss, non_fire_number=non_fire_number, post_process=None)
+                                    params, loss, under_sampling=under_sampling, post_process=None)
     
     ##########################################  Multi classification ###########################
 
@@ -1463,13 +1485,13 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
 
     model2, fit_params2 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                     features, model[0], model_type_2, task_type, 
-                                    params, loss, non_fire_number='full', post_process=None)
+                                    params, loss, under_sampling='full', post_process=None)
     
     models_list = [model1, model2]
     fit_params_list = [fit_params1, fit_params2]
     grid_params_list = [grid_params1, grid_params2]
 
-    estimator = DualModel(models_list, features=features, loss=loss, name=f'{model}', target_name=target, post_process=model[-1], task_type=task_type, non_fire_number=non_fire_number)
+    estimator = DualModel(models_list, features=features, loss=loss, name=f'{model}', target_name=target, post_process=model[-1], task_type=task_type, under_sampling=under_sampling)
 
     fit_params_dict = {
         'df_train': train_dataset,
@@ -1505,7 +1527,7 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
                                             do_bayes_search: bool,
                                             scale : int):
     
-    model_name, non_fire_number, weight_type, target, task_type, loss = model[0].split('_')
+    model_name, under_sampling, weight_type, target, task_type, loss = model[0].split('_')
    
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
@@ -1555,7 +1577,7 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
             'col_id' : None
         }
         print(models_type)
-        model_type, non_fire_number, weight_type, target, task_type, loss = modelt.split('_')
+        model_type, under_sampling, weight_type, target, task_type, loss = modelt.split('_')
         
         if model_type == 'xgboost':
             params = train_xgboost(params_temp, False)
@@ -1578,7 +1600,7 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
         
         model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                         features, modelt, model_type, task_type, 
-                                        params, loss, non_fire_number=non_fire_number, post_process=None)
+                                        params, loss, under_sampling=under_sampling, post_process=None)
         
         grid_params = get_grid_params(model_type)
         
@@ -1587,7 +1609,7 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
         grid_params_list.append(grid_params)
         target_list.append(target)
 
-    estimator = ModelStacking(models_list, features=features, task_type=task_type, loss=loss, name=f'{model_name}', target_name=target, dir_log=dir_output / model_name, non_fire_number=non_fire_number, post_process = model[-1])
+    estimator = ModelStacking(models_list, features=features, task_type=task_type, loss=loss, name=f'{model_name}', target_name=target, dir_log=dir_output / model_name, under_sampling=under_sampling, post_process = model[-1])
 
     fit_params_dict = {
         'df_train': train_dataset, 
@@ -2206,50 +2228,50 @@ def define_trees_model(training_mode, dataset_name, scale, graph_construct, post
             if scale == 4:
                 if is_firemen:
                     models = [
-                        #('xgboost_percentage-0.25-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        #('xgboost_percentage-0.25-0.0_one_union_classification_softmax', None, None, None),
                         ('xgboost_percentage-0.40-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
             elif scale == 5:
                 if is_firemen:
                     models = [
-                    ('xgboost_percentage-0.60-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                    ('xgboost_percentage-0.60-0.0_one_union_classification_softmax', None, None, None),
                     ('xgboost_percentage-0.45-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
             elif scale == 6:
                 if is_firemen:
                     models = [
-                    ('xgboost_percentage-0.70-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                    ('xgboost_percentage-0.70-0.0_one_union_classification_softmax', None, None, None),
                     ('xgboost_percentage-0.6-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
                 ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
             elif scale == 7:
                 if is_firemen:
                     models = [
-                    ('xgboost_percentage-0.40-0.0_one_nunion_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                    ('xgboost_percentage-0.40-0.0_one_nunion_classification_softmax', None, None, None),
                     ('xgboost_percentage-0.9-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
                 ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.15-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.15-0.0_one_union_classification_softmax', None, None, None),
                     ]
         elif scale == 'departement':
             if is_firemen:
                 models = [
-                    ('xgboost_full_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                    ('xgboost_full_one_union_classification_softmax', None, None, None),
                     ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
                 ]
             else:
@@ -2258,56 +2280,61 @@ def define_trees_model(training_mode, dataset_name, scale, graph_construct, post
             if scale == 4:
                 if is_firemen:
                     models = [
-                        ('xgboost_percentage-0.25_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.25_one_union_classification_softmax', None, None, None),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.15-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.15-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
             elif scale == 5:
                 if is_firemen:
                     models = [
-                        ('xgboost_percentage-0.30_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.30_one_union_classification_softmax', None, None, None),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
             elif scale == 6:
                 if is_firemen:
                     models = [
-                        ('xgboost_percentage-0.45-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.45-0.0_one_union_classification_softmax', None, None, None),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.20-0.0_one_union_classification_softmax', None, None, None),
 
                     ]
             elif scale == 7:
                 if is_firemen:
                     models = [
-                        ('xgboost_percentage-0.45-0.0_one_union_classification_softmax',  None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.45-0.0_one_union_classification_softmax',  None, None, None),
                     ]
                 else:
                     models = [
-                        ('xgboost_percentage-0.30-0.0_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+                        ('xgboost_percentage-0.30-0.0_one_union_classification_softmax', None, None, None),
                     ]
 
     elif training_mode == 'binary_search':
         models = [
-            #('xgboost_search_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-            ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-            ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+            #('catboost_search_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
+            
+            #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
+            ('xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            #('gam_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, None),
         ]
 
     elif training_mode == 'features_search':
         if scale == 4:
 
             models = [
-                    ('xgboost_percentage-0.30_one_union_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-                    ('xgboost_percentage-0.8_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, post_process_model_dico['ScalerClassRisk_laplace+mean_Specialized_None_KMeansRisk_5_nbsinister']),
+                    ('xgboost_percentage-0.30_one_union_classification_softmax', None, None, None),
+                    ('xgboost_percentage-0.8_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax', None, None, None),
                 ]
 
         elif scale == 5:
@@ -2379,9 +2406,117 @@ def create_model_config(model_name, undersampling, weight, clustering, conv_type
     m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     #m = f'filter_full_one_union_classification_softmax'
 
-    return [(m, [m1, m2, m3, m4], None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister'])]
+    return [(m, [m1, m2, m3, m4], None, None, None)]
 """
+
 def define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
+
+    res = []
+
+    ##############################################
+
+    models = []  # Liste pour contenir tous les modèles
+
+    # Configurations de undersampling
+    m2_undersampling = 'search_smote'
+    m3_undersampling = 'search_smote'
+    m4_undersampling = 'search_smote'
+
+    # Modèles m2
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m3
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m4 avec différentes post-processings
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
+        for kernel in ['1', '3', '5', 'Specialized']:
+            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            models.append(model)
+
+    mlast = f'xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    models.append(mlast)
+
+    # Nom du modèle principal
+    m = f'filter_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    
+    res.append((m, models, None, None, None))
+
+    ##############################################
+
+    models = []  # Liste pour contenir tous les modèles
+    model_type = 'catboost'
+
+    # Configurations de undersampling
+    m2_undersampling = 'search_smote'
+    m3_undersampling = 'search_smote'
+    m4_undersampling = 'search_smote'
+
+    # Modèles m2
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config(model_type, m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m3
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config(model_type, m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m4 avec différentes post-processings
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
+        for kernel in ['1', '3', '5', 'Specialized']:
+            model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            models.append(model)
+
+    mlast = f'{model_type}_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    models.append(mlast)
+    
+    # Nom du modèle principal
+    m = f'filter_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+
+    res.append((m, models, None, None, None))
+
+    ##############################################
+
+    """models = []  # Liste pour contenir tous les modèles
+    model_type = 'lightgbm'
+
+    # Configurations de undersampling
+    m2_undersampling = 'search'
+    m3_undersampling = 'search'
+    m4_undersampling = 'search'
+
+    # Modèles m2
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config(model_type, m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m3
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config(model_type, m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m4 avec différentes post-processings
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
+        for kernel in ['1', '3', '5', 'Specialized']:
+            model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            models.append(model)
+
+    mlast = f'{model_type}_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    models.append(mlast)
+    
+    # Nom du modèle principal
+    m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+
+    res.append((m, models, None, None, None))"""
+    
+    return res
+
+def define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
     ##############################################
     models = []  # Liste pour contenir tous les modèles
 
@@ -2391,35 +2526,31 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     m3_undersampling = 'search'
     m4_undersampling = 'search'
 
-    # Modèles m1
-    for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m1_undersampling, 'one', 'kmeans', 'laplace+mean', '5', nb_clusters, 'softmax', 'classification')
-        models.append(model)
-
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'softmax', 'classification')
+        model = create_model_config('DilatedCNN', m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m3
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'softmax', 'classification')
+        model = create_model_config('DilatedCNN', m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'laplace', 'mean']:
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
-            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'softmax', 'classification')
+            model = create_model_config('DilatedCNN', m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
             models.append(model)
 
-    mlast = f'xgboost_search_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
     models.append(mlast)
     
     # Nom du modèle principal
-    m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
 
     # Retourner la structure finale
-    return [(m, models, None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister'])]
+    return [(m, models, 5)]
+
 
 def define_staking_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
     ##############################################
@@ -2437,4 +2568,4 @@ def define_staking_trees_model(training_mode, dataset_name, scale, graph_constru
 
     m = f'staking_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
 
-    return [(m, [m1, m2, m3, m4], None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister'])]
+    return [(m, [m1, m2, m3, m4], None, None, None)]

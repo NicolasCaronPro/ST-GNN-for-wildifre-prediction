@@ -201,7 +201,8 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         code = int2strMaj[int(dept.split('-')[1])]
 
         if not read:
-            print(regions[regions['departement'] == dept], dept)
+            #print(regions[regions['departement'] == dept], dept)
+            print(dept)
             sat0, _, _ = rasterization(regions[regions['departement'] == dept], n_pixel_y, n_pixel_x, 'scale0', dir_output, dept+'_scale0')
             uniques_ids = np.unique(sat0[~np.isnan(sat0)])
             additionnal_pixel_x = []
@@ -232,7 +233,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
                 save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
                 continue
         
-        if dataset_name == 'bdiff' or dataset_name == 'vigicrues' or dataset_name == 'georisques':
+        if dataset_name == 'bdiff' or dataset_name == 'vigicrues' or dataset_name == 'georisques' or dataset_name == 'bdiff_small':
             fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv', dtype={'Département': str})
             code_dept_str = name2int[dept]
             if code_dept_str < 10:
@@ -261,8 +262,8 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
             fp['hours_difference'] = fp['hours_difference'].fillna(mean_hours)
 
         fp = fp[fp['date'] > sdate]
-        print(fp.hours_difference.mean(), fp.hours_difference.max(), fp.hours_difference.min())
-
+        #print(fp.hours_difference.mean(), fp.hours_difference.max(), fp.hours_difference.min())
+        print(len(fp))
         if len(fp) == 0:
             print('Return a full zero image')
             inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
@@ -274,20 +275,24 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         sp = fp[(fp['date'] >= sdate) & (fp['date'] < edate)]
         sp['departement'] = dept
 
+        #print(sp.h3.unique())
         sp['scale0'] = sp['h3'].replace(dico)
-        
+        #print(sp.scale0.unique())
+
         sat0 = sat0[0]
         if not read:
             inputDep = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
-                                                             creneaux, sat0, sinister, sinister_encoding, n_pixel_y, n_pixel_x, dir_output, dept)
-            inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0
+                                                             creneaux, sat0, sinister, sinister_encoding, n_pixel_y, n_pixel_x, dir_output, dept, dir_output / 'bin' / resolution / 'log.txt')
+            
+    
+            inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
             save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
-            inputDep_time = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
-                                                             creneaux, sat0, sinister, 'hours_difference', n_pixel_y, n_pixel_x, dir_output, dept)
+            #inputDep_time = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
+            #                                                 creneaux, sat0, sinister, 'hours_difference', n_pixel_y, n_pixel_x, dir_output, dept, dir_output / 'time_intervention' / resolution / 'log.txt')
             
-            inputDep_time[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
-            save_object(inputDep_time, dept+'timeScale0.pkl', dir_output / 'time_intervention' / resolution)
+            #inputDep_time[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
+            #save_object(inputDep_time, dept+'timeScale0.pkl', dir_output / 'time_intervention' / resolution)
         else:
             inputDep = read_object(dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
@@ -365,6 +370,9 @@ if __name__ == "__main__":
     #regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions = []
 
+    #departements = ['departement-13-bouches-du-rhone']
+    #departements = ['departement-01-ain']
+
     for i, dept in enumerate(departements):
         if not (root / dept / 'data' / 'spatial/hexagones.geojson').is_file():
             departements.pop(departements.index(dept))
@@ -374,7 +382,8 @@ if __name__ == "__main__":
         h3['longitude'] = h3['geometry'].apply(lambda x : float(x.centroid.x))
         h3['departement'] = dept
         regions.append(h3)
-
+    
+    #regions = gpd.read_file(root / 'france' / 'data' / 'geo/hexagones_france.gpkg')
     regions = pd.concat(regions).reset_index(drop=True)
     regions['scale0'] = regions.index
     regions.index = regions['hex_id']
