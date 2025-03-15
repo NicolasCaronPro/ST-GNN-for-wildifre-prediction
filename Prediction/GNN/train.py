@@ -5,6 +5,7 @@ from torch import Value
 from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
+from dlordinal.losses import *
 
 ############################################## Some tools ###############################################
 
@@ -167,6 +168,7 @@ def get_model_params(model_type):
         raise ValueError(f"Unsupported model type: {model_type}")
 
 def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
+                             nbfeatures,
                       features, name, model_type, task_type, 
                       params, loss, under_sampling, over_sampling, post_process):
     
@@ -233,11 +235,21 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
 
     elif model_type ==  'linear':
         fit_params = {}
+    
+    elif model_type ==  'lg':
+        fit_params = {
+            'sample_weight': df_train[weight_col] if weight_col in df_train.columns else None
+        }
 
     else:
         raise ValueError(f"Unsupported model model_type: {model_type}")
 
-    model = get_model(model_type=model_type, name=name, device=device, task_type=task_type, params=params, loss=loss, under_sampling=under_sampling, over_sampling=over_sampling, target_name=target, post_process=post_process)
+    model = get_model(model_type=model_type, nbfeatures=nbfeatures,
+                      name=name, device=device, task_type=task_type,
+                      params=params, loss=loss,
+                      under_sampling=under_sampling,
+                      over_sampling=over_sampling,
+                      target_name=target, post_process=post_process)
     return model, fit_params
 
 def explore_features(model,
@@ -493,7 +505,8 @@ def train_sklearn_api_model(params):
         'df_train', 'df_val', 'df_test', 'features', 'target',
         'training_mode', 'dir_output', 'device',
         'do_grid_search', 'do_bayes_search', 'task_type', 'loss', 'model_type', 'name', 'model_params', 'grid_params',
-        'over_sampling'
+        'over_sampling',
+        'nbfeatures'
     ]
 
     # Ensure all required parameters are present
@@ -519,6 +532,7 @@ def train_sklearn_api_model(params):
     model_params = params['model_params']
     grid_params = params['grid_params']
     post_process = params['post_process']
+    nbfeatures = params['nbfeatures']
 
     df_train, df_val, df_test = create_weight_binary(df_train, df_val, df_test, use_weight=True)
 
@@ -526,6 +540,7 @@ def train_sklearn_api_model(params):
 
     relevant_features = features
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
+                                                 nbfeatures,
                                         relevant_features, name, model_type, task_type, 
                                         model_params, loss, under_sampling, over_sampling, post_process)
     
@@ -596,7 +611,7 @@ def train_xgboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
     objective = loss
 
     model_params = {
@@ -608,6 +623,7 @@ def train_xgboost(params, train=True):
         'subsample': 0.8,
         'colsample_bytree': 0.8,
         'colsample_bylevel': 0.8,
+        'nbfeatures' : nbfeatures,
         'reg_lambda': 1.0,
         'reg_alpha': 0.9,
         'n_estimators': 10000,
@@ -617,7 +633,7 @@ def train_xgboost(params, train=True):
         'device':"cuda" if torch.cuda.is_available() else "cpu"
     }
 
-    if loss in ['softprob-dual', 'softmax-dual']:
+    if 'dual' in loss:
         model_params['y_train_origin'] = df_train['nbsinister-kmeans-5-Class-Dept'].values
         model_params['y_val_origin'] = df_val['nbsinister-kmeans-5-Class-Dept'].values
     
@@ -645,6 +661,7 @@ def train_xgboost(params, train=True):
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'task_type': task_type,
+        'nbfeatures' : nbfeatures,
         'loss': loss,
         'model_type': 'xgboost',
         'name': model,
@@ -653,6 +670,120 @@ def train_xgboost(params, train=True):
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
         'col_id' : params['col_id']
+    })
+
+def train_logistic_regression(params, train=True):
+    """
+    Train Logistic Regression model
+    """
+    df_train = params['df_train']
+    df_val = params['df_val']
+    df_test = params['df_test']
+    features = params['features']
+    training_mode = params['training_mode']
+    dir_output = params['dir_output']
+    device = params['device']
+    do_grid_search = params['do_grid_search']
+    do_bayes_search = params['do_bayes_search']
+    model = params['name']
+    post_process = params['post_process']
+
+    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+
+    model_params = {
+        'penalty': loss if loss != 'None' else None,
+        'C': 1.0,
+        'solver': 'lbfgs',
+        'max_iter': 1000,
+        'class_weight': 'balanced' if weight_type == 'balanced' else None,
+        'random_state': 42
+    }
+
+    grid_params = {
+        'penalty': ['l2', 'l1', 'elasticnet', None],
+        'C': [0.01, 0.1, 1.0, 10.0, 100.0],
+        'solver': ['lbfgs', 'liblinear'],
+        'max_iter': [500, 1000, 2000]
+    }
+
+    if not train:
+        return model_params
+
+    train_sklearn_api_model({
+        'df_train': df_train,
+        'df_test': df_test,
+        'df_val': df_val,
+        'features': features,
+        'target': target,
+        'training_mode': training_mode,
+        'dir_output': dir_output,
+        'under_sampling': under_sampling,
+        'over_sampling': over_sampling,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'task_type': task_type,
+        'nbfeatures': nbfeatures,
+        'loss': loss,
+        'model_type': 'logistic_regression',
+        'name': model,
+        'post_process': post_process,
+        'model_params': model_params,
+        'grid_params': grid_params,
+        'type_aggregation': params['type_aggregation'],
+        'col_id': params['col_id']
+    })
+
+def train_ordered(params, train=True):
+    """
+    Train Ordered Logistic Regression model using statsmodels
+    """
+    df_train = params['df_train']
+    df_val = params['df_val']
+    df_test = params['df_test']
+    features = params['features']
+    training_mode = params['training_mode']
+    dir_output = params['dir_output']
+    device = params['device']
+    do_grid_search = params['do_grid_search']
+    do_bayes_search = params['do_bayes_search']
+    model = params['name']
+    post_process = params['post_process']
+
+    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+
+    model_params = {
+        'distr': loss
+    }
+
+    grid_params = {}
+
+    if not train:
+        return model_params
+
+    train_sklearn_api_model({
+        'df_train': df_train,
+        'df_test': df_test,
+        'df_val': df_val,
+        'features': features,
+        'target': target,
+        'training_mode': training_mode,
+        'dir_output': dir_output,
+        'under_sampling': under_sampling,
+        'over_sampling': over_sampling,
+        'device': device,
+        'do_grid_search': do_grid_search,
+        'do_bayes_search': do_bayes_search,
+        'task_type': task_type,
+        'nbfeatures': nbfeatures,
+        'loss': loss,
+        'model_type': 'ordered_logistic',
+        'name': model,
+        'post_process': post_process,
+        'model_params': model_params,
+        'grid_params': grid_params,
+        'type_aggregation': params['type_aggregation'],
+        'col_id': params['col_id']
     })
 
 def train_catboost(params, train=True):
@@ -671,8 +802,8 @@ def train_catboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
     
-    name, under_sampling, over_sampling, weight_type, target, task_type, loss = model.split('_')
-    
+    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+        
     # Map loss to CatBoost objectives
     catboost_objective = {
         'logloss': 'Logloss',
@@ -724,6 +855,7 @@ def train_catboost(params, train=True):
         'device': device,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
+        'nbfeatures' : nbfeatures,
         'task_type': task_type,
         'loss': loss,
         'model_type': 'catboost',
@@ -750,21 +882,22 @@ def train_ngboost(params, train=True):
     do_bayes_search = params['do_bayes_search']
     model = params['name']
     
-    _, target, task_type, loss = model.split('_')
-
-    if target == 'crps':
-        objective = 'normal'
-    else:
-        loss = 'log_loss'
-        objective = 'bernoulli'
+    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     name = f'ngboost_{target}_{task_type}_{loss}'
     model_params = {
-        'learning_rate': 0.01,
+        'Dist': loss,
+        'learning_rate': 0.001,
         'n_estimators': 10000,
         'minibatch_frac': 0.8,
         'random_state': 42,
-        'Base': None,
+        'col_sample':1.0,
+        'verbose':False,
+        'verbose_eval':100,
+        'tol':1e-4,
+        'random_state':42,
+        'validation_fraction':0.1,
+        'early_stopping_rounds':15,
     }
     grid_params = {'n_estimators': [100, 500, 1000, 5000, 10000]}
     
@@ -1168,7 +1301,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     scale : int):
     
     
-    name, under_sampling, over_sampling, weight_type, final_target, task_type, loss = model[0].split('_')
+    name, under_sampling, over_sampling, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
     ###############################################  Feature importance  ###########################################################
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[final_target], features, dir_output, final_target)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=final_target)
@@ -1178,7 +1311,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     
     #features = features95
 
-    if task_type == 'classification':
+    if task_type == 'classification' or task_type == 'ordinal-classification':
         train_dataset['class'] = train_dataset[final_target]
     elif task_type == 'binary':
         train_dataset['binary'] = train_dataset[final_target]
@@ -1220,7 +1353,6 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'col_id' : model[-2]
     }
 
-    name, _, _, _, _,_ ,_ = model[0].split('_')
     if name == 'xgboost':
         score = train_xgboost(params)
     elif name == 'lightgbm':
@@ -1239,6 +1371,10 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         score = train_gam(params)
     elif name == 'catboost':
         score = train_catboost(params)
+    elif name == 'ordered':
+        score = train_ordered(params)
+    elif name == 'lg':
+        score = train_logistic_regression(params)
 
     return score
 
@@ -1255,7 +1391,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                                             do_bayes_search: bool,
                                             scale : int):
     
-    model_name, under_sampling, over_sampling, weight_type, final_target, task_type, loss = model[0].split('_')
+    model_name, under_sampling, over_sampling, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
    
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
@@ -1299,13 +1435,13 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             'device': device,
             'do_grid_search': do_grid_search,
             'do_bayes_search': do_bayes_search,
+            'nbfeatures' : nbfeatures,
             'name': modelt,
             'post_process' : None,
             'type_aggregation' : None,
             'col_id' : None
         }
-        print(modelt)
-        model_type, under_sampling, over_sampling, weight_type, target, task_type, loss = modelt.split('_')
+        model_type, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
         
         if model_type == 'xgboost':
             params = train_xgboost(params_temp, False)
@@ -1328,7 +1464,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         else:
             raise ValueError(f'Unknow model_type {model_type}')
         
-        model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
+        model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight', nbfeatures,
                                         features, modelt, model_type, task_type, 
                                         params, loss, under_sampling=under_sampling, over_sampling=over_sampling, post_process=None)
         
@@ -1364,7 +1500,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
     }
 
     fit(fit_params_dict)
-
+    
 ############################################################# DUAL #########################################################################
 def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_dataset,
                                     model, graph_method,
@@ -2116,22 +2252,28 @@ def train(params):
     plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, dir_output)
     
 # Fonction pour sélectionner la fonction de perte via son nom
-def get_loss_function(loss_name):
+def get_loss_function(loss_name, **loss_params):
     # Dictionnaire pour associer le nom de la fonction de perte à sa classe correspondante
     loss_dict = {
-        "poisson": PoissonLoss,
-        "rmsle": RMSLELoss,
-        "rmse": RMSELoss,
-        "mse": MSELoss,
-        "huber": HuberLoss,
-        "logcosh": LogCoshLoss,
-        "tukeybiweight": TukeyBiweightLoss,
-        "exponential": ExponentialLoss,
-        "weightedcrossentropy": WeightedCrossEntropyLoss
+        "poisson": PoissonLoss(),
+        "rmsle": RMSLELoss(),
+        "rmse": RMSELoss(),
+        "mse": MSELoss(),
+        "huber": HuberLoss(),
+        "logcosh": LogCoshLoss(),
+        "tukeybiweight": TukeyBiweightLoss(),
+        "exponential": ExponentialLoss(),
+        'ordinal-dice' : OrdinalDiceLoss(),
+        'dice' : DiceLoss2(),
+        "weightedcrossentropy": WeightedCrossEntropyLoss(**loss_params),
+        "weightedcrossentropy-2": WeightedCrossEntropyLoss(**loss_params),
+        'kappa' : WKLoss(**loss_params),
+        'cdw' : CDWCELoss(**loss_params),
+        'mcewk' : MCEAndWKLoss(**loss_params),
     }
     loss_name = loss_name.lower()
     if loss_name in loss_dict:
-        return loss_dict[loss_name]()
+        return loss_dict[loss_name]
     else:
         raise ValueError(f"Loss function '{loss_name}' not found in loss_dict.")
 
@@ -2413,14 +2555,47 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
 
     res = []
 
+    ################# ICML #############################
+
+    models = []  # Liste pour contenir tous les modèles
+
+    # Configurations de undersampling
+    m2_undersampling = 'search_full_all'
+    m3_undersampling = 'search_full_all'
+    m4_undersampling = 'search_full_all'
+
+    # Modèles m2
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m3
+    for kernel in ['1', '3', '5', 'Specialized']:
+        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        models.append(model)
+
+    # Modèles m4 avec différentes post-processings
+    for aggregation in ['median', 'cubic', 'mean', 'laplace', 'laplace+mean']:
+        for kernel in ['1', '3', '5', 'Specialized']:
+            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            models.append(model)
+
+    mlast = f'xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    models.append(mlast)
+
+    # Nom du modèle principal
+    m = f'filterICML-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    
+    res.append((m, models, None, None, None))
+
     ##############################################
 
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m2_undersampling = 'search_smote'
-    m3_undersampling = 'search_smote'
-    m4_undersampling = 'search_smote'
+    m2_undersampling = 'search_full_all'
+    m3_undersampling = 'search_full_all'
+    m4_undersampling = 'search_full_all'
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
@@ -2438,13 +2613,13 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
             model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
 
-    mlast = f'xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filter_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2452,9 +2627,9 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     model_type = 'catboost'
 
     # Configurations de undersampling
-    m2_undersampling = 'search_smote'
-    m3_undersampling = 'search_smote'
-    m4_undersampling = 'search_smote'
+    m2_undersampling = 'search_full_all'
+    m3_undersampling = 'search_full_all'
+    m4_undersampling = 'search_full_all'
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
@@ -2472,13 +2647,13 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
             model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
 
-    mlast = f'{model_type}_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'{model_type}_search_full_one_all_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     models.append(mlast)
     
     # Nom du modèle principal
-    m = f'filter_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
 
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 

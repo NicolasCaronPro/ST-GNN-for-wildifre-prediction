@@ -58,7 +58,7 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
-QUICK = True
+QUICK = False
 
 # Input config
 dataset_name = args.dataset
@@ -144,7 +144,7 @@ if not QUICK:
 
     if MLFLOW:
         exp_name = f"{dataset_name}_train"
-        experiments = client.search_experiments()
+        experiments = client.search_smote_experiments()
 
         if exp_name not in list(map(lambda x: x.name, experiments)):
             tags = {
@@ -220,7 +220,7 @@ else:
     train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
     val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
     test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
-    
+
     #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
     #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
     test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
@@ -233,28 +233,27 @@ else:
 prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 prefix_config = deepcopy(prefix)
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+print(name)
 
 ###################### Define models to train ######################
 
 if name_exp.find('voting') != -1: 
     voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
-    voting_models = []
     models = [
-            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax-dual', None, None, None),
-            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
-            
-            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax-dual', None, None, None),
-            
-            #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
-            #('catboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-            #('catboost_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-
-            ('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
-            ('xgboost_full_full_one_nbsinister-kmeans-5-Class-Dept-cubic-Specialized_classification_softmax', None, None, None),
-            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
-            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-            #('xgboost_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
     ]
+    if dataset_name == 'bdiff':
+        voting_models = []
+        models = [
+                #('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet', None, None, None),
+                ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal', None, None, None),
+           
+                #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+                #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+                #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
+        ]
     staking_models = []
 
 elif name_exp.find('stacking') != -1:
@@ -264,18 +263,21 @@ elif name_exp.find('stacking') != -1:
 
 elif name_exp.find('exp') != -1:
     staking_models = []
-    models = [('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-            ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-            ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-            ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
-    ]
     voting_models = []
-
+    models = [
+            ('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+           #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+           #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+           #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+           #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax-dual', None, None, None),
+        ]
 else:
     models = define_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     voting_models = []
     staking_models = []
-
 
 dual_models = [
                #('xgboost_binary_one_nbsinister-max-0-k means-5-Class-Dept_classification_softmax', 'nbsinister-max-0-kmeans-5-Class-Dept', None, None, post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
@@ -289,8 +291,8 @@ gam_models = [
 ]
 
 one_by_id_model = [
-       #('xgboost_full_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'unique', 'id', post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
-       #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'unique', 'id', post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister'])
+       #('xgboost_full_all_one_nbsinister-max-0-kmeans-5-Class-Dept_classification_softmax', 'unique', 'id', post_process_model_dico['ScalerClassRisk_None_None_KMeansRisk_5_nbsinister']),
+       #('xgboost_full_all_one_nbsinister-kmeans-5-Class-Dept-both_classification_softmax', 'unique', 'id', post_process_model_dico['ScalerClassRisk_both_None_KMeansRisk_5_nbsinister'])
 ]
 
 federate_model_by_id_model = []
@@ -459,15 +461,15 @@ if doTest:
                     ('xgboost_percentage-0.15-0.0_one_union_classification_softmax'),
                     ('xgboost_percentage-0.40-1.0_one_union_classification_softmax'),
                     #('xgboost_percentage-0.40_one_union_classification_softmax'),
-                    #('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    #('xgboost_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
                     ('xgboost_percentage-0.90-1.0_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
                 ]
         elif scale == 'departement':
                 models = [
-                    ('xgboost_full_one_union_classification_softmax'),                    
-                    ('xgboost_full_one_union_classification_softmax'),                    
-                    ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
-                    ('xgboost_full_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    ('xgboost_full_all_one_union_classification_softmax'),                    
+                    ('xgboost_full_all_one_union_classification_softmax'),                    
+                    ('xgboost_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+                    ('xgboost_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
                 ]
         else:
             if scale == 4:
@@ -491,38 +493,59 @@ if doTest:
                 ]
     else:"""
     models = [
-        #('xgboost_search_one_union_classification_weighted'),
-        #('filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('xgboost_search_smote_all_one_union_classification_weighted'),
+        #('filter_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('filter-catboost-soft-departement-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-catboost-soft-graphid-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-departement-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-graphid-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        ('catboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        #('filter-catboost-soft-None-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-catboost-hard-None-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-catboost-hard-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet'),
+        ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal'),
         
-        #('filter-catboost-soft-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-catboost-soft-weight-5_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-catboost-soft-weight-1_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-hard-None-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-hard-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        
+        #('filter-catboost-soft-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-weight-5_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-catboost-soft-weight-1_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('filter-xgboost-soft-weight-all_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-5_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-1_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filterICML-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),
-        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax-dual'),
+        ('filter-xgboost-soft-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-hard-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-hard-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        ('xgboost_search_smote_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
-        #('catboost_full_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax'),
+        ('filter-xgboost-soft-weight-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-weight-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-weight-10_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-weight-15_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-weight-20_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
-        #('staking_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-departement-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-graphid-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
-        #('xgboost_search_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        ('filter-xgboost-soft-departement-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-graphid-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        ('filter-xgboost-soft-departement-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('filter-xgboost-soft-graphid-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),
+        #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax'),
+
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        #('staking_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
+        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
     ]
         
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -561,7 +584,7 @@ if doTest:
             if two:
                 dn += '2'
             exp_name = f"{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
-            experiments = client.search_experiments()
+            experiments = client.search_smote_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
 
@@ -688,13 +711,15 @@ if doTest:
 
     if dataset_name != 'bdiff':
         exit(1)
+
     aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
     #aggregated_prediction_dept = pd.concat(aggregated_prediction_dept).reset_index(drop=True)
 
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
+    fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
 
     for name in models:
-        model_name, v1, v2, target_name, v3, v4 = name.split('_')
+        model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
         band = 'prediction'
         if target_name == 'binary':
             vmax_band = 1
@@ -724,7 +749,7 @@ if doTest:
 
         ####################### Prediction #####################
         #check_and_create_path(dir_output / name)
-        susectibility_map_france_daily_geojson(aggregated_prediction_model, region_france, graphScale, np.unique(dates).astype(int), 'prediction', f'{scale}_france',
+        susectibility_map_france_daily_geojson(aggregated_prediction_model, region_france, graphScale, np.unique(dates).astype(int), f'prediction_{target_name}', f'{scale}_france',
                                     dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
         
         train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()

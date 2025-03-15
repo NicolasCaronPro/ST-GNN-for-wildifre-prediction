@@ -26,7 +26,6 @@ if is_pc:
     from regex import D
     import scipy.interpolate
     import scipy.stats
-    import sys
     import torch
     import warnings
     from array_fet import *
@@ -35,9 +34,6 @@ if is_pc:
     from copy import copy, deepcopy
     from geocube.api.core import make_geocube
     from geocube.rasterize import rasterize_points_griddata
-    from lightgbm import LGBMClassifier, LGBMRegressor
-    from lifelines.utils import concordance_index
-    from ngboost import NGBClassifier, NGBRegressor
     #from osgeo import gdal, ogr
     from pathlib import Path
     from scipy import ndimage as ndi
@@ -46,22 +42,12 @@ if is_pc:
     from scipy.stats import kendalltau, pearsonr, spearmanr, rankdata
     from skimage import img_as_float
     from skimage import measure, segmentation, morphology
-    from skimage.feature import peak_local_max
-    from skimage.segmentation import watershed
     from skimage import transform
-    from sklearn.cluster import SpectralClustering
-    from sklearn.decomposition import PCA
-    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
         mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
-    from sklearn.svm import SVR
-    from tqdm import tqdm
-    from torch import optim
-    from xgboost import XGBClassifier, XGBRegressor
-    import convertdate
-    from dtaidistance import dtw, similarity
+    from dtaidistance import dtw
     from sklearn.feature_selection import VarianceThreshold
     from dtwParallel import dtw_functions
     from scipy.spatial import distance as d
@@ -98,9 +84,7 @@ else:
     #from geocube.api.core import make_geocube
     #from geocube.rasterize import rasterize_points_griddata
     from GNN.config import *
-    from lightgbm import LGBMClassifier, LGBMRegressor
     from lifelines.utils import concordance_index
-    from ngboost import NGBClassifier, NGBRegressor
     #from osgeo import gdal, ogr
     from pathlib import Path
     from scipy import ndimage as ndi
@@ -109,21 +93,13 @@ else:
     from scipy.stats import kendalltau, pearsonr, spearmanr
     from skimage import img_as_float
     from skimage import measure, segmentation, morphology
-    from skimage.feature import peak_local_max
-    from skimage.segmentation import watershed
     from skimage import transform
-    from sklearn.cluster import SpectralClustering
-    from sklearn.decomposition import PCA
-    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
         mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
-    from tqdm import tqdm
-    from torch import optim
     from weigh_predictor import *
-    from xgboost import XGBClassifier, XGBRegressor
     from dico_departements import *
     from features_selection import *
     import convertdate
@@ -174,10 +150,11 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return binImageScale, influenceImageScale"""
 
-def create_larger_scale_bin(input, bin, influence, time, raster):
+def create_larger_scale_bin(input, bin, influence, time, burned, raster):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)
+    burnedScale = np.full(influence.shape, np.nan)
 
     clusterID = np.unique(input)
     for di in range(bin.shape[-1]):
@@ -187,12 +164,14 @@ def create_larger_scale_bin(input, bin, influence, time, raster):
                 binImageScale[mask, di] = np.nansum(bin[mask, di])
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
                 timeScale[mask, di] = np.nansum(time[mask, di])
+                burnedScale[mask, di] = np.nansum(time[mask, di])
             else:
                 binImageScale[mask, di] = 0
                 influenceImageScale[mask, di] = 0
                 timeScale[mask, di] = 0
+                burnedScale[mask, di] = 0
 
-    return binImageScale, influenceImageScale, timeScale
+    return binImageScale, influenceImageScale, timeScale, burned
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -209,6 +188,10 @@ def find_dates_between(start, end):
 allDates = find_dates_between('2017-06-12', '2024-06-29')
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 #allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
+all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
+all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
+all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
+all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
 
 def save_object(obj, filename: str, path : Path):
     check_and_create_path(path)
@@ -709,6 +692,7 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
     return x[:, start_features:], y, edges
 
 def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) -> np.array:
+
     uniqueNodes = np.unique(array[:, id_index])
     res = []
 
@@ -754,10 +738,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
         
         # Extraire les données dans l'intervalle de date
         cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date)]
-        if cur_array.shape[0] > 1:
-            cur_array = np.unique(cur_array, axis=0)
-        else:
-            cur_array = cur_array.astype(np.float32)
+        cur_array = cur_array.astype(np.float32)
                 
         res.append(cur_array[:ks+1])
 
@@ -780,7 +761,8 @@ def construct_graph_with_time_series(graph, date : int,
     ks : size of the time series
     """
 
-    mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    #mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    mask = np.argwhere((X[:,date_index] == date))[:, 0]
 
     x = X[mask]
     node_with_weight = np.unique(x[:, id_index])
@@ -804,7 +786,6 @@ def construct_graph_with_time_series(graph, date : int,
             yts = Y[maskts]
             yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
-
     def get_unique_pair_indices(array, graph_id_index, date_index):
         """
         Retourne les indices des lignes uniques basées sur les paires (graph_id, date).
@@ -835,8 +816,9 @@ def construct_graph_with_time_series(graph, date : int,
         y = concat_temporal_graph_into_time_series(y, ks, date)
 
     # Get graph specific spatial
-    maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
-    spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    #maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    #spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    spatialEdges = graph.edges
 
     edges = []
     target = []
@@ -849,8 +831,8 @@ def construct_graph_with_time_series(graph, date : int,
             for sp in spatial:
                 src.append(i)
                 target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
-        src.append(i)
-        target.append(i)
+        #src.append(i)
+        #target.append(i)
         
     edges = np.row_stack((src, target)).astype(int)
     return x[:, start_features:], y, edges
@@ -4553,3 +4535,18 @@ def has_method(obj, method_name):
         bool: True si la méthode existe, False sinon.
     """
     return callable(getattr(obj, method_name, None))
+
+def binary_closing_id(mask, selem):
+
+    from skimage.morphology import binary_closing
+
+    # Appliquer binary_closing pour chaque ID unique
+    unique_ids = np.unique(mask[~np.isnan(mask)])
+    processed_mask = np.full(mask.shape, fill_value=np.nan)
+
+    for uid in unique_ids:
+        mask_binary = (mask == uid)
+        closed_mask = binary_closing(mask_binary, selem)
+        processed_mask[closed_mask] = uid  # Réinjecter les valeurs
+        
+    return processed_mask

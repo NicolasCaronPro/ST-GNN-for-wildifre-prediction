@@ -1,13 +1,11 @@
-from graph_structure import *
+from GNN.graph_structure import *
 import datetime as dt
-import json
 from probabilistic import *
 import argparse
 import socket
-from array_fet import *
+from GNN.array_fet import *
 from generate_database import GenerateDatabase, launch
 from itertools import product
-
 
 # Suppress FutureWarning messages
 warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
@@ -22,7 +20,7 @@ def create_ps(geo):
     X_kmeans = list(zip(geo.longitude, geo.latitude))
 
     if dept in graph.departements.unique():
-        geo['id'] = graph._predict_node_with_position(X_kmeans)
+        geo['id'], _ = graph._predict_node_graph_with_position(X_kmeans)
     else:
         geo['id'] = graph._predict_node_with_features(dept,  dir_script / 'log', resolution,
                                                         dir_script / 'log', dir_target,
@@ -31,6 +29,11 @@ def create_ps(geo):
 
     logger.info(f'Unique id : {np.unique(geo["id"].values)}')
     logger.info(f'{len(geo)} point in the dataset. Constructing database')
+
+    ################### FIX ##################
+    geo['graph_id'] = geo['id'].values
+    geo['weight'] = 0
+    geo['days_until_next_event'] = 0
 
     return geo
 
@@ -49,6 +52,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     geoDT[air_variables] = df_train[air_variables].mean()
     geoDT[vigicrues_variables] = 0
     geoDT[nappes_variables] = 0
+    
     geoDT[geo_variables] = int(departement.split('-')[1])
 
     if sinister == 'firepoint':
@@ -61,27 +65,28 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     logger.info('Drop duplicated point due to graph scale + assign weight to correct point')
     geoDT['weights'] = 0
     geoDT['departement'] = int(departement.split('-')[1])
-    columns = ['id', 'longitude', 'latitude', 'departement', 'date', 'weights']
-    orinode = geoDT.drop_duplicates(['id', 'date'])[columns].values
-    orinode = graph._assign_latitude_longitude(orinode)
-    orinode[:,3] = name2int[departement]
-    orinode[orinode[:, 4] == k_limit, 5] = 1
 
-    model_name = f'{model}_{target}_{task_type}_{loss}'
+    orinode = geoDT.drop_duplicates(['id', 'date'])[ids_columns].values
+
+    orinode = graph._assign_latitude_longitude(orinode)
+    orinode[:,departement_index] = name2int[departement]
+    orinode[orinode[:, date_index] == k_limit, weight_index] = 1
+
+    model_name = f'{model}_{under_sampling}_{over_sampling}_{nbFeature}_{weight_type}_{target}_{task_type}_{loss}'
     
     logger.info(f'Load model {model_name}')
     if model not in traditionnal_models:
         name_model =  model + '/' + 'best.pt'
         dir = 'check_'+scaling + '/' + prefix_train + '/'
-        graph._load_model_from_path(dir_data / datatset_name/ dir / name_model, dico_model[model], device)
+        graph._load_model_from_path(dir_data / spec / dir / name_model, dico_model[model], device)
     else:
         dir = 'check_'+scaling + '/' + prefix_train + '/' + '/baseline'
-        model_ = read_object(f'{model_name}.pkl', dir_data / datatset_name/ dir / model_name)
+        model_ = read_object(f'{model_name}.pkl', dir_data / spec / dir / model_name)
         graph._set_model(model_)
 
     logger.info('Generate X from dataframe -> could be improove')
     if USE_IMAGE:
-        X, features_name = get_sub_nodes_feature_with_images(graph=graph,
+        X, features_name = get_sub_nodes_feature(graph=graph,
                         subNode=orinode,
                         departements=[departement],
                         features=features, sinister=sinister,
@@ -90,7 +95,10 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
                         dir_train=dir_data,
                         resolution=resolution,
                         dates=[d.strftime('%Y-%m-%d') for d in dates],
-                        graph_construct=graphConstruct)
+                        graph_construct=graphConstruct,
+                        dataset_name='firemen',
+                        sinister_encoding='occurence',
+                        path='..')
     else:
         X, features_name = get_sub_nodes_feature_with_geodataframe(graph=graph,
                                 subNode=orinode,
@@ -100,18 +108,30 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
                                 path=dir_data,
                                 dates=[d.strftime('%Y-%m-%d') for d in dates],
                                 resolution=resolution)
-        
+    
     df = pd.DataFrame(columns=ids_columns + features_name, index=np.arange(0, X.shape[0]))
     df[features_name] = X
     df[ids_columns] = orinode
-    df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features)
+
+    #df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features)
     df.to_csv(f'{dir_log}/{date_limit}.csv', index=False)
-        
+
+    # Create class
+    ############################" TO FIX ######################
+    df['nbsinister'] = 0
+    df['month_non_encoder'] = 4
+    df['pastinfluence'] = 0
+    _, __, df, _  = post_process_model_inference(df_train, df, dir_log, graph)
+    df['Past_risk'] = df['nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past']
+
     fire_feature = ['fire_prediction_raw', 'fire_prediction', 'fire_prediction_dept']
 
     logger.info(f'Preprocess X (scale {scaling})')
 
-    df = preprocess_inference(df, df_train, scaling, features_name, fire_feature,
+    logger.info(f'Load features')
+    features_selected = read_object('features.pkl', dir_data / spec / dir / model_name)
+
+    df = preprocess_inference(df, df_train, scaling, features_selected, fire_feature,
                               apply_break_point,
                               scale, kmeans_features, dir_break_point,
                               thresh=thresh_kmeans,
@@ -124,12 +144,10 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     index_to_predict = df[df['fire_prediction'].isna()].index
     logger.info(f'Found {len(df) - index_to_predict.shape[0]} values where fire has no chance')
 
-    logger.info(f'Load features')
-    features_selected = read_object('features.pkl', dir_data / datatset_name/ dir / model_name)
-
     if df is not None:
         if model in traditionnal_models:
-            Y = graph.predict_model_api_sklearn(X=df.loc[index_to_predict], features=features_selected, target_name=target, autoRegression=False)
+            Y, _, _ = graph.predict_model_api_sklearn(X=df.loc[index_to_predict], features=features_selected, target_name=target, autoRegression=False)
+            Y = Y[:, 0]
         else:
             logger.info('Generate X and edges, use for GNN')
             # Predict Today
@@ -169,6 +187,7 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
             check_and_create_path(dir_log / 'features_importance_fire')
             check_and_create_path(dir_log / 'features_importance_fire' / 'sample')
             samples = df[df['do_prediction'] == True].index.values.astype(int)
+            print(samples)
             if len(samples) != 0:
                 samples_name = list(df.loc[samples, 'id'].values.astype(int))
                 samples_date = int(df.loc[samples, 'date'].values[0])
@@ -181,23 +200,26 @@ def fire_prediction(interface, departement, features, train_features, scaling, d
     geoDT = geoDT.set_index('id').join(df.set_index('id')[fire_feature], on='id').reset_index()
     return geoDT
 
-def prepare_data(date_limit):
+def prepare_data(date_limit, incendie_feather_ori):
     assert graph is not None
     # Date
     date_ks = (date_limit - dt.timedelta(days=k_days_conv))
 
-    if 'incendie_feather_ori' in locals():
+    if incendie_feather_ori is not None:
         incendie_feather = incendie_feather_ori[(incendie_feather_ori['date'] >= date_ks) & (incendie_feather_ori['date'] <= date_limit)]
         dates = np.sort(incendie_feather.date.unique())
     else:
         dates_str = find_dates_between(date_ks.strftime('%Y-%m-%d'), (d + dt.timedelta(days=1)).strftime('%Y-%m-%d'))
         dates = [dt.datetime.strptime(d, '%Y-%m-%d').date() for d in dates_str]
+
     if date_limit not in dates:
         logger.info(f'No data for {date_limit}')
-        return None, _
+        return None, None
+    
     logger.info(dates)
     if len(dates) == 0:
-        return None, _
+        return None, None
+    
     ######################### Interface ##################################
     interface = []
 
@@ -218,7 +240,6 @@ def prepare_data(date_limit):
         interface.append(geo_data)
 
     interface = pd.concat(interface).reset_index(drop=True)
-
     if sinister == 'firepoint':
         if 'feux' in interface.columns:
             interface.rename({'feux': 'nbfirepoint'}, axis=1, inplace=True)
@@ -239,9 +260,9 @@ def prepare_data(date_limit):
     n_pixel_x = 0.02875215641173088
     n_pixel_y = 0.020721094073767096
 
-    mask = read_object(f'{dept}rasterScale{scale}_{graphConstruct}.pkl', dir_mask)
+    mask = read_object(f'{dept}rasterScale{scale}_{graphConstruct}_node.pkl', dir_mask)
+    geo = interface[interface['date'] == 0].reset_index()
     if mask is None:
-        geo = interface[interface['date'] == 0].reset_index()
         geo[f'id_{scale}'] = graph._predict_node_with_features(dept,  dir_mask, resolution,
                                                     dir_script / 'log', dir_target,
                                                     dir_target_bin, dir_raster, dir_encoder,
@@ -258,7 +279,8 @@ def prepare_data(date_limit):
                                                         n_pixel_y,
                                                         n_pixel_x,
                                                         dir_script / 'log',
-                                                        dept)
+                                                        dept,
+                                                        None)
 
         Probabilistic(n_pixel_x, n_pixel_y, 1, None, Path(__file__).absolute().parent / dir_script, resolution)._process_input_raster(dims, [inputDep], 1, True,
                                                                                                 [dept], True, dates, [dept], True)
@@ -360,7 +382,6 @@ if __name__ == "__main__":
     knowed_departement = ['departement-01-ain', 'departement-25-doubs', 'departement-69-rhone', 'departement-78-yvelines']
 
     traditionnal_models = ['xgboost', 'lightgbm', 'ngboost']
-        
 
     parser = argparse.ArgumentParser(
         prog='Inference',
@@ -407,14 +428,19 @@ if __name__ == "__main__":
     shift = args.shift_kmeans
     doKMEANS = args.doKMEANS == 'True'
 
-    scale_list = [4, 5, 6, 7, 'departement']
+    scale_list = [6, 'departement']
     days_in_futur_list = [0]
     combinations = list(product(scale_list, days_in_futur_list))
+
+    under_sampling = 'search'
+    over_sampling = 'full'
+    nbFeature = 'all'
+    weight_type = 'one'
 
     interfaces = []
     
     #spec = 'occurence_inference'
-    spec = 'occurence_default'
+    spec = 'occurence_voting'
 
     for scale, days_in_futur in combinations:
 
@@ -443,7 +469,7 @@ if __name__ == "__main__":
             dir_data = Path(f'../GNN/{dataset_name}/{sinister}/{resolution}/train/')
             dir_feather = Path('interface')
             dir_log = Path(f'interface/{dept}')
-            dir_incendie = Path(f'/home/caron/Bureau/csv/{dept}/data/')
+            dir_incendie = Path(f'/media/caron/X9 Pro/travaille/Thèse/csv/{dept}/data/')
             dir_incendie_disk = Path(f'/media/caron/X9 Pro/travaille/Thèse/csv/{dept}/data')
             dir_interface = Path('interface')
             dir_feather = Path('interface')
@@ -486,9 +512,12 @@ if __name__ == "__main__":
                 start = (dt.datetime.now() - dt.timedelta(days=histo)).date().strftime('%Y-%m-%d')
                 stop = (dt.datetime.now() + dt.timedelta(days=2)).date().strftime('%Y-%m-%d')
                 launch(dir_incendie, dir_incendie_disk, dir_raster,
-                    dept, resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features,
+                    dept, resolution, compute_meteostat_features, compute_temporal_features,
+                    compute_spatial_features, compute_air_features,
+                    compute_trafic_features, compute_vigicrues_features, compute_nappes_features,
                     start, stop)
                 USE_IMAGE = True
+                incendie_feather_ori = None
 
         # Load feather and spatial
         if (dir_incendie / 'spatial' / f'hexagones_{sinister}.geojson').is_file():
@@ -541,14 +570,18 @@ if __name__ == "__main__":
             sd = dt.datetime.now().date() - dt.timedelta(days=8)
             ed = dt.datetime.now().date() - dt.timedelta(days=6)
         else:
-            sd = dt.datetime.now().date()
-            ed = dt.datetime.now().date() + dt.timedelta(days=2)
+            #sd = dt.datetime.now().date()
+            #ed = dt.datetime.now().date() + dt.timedelta(days=2)
+            ed = (dt.datetime.strptime('2025-03-10', '%Y-%m-%d') + dt.timedelta(days=2)).date()
+            sd = dt.datetime.strptime('2025-03-10', '%Y-%m-%d').date()
+        
         d = sd
 
         while d != ed:
             date_limit = d
         
-            interface, dates = prepare_data(date_limit)
+            interface, dates = prepare_data(date_limit, incendie_feather_ori)
+
             if interface is None:
                 d += dt.timedelta(days=1)
                 continue
@@ -557,7 +590,7 @@ if __name__ == "__main__":
             ######################### Predict ################################
 
             logger.info(f'Launch {sinister} Prediction')
-            interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, dates, df_train, apply_break_point)
+            interface = fire_prediction(interface, dept, features, train_features, scaling, dir_data, dates, df_train, False)
             if interface is None:
                 logger.info(f'Can t produce fire prediction for {dates[-1]}')
                 d += dt.timedelta(days=1)
@@ -566,7 +599,7 @@ if __name__ == "__main__":
             interface['scale'] = scale
             interface['days_in_futur'] = days_in_futur
             interfaces.append(interface)
-
+        
         interfaces = pd.concat(interfaces)
 
         ######################### Saving ###############################

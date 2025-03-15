@@ -545,6 +545,7 @@ class GraphBuilder:
                     dst.append(indices[i][j])
         
         node_max = np.max(dst) + 1
+
         vertices_mesh = torch.tensor(
             self.icospheres["order_" + str(self.max_order) + "_vertices"],
             dtype=torch.float32,
@@ -554,6 +555,9 @@ class GraphBuilder:
 
         src = np.asarray(src)
         dst = np.asarray(dst)
+
+        #print(f'src create_g2m_graph -> {src}')
+        #print(f'dst create_g2m_graph -> {dst}')
 
         #if last_graph is not None:
         #    num_nodes = last_graph.num_nodes('grid')
@@ -592,6 +596,8 @@ class GraphBuilder:
         if self.doPrint:
             print("Creating mesh2grid bipartite graph")
 
+        #print(self.lat_lon_grid_flat.shape)
+        #print(np.unique(self.lat_lon_grid_flat, axis=0).shape)
         cartesian_grid = latlon2xyz(self.lat_lon_grid_flat)
         n_nbrs = 1
         neighbors = NearestNeighbors(n_neighbors=n_nbrs).fit(
@@ -612,10 +618,15 @@ class GraphBuilder:
         )[:self.node_max]
 
         #src = src[:self.node_max]
+        dst = [d for i, d in enumerate(dst) if src[i] < self.node_max]
         src = [s for s in src if s < self.node_max]
         src = np.asarray(src)
-        dst = dst[:src.shape[0]]
         dst = np.asarray(dst)
+
+        #print(f'src create_m2g_graph -> {src}')
+        #print(f'dst create_m2g_graph -> {dst}')
+
+        #cartesian_grid = cartesian_grid[np.sort(np.unique(dst))]
 
         #if last_graph is not None:
         #    num_nodes = last_graph.num_nodes('mesh')

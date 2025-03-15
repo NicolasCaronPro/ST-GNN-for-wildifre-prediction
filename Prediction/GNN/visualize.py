@@ -678,11 +678,11 @@ def susectibility_map_france_daily_geojson(df_res, regions_france, graph, dates,
         else:
             regions_france['id'] = regions_france['departement'].values
 
-        for col in ['risk', 'nbsinister', 'prediction', 'class']:
+        for col in ['risk', 'nbsinister', band, 'class']:
             if col in regions_france.columns:
                 regions_france.drop(col, inplace=True, axis=1)
 
-        regions_france = regions_france.set_index('id').join(df_res_daily.set_index('id')[['risk', 'nbsinister', 'prediction', 'class']], on='id').reset_index()
+        regions_france = regions_france.set_index('id').join(df_res_daily.set_index('id')[['risk', 'nbsinister', band, 'class']], on='id').reset_index()
         regions_france['latitude'] = regions_france['geometry'].apply(lambda x : float(x.centroid.y))
         regions_france['longitude'] = regions_france['geometry'].apply(lambda x : float(x.centroid.x))
         # Vérification des valeurs manquantes dans 'time_series_risk'

@@ -265,7 +265,8 @@ def get_academic_zone(name, date):
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
 
-targets_columns = [#'time_intervention',
+targets_columns = ['time_intervention',
+                    'burned_area',
                    'nbsinister_id', 'class_risk', 'nbsinister', 'risk']
 
 weights_columns = ['proportion_on_zero_class',
@@ -306,7 +307,11 @@ days_until_next_event_index = ids_columns.index('days_until_next_event')
 
 class_index = targets_columns.index('class_risk')
 nbsinister_index = targets_columns.index('nbsinister')
+burned_index = targets_columns.index('burned_area')
 risk_index = targets_columns.index('risk')
+time_intervention_index = targets_columns.index('time_intervention')
+
+##########################################################################
 
 ############################ Logger ######################################
 
@@ -389,7 +394,7 @@ encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
 epochs = 10000
-lr = 0.00001
+lr = 0.0001
 PATIENCE_CNT = 50
 CHECKPOINT = 50
 batch_size = 256
@@ -426,7 +431,7 @@ METHODS_KMEANS_TRAIN = ['mean', 'min', 'max',
                         #'std'
                         ]
 
-num_lstm_layers = 3
+num_lstm_layers = 1
 dropout = 0.03
 
 sklearn_model_list = ['xgboost', 'lightgbm', 'svm', 'rf', 'dt', 'ngboost']

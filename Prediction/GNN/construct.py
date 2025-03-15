@@ -5,6 +5,7 @@ from sklearn.cluster import KMeans
 from copy import copy
 from weigh_predictor import Predictor
 from GNN.graph_structure import *
+from feature_engine.selection import SmartCorrelatedSelection
 
 def look_for_information(graph, dataset_name : str,
                          maxDate : str,
@@ -903,7 +904,7 @@ def init(args, dir_output, script):
     #graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
 
     ########################## Do Database ####################################
-
+    print(doDatabase)
     if doDatabase:
         logger.info('#####################################')
         logger.info('#      Construct   Database         #')
@@ -965,7 +966,7 @@ def init(args, dir_output, script):
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
-    else: 
+    else:
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
         df[ids_columns[:-1] + targets_columns] = Y
@@ -987,11 +988,10 @@ def init(args, dir_output, script):
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
     trainCode = [name2int[d] for d in train_departements]
-    train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
+    train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
     df['nbsinister_0_0'] = df['nbsinister'].values
     shift_list = np.arange(0, 1)
     train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
-    
 
     if dataset_name.find('bdiff') !=-1:
         df = df[df['date'] <= allDates.index('2023-12-31')]
@@ -1091,11 +1091,12 @@ def init(args, dir_output, script):
     features_name = list(features_name)
 
     ############################## Add varying time features #############################
-
-    if dataset_name != 'bdiff':
-        logger.info(f'Adding time columns {7}')
+    
+    if dataset_name == 'bdiff':
+        num_day = 21
+        logger.info(f'Adding time columns {21}')
         logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-        df, _ = add_time_columns(varying_time_variables, 7, df.copy(deep=True), train_features, features_name)
+        df, _ = add_time_columns(varying_time_variables, 21, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 
@@ -1112,5 +1113,6 @@ def init(args, dir_output, script):
 
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
+    test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
 
     return df, graphScale, prefix, fp, features_name

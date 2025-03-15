@@ -55,7 +55,7 @@ parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x clu
 
 args = parser.parse_args()
 
-QUICK = False
+QUICK = True
 
 # Input config
 dataset_name = args.dataset
@@ -218,9 +218,8 @@ if not QUICK:
 else:
     post_process_model_dico = None
 
-    prefix = f'full_{k_days}_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
-    
-    prefix_config = deepcopy(prefix)
+    prefix = f'full_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+
     name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
     
     graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
@@ -235,19 +234,19 @@ else:
     val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
     test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
-    features_selected_str = np.asarray(features_selected_str)
-    features_selected_str = list(features_selected_str[:,0])
+    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
-    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
+    features_selected = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_importance = np.asarray(features_selected)
+    features_selected = list(features_importance[:,0])
+    features_selected.append('Past_risk')
 
-    features_selected_str = list(features_selected_str)
-    features_selected = np.arange(0, len(features_selected_str))
-    logger.info((features_selected_str, len(features_selected_str)))
-
-    features_selected_str.append('Past_risk')
+prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+prefix_config = deepcopy(prefix)
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
+print(name)
 
 models = []
 

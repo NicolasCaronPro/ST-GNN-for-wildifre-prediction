@@ -135,7 +135,7 @@ if not QUICK:
 
     if MLFLOW:
         exp_name = f"{dataset_name}_train"
-        experiments = client.search_smote_experiments()
+        experiments = client.search_experiments()
 
         if exp_name not in list(map(lambda x: x.name, experiments)):
             tags = {
@@ -239,6 +239,7 @@ else:
     logger.info((features_selected_str, len(features_selected_str)))
 
     features_selected_str.append('Past_risk')
+    print(features_selected_str)
 
 prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 prefix_config = deepcopy(prefix)
@@ -249,34 +250,43 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 if name_exp.find('voting') != -1:
     #voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     voting_models = []
-    models = [#('DilatedCNN', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_smote_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-              ]
+    models = [
+            #('LSTM',   'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kappa', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice', 5),
+            ('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('DilatedCNN', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('DilatedCNN', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ]
     
-    federated_models = [('NetMLP', False, 'departement', 'full_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),]
-
-    gnn_models = []
     staking_models = []
+    federated_models = [
+        #('NetMLP', False, 'departement', 'full_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        ]
+    
     gnn_models = [
-                #('STGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGAT', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGATLSTM', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGAT', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('NetGCN', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('graphCast', False, 'full_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('STGCN', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('STGAT', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('STGATLSTM', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('DSTGCN', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('DSTGAT', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('NetGCN', False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
                 ]
 else:
     models = [
-            #('LSTM', 'search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM', 'search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
+            #('LSTM', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
 
-            #('DilatedCNN', 'search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('DilatedCNN', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]
 
     gnn_models = [
-            #('net', False, 'full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetGCN', False, 'full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
             #('ST-GCN', False, 'full_proportion-on-zero-class_nbsinister-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
     ]
@@ -313,7 +323,6 @@ params = {
     "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
-    'nbfeatures':nbfeatures,
     'graph_method' : graph_method
 }
 
@@ -386,25 +395,34 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                #('LSTM_search_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                # ('LSTM_search_smote_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
-                #('filter-soft-weight-all_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DilatedCNN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('federated-NetMLP-departement_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('NetGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGAT_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGCN_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGAT_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGATLSTM_full_smote_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                # ('LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy'),
+                #('filter-soft-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('federated-NetMLP-departement_full_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetGCN_full_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice'),
+                ('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice'),
+
+                ('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kappa'),
+                
+                ('NetGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DSTGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DSTGAT_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('STGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('STGAT_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('STGATLSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('graphCast_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
     elif graph_method == 'graph':
 
         models = [
         ]
-
+        
     prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
 
     if days_in_futur > 0:
@@ -435,16 +453,18 @@ if doTest:
                             suffix='temp')
 
     df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
+    for re in res:
+        aggregated_prediction.append(re)
 
     ####################################################### Test by departmenent ###################################################
 
-    for dept in departements:
+    """for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
                 dn += '2'
             exp_name = f"{name_exp}_{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
-            experiments = client.search_smote_experiments()
+            experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
                 tags = {
@@ -526,7 +546,7 @@ if doTest:
         if 'df_metrics' not in locals():
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
-            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))"""
         #aggregated_prediction_dept.append(res_dept)
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
@@ -539,3 +559,65 @@ if doTest:
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Target')
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Days_in_futur')
+
+    if dataset_name != 'bdiff':
+        exit(1)
+
+    aggregated_prediction = pd.concat(aggregated_prediction).reset_index(drop=True)
+    #aggregated_prediction_dept = pd.concat(aggregated_prediction_dept).reset_index(drop=True)
+
+    aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
+    fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
+
+    for name in models:
+        model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
+        band = 'prediction'
+        if target_name == 'binary':
+            vmax_band = 1
+        else:
+            vmax_band = np.nanmax(aggregated_prediction[target_name].values)
+
+        aggregated_prediction_model = aggregated_prediction[aggregated_prediction['model'] == name]
+        #aggregated_prediction_dept_model = aggregated_prediction_dept[aggregated_prediction_dept['model'] == name]
+
+        #dates = aggregated_prediction[aggregated_prediction['nbsinister'] == aggregated_prediction['nbsinister'].max()]['date'].values
+        dates = [
+            allDates.index('2023-04-26'),
+            allDates.index('2023-05-25'),
+            allDates.index('2023-03-06'),
+            allDates.index('2023-04-17'),
+            allDates.index('2023-06-15'),
+            allDates.index('2023-09-03'),
+            allDates.index('2023-09-17'),
+            allDates.index('2023-09-13'),
+            allDates.index('2023-08-15'),
+            allDates.index('2023-05-08')
+        ]
+
+        region_france = gpd.read_file(root / 'csv/france/data/geo/hexagones_france.gpkg')
+        region_france['latitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.y))
+        region_france['longitude'] = region_france['geometry'].apply(lambda x : float(x.centroid.x))
+
+        ####################### Prediction #####################
+        #check_and_create_path(dir_output / name)
+        susectibility_map_france_daily_geojson(aggregated_prediction_model, region_france, graphScale, np.unique(dates).astype(int), f'prediction_{target_name}', f'{scale}_france',
+                                    dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
+        
+        train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
+        vmax_band = np.nanmax(train_dataset_dept[target_name].values)
+        
+        #susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
+        #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)"""
+    
+    """######################## Ground Truth ####################
+    name = 'GT'
+    check_and_create_path(dir_output / name)
+    susectibility_map_france_daily_geojson(aggregated_prediction, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), target_name,
+                                       f'{scale}_gt', dir_output / name, vmax_band=vmax_band,
+                                       dept_reg=False, sinister=sinister, sinister_point=fp)
+
+    susectibility_map_france_daily_geojson(aggregated_prediction_dept,
+                                       region_france.copy(deep=True), graphScale, np.unique(dates).astype(int),
+                                       target_name, 'departement_gt',
+                                       dir_output / name, vmax_band=vmax_band,
+                                       dept_reg=True, sinister=sinister, sinister_point=fp)"""

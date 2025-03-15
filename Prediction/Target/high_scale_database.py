@@ -274,7 +274,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         
         sp = fp[(fp['date'] >= sdate) & (fp['date'] < edate)]
         sp['departement'] = dept
-
+        
         #print(sp.h3.unique())
         sp['scale0'] = sp['h3'].replace(dico)
         #print(sp.scale0.unique())
@@ -370,6 +370,7 @@ if __name__ == "__main__":
     #regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions = []
 
+    #departements = ['departement-04-alpes-de-haute-provence']
     #departements = ['departement-13-bouches-du-rhone']
     #departements = ['departement-01-ain']
 

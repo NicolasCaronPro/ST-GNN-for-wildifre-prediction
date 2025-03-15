@@ -752,8 +752,9 @@ class ScalerClassRisk:
 
         if sinisters is not None and class_risk is not None:
             sinisters = sinisters.reshape(-1)
-            # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
-            predictions[sinisters > 0] = np.vectorize(lambda_function)(predictions[sinisters > 0])
+            if np.any(sinisters > 0):
+                # Apply the lambda function using np.vectorize for the condition `sinisters > 0`
+                predictions[sinisters > 0] = np.vectorize(lambda_function)(predictions[sinisters > 0])
 
         """if ids_preprocessor is not None:
             fig, ax = plt.subplots(2, figsize=(15,5))
@@ -1030,6 +1031,20 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     new_cols.append('nbsinister-kmeans-5-Class-Dept')
 
+    ######################################################################################
+
+    obj2 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='burned_area', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+
+    obj2.fit(train_dataset_['burned_area'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+
+    train_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['burned_area'].values,  train_dataset_['burned_area'].values, train_dataset_['departement'].values)
+    val_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(val_dataset_['burned_area'].values,  val_dataset_['burned_area'].values, val_dataset_['departement'].values)
+    test_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['burned_area'].values,  test_dataset_['burned_area'].values, test_dataset_['departement'].values)
+    
+    res[obj2.name] = obj2
+
+    new_cols.append('burnedarea-kmeans-5-Class-Dept')
+
     ###################################################################################
 
     """obj4 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk', scaler=None, class_risk=KMeansRisk(5))
@@ -1228,7 +1243,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     if graph.sequences_month is None:
         graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
 
-    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum']
+    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
 
     kernels = ['Specialized', 1, 3, 5]
     """

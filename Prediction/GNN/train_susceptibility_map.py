@@ -151,8 +151,11 @@ model_config = {
         'CHECKPOINT' : CHECKPOINT,
         'epoch' : epochs,
         'act_func': 'relu',
-        'task_type': task_type},
+        'task_type': task_type
+        },
     }
+
+#graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
 ks = k_days
 departements = departements
 train_departements = train_departements
@@ -160,11 +163,12 @@ train_date = trainDate
 val_date = maxDate
 dir_log = dir_output
 susceptibility_mapper = Model_susceptibility(model_name=model_name, target=target,\
-                                                resolution=resolution, model_config=model_config,\
+                                            resolution=resolution, model_config=model_config,\
                                             features_name=train_features, out_channels=out_channels,
                                             task_type=task_type, ks=k_days, departements=departements,
                                             train_departements=train_departements, train_date=train_date,
-                                            val_date=val_date, dir_log=dir_log)
+                                            val_date=val_date, dir_log=dir_log
+                                            )
 
-susceptibility_mapper.create_model_and_train(root_target / sinister / dataset_name / sinister_encoding)
+susceptibility_mapper.create_model_and_train(None, root_target / sinister / dataset_name / sinister_encoding)
 susceptibility_mapper.test_model(root_target / sinister / dataset_name / sinister_encoding)

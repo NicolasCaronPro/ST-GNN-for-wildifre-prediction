@@ -248,6 +248,10 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     realVspredict(test_dataset['class_risk'].values, test_dataset[ids_columns + targets_columns].values, -3, dir_output / prefix, 'class')
 
     realVspredict(test_dataset['nbsinister'].values, test_dataset[ids_columns + targets_columns].values, -2, dir_output / prefix, 'nbsinister')
+
+    #realVspredict(test_dataset['burned_area'].values, test_dataset[ids_columns + targets_columns].values, -2, dir_output / prefix, 'burned_area')
+    
+    #realVspredict(test_dataset['time_intervention'].values, test_dataset[ids_columns + targets_columns].values, -2, dir_output / prefix, 'time_intervention')
         
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
@@ -306,9 +310,13 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     df = df.sort_values('date')
     trainCode = [name2int[departement] for departement in train_departements]
 
-    train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
-    val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
-    test_mask = ((df['date'] >= allDates.index(maxDate) + ks) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
+    #train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
+    #val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
+    #test_mask = ((df['date'] >= allDates.index(maxDate) + ks) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
+
+    train_mask = (df['date'].isin([allDates.index(d) for d in all_train_dates])) & (df['departement'].isin(trainCode))
+    val_mask = (df['date'].isin([allDates.index(d) for d in all_val_dates])) & (df['departement'].isin(trainCode))
+    test_mask = ((df['date'].isin([allDates.index(d) for d in all_test_dates])) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
 
     train_dataset_unscale = df[train_mask].reset_index(drop=True).copy(deep=True)
     test_dataset_unscale = df[test_mask].reset_index(drop=True).copy(deep=True)
@@ -998,9 +1006,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     res_temp = pd.DataFrame(index=np.arange(0, pred.shape[0]))
     res_temp['graph_id'] = y[:, graph_id_index]
     res_temp['date'] = y[:, date_index]
-    res_temp['prediction'] = pred[:, 0]
+    res_temp[f'prediction_{target_name}'] = pred[:, 0]
 
-    df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])['prediction'], on=['graph_id', 'date']).reset_index()
+    df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])[f'prediction_{target_name}'], on=['graph_id', 'date']).reset_index()
 
     res = df_test.copy(deep=True)
 
@@ -1064,7 +1072,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     
     logger.info(f'###################### Analysis {col_class} #########################')
 
-    _, iv = calculate_woe_iv(res, 'prediction', 'nbsinister')
+    _, iv = calculate_woe_iv(res, f'prediction_{target_name}', 'nbsinister')
     metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
     logger.info(f'IV = {iv}')
 
@@ -1331,11 +1339,11 @@ def test_sklearn_api_model(args,
 
         read_name = name
 
-        model_name, v1, v2, v5, target_name, v3, v4 = name.split('_')
+        model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
         if model_name.find('filter') != -1:
-            _, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
-            read_name = f'filter-{model_type}_{v1}_{v2}_{v5}_{target_name}_{v3}_{v4}'
+            filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
+            read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
         else:
             read_name = name
             hard_or_soft='soft'
@@ -1449,7 +1457,7 @@ def test_sklearn_api_model(args,
     save_object(metrics_dept, outname, dir_output)
 
     return metrics, metrics_dept, res_scale, res_departement
-    
+   
 def test_dl_model(args,
                   graphScale, test_dataset_dept,
                           test_dataset_unscale_dept,
@@ -1490,7 +1498,7 @@ def test_dl_model(args,
     for name in models:
         model_name = name.split('_')[0]
 
-        _, v1, v2, v5, target_name, v3, v4 = name.split('_')
+        model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
         
         is_2D_model = model_name in models_2D
         if is_2D_model:
@@ -1514,13 +1522,13 @@ def test_dl_model(args,
             logger.info(f'{model_dir}/{name}.pkl not found')
             continue
 
-        dl_model, _ = model.make_model(graphScale, model.model_params)
+        #dl_model, _ = model.make_model(graphScale, model.model_params)
 
-        if (model_dir / 'best.pt').is_file():
-            model._load_model_from_path(model_dir / 'best.pt', dl_model)
-        else:
-            logger.info(f'{model_dir}/best.pt not found')
-            continue
+        #if (model_dir / 'best.pt').is_file():
+        #    model._load_model_from_path(model_dir / 'best.pt', dl_model)
+        #else:
+        #    logger.info(f'{model_dir}/best.pt not found')
+        #    continue
 
         graphScale._set_model(model)
 
@@ -1929,6 +1937,7 @@ def create_inference_2D(graph, X : np.array, x_train : np.array, y_train : np.ar
 ############################################################################################################
 
 def wrapped_train_deep_learning_1D(params):
+    torch.cuda.empty_cache()
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
     torch_structure = params['torch_structure']
@@ -1937,12 +1946,11 @@ def wrapped_train_deep_learning_1D(params):
     features = params['features_selected_str']
     dir_output = params['dir_output']
 
-    under_sampling, over_sampling, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
-    val_dataset = params['val_dataset']
-    test_dataset = params['test_dataset']
-    nbfeatures = params['nbfeatures']
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
     
     ###############################################  Feature importance  ###########################################################
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
@@ -1952,7 +1960,7 @@ def wrapped_train_deep_learning_1D(params):
     logger.info(f'Fitting model {model}_{infos}')
     logger.info('Try loading loader')
 
-    if task_type == 'classification' and target_name != 'binary':
+    if task_type == 'classification' or task_type == 'ordinal-classification':
         train_dataset['class'] = train_dataset[target_name]
     
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
@@ -1985,7 +1993,7 @@ def wrapped_train_deep_learning_1D(params):
                                     over_sampling=over_sampling,
                                     )
     elif torch_structure == 'Model_gnn':
-        mesh_file = 'icospheres/icospheres_0_1.json.gz'
+        mesh_file = 'icospheres/icospheres_0_1_2_3_4_5_6.json.gz'
         if model in ['graphCast']:
             mesh = True
         else:
@@ -2031,7 +2039,6 @@ def wrapped_train_deep_learning_1D_federated(params):
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
     test_dataset = params['test_dataset']
-    nbfeatures = params['nbfeatures']
     
     ###############################################  Feature importance  ###########################################################
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
@@ -2041,7 +2048,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     logger.info(f'Fitting model {model}_{infos}')
     logger.info('Try loading loader')
 
-    if task_type == 'classification' and target_name != 'binary':
+    if task_type == 'classification' or task_type == 'ordinal-classification':
         train_dataset['class'] = train_dataset[target_name]
     
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
@@ -2066,7 +2073,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     features_name=features,
                                     ks=params['k_days'],
                                     dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
-                                    name=f'{model}_{infos}',
+                                    name=f'temp',
                                     task_type=task_type,
                                     loss=loss,
                                     device=device,
@@ -2090,7 +2097,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     features_name=features,
                                     ks=params['k_days'],
                                     dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
-                                    name=f'{model}_{infos}',
+                                    name=f'temp',
                                     task_type=task_type,
                                     loss=loss,
                                     device=device,
@@ -2103,18 +2110,19 @@ def wrapped_train_deep_learning_1D_federated(params):
     name = f'federated-{model}-{federated_cluster}_{infos}'
     model = FederatedLearningModel(wrapped_model, features=features, federated_cluster=federated_cluster,
                                    loss=loss, name=name,
-                                   dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}_{infos}'),
+                                   dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
                                    under_sampling=under_sampling,
                                    over_sampling=over_sampling,
                                    target_name=target_name,
                                    post_process=None,
                                    task_type=task_type,
-                                   aggregation_method=aggregation_method)
+                                   aggregation_method=aggregation_method,
+                                   nbfeatures=nbfeatures)
     
     params['global_epochs'] = params['epochs']
     params['local_epochs'] = params['epochs']
-    params['patience_count_global'] = params['PATIENCE_CNT']
-    params['patience_count_local'] = 15
+    params['patience_count_global'] = 3
+    params['patience_count_local'] = params['PATIENCE_CNT']
     
     model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
     
@@ -2127,10 +2135,8 @@ def wrapped_train_deep_learning_2D(params):
     use_temporal_as_edges = params['use_temporal_as_edges']
     infos = params['infos']
     torch_structure = params['torch_structure']
-    autoRegression = params['autoRegression']
     image_per_node = params['image_per_node']
     graph_method = params['graph_method']
-    nbfeatures = params['nbfeatures']
 
     under_sampling, over_sampling, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2193,7 +2199,6 @@ def wrapped_train_deep_learning_2D_federated(params):
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
     image_per_node = params['image_per_node']
-    nbfeatures = params['nbfeatures']
 
     under_sampling, over_sampling, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2249,13 +2254,74 @@ def wrapped_train_deep_learning_2D_federated(params):
                                    target_name=target_name,
                                    post_process=None,
                                    task_type=task_type,
-                                   aggregation_method=aggregation_method)
+                                   aggregation_method=aggregation_method,
+                                   nbfeatures=nbfeatures)
     
     model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
     
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+def wrapped_train_deep_learning_distallation(params):
+    torch.cuda.empty_cache()
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    distillation_training_mode = params['distillation_training_mode']
+    teacher_name = params['teacher_name']
+
+    under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
+
+    wrapped_model = ModelKnowledgeDistillation(
+                                distillation_training_mode=distillation_training_mode,
+                                teacher_name=teacher_name,
+                                model_name=model,
+                                batch_size=batch_size,
+                                lr=params['lr'],
+                                out_channels=params['out_channels'],
+                                features_name=features,
+                                ks=params['k_days'],
+                                dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                name=f'{model}_{infos}',
+                                loss=loss,
+                                device=device
+                                )
+    
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_hybrid(params):
     model = params['model']
@@ -2441,7 +2507,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
                                     device=device,
                                     under_sampling=under_sampling)
         elif model_type in ['GNN']:
-            mesh_file = 'icospheres/icospheres_0_1_2_3_4_5_6.json.gz'
+            mesh_file = 'icospheres/icospheres_0_1_2_3_4.json.gz'
             if model_type in ['graphCast']:
                 mesh = True
             else:

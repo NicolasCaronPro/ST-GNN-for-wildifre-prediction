@@ -22,6 +22,8 @@ from skimage.util import img_as_ubyte
 import scipy.ndimage as ndimage
 from tslearn.clustering import TimeSeriesKMeans
 from scipy.spatial.distance import cdist
+from skimage.segmentation import watershed
+from skimage.feature import peak_local_max
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -129,7 +131,7 @@ class GraphStructure():
         self.oriLen = self.oriLatitudes.shape[0]
         self.numCluster = np.shape(np.unique(self.graph_ids))[0]
 
-        self._raster(path=path, sinister=sinister, base=base, resolution=resolution, train_date=train_date, dataset_name=dataset_name, sinister_encoding=sinister_encoding)
+        self._raster(path=path, sinister=sinister, base=base, resolution=resolution, dataset_name=dataset_name)
 
     def create_geometry_with_clustering(self, dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date):
 
@@ -621,18 +623,19 @@ class GraphStructure():
 
         return data, GT
     
-    def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name, sinister_encoding, train_date):
+    def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name):
 
-        dir_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resStr
-        dir_time = root_target / sinister / dataset_name / sinister_encoding / 'time_intervention' / resStr
+        dir_bin = root_target / sinister / dataset_name / 'occurence' / 'bin' / resStr
+        dir_time = root_target / sinister / dataset_name / 'time_intervention' / 'bin' / resStr
+        dir_burned = root_target / sinister / dataset_name / 'burned_area' / 'bin' / resStr
 
-        dir_bin_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'bin' / resStr
+        dir_bin_bdiff = root_target / sinister / 'bdiff' / 'occurence' / 'bin' / resStr
         #dir_time_bdiff = root_target / sinister / dataset_name / sinister_encoding / 'time_intervention' / resStr
 
-        dir_target = root_target / sinister / dataset_name /  sinister_encoding / 'log' / resStr
-        dir_target_bdiff = root_target / sinister / 'bdiff' / sinister_encoding / 'log' / resStr
+        dir_target = root_target / sinister / dataset_name /  'occurence' / 'log' / resStr
+        dir_target_bdiff = root_target / sinister / 'bdiff' / 'occurence' / 'log' / resStr
 
-        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resStr
+        dir_raster = root_target / sinister / dataset_name / 'occurence' / 'raster' / resStr
 
         if len(self.drop_department) == self.departements.unique().shape[0]:
             logger.info('All department were droped, try with a smaller minimum scale. If it still does work, try with department == scale')
@@ -732,14 +735,17 @@ class GraphStructure():
                 mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
                 mask = mask[0]
                 mask[np.isnan(raster)] = np.nan"""
-                mask = np.full(raster.shape, fill_value = np.nan)
-                for uid in np.unique(raster[~np.isnan(raster)]):
-                    mask[raster == uid] = self.graph_ids[self.oriIds == uid]
+
+                raster_node = binary_closing_id(raster_node, disk(1))
                 save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
+                
+                mask = binary_closing_id(mask, disk(1))
                 save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
             else:
                 self.ids = np.copy(self.graph_ids)
+                mask = binary_closing_id(mask, disk(1))
                 raster_node = np.copy(mask)
+
                 save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
                 save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
            
@@ -784,31 +790,37 @@ class GraphStructure():
                     outputName = f'{dept}Influence.pkl'
                     influence = read_object(outputName, dir_target)
 
-                    outputName = f'{dept}timeScale0.pkl'
-                    time = read_object(outputName, dir_target)
+                    outputName = f'{dept}binScale0.pkl'
+                    time = read_object(outputName, dir_time)
 
                 if time is None:
                     time = np.zeros(influence.shape)
 
-                binImageScale, influenceImageScale, timeScale = create_larger_scale_bin(mask, bin, influence, time, raster)
+                if dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
+                    outputName = f'{dept}binScale0.pkl'
+                    burned = read_object(outputName, dir_burned)
+                else:
+                    burned = np.zeros(influence.shape)
+
+                binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned, raster)
                 save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'bin')
                 save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'influence')
                 save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'time_intervention')
-
-                binImageScale, influenceImageScale, timeScale, = create_larger_scale_bin(raster_node, bin, influence, time, raster)
+                save_object(burnedScale, f'{dept}burnedScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'burned')
+                
+                binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(raster_node, bin, influence, time, burned, raster)
                 save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'bin')
                 save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'influence')
                 save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'time_intervention')
+                save_object(burnedScale, f'{dept}burnedScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'burned')
 
             self.numCluster = np.shape(np.unique(self.ids))[0]
             
     def _raster(self, path : Path,
                 sinister : str, 
                 dataset_name: str,
-                sinister_encoding,
                 resolution : str,
-                base: str,
-                train_date) -> None:
+                base: str) -> None:
         """
         Create new raster mask
         """
@@ -818,7 +830,7 @@ class GraphStructure():
         check_and_create_path(path / 'proba')
 
         self._raster2(path, resolutions[resolution]['y'], resolutions[resolution]['x'], resolution, True,
-                      base, sinister, train_date=train_date, dataset_name=dataset_name, sinister_encoding=sinister_encoding)
+                      base, sinister, dataset_name=dataset_name)
 
     def _save_feature_image(self, path, dept, vb, image, raster, mini=None, maxi=None):
         data = np.copy(image)

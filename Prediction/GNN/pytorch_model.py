@@ -1,20 +1,33 @@
-from numpy import dtype
-import torch_geometric
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
+from torch import optim
+
 torch.set_printoptions(precision=3, sci_mode=False)
 
 from PIL import Image
 import torchvision.transforms.functional as TF
-from torchvision import transforms
-from feature_engine.selection import SmartCorrelatedSelection
 
 from GNN.discretization import *
 
-from dgl import DGLGraph
+import dgl
 
-from graph_builder import * 
+from graph_builder import *
+
+
+from tqdm import tqdm
+
+def seed_worker(worker_id):
+    worker_seed = torch.initial_seed() % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+torch.manual_seed(42)
+random.seed(42)
+np.random.seed(42)
+
+g = torch.Generator()
+g.manual_seed(42)
 
 class ReadGraphDataset_2D(Dataset):
     def __init__(self, X : list,
@@ -217,7 +230,7 @@ def graph_collate_fn(batch):
     edge_index = torch.cat(edge_index_list, 1)
     graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
     #node_indices = torch.cat(node_indice_list, 0)
-    graph = DGLGraph((edge_index[0], edge_index[1]))
+    graph = dgl.graph((edge_index[0], edge_index[1]))
     return node_features, node_labels, graph, graph_labels_list
 
 def graph_collate_fn_mesh(batch):
@@ -265,6 +278,7 @@ def graph_collate_fn_mesh(batch):
         longtitudes = features_labels_graph_index_tuple[1][:, longitude_index]
 
         g_lat_lon_grid = torch.concat((latitudes, longtitudes), dim=1).to('cpu')
+        g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
         graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
 
         graph_mesh = graph_builder.create_mesh_graph(last_graph_1)
@@ -286,7 +300,7 @@ def graph_collate_fn_mesh(batch):
     node_features = torch.cat(node_features_list, 0)
     node_labels = torch.cat(node_labels_list, 0)
 
-    for g in graph_mesh_list:  # graphs est une liste de DGLGraph
+    for g in graph_mesh_list:  # graphs est une liste de dgl.graph
         if '_ID' not in g.edata:
             g.edata['_ID'] = torch.arange(g.num_edges(), dtype=torch.int32)
         if '_ID' not in g.ndata:
@@ -297,7 +311,8 @@ def graph_collate_fn_mesh(batch):
     graph_list.append(dgl.batch(mesh2grid_list))
     
     graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
-
+    print(node_features.shape)
+    print(graph_list)
     return node_features, node_labels, graph_list, graph_labels_list
 
 def graph_collate_fn_hybrid(batch):
@@ -483,6 +498,8 @@ def create_dataset(graph,
     dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
     dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
 
+    logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
+
     logger.info(f'Constructing train Dataset')
     Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges)
 
@@ -584,9 +601,12 @@ def create_test_loader(graph, df,
         collate = graph_collate_fn_mesh
     
     if use_temporal_as_edges is None:
-        loader = DataLoader(dataset, dataset.__len__(), False)
+        loader = DataLoader(dataset, dataset.__len__(), False, worker_init_fn=seed_worker,
+            generator=g)
     else:
-        loader = DataLoader(dataset, dataset.__len__(), False, collate_fn=collate)
+        loader = DataLoader(dataset, dataset.__len__(), False, collate_fn=collate,
+                            worker_init_fn=seed_worker,
+        generator=g)
 
     return loader
 
@@ -880,6 +900,7 @@ class ModelTorch():
         self.over_sampling = over_sampling
         self.find_log = False
         self.nbfeatures = nbfeatures
+        self.student_train = False
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -925,6 +946,179 @@ class ModelTorch():
             labels = labels[first_indices]
 
         return labels
+
+    def calculate_loss(self, criterion, output, target, weights):
+        if self.task_type == 'regression':
+            target = target.view(output.shape)
+            weights = weights.view(output.shape)
+            
+            target = torch.masked_select(target, weights.gt(0))
+            output = torch.masked_select(output, weights.gt(0))
+            weights = torch.masked_select(weights, weights.gt(0))
+            loss = criterion(output, target, weights)
+        else:
+            target = torch.masked_select(target, weights.gt(0))
+            output = output[weights.gt(0)]
+            target = target.long()
+            weights = torch.masked_select(weights, weights.gt(0))
+
+            if self.loss in ['kappa', 'cdw', 'mcewk']:
+                target = target.to('cpu')
+                output = output.to('cpu')
+
+            loss = criterion(output, target)
+        
+        return loss
+
+    def launch_train_loader(self, loader, criterion, optimizer, teacher=None):
+        
+        self.model.train()
+        for i, data in enumerate(loader, 0):
+
+            inputs, labels, edges = data
+            graphs = None
+
+            band = -1
+
+            try:
+                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
+            except Exception as e:
+                target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+            
+            if self.student_train:
+                target = self.teacher.predict_proba(inputs)
+
+            output = self.model(inputs, edges)
+
+            loss = self.calculate_loss(criterion, output, target, weights)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        return loss
+
+    def launch_val_test_loader(self, loader, criterion, teacher=None):
+        
+        self.model.eval()
+        total_loss = 0.0
+
+        with torch.no_grad():
+
+            for i, data in enumerate(loader, 0):
+                
+                inputs, labels, _ = data
+                graphs = None
+
+                band = -1
+
+                try:
+                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
+                except Exception as e:
+                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+
+                output = self.model(inputs)
+                loss = self.calculate_loss(criterion, output, target, weights)
+                total_loss += loss.item()
+
+        return total_loss
+
+    def make_model(self, graph, custom_model_params):
+        model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
+                                graph, dropout, 'relu',
+                                self.ks,
+                                out_channels=self.out_channels,
+                                task_type=self.task_type,
+                                device=device, num_lstm_layers=num_lstm_layers,
+                                custom_model_params=custom_model_params)
+        if self.model_params is None:
+            self.model_params = params
+        return model, params
+    
+    def func_epoch(self, train_loader, val_loader, optimizer, criterion, teacher=None):
+
+        train_loss = self.launch_train_loader(train_loader, criterion, optimizer, teacher)
+
+        if val_loader is not None:
+            val_loss = self.launch_val_test_loader(val_loader, criterion, teacher)
+        else:
+            val_loss = train_loss.item()
+
+        return val_loss, train_loss
+
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, teacher=None):
+        """
+        Train neural network model
+        """
+
+        if MLFLOW:
+            existing_run = get_existing_run(f'{self.model_name}_')
+            if existing_run:
+                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+            else:
+                mlflow.start_run(run_name=f'{self.model_name}_', nested=True)
+
+        assert self.train_loader is not None and self.val_loader is not None
+
+        check_and_create_path(self.dir_log)
+
+        criterion = self.get_loss(self.loss)
+
+        if new_model:
+            self.model, _ = self.make_model(graph, custom_model_params)
+        
+        parameters = self.model.parameters()
+        if has_method(criterion, 'get_learnable_parameters'):
+            logger.info(f'Adding {self.loss} parameter')
+            loss_parameters = criterion.get_learnable_parameters().values()
+            parameters = list(parameters) + list(loss_parameters)
+        else:
+            optimizer_loss = None
+
+        optimizer = optim.Adam(parameters, lr=self.lr)
+
+        BEST_VAL_LOSS = math.inf
+        BEST_MODEL_PARAMS = None
+        patience_cnt = 0
+
+        val_loss_list = []
+        train_loss_list = []
+        epochs_list = []
+
+        logger.info('Train model with')
+        for epoch in tqdm(range(epochs), disable=not verbose):
+            val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, teacher=teacher)
+            train_loss = train_loss.item()
+            val_loss = round(val_loss, 3)
+            train_loss = round(train_loss, 3)
+            val_loss_list.append(val_loss)
+            train_loss_list.append(train_loss)
+            epochs_list.append(epoch)
+            if val_loss < BEST_VAL_LOSS:
+                BEST_VAL_LOSS = val_loss
+                BEST_MODEL_PARAMS = self.model.state_dict()
+                patience_cnt = 0
+            else:
+                patience_cnt += 1
+                if patience_cnt >= PATIENCE_CNT:
+                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
+                    save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
+                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
+                    plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+                    if MLFLOW:
+                        mlflow.end_run()
+                    return
+            if MLFLOW:
+                mlflow.log_metric('loss', val_loss, step=epoch)
+            if epoch % CHECKPOINT == 0 and verbose:
+                logger.info(f'epochs {epoch}, Val loss {val_loss}')
+                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+                save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
+
+        logger.info(f'Last val loss {val_loss}')
+        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
+        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
+        self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
 
     def split_dataset(self, dataset, nb, reset=True):
         # Separate the positive and zero classes based on y
@@ -992,7 +1186,9 @@ class ModelTorch():
                 copy_model.under_sampling = 'full'
                 copy_model.create_train_val_test_loader(graph, df_combined, df_val, df_test)
                 copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False)
+                
                 test_loader = copy_model.create_test_loader(graph, df_test)
+                
                 test_output, y = copy_model._predict_test_loader(test_loader)
                 test_output = test_output.detach().cpu().numpy()
 
@@ -1019,8 +1215,8 @@ class ModelTorch():
 
         if is_unknowed_risk:
             plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage, under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage, over_prediction_score_scores, label='over_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
             plt.xticks(test_percentage)
             plt.xlabel('Percentage of Unknowed sample')
             plt.ylabel('IOU Score')
@@ -1037,8 +1233,8 @@ class ModelTorch():
             save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
         else:
             plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage, under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage, over_prediction_score_scores, label='over_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
             plt.xticks(test_percentage)
             plt.xlabel('Percentage of Binary sample')
             plt.ylabel('IOU Score')
@@ -1215,7 +1411,7 @@ class ModelTorch():
         else:
             band = -1
 
-        pred = np.full((predTensor.shape[0], 2), fill_value=np.nan)
+        pred = np.full((predTensor.shape[0], 1), fill_value=np.nan)
         if name in ['Unet', 'ULSTM']:
             pred = np.full((y.shape[0], 2), fill_value=np.nan)
             pred_2D = predTensor
@@ -1228,10 +1424,9 @@ class ModelTorch():
                     mask = np.argwhere((y[:, graph_id_index] == graph) & (y[:, date_index] == date))
                     if mask.shape[0] == 0:
                         continue
-                    pred[mask[:, 0], 0] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
+                    pred[mask[:, 0]] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
         else:
             pred[:, 0] = predTensor
-            pred[:, 1] = predTensor
 
         return pred
 
@@ -1270,7 +1465,7 @@ class ModelTorch():
         predTensor, YTensor = self._predict_test_loader(loader, True)
         pred = self.filtering_pred(df, predTensor, YTensor, graph)
         return pred
-
+        
     def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_log):
         # Création de la figure et des axes
         plt.figure(figsize=(10, 6))
@@ -1308,7 +1503,7 @@ class ModelTorch():
     def _load_model_from_path(self, path : Path, model) -> None:
         model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True), strict=False)
         self.model = model
-
+    
     def update_weight(self, weight):
         """
         Update the model's weights with the given state dictionary.
@@ -1331,6 +1526,13 @@ class ModelTorch():
 
         # Charger les poids dans le modèle
         self.model.load_state_dict(weight)
+    
+    def update_model(self, model):
+        self.model = deepcopy(model)
+
+    def get_loss(self, loss_name):
+        loss_params = {'num_classes' : 5}
+        return get_loss_function(loss_name, **loss_params)
 
 class ModelCNN(ModelTorch):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node):
@@ -1340,17 +1542,17 @@ class ModelCNN(ModelTorch):
         self.image_per_node = image_per_node
         self.nbfeatures = nbfeatures
         
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
+        
+        if features_importance:
+            importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+            if self.nbfeatures != 'all':
+                self.features_name = featuresAll[:int(self.nbfeatures)]
+            else:
+                self.features_name = featuresAll
 
-        self.graph = graph
-
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
-        if self.nbfeatures != 'all':
-            self.features_name = featuresAll[:int(self.nbfeatures)]
-        else:
-            self.features_name = featuresAll
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
             old_shape = df_train.shape
@@ -1386,12 +1588,6 @@ class ModelCNN(ModelTorch):
                     df_combined = self.split_dataset(df_train, nb)
                     df_train = df_combined
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
-
-        if self.over_sampling == 'full':
-            pass
-            
-        else:
-            raise ValueError(f'Unknow value of under_sampling -> {self.over_sampling}')
                 
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_log)
@@ -1438,199 +1634,6 @@ class ModelCNN(ModelTorch):
 
         return loader
 
-    def launch_train_loader(self, loader, criterion, optimizer):
-        
-        self.model.train()
-        for i, data in enumerate(loader, 0):
-
-            inputs, labels, edges = data
-            graphs = None
-
-            band = -1
-
-            try:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-            except Exception as e:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-            #inputs_model = inputs[:, features]
-            inputs_model = inputs
-            output = self.model(inputs_model, edges)
-
-            if self.task_type == 'regression':
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-                
-                target = torch.masked_select(target, weights.gt(0))
-                output = torch.masked_select(output, weights.gt(0))
-                weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target, weights)
-            else:
-                target = torch.masked_select(target, weights.gt(0))
-                target = target.long()
-                output = output[weights.gt(0)]
-                weights = torch.masked_select(weights, weights.gt(0))
-                #output = torch.reshape(output, target.shape)
-                loss = criterion(output, target)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        return loss
-
-    def launch_val_test_loader(self, loader, criterion):
-        self.model.eval()
-        total_loss = 0.0
-
-        with torch.no_grad():
-
-            for i, data in enumerate(loader, 0):
-                
-                inputs, labels, edges = data
-                graphs = None
-
-                # Determine the index of the target variable in labels
-                #if target_name == 'binary' or target_name == 'nbsinister':
-                #    band = -2
-                #else:
-                band = -1
-
-                try:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-                except Exception as e:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-                inputs_model = inputs
-                #inputs_model = inputs[:, features]
-                output = self.model(inputs_model, edges)
-                # Compute loss
-                if self.task_type == 'regression':
-                    target = target.view(output.shape)
-                    weights = weights.view(output.shape)
-
-                    # Mask out invalid weights
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    output = torch.masked_select(output, valid_mask)
-                    weights = torch.masked_select(weights, valid_mask)
-                    loss = criterion(output, target, weights)
-                else:
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    target = target.long()
-                    output = output[valid_mask]
-                    weights = torch.masked_select(weights, valid_mask)
-                    #output = torch.reshape(output, target.shape)
-                    loss = criterion(output, target)
-
-                total_loss += loss.item()
-
-        return total_loss
-
-    def func_epoch(self, train_loader, val_loader, optimizer, criterion):
-        
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
-
-        if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion)
-        
-        else:
-            val_loss = train_loss
-
-        return val_loss, train_loss
-    
-    def make_model(self, graph, custom_model_params):
-        model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
-                                graph, dropout, 'relu',
-                                self.ks,
-                                out_channels=self.out_channels,
-                                task_type=self.task_type,
-                                device=device, num_lstm_layers=num_lstm_layers,
-                                custom_model_params=custom_model_params)
-        if self.model_params is None:
-            self.model_params = params
-        return model, params
-
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, new_model=True):
-        """
-        Train neural network model
-        """
-
-        if MLFLOW:
-            existing_run = get_existing_run(f'{self.model_name}_')
-            if existing_run:
-                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-            else:
-                mlflow.start_run(run_name=f'{self.model_name}_', nested=True)
-
-        assert self.train_loader is not None and self.val_loader is not None
-
-        check_and_create_path(self.dir_log)
-
-        criterion = get_loss_function(self.loss)
-
-        if new_model:
-            self.model, _ = self.make_model(graph, custom_model_params)
-        
-        #if (dir_log / '100.pt').is_file():
-        #    model.load_state_dict(torch.load((dir_log / '100.pt'), map_location=device, weights_only=True), strict=False)
-
-        parameters = self.model.parameters()
-        if has_method(criterion, 'get_learnable_parameters'):
-            logger.info(f'Adding {self.loss} parameter')
-            loss_parameters = criterion.get_learnable_parameters().values()
-            parameters = list(parameters) + list(loss_parameters)
-
-        optimizer = optim.Adam(parameters, lr=self.lr)
-
-        BEST_VAL_LOSS = math.inf
-        BEST_MODEL_PARAMS = None
-        patience_cnt = 0
-
-        val_loss_list = []
-        train_loss_list = []
-        epochs_list = []
-
-        logger.info('Train model with')
-        for epoch in tqdm(range(epochs)):
-            val_loss, train_loss = self.func_epoch(self.train_loader, self.val_loader, optimizer, criterion)
-            train_loss = train_loss.item()
-            val_loss = round(val_loss, 3)
-            train_loss = round(train_loss, 3)
-            val_loss_list.append(val_loss)
-            train_loss_list.append(train_loss)
-            epochs_list.append(epoch)
-            if val_loss < BEST_VAL_LOSS:
-                BEST_VAL_LOSS = val_loss
-                BEST_MODEL_PARAMS = self.model.state_dict()
-                patience_cnt = 0
-            else:
-                patience_cnt += 1
-                if patience_cnt >= PATIENCE_CNT:
-                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
-                    save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                    plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-                    if MLFLOW:
-                        mlflow.end_run()
-                    return
-            if MLFLOW:
-                mlflow.log_metric('loss', val_loss, step=epoch)
-            if epoch % CHECKPOINT == 0:
-                logger.info(f'epochs {epoch}, Val loss {val_loss}')
-                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-                save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
-
-        logger.info(f'Last val loss {val_loss}')
-        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-        self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-
-        if 'loss_parameters' in locals():
-            logger.info(f'################ Loss parameter ###################')
-            logger.info(criterion.ratio_matrix)
-            
 class ModelGNN(ModelTorch):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
@@ -1638,21 +1641,18 @@ class ModelGNN(ModelTorch):
         self.mesh_file = mesh_file
         self.graph_method = graph_method
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test):
-
-        self.graph = graph
-
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
         
-        if self.nbfeatures != 'all':
-            self.features_name = featuresAll[:int(self.nbfeatures)]
-        else:
-            self.features_name = featuresAll
+        if features_importance:
+            importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+            
+            if self.nbfeatures != 'all':
+                self.features_name = featuresAll[:int(self.nbfeatures)]
+            else:
+                self.features_name = featuresAll
 
-        print(self.features_name)
-        
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
             old_shape = df_train.shape
@@ -1665,9 +1665,9 @@ class ModelGNN(ModelTorch):
                     nb = len(df_train[df_train[self.target_name] > 0])
 
                 df_combined = self.split_dataset(df_train, nb, reset=False)
-
+                df_train['weight'] = 0
                 # Mettre à jour df_train pour l'entraînement
-                df_train.loc[df_combined.index, 'weight'] = 0
+                df_train.loc[df_combined.index, 'weight'] = 1
 
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
 
@@ -1686,29 +1686,12 @@ class ModelGNN(ModelTorch):
                     nb = int(best_tp * len(y[y == 0]))
 
                     df_combined = self.split_dataset(df_train, nb, reset=False)
-                    df_train.loc[df_combined.index, 'weight'] = 0
+                    df_train['weight'] = 0
+
+                    # Mettre à jour df_train pour l'entraînement
+                    df_train.loc[df_combined.index, 'weight'] = 1
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
-        
-        if self.over_sampling == 'full':
-            pass
-
-        elif self.over_sampling == 'smote':
-            if self.task_type == 'classification':
-                """y_negative = y[y == 0].shape[0]
-                y_one = y_negative * 0.01
-                y_two = y_negative * 0.01
-                y_three = y_negative * 0.01
-                y_four = y_negative * 0.01
-                smote = SMOTE(random_state=42, sampling_strategy={0 : y_negative, 1 : y_one, 2 : y_two, 3 : y_three, 4 : y_four})"""
-                smote = SMOTE(random_state=42, sampling_strategy='auto')
-            elif self.task_type == 'binary':
-                smote = SMOTE(random_state=42, sampling_strategy='auto')
-            df_train = smote.fit_resample(df_train)
-
-        else:
-            raise ValueError(f'Unknow value of under_sampling -> {self.over_sampling}')
             
-        #if (self.dir_log / 'train_loader.pkl').is_file():
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_log)
             self.val_loader = read_object('val_loader.pkl', self.dir_log)
@@ -1753,9 +1736,6 @@ class ModelGNN(ModelTorch):
 
     def launch_train_loader(self, loader, criterion, optimizer):
         
-        #if has_method(criterion, 'get_learnable_parameters'):
-        #    criterion.eval()
-            
         self.model.train()
         for i, data in enumerate(loader, 0):
             
@@ -1767,28 +1747,12 @@ class ModelGNN(ModelTorch):
             band = -1
             target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs_id)
 
-            inputs_model = inputs
-
             if not self.mesh:
-                output = self.model(inputs_model, graphs)
+                output = self.model(inputs, graphs)
             else:
-                output = self.model(inputs_model, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+                output = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
 
-            if self.task_type == 'regression':
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-                
-                target = torch.masked_select(target, weights.gt(0))
-                output = torch.masked_select(output, weights.gt(0))
-                weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target, weights)
-            else:
-                target = torch.masked_select(target, weights.gt(0))
-                target = target.long()
-                output = output[weights.gt(0)]
-                weights = torch.masked_select(weights, weights.gt(0))
-                #output = torch.reshape(output, target.shape)
-                loss = criterion(output, target)
+            loss = self.calculate_loss(criterion, output, target, weights)
 
             optimizer.zero_grad()
             loss.backward()
@@ -1809,146 +1773,19 @@ class ModelGNN(ModelTorch):
                 else:
                     inputs, labels, DGLgraphs, graphs_id = data
 
-                # Determine the index of the target variable in labels
-                #if target_name == 'binary' or target_name == 'nbsinister':
-                #    band = -2
-                #else:
                 band = -1
 
                 target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs_id)
 
-                inputs_model = inputs
-               
                 if not self.mesh:
-                    output = self.model(inputs_model, graphs)
+                    output = self.model(inputs, graphs)
                 else:
-                    output = self.model(inputs_model, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+                    output = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
 
-                # Compute loss
-                if self.task_type == 'regression':
-                    target = target.view(output.shape)
-                    weights = weights.view(output.shape)
-
-                    # Mask out invalid weights
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    output = torch.masked_select(output, valid_mask)
-                    weights = torch.masked_select(weights, valid_mask)
-                    loss = criterion(output, target, weights)
-                else:
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    output = output[valid_mask]
-                    target = target.long()
-                    weights = torch.masked_select(weights, valid_mask)
-                    #output = torch.reshape(output, target.shape)
-                    loss = criterion(output, target)
-
+                loss = self.calculate_loss(criterion, output, target, weights)
                 total_loss += loss.item()
 
         return total_loss
-
-    def func_epoch(self, train_loader, val_loader, optimizer, optimizer_loss, criterion):
-        
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
-
-        if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion, optimizer_loss)
-        
-        else:
-            val_loss = train_loss
-
-        return val_loss, train_loss
-    
-    def make_model(self, graph, custom_model_params):
-        model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
-                                graph, dropout, 'relu',
-                                self.ks,
-                                out_channels=self.out_channels,
-                                task_type=self.task_type,
-                                device=device, num_lstm_layers=num_lstm_layers,
-                                custom_model_params=custom_model_params)
-        if self.model_params is None:
-            self.model_params = params
-        return model, params
-
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
-        """
-        Train neural network model
-        """
-
-        if MLFLOW:
-            existing_run = get_existing_run(f'{self.model_name}_')
-            if existing_run:
-                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-            else:
-                mlflow.start_run(run_name=f'{self.model_name}_', nested=True)
-
-        assert self.train_loader is not None and self.val_loader is not None
-
-        check_and_create_path(self.dir_log)
-
-        criterion = get_loss_function(self.loss)
-
-        if new_model:
-            self.model, _ = self.make_model(graph, custom_model_params)
-            
-        #if (dir_log / '100.pt').is_file():
-        #    model.load_state_dict(torch.load((dir_log / '100.pt'), map_location=device, weights_only=True), strict=False)
-
-        parameters = self.model.parameters()
-        if has_method(criterion, 'get_learnable_parameters'):
-            logger.info(f'Adding {self.loss} parameter')
-            loss_parameters = criterion.get_learnable_parameters().values()
-            #optimizer_loss = optim.Adam(parameters, lr=self.lr)
-            parameters = list(parameters) + list(loss_parameters)
-        else:
-            optimizer_loss = None
-
-        optimizer = optim.Adam(parameters, lr=self.lr)
-
-        BEST_VAL_LOSS = math.inf
-        BEST_MODEL_PARAMS = None
-        patience_cnt = 0
-
-        val_loss_list = []
-        train_loss_list = []
-        epochs_list = []
-
-        logger.info('Train model with')
-        for epoch in tqdm(range(epochs), disable=not verbose):
-            val_loss, train_loss = self.func_epoch(self.train_loader, self.val_loader, optimizer, optimizer_loss, criterion)
-            train_loss = train_loss.item()
-            val_loss = round(val_loss, 3)
-            train_loss = round(train_loss, 3)
-            val_loss_list.append(val_loss)
-            train_loss_list.append(train_loss)
-            epochs_list.append(epoch)
-            if val_loss < BEST_VAL_LOSS:
-                BEST_VAL_LOSS = val_loss
-                BEST_MODEL_PARAMS = self.model.state_dict()
-                patience_cnt = 0
-            else:
-                patience_cnt += 1
-                if patience_cnt >= PATIENCE_CNT:
-                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
-                    save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                    plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-                    if MLFLOW:
-                        mlflow.end_run()
-                    return
-            if MLFLOW:
-                mlflow.log_metric('loss', val_loss, step=epoch)
-            if epoch % CHECKPOINT == 0 and verbose:
-                logger.info(f'epochs {epoch}, Val loss {val_loss}')
-                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-                save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
-
-        logger.info(f'Last val loss {val_loss}')
-        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-        self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
 
     def _predict_test_loader(self, X: DataLoader, proba=False) -> torch.tensor:
         """
@@ -2011,24 +1848,136 @@ class ModelGNN(ModelTorch):
                 pred = torch.round(pred, decimals=1)
             
             return pred, y
+    
+    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True):
+        
+        if not is_unknowed_risk:
+            test_percentage = np.arange(0.1, 1.05, 0.05)
+        else:
+            test_percentage = np.arange(0.0, 1.05, 0.05)
+
+        under_prediction_score_scores = []
+        over_prediction_score_scores = []
+        data_log = None
+        find_log = False
+
+        """if False:
+            if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
+                data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
+        else:
+            if (self.dir_log / 'test_percentage_scores.pkl').is_file():
+                print(f'Load test_percentage_score')
+                find_log = True
+                data_log = read_object('test_percentage_scores.pkl', self.dir_log)"""
+
+        print(f'data_log : {data_log}')
+        if data_log is not None:
+            test_percentage, under_prediction_score_scores, over_prediction_score_scores = data_log[0], data_log[1], data_log[2]
+        else:
+            y_ori = df_train[self.target_name].values 
+            for tp in test_percentage:
+                df_train_copy = df_train.copy(deep=True)
+
+                if not is_unknowed_risk:
+                    nb = int(tp * y_ori[y_ori == 0].shape[0])
+                else:
+                    nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
+
+                logger.info(f'Trained with {tp} -> {nb} sample of class 0')
+
+                df_combined = self.split_dataset(df_train_copy, nb, reset=False)
+
+                # Mettre à jour df_train pour l'entraînement
+                df_train_copy['weight'] = 0
+                df_train_copy.loc[df_combined.index, 'weight'] = 1
+                
+                copy_model = deepcopy(self)
+                copy_model.under_sampling = 'full'
+                copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test)
+                copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False)
+                test_loader = copy_model.create_test_loader(graph, df_test)
+                test_output, y = copy_model._predict_test_loader(test_loader)
+                test_output = test_output.detach().cpu().numpy()
+
+                y = y.detach().cpu().numpy()
+                y = y[:, -1]
+
+                under_prediction_score_value = under_prediction_score(y, test_output)
+                over_prediction_score_value = over_prediction_score(y, test_output)
+                
+                under_prediction_score_scores.append(under_prediction_score_value)
+                over_prediction_score_scores.append(over_prediction_score_value)
+
+                print(f'Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}')
+
+                if under_prediction_score_value > over_prediction_score_value:
+                    break
+        
+        # Find the index where the two scores cross (i.e., where the difference changes sign)
+        score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
+
+        # If no crossing point is found, use the best point based on another criterion (e.g., minimum difference)
+        index_max = np.argmin(np.abs(score_differences))
+        best_tp = test_percentage[index_max]         
+
+        if is_unknowed_risk:
+            plt.figure(figsize=(15, 7))
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
+            plt.xticks(test_percentage)
+            plt.xlabel('Percentage of Unknowed sample')
+            plt.ylabel('IOU Score')
+
+            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
+            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
+            
+            # Ajouter une légende
+            plt.legend()
+
+            # Sauvegarder et fermer la figure
+            plt.savefig(self.dir_log / f'{self.name}_unknowned_scores_per_percentage.png')
+            plt.close()
+            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
+        else:
+            plt.figure(figsize=(15, 7))
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
+            plt.xticks(test_percentage)
+            plt.xlabel('Percentage of Binary sample')
+            plt.ylabel('IOU Score')
+
+            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
+            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
+
+            # Ajouter une légende
+            plt.legend()
+
+            # Sauvegarder et fermer la figure
+            plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
+            plt.close()
+            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'test_percentage_scores.pkl', self.dir_log)
+
+        print(best_tp)
+        return best_tp, find_log
 
 class Model_Torch(ModelTorch):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
         self.graph = graph
 
-        ##################################### Select features #########################################
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        if features_importance:        
+            ##################################### Select features #########################################
+            importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+            features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+            
+            if self.nbfeatures != 'all':
+                self.features_name = featuresAll[:int(self.nbfeatures)]
+            else:
+                self.features_name = featuresAll
 
-        if self.nbfeatures != 'all':
-            self.features_name = featuresAll[:int(self.nbfeatures)]
-        else:
-            self.features_name = featuresAll
-        
         ##################################### Define percentage of 0 samples #########################################
         if self.under_sampling != 'full':
             old_shape = df_train.shape
@@ -2066,35 +2015,18 @@ class Model_Torch(ModelTorch):
                     df_train = df_combined
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
-        if self.over_sampling == 'full':
-            pass
-
-        elif self.over_sampling == 'smote':
-            if self.task_type == 'classification':
-                """y_negative = y[y == 0].shape[0]
-                y_one = y_negative * 0.01
-                y_two = y_negative * 0.01
-                y_three = y_negative * 0.01
-                y_four = y_negative * 0.01
-                smote = SMOTE(random_state=42, sampling_strategy={0 : y_negative, 1 : y_one, 2 : y_two, 3 : y_three, 4 : y_four})"""
-                smote = SMOTE(random_state=42, sampling_strategy='auto')
-            elif self.task_type == 'binary':
-                smote = SMOTE(random_state=42, sampling_strategy='auto')
-            df_train = smote.fit_resample(df_train)
-
-        else:
-            raise ValueError(f'Unknow value of under_sampling -> {self.over_sampling}')
-
         self.df_train = df_train
         self.df_test = df_test
         self.df_val = df_val
 
+        print(df_train.shape, df_test.shape, df_val.shape)
+        print(df_train[df_train['weight'] > 0].shape, df_val[df_val['weight'] > 0].shape)
+
         ##################################### Create loader #########################################        
-        #if (self.dir_log / 'train_loader.pkl').is_file():
         if False:
-            self.train_loader = read_object('train_loader.pkl', self.dir_log)
-            self.val_loader = read_object('val_loader.pkl', self.dir_log)
-            self.test_loader = read_object('test_loader.pkl', self.dir_log)
+            train_dataset = read_object('train_dataset.pkl', self.dir_log)
+            val_dataset = read_object('val_dataset.pkl', self.dir_log)
+            test_dataset = read_object('test_dataset.pkl', self.dir_log)
         else:
             train_dataset, val_dataset, test_dataset = create_dataset(graph,
                                                                 df_train,
@@ -2104,14 +2036,18 @@ class Model_Torch(ModelTorch):
                                                                 self.target_name,
                                                                 None,
                                                                 self.device, self.ks)
-        
-            self.train_loader = DataLoader(train_dataset, batch_size, True,)
-            self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False)
-            self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False)
+    
+            save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
+            save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
+            save_object_torch(test_dataset, 'test_dataset.pkl', self.dir_log)
 
-        save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
-        save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
-        save_object_torch(self.test_loader, 'test_loader.pkl', self.dir_log)
+            train_loader = DataLoader(train_dataset, batch_size, True, worker_init_fn=seed_worker, generator=g)
+            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+
+            self.train_loader = train_loader
+            self.val_loader = val_loader
+            self.test_loader = test_loader
 
     def create_test_loader(self, graph, df):
         loader = create_test_loader(graph, df,
@@ -2123,203 +2059,11 @@ class Model_Torch(ModelTorch):
 
         return loader
 
-    def launch_train_loader(self, loader, criterion, optimizer):
-        
-        self.model.train()
-        for i, data in enumerate(loader, 0):
-
-            inputs, labels, _ = data
-            graphs = None
-
-            band = -1
-
-            try:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-            except Exception as e:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-            #inputs_model = inputs[:, features]
-            inputs_model = inputs
-            output = self.model(inputs_model)
-
-            if self.task_type == 'regression':
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-                
-                target = torch.masked_select(target, weights.gt(0))
-                output = torch.masked_select(output, weights.gt(0))
-                weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target, weights, update_matrix=True)
-            else:
-                target = torch.masked_select(target, weights.gt(0))
-                output = output[weights.gt(0)]
-                target = target.long()
-                weights = torch.masked_select(weights, weights.gt(0))
-                loss = criterion(output, target, update_matrix=True)
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        return loss
-
-    def launch_val_test_loader(self, loader, criterion):
-        self.model.eval()
-        total_loss = 0.0
-
-        with torch.no_grad():
-
-            for i, data in enumerate(loader, 0):
-                
-                inputs, labels, _ = data
-                graphs = None
-
-                # Determine the index of the target variable in labels
-                #if target_name == 'binary' or target_name == 'nbsinister':
-                #    band = -2
-                #else:
-                band = -1
-
-                try:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-                except Exception as e:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-                inputs_model = inputs
-                #inputs_model = inputs[:, features]
-                output = self.model(inputs_model)
-
-                # Compute loss
-                if self.task_type == 'regression':
-                    target = target.view(output.shape)
-                    weights = weights.view(output.shape)
-
-                    # Mask out invalid weights
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    output = torch.masked_select(output, valid_mask)
-                    weights = torch.masked_select(weights, valid_mask)
-                    loss = criterion(output, target, weights)
-                else:
-                    valid_mask = weights.gt(0)
-                    target = torch.masked_select(target, valid_mask)
-                    target = target.long()
-                    output = output[valid_mask]
-                    weights = torch.masked_select(weights, valid_mask)
-                    loss = criterion(output, target)
-
-                total_loss += loss.item()
-
-        return total_loss
-
-    def func_epoch(self, train_loader, val_loader, optimizer, criterion):
-        
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
-
-        if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion)
-        else:
-            val_loss = train_loss.item()
-
-        return val_loss, train_loss
-    
-    def make_model(self, graph, custom_model_params):
-        model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
-                                graph, dropout, 'relu',
-                                self.ks,
-                                out_channels=self.out_channels,
-                                task_type=self.task_type,
-                                device=device, num_lstm_layers=num_lstm_layers,
-                                custom_model_params=custom_model_params)
-        if self.model_params is None:
-            self.model_params = params
-        return model, params
-
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
-        """
-        Train neural network model
-        """
-
-        if MLFLOW:
-            existing_run = get_existing_run(f'{self.model_name}_')
-            if existing_run:
-                mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-            else:
-                mlflow.start_run(run_name=f'{self.model_name}_', nested=True)
-
-        assert self.train_loader is not None and self.val_loader is not None
-
-        check_and_create_path(self.dir_log)
-
-        criterion = get_loss_function(self.loss)
-
-        if new_model:
-            self.model, _ = self.make_model(graph, custom_model_params)
-
-        #print(len(self.features_name))
-
-        parameters = self.model.parameters()
-
-        if has_method(criterion, 'get_learnable_parameters'):
-            logger.info(f'Adding {self.loss} parameter')
-            loss_parameters = criterion.get_learnable_parameters().values()
-            parameters = list(parameters) + list(loss_parameters)
-
-        optimizer = optim.Adam(parameters, lr=self.lr)
-
-        BEST_VAL_LOSS = math.inf
-        BEST_MODEL_PARAMS = None
-        patience_cnt = 0
-
-        val_loss_list = []
-        train_loss_list = []
-        epochs_list = []
-
-        #disable = None if not verbose else False
-
-        for epoch in tqdm(range(epochs), disable=not verbose):
-            val_loss, train_loss = self.func_epoch(self.train_loader, self.val_loader, optimizer, criterion)
-            train_loss = train_loss.item()
-            val_loss = round(val_loss, 3)
-            train_loss = round(train_loss, 3)
-            val_loss_list.append(val_loss)
-            train_loss_list.append(train_loss)
-            epochs_list.append(epoch)
-            if val_loss < BEST_VAL_LOSS:
-                BEST_VAL_LOSS = val_loss
-                BEST_MODEL_PARAMS = self.model.state_dict()
-                patience_cnt = 0
-            else:
-                patience_cnt += 1
-                if patience_cnt >= PATIENCE_CNT:
-                    logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
-                    save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-                    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                    plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-                    if MLFLOW:
-                        mlflow.end_run()
-                    return
-            if MLFLOW:
-                mlflow.log_metric('loss', val_loss, step=epoch)
-            if epoch % CHECKPOINT == 0 and verbose:
-                logger.info(f'epochs {epoch}, Val loss {val_loss}')
-                logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-                save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
-                if has_method(criterion, 'get_learnable_parameters'):
-                    logger.info(f'################ Loss parameter ###################')
-                    mat = torch.round(input=criterion.ratio_matrix, decimals=2)
-                    logger.info(mat)
-
-        logger.info(f'Last val loss {val_loss}')
-        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-        self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-
 class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='mean'):
+                 aggregation_method='mean', nbfeatures='all'):
         """
         Initialize the Federated Learning Model.
 
@@ -2329,7 +2073,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         - aggregation_method: Method to aggregate local models ('mean', 'median', 'weighted', etc.).
         """
         super().__init__()
-        self.features = features
+        self.features_name = features
         self.federated_cluster = federated_cluster
         self.name = name
         self.loss = loss
@@ -2341,17 +2085,31 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.task_type = task_type
         self.aggregation_method = aggregation_method  # Méthode d'agrégation
         self.global_model = deepcopy(federated_model)  # Modèle global
+        self.nbfeatures = nbfeatures
 
     def fit(self, df_train, df_val, df_test, graph, args):
         """
         Train local models for each federated cluster, aggregate them into a global model, 
         and stop training once the global score does not improve for patience_count_global epochs.
         """
+
+        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        
+        if self.nbfeatures != 'all':
+            self.features_name = featuresAll[:int(self.nbfeatures)]
+        else:
+            self.features_name = featuresAll
+
+        self.global_model.features_name = self.features_name
+        self.global_model.nbfeatures = 'all'
         self.global_model.graph = graph
 
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
+        self.model_params = deepcopy(model_params)
         del initiate_model
         del model_params
         
@@ -2387,6 +2145,9 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                 # Initialisation du modèle local
                 local_model = deepcopy(self.global_model)
 
+                local_model.features_name = self.features_name
+                local_model.nbfeatures = 'all'
+
                 # Création des datasets pour le cluster fédéré
                 df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
                     df_train, df_val, df_test, cluster
@@ -2396,7 +2157,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
 
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster)
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, False)
 
                 # Entraînement du modèle local
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
@@ -2486,6 +2247,137 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             return self.global_model.predict_proba(X)
         else:
             raise AttributeError("The global model does not support predict_proba.")
+        
+    def make_model(self, graph, custom_model_params):
+        return self.global_model.make_model(graph, custom_model_params)
+    
+    def create_test_loader(self, graph, df):
+        return self.global_model.create_test_loader(graph, df)
+    
+    def _predict_test_loader(self, X):
+        return self.global_model._predict_test_loader(X)
+
+############################################ KNOWNLEDEG DISTILLATION ##############################################################
+
+class ModelKnowledgeDistillation(ModelTorch):
+    def __init__(self, distillation_training_mode, teacher_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device):
+
+        _, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss = teacher_name.split('_')
+
+        super().__init__(f'{model_name}-{teacher_name}-{distillation_training_mode}', nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, \
+        out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+        
+        self.distillation_training_mode = distillation_training_mode
+        self.teacher_name = teacher_name
+
+        self.student_train = True
+
+        if 'group' in self.distillation_training_mode:
+            self.model_list = []
+            
+    def create_train_val_test_loader(self, graph, df_val, df_test, features_importance=True):
+        self.graph = graph
+
+        if self.teacher_name in sklearn_model_list:
+            self.teacher = read_object(f'{self.teacher_name}', self.dir_log / '..' / 'baseline' / self.teacher_name)
+        else:
+            self.teacher = read_object(f'{self.teacher_name}', self.dir_log / self.teacher_name)
+
+        self.df_train = self.teacher.df_train
+        self.df_test = df_test
+        self.df_val = df_val
+
+        ##################################### Create loader #########################################
+        if False:
+            train_dataset = read_object('train_dataset.pkl', self.dir_log)
+            val_dataset = read_object('val_dataset.pkl', self.dir_log)
+            test_dataset = read_object('test_dataset.pkl', self.dir_log)
+        else:
+            train_dataset, val_dataset, test_dataset = create_dataset(graph,
+                                                                self.df_train,
+                                                                df_val,
+                                                                df_test,
+                                                                self.features_name,
+                                                                self.target_name,
+                                                                None,
+                                                                self.device, self.ks)
+
+            save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
+            save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
+            save_object_torch(test_dataset, 'test_dataset.pkl', self.dir_log)
+
+            train_loader = DataLoader(train_dataset, batch_size, True, worker_init_fn=seed_worker, generator=g)
+            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+
+            self.train_loader = train_loader
+            self.val_loader = val_loader
+            self.test_loader = test_loader
+        
+    def create_test_loader(self, graph, df):
+        loader = create_test_loader(graph, df,
+                       self.features_name,
+                       self.device,
+                       None,
+                       self.target_name,
+                       self.ks)
+
+        return loader
+
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
+        if self.distillation_training_mode == 'iterate':
+            score_0 = 0
+            for sub_teacher in self.teacher.best_estimator_:
+                
+                model_params_log = self.model.state_dict()
+                super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                
+                score = self.score(self.df_test[self.feature_names], self.df_test[self.target_name])
+                if score > score_0:
+                    score_0 = score
+                else:
+                    self.update_weight(model_params_log)
+
+        elif self.distillation_training_mode == 'normal':
+            super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, self.teacher)
+
+        elif 'group' in self.distillation_training_mode:
+            nbgroup = int(self.distillation_training_mode.split('-')[1])
+            if nbgroup == 'search':
+                score_0 = 0
+                for sub_teacher in self.teacher.best_estimator_:
+                    
+                    model_params_log = self.model.model.state_dict()
+                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                    
+                    score = self.score(self.df_test[self.feature_names], self.df_test[self.target_name])
+                    if score > score_0:
+                        score_0 = score
+                    else:
+                        self.update_weight(model_params_log)
+                        self.model_list.append(deepcopy(self.model))
+                        score_0 = 0
+            else:
+                nbgroup = int(nbgroup)
+                score_0 = 0
+                current_group = 0
+                for sub_teacher in self.teacher.best_estimator_:
+                    
+                    model_params_log = self.model.model.state_dict()
+                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                    
+                    score = self.score(self.df_test[self.feature_names], self.df_test[self.target_name])
+                    if score > score_0:
+                        score_0 = score
+                    else:
+                        self.update_weight(model_params_log)
+                        self.model_list.append(deepcopy(self.model))
+                        score_0 = 0
+                        current_group += 1
+                        if current_group > nbgroup:
+                            break
+
+############################################ VOTING MODEL ##############################################################
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification'):
@@ -2733,7 +2625,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
-    
+
 class Model_susceptibility():
     def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log):
             self.model_name = model_name
@@ -2748,6 +2640,7 @@ class Model_susceptibility():
             self.val_date = val_date
             self.train_departements = train_departements
             self.dir_log = dir_log
+            self.model_params = None
             self.target = target
 
     def susecptibility_map_individual_pixel_feature(self, dept, year, variables, target_value, sdate_year, edate_year, raster, dir_data, dir_output):
@@ -2762,6 +2655,7 @@ class Model_susceptibility():
             mask_X = np.asarray(mask_X).reshape(-1,1)
 
             y = list(target_value[mask_X[:, 0]])
+
         vec_x = []
         
         assert raster is not None
@@ -3116,10 +3010,10 @@ class Model_susceptibility():
 
         return X_train, y_train, X_val, y_val, X_test, y_test, dept_test, years_test
     
-    def create_model_and_train(self, graph):
+    def create_model_and_train(self, graph, root_target):
         params = self.model_config['params']
         
-        X_train, y_train, X_val, y_val, X_test, y_test, dept_test, years_test = self.create_numpy_data()
+        X_train, y_train, X_val, y_val, X_test, y_test, dept_test, years_test = self.create_numpy_data(root_target)
         assert y_train is not None
 
         logger.info('################# Susceptibility map dataset #########################')
@@ -3155,34 +3049,40 @@ class Model_susceptibility():
             features = np.arange(0, X_train.shape[1])
 
             self.susceptility_mapper_name = self.model_config['type']
-            self.model = ModelCNN(model_name=model,
-                                    nbfeatures=len(self.features_name),
+            self.model = ModelCNN(model_name=self.susceptility_mapper_name,
+                                    nbfeatures='all',
                                     batch_size=batch_size,
                                     lr=params['lr'],
                                     target_name=self.target,
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=params['k_days'],
-                                    dir_log=self.dir_log / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{params["infos"]}'),
-                                    name=f'{model}_{params["infos"]}',
-                                    task_type=task_type,
-                                    loss=loss,
+                                    dir_log=self.dir_log / 'susecptibility_map_features' / self.model_config['type'],
+                                    name=f'{self.susceptility_mapper_name}_{self.model_config["infos"]}',
+                                    task_type=params['task_type'],
+                                    loss=self.model_config['loss'],
                                     device=device,
+                                    features=self.features_name,
+                                    over_sampling='full',
                                     under_sampling='full',
-                                    over_sampling='full')
-            
+                                    image_per_node='image_per_departement',
+                                    path=self.dir_log
+                                    )
+
             self.model.train_loader = train_loader
             self.model.test_loader = test_loader
             self.model.val_loader = val_loader
             if (self.dir_log / 'susecptibility_map_features' / self.model_config['type'] / 'best.pt').is_file():
-                temp_model = self.model.make_model(graph, custom_model_params=self.model_config['params'])
-                self.model._load_model_from_path(self.dir_log / 'susecptibility_map_features' / self.dir_log['type'] / 'best.pt', temp_model)
+                temp_model, _ = self.make_model(custom_model_params=self.model_config['params'])
+                self.model._load_model_from_path(self.dir_log / 'susecptibility_map_features' / self.model_config['type'] / 'best.pt', temp_model)
             else:
-                self.model.train(params, PATIENCE_CNT=params['PATIENCE_CNT'], CHECKPOINT=params['CHECKPOINT'], epochs=params['epoch'], custom_model_params=self.model_config['params'])
-    
+                temp_model, _ = self.make_model(custom_model_params=self.model_config['params'])
+                self.model.update_model(temp_model)
+                self.model.train(params, PATIENCE_CNT=params['PATIENCE_CNT'], CHECKPOINT=params['CHECKPOINT'], epochs=params['epoch'], custom_model_params=self.model_config['params'], new_model=False)
+
     def create_train_val_test_loader(self, X_train, y_train, X_val, y_val, X_test, y_test, dept_test, years_test):
          # Initialisation des nouveaux tableaux avec des zéros
-        T, H, W = y_train.shape
+        """T, H, W = y_train.shape
         new_y_train = np.zeros((T, H, W, 9), dtype=y_train.dtype)
 
         T, H, W = y_val.shape
@@ -3204,10 +3104,10 @@ class Model_susceptibility():
         # Mise de la bande -4 à 1
         new_y_train[..., weight_index] = 1
         new_y_val[..., weight_index] = 1
-        new_y_test[..., weight_index] = 1
+        new_y_test[..., weight_index] = 1"""
 
         logger.info(f'{X_train.shape}, {X_val.shape}, {X_test.shape}')
-        logger.info(f'{new_y_train.shape}, {new_y_val.shape}, {new_y_test.shape}')
+        logger.info(f'{y_train.shape}, {y_val.shape}, {y_test.shape}')
 
         self.susceptibility_scaler = StandardScaler()
         self.susceptibility_scaler.fit(X_train.reshape(-1, X_train.shape[1]))
@@ -3228,11 +3128,11 @@ class Model_susceptibility():
             X_test, y_test, [], transform=None, device=device)"""  # Pas de data augmentation sur le test
         
         train_dataset = InplaceGraphDataset(
-            X_train, new_y_train, [], leni=len(X_train), device=device)
+            X_train, y_train, [], leni=len(X_train), device=device)
         val_dataset = InplaceGraphDataset(
-            X_val, new_y_val, [], leni=len(X_val), device=device)
+            X_val, y_val, [], leni=len(X_val), device=device)
         test_dataset = InplaceGraphDataset(
-            X_test, new_y_test, [], leni=len(X_test), device=device)
+            X_test, y_test, [], leni=len(X_test), device=device)
 
         train_loader = DataLoader(dataset=train_dataset, batch_size=4, shuffle=True)
         val_loader = DataLoader(dataset=val_dataset, batch_size=val_dataset.__len__(), shuffle=False)
@@ -3247,7 +3147,7 @@ class Model_susceptibility():
             return self.model._predict_test_loader(X)
     
     def make_model(self, custom_model_params):
-        model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
+        model, params = make_model(self.model.model_name, len(self.features_name), len(self.features_name),
                                 None, dropout, 'relu',
                                 self.ks,
                                 out_channels=self.out_channels,
@@ -3257,4 +3157,75 @@ class Model_susceptibility():
         
         if self.model_params is None:
             self.model_params = params
+
         return model, params
+
+    def test_model(self, root_target):
+        check_and_create_path(self.dir_log / 'test')
+        with torch.no_grad():
+            mae_func = torch.nn.L1Loss(reduce='none')
+            mae = 0
+            itest = 0
+            for data in self.test_loader:
+                X, y, _ = data
+                logger.info(f'{torch.max(X)}')
+                output = self.model.model(X)
+                for b in range(y.shape[0]):
+                    loss = mae_func(output[b, 0], y[b, :, :, -1])
+                    
+                    print(np.unique(y[b, :, :, departement_index]))
+                    departement = np.unique(y[b, :, :, departement_index])[0]
+
+                    yb = y[b].detach().cpu().numpy()
+                    outputb = output[b].detach().cpu().numpy()
+                    
+                    logger.info(f'loss {departement}: {loss.item()} {np.max(outputb)}')
+
+                    if MLFLOW:
+                        existing_run = get_existing_run(f'susceptibility_{departement}_{self.model_name}')
+                        if existing_run:
+                            mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                        else:
+                            mlflow.start_run(run_name=f'susceptibility_{departement}_{self.model_name}', nested=True)
+                        
+                        mlflow.log_metric('MAE', loss.item())
+
+                    mae += loss.item()
+
+                    fig, ax = plt.subplots(1, 2, figsize=(15,5))
+                    #raster = read_object(f'{names[b]}.pkl', dir_output / 'database')
+                    #assert raster is not None
+                    #raster = raster[0]
+
+                    #output_image = resize_no_dim(outputb[0], raster.shape[0], raster.shape[1])
+                    #y_image = resize_no_dim(yb[:,  :], raster.shape[0], raster.shape[1])
+
+                    output_image = outputb[0]
+                    y_image = yb[:, :, -1]
+
+                    output_image[np.isnan(y_image)] = np.nan
+                    #y_image[np.isnan(raster)] = np.nan
+
+                    maxi = max(np.nanmax(output_image), np.nanmax(y_image))
+
+                    im0 = ax[0].imshow(output_image, vmin=0, vmax=maxi)
+                    ax[0].set_title('Prediction map')
+                    cbar0 = plt.colorbar(im0, ax=ax[0], orientation='vertical')
+                    cbar0.set_label('Feature Value')
+
+                    im1 = ax[1].imshow(y_image, vmin=0, vmax=maxi)
+                    ax[1].set_title('Ground truth')
+                    cbar1 = plt.colorbar(im1, ax=ax[1], orientation='vertical')
+                    cbar1.set_label('Feature Value')
+
+                    plt.tight_layout()
+                    plt.savefig(self.dir_log / 'test' / f'{departement}.png')
+                    plt.close('all')
+                    
+                    if MLFLOW:
+                        mlflow.log_figure(fig, f'_{departement}.png')
+                        mlflow.end_run()
+
+                itest += y.shape[0]
+                        
+            logger.info(f'MAE on test set : {mae / itest}')
