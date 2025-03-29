@@ -285,8 +285,8 @@ def haversine(p1, p2, unit = 'kilometer'):
 def download_air(path, geo, dir_output):
     check_and_create_path(dir_output)
     stations = pd.read_csv(path / 'Export_stations_france.csv', delimiter=';')
-    stations = gpd.GeoDataFrame(stations, geometry=gpd.points_from_xy(stations.Longitude, stations.Latitude))
-    print(stations.columns)
+    stations = gpd.GeoDataFrame(stations, geometry=gpd.points_from_xy(stations.Longitude, stations.Latitude), crs=geo.crs)
+    stations = stations.to_crs(geo.crs)
     center = geo.centroid
     dist_max = 75
     stations['dist'] = stations.apply(lambda x : haversine((float(x['Longitude']), float(x['Latitude'])), (float(center.x), float(center.y))), axis=1)

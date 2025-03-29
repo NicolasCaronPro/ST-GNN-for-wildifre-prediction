@@ -16,6 +16,7 @@ import torch
 import dgl
 from torch import Tensor, testing
 from dgl.convert import heterograph
+import math
 
 def get_edge_len(edge_src: Tensor, edge_dst: Tensor, axis: int = 1):
     """returns the length of the edge
@@ -181,7 +182,6 @@ def add_edge_features(
     else:
         graph.edata["x"] = torch.cat((disp, disp_norm), dim=-1)
     return graph
-
 
 def add_node_features(graph: dgl.DGLGraph, pos: Tensor) -> dgl.DGLGraph:
     """Adds cosine of latitude, sine and cosine of longitude as the node features
@@ -655,3 +655,155 @@ class GraphBuilder:
             print("mesh2grid bipartite graph={}".format(m2g_graph))
 
         return m2g_graph
+
+class GraphBuilder2:
+    def __init__(self, g_lat_lon_grid_scales, Y_scales, graph_scales, date_index, id_index) -> None:
+        self.g_lat_lon_grid_scales = g_lat_lon_grid_scales
+        self.graph_scales = graph_scales
+        self.Y_scales = Y_scales
+        self.date_index = date_index
+        self.id_index = id_index
+
+    def haversine_distance(self, lat1, lon1, lat2, lon2):
+        R = 6371.0  # Earth radius
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+        a = math.sin(delta_phi / 2.0) ** 2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2.0) ** 2
+        return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    def _add_node_and_edge_features(self, hetero_graph, edge_type, src_pos_list, tgt_pos_list, src, dst):
+        src_pos_tensor = torch.tensor(src_pos_list, dtype=torch.float32)
+        tgt_pos_tensor = torch.tensor(tgt_pos_list, dtype=torch.float32)
+
+        #print(hetero_graph)
+        #print(src_pos_tensor, tgt_pos_tensor)
+        # Assign node positions
+        #hetero_graph.nodes[edge_type[0]].data["pos"] = src_pos_tensor
+        #hetero_graph.nodes[edge_type[2]].data["pos"] = tgt_pos_tensor
+
+        # Compute directional edge vectors
+        """src_vecs = src_pos_tensor[torch.tensor(src)]
+        tgt_vecs = tgt_pos_tensor[torch.tensor(dst)]
+        disp = tgt_vecs - src_vecs
+        norm = torch.linalg.norm(disp, dim=1, keepdim=True)
+        norm[norm == 0] = 1e-6  # avoid division by zero
+        edge_features = torch.cat([disp / norm, norm], dim=1)  # (dx, dy, norm)"""
+
+        num_edges = hetero_graph.num_edges(edge_type)
+        hetero_graph.edges[edge_type].data["x"] = torch.ones(num_edges, 1)
+
+    def graph_scale(self):
+        graph_list = []
+        for i, Y in enumerate(self.Y_scales):
+            spatialEdges = self.graph_scales[i].edges
+            graph_meta = self.graph_scales[i]
+            scale_src = scale_dst = graph_meta.scale  # same scale
+
+            src = []
+            dst = []
+
+            for j, node in enumerate(Y):
+                spatialNodes = Y[np.argwhere((Y[:, self.date_index, -1] == node[self.date_index][-1]))][:,:, 0, 0]
+                if spatialEdges.shape[1] != 0:
+                    spatial = spatialEdges[1][
+                        (np.isin(spatialEdges[1], spatialNodes[:, 0])) &
+                        (spatialEdges[0] == node[self.id_index][0])
+                    ]
+                    for sp in spatial:
+                        target_idx = np.argwhere(
+                            (Y[:, self.date_index, -1] == node[self.date_index, -1]) &
+                            (Y[:, self.id_index, 0] == sp)
+                        )[0][0]
+                        src.append(j)
+                        dst.append(target_idx)
+
+            edge_type = (f"scale_{scale_src}", "coo", f"scale_{scale_dst}")
+            data_dict = {edge_type: (torch.tensor(src, dtype=torch.int32), torch.tensor(dst, dtype=torch.int32))}
+            hetero_graph = heterograph(data_dict)
+
+            # Positions (same for src and dst)
+            latlon = self.g_lat_lon_grid_scales[i]
+            self._add_node_and_edge_features(hetero_graph, edge_type, latlon, latlon, src, dst)
+            graph_list.append(hetero_graph)
+
+        return graph_list
+
+    def increase_scale(self, graph_scale_list):
+        graph_list = []
+        updated_graph_scale_list = []
+
+        for i in range(len(self.Y_scales) - 1):
+            src_lat_lon = self.g_lat_lon_grid_scales[i]
+            tgt_lat_lon = self.g_lat_lon_grid_scales[i + 1]
+
+            graph_src = self.graph_scales[i]
+            graph_target = self.graph_scales[i + 1]
+            scale_src = graph_src.scale
+            scale_dst = graph_target.scale
+
+            src = []
+            dst = []
+
+            for src_idx, (src_lat, src_lon) in enumerate(src_lat_lon):
+                for tgt_idx, (tgt_lat, tgt_lon) in enumerate(tgt_lat_lon):
+                    #if self.haversine_distance(src_lat, src_lon, tgt_lat, tgt_lon) < 50:
+                        src.append(src_idx)
+                        dst.append(tgt_idx)
+
+            edge_type = (f"scale_{scale_src}", "coo", f"scale_{scale_dst}")
+            data_dict = {edge_type: (torch.tensor(src, dtype=torch.int32), torch.tensor(dst, dtype=torch.int32))}
+            hetero_graph = heterograph(data_dict)
+
+            self._add_node_and_edge_features(hetero_graph, edge_type, src_lat_lon[src], tgt_lat_lon[dst], src, dst)
+            graph_list.append(hetero_graph)
+
+            # Ajout des features
+            self._add_node_and_edge_features(hetero_graph, edge_type, src_lat_lon, tgt_lat_lon, src, dst)
+            graph_list.append(hetero_graph)
+
+            # --- Filtrage des graphes sources & cibles selon les noeuds utilisés
+            used_src_nodes = np.unique(src)
+            used_dst_nodes = np.unique(dst)
+
+            filtered_src_graph = dgl.node_subgraph(graph_scale_list[i], used_src_nodes)
+            filtered_dst_graph = dgl.node_subgraph(graph_scale_list[i + 1], used_dst_nodes)
+
+            # On ajoute à la liste mise à jour (attention à l'ordre)
+            if i == 0:
+                updated_graph_scale_list.append(filtered_src_graph)
+            updated_graph_scale_list.append(filtered_dst_graph)
+
+        return graph_list, updated_graph_scale_list
+    
+    def decrease_scale(self):
+        graph_list = []
+        for i in range(len(self.Y_scales) - 1, 0, -1):
+            src_lat_lon = self.g_lat_lon_grid_scales[i]
+            tgt_lat_lon = self.g_lat_lon_grid_scales[i - 1]
+
+            graph_src = self.graph_scales[i]
+            graph_target = self.graph_scales[i - 1]
+
+            scale_src = graph_src.scale
+            scale_dst = graph_target.scale
+
+            src = []
+            dst = []
+
+            for src_idx, (src_lat, src_lon) in enumerate(src_lat_lon):
+                for tgt_idx, (tgt_lat, tgt_lon) in enumerate(tgt_lat_lon):
+                    #if self.haversine_distance(src_lat, src_lon, tgt_lat, tgt_lon) < 50:
+                        src.append(src_idx)
+                        dst.append(tgt_idx)
+
+            edge_type = (f"scale_{scale_src}", "coo", f"scale_{scale_dst}")
+            data_dict = {edge_type: (torch.tensor(src, dtype=torch.int32), torch.tensor(dst, dtype=torch.int32))}
+            hetero_graph = heterograph(data_dict)
+
+            self._add_node_and_edge_features(hetero_graph, edge_type, src_lat_lon[src], tgt_lat_lon[dst], src, dst)
+            graph_list.append(hetero_graph)
+
+        return graph_list

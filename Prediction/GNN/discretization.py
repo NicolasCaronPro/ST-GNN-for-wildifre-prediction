@@ -1364,7 +1364,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             res[obj.name] = deepcopy(obj)
             new_cols.append(train_col)
 
-            train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+            train_col = f"nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
     
             # Sélection du préprocesseur
             preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
@@ -1374,7 +1374,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             obj = ScalerClassRisk(
                 col_id='departement',
                 dir_output=dir_post_process,
-                target='nbsinister',
+                target='nbsinisterDaily',
                 scaler=None,
                 class_risk=class_risk,
                 preprocessor=preprocessor
@@ -1382,28 +1382,28 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
             # Application du fit et prédictions
             obj.fit(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['nbsinisterDaily'].values,
                 train_dataset_['departement'].values,
                 train_dataset_[['month_non_encoder', 'graph_id']].values
             )
 
             train_dataset_[train_col] = obj.predict(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['nbsinisterDaily'].values,
                 train_dataset_['departement'].values,
                 train_dataset_[['month_non_encoder', 'graph_id']].values
             )
 
             val_dataset_[train_col] = obj.predict(
-                val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,
+                val_dataset_['nbsinisterDaily'].values,
+                val_dataset_['nbsinisterDaily'].values,
                 val_dataset_['departement'].values,
                 val_dataset_[['month_non_encoder', 'graph_id']].values
             )
             test_dataset_[train_col] = obj.predict(
-                test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,
+                test_dataset_['nbsinisterDaily'].values,
+                test_dataset_['nbsinisterDaily'].values,
                 test_dataset_['departement'].values,
                 test_dataset_[['month_non_encoder', 'graph_id']].values
             )

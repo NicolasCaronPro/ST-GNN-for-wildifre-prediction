@@ -210,7 +210,7 @@ osmnxint2str = {
  '4': 'tertiary', 
  '5': 'path'}
 
-newFeatures = []
+newFeatures = ['precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7']
 
 import datetime as dt
 
@@ -263,7 +263,7 @@ def get_academic_zone(name, date):
         return dict_zones[name][0]
     return dict_zones[name][1]
 
-ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'days_until_next_event']
+ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'days_until_next_event']
 
 targets_columns = ['time_intervention',
                     'burned_area',
@@ -304,6 +304,7 @@ departement_index = ids_columns.index('departement')
 date_index = ids_columns.index('date')
 weight_index = ids_columns.index('weight')
 days_until_next_event_index = ids_columns.index('days_until_next_event')
+scale_index = ids_columns.index('scale')
 
 class_index = targets_columns.index('class_risk')
 nbsinister_index = targets_columns.index('nbsinister')
@@ -394,7 +395,7 @@ encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
 epochs = 10000
-lr = 0.0001
+lr = 0.00005
 PATIENCE_CNT = 50
 CHECKPOINT = 50
 batch_size = 256
@@ -435,7 +436,7 @@ num_lstm_layers = 1
 dropout = 0.03
 
 sklearn_model_list = ['xgboost', 'lightgbm', 'svm', 'rf', 'dt', 'ngboost']
-models_2D = ['Zhang', 'Unet', 'ConvLSTM']
+models_2D = ['Zhang', 'Unet', 'ConvLSTM', 'ResNet']
 models_hybrid = ['ConvGraphNet', 'ST-ConvGraphNet', 'HybridConvGraphNet']
 temporal_model_list = ['LSTM', 'DST-GCN', 'ST-GCN', 'ST-GAT', 'ATGCN', 'ST-GATLSTM', 'DilatedCNN']
 daily_model_list = ['GCN', 'GAT', 'KAN']

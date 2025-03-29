@@ -203,9 +203,9 @@ if not QUICK:
     features_selected_str.append('Past_risk')
     features_selected = np.arange(0, len(features_selected_str))
 
-    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -235,13 +235,33 @@ else:
     features_selected_str = list(features_selected_str[:,0])
 
     varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
-    features_name, newShape = get_features_name_list(6, train_features, ['mean'])
+    
+    features_name, newShape = get_features_name_list(6, train_features, METHODS_SPATIAL_TRAIN)
+
     features_name = [fet for fet in features_name if fet in train_dataset.columns]
+
     features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
+    print(features_name)
+    print(features_name_2D)
+    print(varying_time_variables_2)
     features_selected_str = get_features_selected_for_time_series_for_2D(features_name, features_name_2D, varying_time_variables_2, nbfeatures)
+    
     features_selected_str = list(np.unique(features_selected_str))
+
     features_selected = np.arange(0, len(features_selected_str))
+
     features_selected_str.append('Past_risk')
+    features_name.append('Past_risk')
+
+if 'scale' not in np.unique(train_dataset.columns):
+    if scale == 'departement':
+        train_dataset['scale'] = 10
+        val_dataset['scale'] = 10
+        test_dataset['scale'] = 10
+    else:
+        train_dataset['scale'] = scale
+        val_dataset['scale'] = scale
+        test_dataset['scale'] = scale
 
 prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 prefix_config = deepcopy(prefix)
@@ -252,7 +272,9 @@ name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 if name_exp.find('voting') != -1:
     voting_models = []
     models = [
-            ('Zhang', True, False, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
+            #('Zhang', True, False, 'search_full_15_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
+            #('ConvLSTM', True, False, 'search_full_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
+            ('ResNet', True, False, 'search_full_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
             ]
     
     staking_models = []
@@ -299,8 +321,10 @@ params = {
     "features_name_1D": features_name,
     "features_selected_2D": features_selected,
     "features_name_2D": features_selected_str,
+    'varying_time_variables' : varying_time_variables,
+    'train_features': train_features,
     'features' : features,
-    "name_dir": rootDisk / temp_dir / name_dir, 
+    "name_dir": rootDisk / 'GNN' / name_dir, 
     'k_days' : k_days,
     'graph_method' : graph_method,
 }
@@ -309,11 +333,11 @@ if doTrain:
 
     for model in models:
         params['model'] = model[0]
-        params['use_image_per_node'] = model[1]
+        params['image_per_node'] = model[1]
         params['use_temporal_as_edges'] = model[2]
         params['infos'] = model[3]
         params['out_channels'] = model[4]
-        params['torch_structure'] = 'ModelCNN'
+        params['torch_structure'] = 'Model_CNN'
         
         wrapped_train_deep_learning_2D(params)
 
@@ -366,7 +390,9 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                ('Zhang_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weiDghtedcrossentropy'),
+                ('Zhang_search_full_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('ConvLSTM_search_full_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('ResNet_search_full_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
     elif graph_method == 'graph':
 

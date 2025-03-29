@@ -14,7 +14,10 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                         dir_train : Path,
                         resolution : str, 
                         graph_construct : str,
-                        sinister_encoding : str) -> tuple:
+                        sinister_encoding : str,
+                        newFeatures: list=[],
+                        save : bool = True,
+                        use_log=True) -> tuple:
     
     # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
 
@@ -22,13 +25,15 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
 
     assert graph.nodes is not None
 
-    logger.info('Load 2D nodes features')
+    if use_log:
+        logger.info('Load 2D nodes features')
 
     features_name, newShape = get_features_name_lists_2D(graph.scale, features)
 
     dir_encoder = dir_train / 'Encoder'
 
-    encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
+    if dataset_name != 'bdiff':
+        encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
     encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
     encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
     encoder_ids = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
@@ -47,7 +52,8 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
     for departement in departements:
         check_and_create_path(dir_output / departement)
         check_and_create_path(dir_output / departement / str(graph.scale))
-        logger.info(departement)
+        if use_log:
+            logger.info(departement)
         
         dir_data = rootDisk / 'csv' / departement / 'raster' / resolution
         dir_target = dir_train / 'influence'
@@ -65,8 +71,6 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
         Y_dept_bin = read_object(f'{departement}binScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl', dir_target_bin)
 
         nodeDepartement = df[df['departement'] == name2int[departement]][ids_columns].values
-
-        logger.info(nodeDepartement.shape)
 
         if nodeDepartement.shape[0] == 0:
             continue
@@ -103,7 +107,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             name = 'cosia_landcover.pkl'
             arrayCosiaLandcover = read_object(name, dir_data)
 
-        if 'landcover_encoder' in features:
+        if 'landcover_encoder' in features and dataset_name != 'bdiff':
             #logger.info('Dynamic World landcover')
             name = 'dynamic_world_landcover.pkl'
             arrayLand = read_object(name, dir_data)
@@ -122,7 +126,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             logger.info('IDS')
     
         for unDate in unDates:
-            if unDate % 100 == 0:
+            if unDate % 100 == 0 and use_log:
                 logger.info(f'{allDates[unDate]}')
 
             Y = Y_dept[:, :, unDate]
@@ -132,9 +136,38 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             #save_object(Y, f'Y_{unDate}.pkl', dir_output / departement / f'{graph.scale}_{graph_construct}' / 'binary')
 
             X = np.empty((newShape, *mask.shape))
+            
+            if (dir_output / departement / f'X_{unDate}.pkl').is_file() and use_log:
+                if name2int[departement] < 50:
+                    continue
+                try:
+                    X = read_object(f'X_{unDate}.pkl', dir_output / departement)
+                    if newFeatures != []:
+                        if X.shape[0] == len(features_name):
+                            continue
 
-            if (dir_output / departement / f'X_{unDate}.pkl').is_file():
-                continue
+                        X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], newFeatures,
+                                                                        sinister, dataset_name, dir_train, dir_train,
+                                                                        resolution, graph_construct, sinister_encoding, newFeatures=[], save=False, use_log=False)
+                        
+                        features_name_ori, newShape = get_features_name_lists_2D(graph.scale, [fet for fet in features if fet not in newFeatures])
+
+                        new_X = np.empty((X.shape[0] + X2.shape[0], X.shape[1], X.shape[2]))
+
+                        for fet in features_name:
+                            if fet in features_name_2:
+                                new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
+                            else:
+                                new_X[features_name.index(fet)] = X[features_name_ori.index(fet)]
+                        
+                        X = new_X
+                        if save:
+                            save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+    
+                    continue
+
+                except:
+                    pass                
 
             if 'population' in features:
                 X[features_name.index('population'), :, :] = arrayPop
@@ -230,7 +263,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             #logger.info('Geo')
             if 'Geo' in features:
                 X[features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[0] # departement
-
+                
             #logger.info('Meteorological')
             ### Meteo
             for i, var in enumerate(cems_variables):
@@ -314,13 +347,16 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             if 'vigicrues' in features:
                 for var in vigicrues_variables:
                     array = read_object('vigicrues'+var+'.pkl', dir_data)
-                    X[features_name.index(var), :, :] = array[:, :, unDate]
-                    del array
+                    if array is not None:
+                        X[features_name.index(var), :, :] = array[:, :, unDate]
+                        del array
 
             #logger.info('nappes')
             if 'nappes' in features:
                 for var in nappes_variables:
                     array = read_object(var+'.pkl', dir_data)
+                    if array is None:
+                        continue
                     X[features_name.index(var), :, :] = array[:, :, unDate]
                     del array
 
@@ -334,6 +370,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                     X[features_name.index('cluster_encoder'), masknode[:, 0], masknode[:, 1]] = df[(df['id'] == node)][f'cluster_encoder'].values[0]
                 #del array
             
-            save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+            if save:
+                save_object(X, f'X_{unDate}.pkl', dir_output / departement)
 
     return X, features_name

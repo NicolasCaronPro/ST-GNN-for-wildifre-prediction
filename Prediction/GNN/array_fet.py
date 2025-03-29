@@ -5,7 +5,8 @@ cems_variables = ['temp',
                 'temp16',
                 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
                 'days_since_rain', 'sum_consecutive_rainfall', 'sum_rain_last_7_days',
-                'sum_snow_last_7_days', 'snow24h', 'snow24h16'
+                'sum_snow_last_7_days', 'snow24h', 'snow24h16',
+                'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7'
                 ]
 
 air_variables = ['O3', 'NO2', 'PM10', 'PM25']
@@ -15,11 +16,10 @@ sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
 landcover_variables = [
                       'foret_encoder',
                       'argile_encoder',
-                      'id_encoder',
                       'cosia_encoder'
                         ]
 
-cluster_encoder = ['cluster_encoder']
+cluster_encoder = ['cluster_encoder', 'id_encoder']
 
 calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend', 'couvrefeux', 'confinemenent',
                     'ramadan', 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder',

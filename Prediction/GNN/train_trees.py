@@ -194,9 +194,9 @@ if not QUICK:
     post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
     features_selected.append('Past_risk')
 
-    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -217,9 +217,9 @@ else:
     val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
     test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
 
-    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
-    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
-    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+    #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    #test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
     #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
     #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
@@ -241,15 +241,22 @@ if name_exp.find('voting') != -1:
     voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     models = [
                 ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
     ]
+    
     if dataset_name == 'bdiff':
         voting_models = []
         models = [
-                #('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                #('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet', None, None, None),
-                ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal', None, None, None),
+                ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_CRPScore', None, None, None),
+                ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
            
+                ('xgboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('catboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('lg_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                ('ngboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore', None, None, None),
+
                 #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
                 #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
                 #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
@@ -502,40 +509,49 @@ if doTest:
         #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
         ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet'),
-        ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal'),
+        ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+        ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_CRPScore'),
+
+        ('xgboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        ('catboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        ('lg_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
+        ('ngboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore'),
         
-        #('filter-catboost-soft-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet'),
+        #('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal'),
+        
+        #('filter-catboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-hard-None-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-hard-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         
         #('filter-catboost-soft-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-soft-weight-5_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-soft-weight-1_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filterICML-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filter-xgboost-soft-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-hard-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-hard-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filter-xgboost-soft-weight-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-weight-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-weight-10_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-weight-15_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-weight-20_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filter-xgboost-soft-departement-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-graphid-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filter-xgboost-soft-departement-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-graphid-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-
-        ('filter-xgboost-soft-departement-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('filter-xgboost-soft-graphid-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filterICML-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filter-xgboost-soft-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-hard-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-hard-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filter-xgboost-soft-weight-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-10_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-15_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-20_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filter-xgboost-soft-departement-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filter-xgboost-soft-departement-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+#
+        #('filter-xgboost-soft-departement-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
         #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
         #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),

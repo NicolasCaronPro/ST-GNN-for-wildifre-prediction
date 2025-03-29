@@ -365,7 +365,7 @@ def construct_database(
     ##################################### Not Using all nodes at all dates #########################
     # If we're not using all nodes at all dates, proceed with sampling
     # Split Y into training and testing sets based on the maxDate and trainCode
-    y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
+    """y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
     y_test = Y[
         ((Y[:, date_index] >= allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))) |
         (~np.isin(Y[:, departement_index], trainCode))
@@ -594,9 +594,9 @@ def construct_database(
                         (y_train[:, date_index] >= ifd) &
                         (y_train[:, date_index] <= ied)
                     )
-                new_Y += list(y_train[masknode])
+                new_Y += list(y_train[masknode])"""
 
-    # Convert the lists to numpy arrays
+    """# Convert the lists to numpy arrays
     new_Y = np.asarray(new_Y).reshape(-1, y_train.shape[-1])
     # Create a mask to include neighboring days within k_days
     mask_days = np.zeros(y_train.shape[0], dtype=bool)
@@ -621,7 +621,8 @@ def construct_database(
     Y = np.concatenate((new_Y, new_Y_neighboor, y_test), casting='safe')
     
     # Remove duplicate rows from Y
-    Y = np.unique(Y, axis=0)
+    Y = np.unique(Y, axis=0)"""
+
     if X is None:
         # If X is not loaded, generate the features
         X, features_name = get_sub_nodes_feature(
@@ -637,17 +638,17 @@ def construct_database(
             resolution,
         )
     else:
-        # Align X with Y based on node IDs and dates
+        """ # Align X with Y based on node IDs and dates
         X_ = np.empty((Y.shape[0], X.shape[1]))
         for i, instance in enumerate(Y):
             instance_index = np.argwhere(
-                (X[:, id_index] == instance[id_index]) & (X[:, date_index] == instance[date_index])
+                (Y[:, id_index] == instance[id_index]) & (Y[:, date_index] == instance[date_index])
             )[:, 0]
             if instance_index.shape[0] >= 2:
                 instance_index = instance_index[0]
             X_[i] = X[instance_index]
 
-        X = X_
+        X = X_"""
 
         # Boucle sur chaque noeud unique dans la première colonne de X
         for node in np.unique(X[:, id_index]):
@@ -671,7 +672,7 @@ def construct_database(
                     
                     # Calculer les nouvelles valeurs interpolées
                     new_values = f(nan_date)
-                    
+
                     # Remplacer les NaN par les nouvelles valeurs interpolées
                     X[nan_mask, band] = new_values
 
@@ -683,26 +684,7 @@ def construct_database(
 
     logger.info(f'{X.shape, Y.shape}')
     # Extract the training samples from Y
-    y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
-    print(y_train.shape, Y.shape, new_Y.shape)
-    # Print unique values and sums for verification
-    print(np.unique(y_train[:, -2]))
-    print(np.sum(y_train[y_train[:, weight_index] > 0, -2]))
-
-    # Log the number of events and non-events used for training
-    logger.info(
-        f'Number of event used for training {np.argwhere((y_train[:, -2] > 0) & (y_train[:, weight_index] > 0)).shape}'
-    )
-    logger.info(
-        f'Number of non event used for training {np.argwhere((y_train[:, -2] == 0) & (y_train[:, weight_index] > 0)).shape}'
-    )
-    # Log the number of samples per class
-    for c in np.unique(y_train[:, -3]):
-        logger.info(
-            f'{c} : , {np.argwhere((y_train[:, -3] == c) & (y_train[:,weight_index] > 0)).shape}'
-        )
-
-    # Return the features, ground truth, and feature names
+    
     return X, Y, features_name
 
 def construct_non_point(firepoints, regions, maxDate, sinister, dir):
@@ -895,7 +877,7 @@ def init(args, dir_output, script):
 
     ######################### Encoding ######################################
 
-    if True:
+    if False:
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
@@ -940,36 +922,71 @@ def init(args, dir_output, script):
                                             'train',
                                             resolution,
                                             trainDate)
-        
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
     else:
         X = read_object('X_'+prefix+'.pkl', dir_output)
         Y = read_object('Y_'+prefix+'.pkl', dir_output)
-        features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
+        if dataset_name != 'bdiff':
+            features_name, newshape = get_features_name_list_old(graphScale.scale, features, METHODS_SPATIAL)
+        else:
+            features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
+    
+    newFeatures = []
+
+    if newFeatures != [] and dataset_name != 'bdiff':
+        X2, features_name_2 = get_sub_nodes_feature(
+            graphScale,
+            Y[:, :len(ids_columns) - 1],
+            departements,
+            newFeatures,
+            sinister,
+            dataset_name,
+            sinister_encoding,
+            dir_output,
+            dir_output,
+            resolution,
+            use_log=False
+        )
+
+        X2 = X2[:, len(ids_columns)-1:]
+
+        if dataset_name != 'bdiff':
+            features_name_ori, newshape = get_features_name_list_old(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
+        else:
+            features_name, newshape = get_features_name_lis(graphScale.scale, features, METHODS_SPATIAL)
+            
+        new_X = np.empty((X.shape[0], X.shape[1] + X2.shape[1]))
+
+        for fet in features_name:
+            if fet in features_name_2:    
+                new_X[:, features_name.index(fet)] = X2[:, features_name_2.index(fet)]
+            else:
+                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X[:, features_name_ori.index(fet) + len(ids_columns)-1]
+        
+        X = new_X
+
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
     X = X[:, len(ids_columns)-1:]
-
-    if newFeatures != []:
-        X2, features_name_ = get_sub_nodes_feature(graphScale, Y[:, :6], departements, newFeatures, sinister, dir_output, dir_output, resolution, graph_construct)
-        for fet in newFeatures:
-            start , maxi, _, _ = calculate_feature_range(fet, scale, METHODS_SPATIAL)
-            X[:, features_name.index(start): features_name.index(start) + maxi] = X2[:, features_name_.index(start): features_name_.index(start) + maxi]
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-        X = X[:, len(ids_columns)-1:]
-
+    
     ############################## Dataframe creation ###################################
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
-    if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase:
+    if dataset_name == 'bdiff':
+        newFeatures = []
+
+    if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == []:
+    #if False:
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
     else:
+        #print(len(features_name), X.shape)
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
-        df[ids_columns[:-1] + targets_columns] = Y
+        df[ids_columns + targets_columns] = Y
         find_df = False
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
@@ -979,9 +996,15 @@ def init(args, dir_output, script):
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
                                                                     sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding)
+                                                                    resolution, graph_construct, sinister_encoding, newFeatures=['precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7'], save=True, use_log=True)
     else:
         features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
+
+    if 'id_encoder_mean' in np.unique(df.columns):
+        df['id_encoder'] = df['id_encoder_mean']
+        for v in ['id_encoder_mean', 'id_encoder_max', 'id_encoder_min', 'id_encoder_std', 'id_encoder_sum', 'id_encoder_grad']:
+            if v in np.unique(df.columns):
+                df.drop(v, inplace=True, axis=1)
 
     df['nbsinister_0_0'] = df['nbsinister'].values
     df['risk_0_0'] = df['nbsinister'].values
@@ -989,17 +1012,23 @@ def init(args, dir_output, script):
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
     trainCode = [name2int[d] for d in train_departements]
     train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
-    df['nbsinister_0_0'] = df['nbsinister'].values
     shift_list = np.arange(0, 1)
     train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
 
     if dataset_name.find('bdiff') !=-1:
         df = df[df['date'] <= allDates.index('2023-12-31')]
-
+        
     #if not doDatabase:
     #    return df, graphScale, prefix, fp, features_name
 
+    # Missing 17, 24, 27, 40, 46, 47, 48, 50, 67, 71, 75, 82, 92, 93, 94, vigicrus, nappes and Geodair
     ################################ Process Target ###############################################
+
+    if dataset_name == 'bdiff' and not find_df:
+        limit_day = [7, 15, 31]
+        logger.info(f'Add {limit_day} days in future')
+        df = target_by_day(df, limit_day, target_spe='0')
+        print(df[df['departement'] == 13]['nbsinister_sum_0_+7'].unique())
 
     """if (dir_output / f'df_mid_{prefix}.pkl').is_file():
         df = read_object(f'df_mid_{prefix}.pkl', dir_output)
@@ -1008,8 +1037,8 @@ def init(args, dir_output, script):
         save_object(df, f'df_mid_{prefix}.pkl', dir_output)"""
 
     ################################ Remove bad or correlated features #############################################
-    if True:
-    #if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
+    #if True:
+    if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
 
         if name_exp == 'occurence_less_feature':
             features_name, _ = get_features_name_list(scale, train_features, ['mean'])
@@ -1091,12 +1120,11 @@ def init(args, dir_output, script):
     features_name = list(features_name)
 
     ############################## Add varying time features #############################
-    
-    if dataset_name == 'bdiff':
-        num_day = 21
-        logger.info(f'Adding time columns {21}')
-        logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-        df, _ = add_time_columns(varying_time_variables, 21, df.copy(deep=True), train_features, features_name)
+
+    #if dataset_name == 'bdiff' and not find_df:
+    logger.info(f'Adding time columns {10}')
+    logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
+    df, _ = add_time_columns(varying_time_variables, 10, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 

@@ -838,8 +838,8 @@ def construct_graph_with_time_series(graph, date : int,
     return x[:, start_features:], y, edges
 
 def construct_time_series(date : int,
-                                     X : np.array, Y : np.array,
-                                     ks :int, start_features : int) -> np.array:
+                            X : np.array, Y : np.array,
+                            ks :int, start_features : int) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -2581,7 +2581,61 @@ def get_features_name_list(scale, features, methods):
             features_name += [var]
         elif var.find('frequencyratio') != -1:
             features_name += [var]
-        elif var == 'cluster_encoder':
+        elif var in cluster_encoder:
+            features_name += [var]
+        else:
+            features_name += [f'{var}_{met}' for met in methods]
+
+    return features_name, len(features_name)
+
+def get_features_name_list_old(scale, features, methods):
+    features_name = []
+    if scale == 0:
+        methods = ['mean']
+    for var in features:
+        if var == 'Calendar':
+            features_name += calendar_variables
+        elif var == 'air':
+            features_name += air_variables
+        elif var in landcover_variables or var == 'id_encoder':
+            features_name += [f'{var}_{met}' for met in methods]
+        elif var == 'sentinel':
+            features_name += [f'{v}_{met}' for v in sentinel_variables for met in methods]
+        elif var == "foret":
+            features_name += [f'{foretint2str[v]}_{met}' for v in foret_variables for met in methods]
+        elif var == 'dynamicWorld':
+            features_name += [f'{v}_{met}' for v in dynamic_world_variables for met in methods]
+        elif var == 'cosia':
+            features_name += [f'{v}_{met}' for v in cosia_variables for met in methods]
+        elif var == 'highway':
+            features_name += [f'{osmnxint2str[v]}_{met}' for v in osmnx_variables for met in methods]
+        elif var == 'Geo':
+            features_name += geo_variables
+        elif var == 'vigicrues':
+            features_name += [f'{v}_{met}' for v in vigicrues_variables for met in methods]
+        elif var == 'nappes':
+            features_name += [f'{v}_{met}' for v in nappes_variables for met in methods]
+        elif var == 'Historical':
+            features_name += [f'{v}' for v in historical_variables]
+        elif var == 'AutoRegressionReg':
+            features_name += [f'AutoRegressionReg-{v}' for v in auto_regression_variable_reg]
+        elif var == 'AutoRegressionBin':
+            features_name +=  [f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin]
+        elif var == 'elevation':
+            features_name += [f'{v}_{met}' for v in elevation_variables for met in methods]
+        elif var == 'population':
+            features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
+        elif var == 'region_class':
+            features_name += [var]
+        elif var == 'Past_risk':
+            features_name += [var]
+        elif var in varying_time_variables_name:
+            features_name += [var]
+        elif var == 'temporal_prediction' or var == 'spatial_prediction':
+            features_name += [var]
+        elif var.find('frequencyratio') != -1:
+            features_name += [var]
+        elif var in cluster_encoder and var != 'id_encoder':
             features_name += [var]
         else:
             features_name += [f'{var}_{met}' for met in methods]
@@ -2624,7 +2678,7 @@ def get_features_name_lists_2D(shape, features):
             features_name.extend([f'AutoRegressionReg-{v}' for v in auto_regression_variable_reg])
         elif var == 'AutoRegressionBin':
             features_name.extend([f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin])
-        elif var == 'cluster_encoder':
+        elif var in cluster_encoder:
             features_name.extend([var])
         elif var == 'Past_risk':
             features_name.extend([var])
@@ -3556,7 +3610,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     # Limitation des signaux à un maximum de 1
     y_pred_clipped = np.clip(y_pred, 0, 1)  # Limiter y_pred à 1
     y_true_fire_clipped = np.clip(y_true_fire, 0, 1)  # Limiter y_true_fire à 1
-
+    print(np.unique(y_true_fire_clipped))
+    print(np.unique(y_pred_clipped))
     iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
 
     y_pred_clipped_ytrue = np.copy(y_pred)
@@ -3960,7 +4015,56 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
-def target_by_day(df: pd.DataFrame, days_range: int, method: str, target_spe='0') -> pd.DataFrame:
+import numpy as np
+
+def compute_rolling_by_group(df, group_col, date_col, value_col, windows, agg_func=sum, col_name=''):
+    """
+    Applique un rolling forward par groupe, pour plusieurs tailles de fenêtres,
+    avec une fonction d'agrégation personnalisée (sum, mean, max, ...).
+
+    Parameters:
+        df (pd.DataFrame): le DataFrame de base
+        group_col (str): nom de la colonne de regroupement (ex: 'graph_id')
+        date_col (str): nom de la colonne date (doit être ordinalement croissante)
+        value_col (str): nom de la colonne contenant les valeurs à agréger
+        windows (list): liste des tailles de fenêtre (entiers)
+        agg_func (str or callable): 'sum', 'mean', 'max' ou une fonction pandas-compatible
+
+    Returns:
+        pd.DataFrame: le DataFrame d'origine avec les colonnes ajoutées
+    """
+
+    result_df = df.copy()
+
+    for window in windows:
+        col_name_ = col_name+f'{window}'
+        logger.info(f'Process {col_name_}')
+
+        # Fonction de rolling forward par groupe
+        def apply_rolling(dataset):
+            backward_rolling = (
+                dataset.set_index('date')
+                .iloc[::-1]
+                .groupby([group_col])[value_col]
+                .rolling(window=window, min_periods=1)
+                .apply(agg_func, raw=True).reset_index()
+                .iloc[::-1]  # Remettre dans l'ordre original
+            )
+            backward_rolling[col_name_] = backward_rolling[value_col]  
+            return backward_rolling
+
+        # Appliquer le rolling par groupe
+        res = apply_rolling(result_df)
+
+        if col_name_ in np.unique(result_df.columns):
+            result_df.drop(col_name_, inplace=True, axis=1)
+
+        #print(res['date'].shape)
+        result_df = result_df.set_index(['graph_id', 'date']).join(res.set_index(['graph_id', 'date'])[col_name_], on=['graph_id', 'date']).reset_index()
+
+    return result_df
+
+def target_by_day(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.DataFrame:
     """
     Adjust target values based on specified method (mean or max) over a number of future days.
     
@@ -3976,30 +4080,95 @@ def target_by_day(df: pd.DataFrame, days_range: int, method: str, target_spe='0'
 
     unique_nodes = df['graph_id'].unique()
 
-    df_res[f'nbsinister_sum_{target_spe}_+0'] =  df[f'nbsinister_{target_spe}'].values
-    df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
-    df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
-    df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}'].values
+    #df_res[f'nbsinister_sum_{target_spe}_+0'] =  df[f'nbsinister_{target_spe}'].values
+    #df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    #df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    #df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}'].values
     
-    for days in range(1, days_range + 1):
+    """for days in days_range:
         logger.info(f'################ {days} ################')
         df_res[f'nbsinister_sum_{target_spe}_+{days}'] = 0
         df_res[f'risk_mean_{target_spe}_+{days}'] = 0.0
         df_res[f'risk_max_{target_spe}_+{days}'] = 0.0
         #df[f'class_risk_max_{target_spe}_+{days}'] = 0.0
         for node in unique_nodes:
-            node_df = df[df['graph_id'] == node]
-            unique_dates = node_df['date'].unique()
-            for date in unique_dates:
-                mask = (df['date'] == date) & (df['graph_id'] == node)
-                future_mask = (df['date'] >= date) & (df['date'] < date + days) & (df['graph_id'] == node)
+            #node_df = df[df['graph_id'] == node]
+            #unique_dates = node_df['date'].unique()
+            #for date in unique_dates:
+            #    mask = df[(df['date'] == date) & df['graph_id'] == node].index
+            #    future_mask = node_df[(node_df['date'] >= date) & (node_df['date'] < date + days) & (node_df['graph_id'] == node)].index
                 
-                df_res.loc[mask, f'risk_mean_{target_spe}_+{days}'] = node_df[future_mask][f'risk_{target_spe}'].mean()
-                df_res.loc[mask, f'risk_max_{target_spe}_+{days}'] = node_df[future_mask][f'risk_{target_spe}'].max()
-                df_res.loc[mask, f'class_risk_max_{target_spe}_+{days}'] = node_df[future_mask][f'class_risk_{target_spe}'].max()
-                df_res.loc[mask, f'nbsinister_sum_{target_spe}_+{days}'] = node_df[future_mask][f'nbsinister_{target_spe}'].sum()
+            #    df_res.loc[mask, f'risk_mean_{target_spe}_+{days}'] = node_df.loc[future_mask, f'risk_{target_spe}_0'].mean()
+            #    df_res.loc[mask, f'risk_max_{target_spe}_+{days}'] = node_df.loc[future_mask, f'risk_{target_spe}_0'].max()
+            #    df_res.loc[mask, f'class_risk_max_{target_spe}_+{days}'] = node_df.loc[future_mask, f'class_risk_{target_spe}_0'].max()
+            #    df_res.loc[mask, f'nbsinister_sum_{target_spe}_+{days}'] = node_df.loc[future_mask, f'nbsinister_{target_spe}_0'].sum()
             
+            mask = df[df['graph_id'] == node].index
+            values = df.loc[mask, f'nbsinister_{target_spe}_0'].rolling(window=days, min_periods=1).sum()
+            print(df.loc[mask].shape, values.shape)
+            df.loc[mask,  f'nbsinister_sum_{target_spe}_+{days}'] = df[mask, f'nbsinister_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).sum())"""
+    
+    from statistics import mean
+    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'nbsinister', days_range, sum, col_name=f'nbsinister_sum_{target_spe}_+')
+    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, max, col_name=f'risk_max_{target_spe}_+')
+    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
+    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, mean, col_name=f'risk_mean_{target_spe}_+')
+
     return df_res
+
+def target_by_day_opti(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.DataFrame:
+    """
+    Adjust target values based on specified method (mean or max) over a number of future days.
+    
+    Parameters:
+    df : DataFrame containing the data
+    days_range : List of future days to look ahead for calculating the target
+    target_spe : Target specification as a string
+    
+    Returns:
+    DataFrame with adjusted target values.
+    """
+    df_res = df.copy(deep=True)
+    df = df.sort_values(by=['graph_id', 'date'])  # Ensure the data is sorted
+    
+    #df_res[f'nbsinister_sum_{target_spe}_+0'] = df[f'nbsinister_{target_spe}_0'].values
+    #df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
+    #df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
+    #df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}_0'].values
+
+    grouped = df.groupby('graph_id')
+    
+    for days in days_range:
+        df_res[f'nbsinister_sum_{target_spe}_+{days}'] = grouped[f'nbsinister_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).sum().shift(-days + 1))
+        df_res[f'risk_mean_{target_spe}_+{days}'] = grouped[f'risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).mean().shift(-days + 1))
+        df_res[f'risk_max_{target_spe}_+{days}'] = grouped[f'risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
+        df_res[f'class_risk_max_{target_spe}_+{days}'] = grouped[f'class_risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
+    
+    return df_res
+
+def set_weight_every_n_days(df: pd.DataFrame, days_in_futur: int) -> pd.DataFrame:
+    """
+    Sets the `weight` column to 0 except for every `days_in_futur` days for each node in `graph_id`.
+    Selection is based on the `date` column.
+    
+    Parameters:
+    df : DataFrame containing the data
+    days_in_futur : Interval of days to keep non-zero weight
+    
+    Returns:
+    DataFrame with updated weight values.
+    """
+    df = df.sort_values(by=['graph_id', 'date']).copy()
+    df['weight'] = 0  # Set all weights to 0
+    
+    def select_dates(group):
+        selected_dates = group['date'].iloc[::days_in_futur]
+        group.loc[group['date'].isin(selected_dates), 'weight'] = 1
+        return group
+    
+    df = df.groupby('graph_id', group_keys=False).apply(select_dates)
+    
+    return df
 
 def scale_target(df, df_train, col, method):
     assert col in ['nbsinister', 'risk']
@@ -4176,13 +4345,11 @@ def get_features_selected_for_time_series(features, features_name, time_varying_
 
 def get_features_selected_for_time_series_for_2D(features, features_name, time_varying_features, nbfeatures):
     
-    features_selected = []
     features_selected_str = []
     for fet in features:
-        if len(features_selected_str) == nbfeatures:
+        if len(features_selected_str) == nbfeatures and nbfeatures != 'all':
             break
-        if fet in features_name:
-            features_selected.append(features_name.index(fet))
+        if fet in features_name or fet == 'Past_risk':
             if fet not in features_selected_str:
                 features_selected_str.append(fet)
         elif fet in time_varying_features:
@@ -4469,7 +4636,7 @@ def add_weigh_column(dff, train_mask, weight_col, graph_method):
 
     df = dff.copy(deep=True)
 
-    df = df[df['weight'] > 0]
+    #df = df[df['weight'] > 0]
 
     logger.info(f'Adding weight columns')
     target_name_nbsinister = 'nbsinister'
@@ -4520,7 +4687,7 @@ def add_weigh_column(dff, train_mask, weight_col, graph_method):
             print(e)
         df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[weigh_col_name], how='right').reset_index()
     
-    df['weight'] = df[weigh_col_name]
+    df['weight'] = df['weight'] * df[weigh_col_name]
     return df
 
 def has_method(obj, method_name):

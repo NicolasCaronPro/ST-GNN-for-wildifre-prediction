@@ -55,7 +55,7 @@ parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x clu
 
 args = parser.parse_args()
 
-QUICK = True
+QUICK = False
 
 # Input config
 dataset_name = args.dataset
@@ -207,9 +207,9 @@ if not QUICK:
     features_selected_str.append('Past_risk')
     features_selected = np.arange(0, len(features_selected_str))
 
-    train_dataset = add_past_risk(train_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    test_dataset = add_past_risk(test_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    val_dataset = add_past_risk(val_dataset, 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -256,7 +256,7 @@ models = []
 #    
 
 models.append(Statistical_Model('fwi_mean', [5, 10.5, 21.5, 34.5], 5, 'nbsinister-kmeans-5-Class-Dept', 'classification'))
-cols = ['nbsinister-kmeans-5-Class-Dept', 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized',  'nbsinister-kmeans-5-Class-Dept-cubic-Specialized-Past']
+cols = ['nbsinister-kmeans-5-Class-Dept', 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized',  'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past']
 test_dataset_unscale = test_dataset_unscale.set_index(['graph_id', 'date']).join(test_dataset.set_index(['graph_id', 'date'])[cols], on=['graph_id', 'date']).reset_index()
 test_dataset_unscale.dropna(subset=cols, inplace=True)
 for model in models:

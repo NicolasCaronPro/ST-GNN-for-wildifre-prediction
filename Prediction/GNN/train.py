@@ -6,6 +6,7 @@ from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
 from dlordinal.losses import *
+from torch.nn import KLDivLoss
 
 ############################################## Some tools ###############################################
 
@@ -725,7 +726,7 @@ def train_logistic_regression(params, train=True):
         'task_type': task_type,
         'nbfeatures': nbfeatures,
         'loss': loss,
-        'model_type': 'logistic_regression',
+        'model_type': 'lg',
         'name': model,
         'post_process': post_process,
         'model_params': model_params,
@@ -881,12 +882,21 @@ def train_ngboost(params, train=True):
     do_grid_search = params['do_grid_search']
     do_bayes_search = params['do_bayes_search']
     model = params['name']
+    post_process = params['post_process']
     
     name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     name = f'ngboost_{target}_{task_type}_{loss}'
+    
+    if loss == 'normal':
+        loss_class = Normal
+    elif loss == 'bernouilli':
+        loss_class = Bernoulli
+    elif loss == "CRPScore":
+        loss_class = k_categorical(5)
+
     model_params = {
-        'Dist': loss,
+        'Dist': loss_class,
         'learning_rate': 0.001,
         'n_estimators': 10000,
         'minibatch_frac': 0.8,
@@ -896,8 +906,6 @@ def train_ngboost(params, train=True):
         'verbose_eval':100,
         'tol':1e-4,
         'random_state':42,
-        'validation_fraction':0.1,
-        'early_stopping_rounds':15,
     }
     grid_params = {'n_estimators': [100, 500, 1000, 5000, 10000]}
     
@@ -912,17 +920,21 @@ def train_ngboost(params, train=True):
         'target': target,
         'training_mode': training_mode,
         'dir_output': dir_output,
+        'under_sampling': under_sampling,
+        'over_sampling': over_sampling,
         'device': device,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
+        'nbfeatures' : nbfeatures,
         'task_type': task_type,
         'loss': loss,
         'model_type': 'ngboost',
-        'name': name,
+        'name': model,
+        'post_process': post_process,
         'model_params': model_params,
         'grid_params': grid_params,
-        'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'type_aggregation': params['type_aggregation'],
+        'col_id': params['col_id']
     })
 
 def train_lightgbm(params, train=True):
@@ -2254,6 +2266,21 @@ def train(params):
 # Fonction pour sélectionner la fonction de perte via son nom
 def get_loss_function(loss_name, **loss_params):
     # Dictionnaire pour associer le nom de la fonction de perte à sa classe correspondante
+    if 'ID' in loss_name:
+        vec = loss_name.split('-')
+        loss_name = vec[0]
+        id = vec[1]
+        if id == 'departement':
+            id = departement_index
+        elif id == 'node':
+            id = graph_id_index
+        elif id == 'scale':
+            id = scale_index
+        else:
+            raise ValueError(f'{id} not implemented')
+        criterion = get_loss_function(loss_name, **loss_params)
+        return LossPerId(criterion=criterion, id=id)
+
     loss_dict = {
         "poisson": PoissonLoss(),
         "rmsle": RMSLELoss(),
@@ -2270,6 +2297,7 @@ def get_loss_function(loss_name, **loss_params):
         'kappa' : WKLoss(**loss_params),
         'cdw' : CDWCELoss(**loss_params),
         'mcewk' : MCEAndWKLoss(**loss_params),
+        'kldivloss' : KLDivLoss(reduction='batchmean'),
     }
     loss_name = loss_name.lower()
     if loss_name in loss_dict:
@@ -2505,7 +2533,7 @@ def define_trees_model(training_mode, dataset_name, scale, graph_construct, post
 
 def create_model_config(model_name, undersampling, weight, clustering, conv_type, n_clusters, kernel, loss, task_type):
     train_col = f"nbsinister-{clustering}-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-    return f'{model_name}_{undersampling}_{weight}_{train_col}_{task_type}_{loss}'
+    return f'{model_name}_{undersampling}_full_all_{weight}_{train_col}_{task_type}_{loss}'
 
 """def define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
     ##############################################
@@ -2575,7 +2603,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'cubic', 'mean', 'laplace', 'laplace+mean']:
+    for aggregation in ['median', 'mean', 'laplace', 'laplace+mean']:
         for kernel in ['1', '3', '5', 'Specialized']:
             model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
@@ -2586,7 +2614,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     # Nom du modèle principal
     m = f'filterICML-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2619,7 +2647,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     # Nom du modèle principal
     m = f'filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     
-    #res.append((m, models, None, None, None))
+    res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2647,13 +2675,13 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
             model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
 
-    mlast = f'{model_type}_search_full_one_all_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'{model_type}_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     models.append(mlast)
     
     # Nom du modèle principal
-    m = f'filter_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
 
-    #res.append((m, models, None, None, None))
+    res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2703,25 +2731,26 @@ def define_voting_dl_models(training_mode, dataset_name, scale, graph_construct,
 
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('DilatedCNN', m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config('LSTM', m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m3
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('DilatedCNN', m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config('LSTM', m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
+    for aggregation in ['median', 'mean', 'laplace', 'laplace+mean']:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
-            model = create_model_config('DilatedCNN', m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
+            model = create_model_config('LSTM', m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
             models.append(model)
 
-    mlast = f'DilatedCNN_search_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    mlast = f'LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
     models.append(mlast)
-    
+
     # Nom du modèle principal
-    m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    m = f'filterICML-LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    #m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
 
     # Retourner la structure finale
     return [(m, models, 5)]

@@ -125,11 +125,20 @@ class GenerateDatabase():
         #raster_argile(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
     def add_air_qualite(self):
-        if not (self.airParams['dir'] / 'air' / 'ExportStations.csv').is_file():
-            download_air(Path('/home/caron/Bureau/csv/france/data/air'), self.region, self.airParams['dir'] / 'air')
-
-        air_stations = pd.read_csv(self.airParams['dir'] / 'air' / 'ExportStations.csv')
-        air_stations["Date d'entrée en service (à 00h00)"] = pd.to_datetime(air_stations["Date d'entrée en service (à 00h00)"], dayfirst=True)
+        
+        if (self.dir_raster / 'O3raw.pkl').is_file():
+            logger.info('Already computed skip')
+            return
+        
+        #if not (self.airParams['dir'] / 'air' / 'ExportStations.csv').is_file():
+        download_air(Path('/home/caron/Bureau/csv/france/data/air'), self.region, self.airParams['dir'] / 'air')
+        try:
+            air_stations = pd.read_csv(self.airParams['dir'] / 'air' / 'ExportStations.csv')
+            air_stations["Date d'entrée en service (à 00h00)"] = pd.to_datetime(air_stations["Date d'entrée en service (à 00h00)"], dayfirst=True)
+        except:
+            air_stations = pd.read_csv(self.airParams['dir'] / 'air' / 'ExportStations.csv', delimiter=';')
+            air_stations["Date d'entrée en service (à 00h00)"] = pd.to_datetime(air_stations["Date d'entrée en service (à 00h00)"], dayfirst=True)
+        print(air_stations.columns, len(air_stations))
         gdf = gpd.GeoDataFrame(air_stations, geometry=gpd.points_from_xy(air_stations.Longitude, air_stations.Latitude))
         gdf = gdf.set_crs(epsg=4326)
         polluants = {
@@ -144,7 +153,8 @@ class GenerateDatabase():
         start = dt.datetime.strptime(self.airParams['start'], '%Y-%m-%d')
         if not (self.airParams['dir'] / 'air' / 'Air_archive').is_dir():
         #if True:
-            token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MjU1NjYzNDYsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiYjhhOTY0NTktZDRjNi00YTc1LTlhMzctYjJlOTMxOTliM2I2IiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.-Vc8Dx17OJDG0ymqMUYCVQMwT8acMZrqEszooE8fKwI'           
+            #token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3MjU1NjYzNDYsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiYjhhOTY0NTktZDRjNi00YTc1LTlhMzctYjJlOTMxOTliM2I2IiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.-Vc8Dx17OJDG0ymqMUYCVQMwT8acMZrqEszooE8fKwI'           
+            token = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiR2VvZGFpclJlc3RBUEkiXSwic2NvcGUiOlsicmVhZCJdLCJleHAiOjE3NDIwOTEzNzgsImF1dGhvcml0aWVzIjpbIlNFUlZJQ0UiXSwianRpIjoiZjAwN2IzZmYtNzZmOS00NmMxLWI4YWQtMGY4ZjFlODQ3NWI0IiwiY2xpZW50X2lkIjoiR2VvZGFpckZyb250ZW5kQ2xpZW50In0.NcP2FP0QnAP35qnNPFOWFMZBcAE1mCsSKZv7GF9qpU'
             headers = {
                             'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0',
                             'Accept': 'application/json, text/plain, */*',
@@ -156,45 +166,49 @@ class GenerateDatabase():
                             'Sec-Fetch-Site': 'same-origin',
                         }
             for polluant in polluants:
-                logger.info(f" - polluant : {polluant}")
-                for annee in range(start.year, dt.datetime.now().year + 1, 2):
-                    logger.info(f"   année : {annee}")
-                    if not (self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
-                    #if True:
-                        headers1 = headers.copy()
-                        headers1['Content-Type']= 'multipart/form-data; boundary=---------------------------14490471821690778178105310701'
-                        headers1['Origin'] ='https://www.geodair.fr'
-                        data = f'''-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="polluant"\r\n\r\n{polluants[polluant]}\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="region"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="departement"\r\n\r\n{self.departement.split('-')[1]}\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="typologie"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="influence"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="date"\r\n\r\n{annee}-01-01 00:00\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="dateFin"\r\n\r\n{annee+2}-01-01 00:00\r\n-----------------------------14490471821690778178105310701--\r\n'''
-                        response1 = requests.post('https://www.geodair.fr/priv/api/station/filtered-list', headers=headers1, data=data)
-                        reponse = json.loads(response1.text)
-                        logger.info(reponse)
-                        if len(reponse)>0:
-                            headers2 = headers.copy()
-                            headers2['Content-Type'] = 'multipart/form-data; boundary=---------------------------200640252532634071971631722713'
-                            headers2['Origin'] = 'https://www.geodair.fr'
-                            data = f'''-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="polluant"\r\n\r\n{polluants[polluant]}\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="codeStat"\r\n\r\na1\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="typeStat"\r\n\r\nhoraire\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="dateDebut"\r\n\r\n{annee}-01-01 00:00\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="dateFin"\r\n\r\n{annee+2}-01-01 00:00\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="stations"\r\n\r\n{','.join([reponse[k]["code"] for k in range(len(reponse))])}\r\n-----------------------------200640252532634071971631722713--\r\n'''
-                            response2 = requests.post('https://www.geodair.fr/priv/api/statistique/export/grand-publique/periode', headers=headers2, data=data)
-                            time.sleep(1)
-                            while True:
-                                cpt = 0
-                                response3 = requests.get(
-                                    f'https://www.geodair.fr/priv/api/download?id={response2.text}',
-                                    headers=headers,
-                                )
-                                if "error" not in response3.text:
-                                    with open('/tmp/txt.csv', 'w') as f:
-                                        f.write(response3.text)
-                                    dg = pd.read_csv('/tmp/txt.csv', sep=';')
-                                    (self.airParams['dir'] / 'air' / 'Air_archive').mkdir(exist_ok=True, parents=True)
-                                    dg.to_csv(self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';', index=False)
-                                    break
-                                else:
-                                    logger.info(response3)
-                                    cpt+= 1
-                                    time.sleep(1)
-                                if cpt == 5:
-                                    break
-                                
+                #try:
+                    logger.info(f" - polluant : {polluant}")
+                    for annee in range(start.year, dt.datetime.now().year + 1, 2):
+                        logger.info(f"   année : {annee}")
+                        if not (self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv").is_file():
+                        #if True:
+                            headers1 = headers.copy()
+                            headers1['Content-Type']= 'multipart/form-data; boundary=---------------------------14490471821690778178105310701'
+                            headers1['Origin'] ='https://www.geodair.fr'
+                            data = f'''-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="polluant"\r\n\r\n{polluants[polluant]}\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="region"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="departement"\r\n\r\n{self.departement.split('-')[1]}\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="typologie"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="influence"\r\n\r\n\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="date"\r\n\r\n{annee}-01-01 00:00\r\n-----------------------------14490471821690778178105310701\r\nContent-Disposition: form-data; name="dateFin"\r\n\r\n{annee+2}-01-01 00:00\r\n-----------------------------14490471821690778178105310701--\r\n'''
+                            response1 = requests.post('https://www.geodair.fr/priv/api/station/filtered-list', headers=headers1, data=data)
+                            reponse = json.loads(response1.text)
+                            logger.info(reponse)
+                            if len(reponse)>0:
+                                headers2 = headers.copy()
+                                headers2['Content-Type'] = 'multipart/form-data; boundary=---------------------------200640252532634071971631722713'
+                                headers2['Origin'] = 'https://www.geodair.fr'
+                                data = f'''-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="polluant"\r\n\r\n{polluants[polluant]}\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="codeStat"\r\n\r\na1\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="typeStat"\r\n\r\nhoraire\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="dateDebut"\r\n\r\n{annee}-01-01 00:00\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="dateFin"\r\n\r\n{annee+2}-01-01 00:00\r\n-----------------------------200640252532634071971631722713\r\nContent-Disposition: form-data; name="stations"\r\n\r\n{','.join([reponse[k]["code"] for k in range(len(reponse))])}\r\n-----------------------------200640252532634071971631722713--\r\n'''
+                                response2 = requests.post('https://www.geodair.fr/priv/api/statistique/export/grand-publique/periode', headers=headers2, data=data)
+                                time.sleep(1)
+                                while True:
+                                    cpt = 0
+                                    response3 = requests.get(
+                                        f'https://www.geodair.fr/priv/api/download?id={response2.text}',
+                                        headers=headers,
+                                    )
+                                    if "error" not in response3.text:
+                                        with open('/tmp/txt.csv', 'w') as f:
+                                            f.write(response3.text)
+                                        dg = pd.read_csv('/tmp/txt.csv', sep=';')
+                                        (self.airParams['dir'] / 'air' / 'Air_archive').mkdir(exist_ok=True, parents=True)
+                                        dg.to_csv(self.airParams['dir'] / 'air' / 'Air_archive' / f"{polluant}_{annee}_{annee+2}.csv", sep=';', index=False)
+                                        break
+                                    else:
+                                        logger.info(response3)
+                                        cpt+= 1
+                                        time.sleep(1)
+                                    if cpt == 5:
+                                        break
+                #except:
+                #        logger.info(f"Error with - polluant : {polluant}")
+                #        return
+        
         if True:
             polluants_csv = []
             for polluant in polluants:
@@ -623,10 +637,10 @@ if __name__ == '__main__':
     """launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     """
     ################## Aisne ######################
-    #launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    """launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Allier ######################
-    #launch('departement-03-allier', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-03-allier', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Alpes-de-Haute-Provence ######################
     launch('departement-04-alpes-de-haute-provence', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -666,7 +680,7 @@ if __name__ == '__main__':
     
     ################## Charente ######################
     launch('departement-16-charente', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    
+    """
     ################## Charente-Maritime ######################
     launch('departement-17-charente-maritime', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     

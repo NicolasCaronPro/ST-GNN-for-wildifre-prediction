@@ -3269,7 +3269,7 @@ class GraphStructure():
                     post_process_ids = None
                     post_process_preprocessor = None
 
-                if isinstance(self.model, ModelVoting):
+                if isinstance(self.model, ModelVoting) or isinstance(self.model, ModelVotingPytorchAndSklearn):
                     if weights_average != 'weight' and weights_average != 'None':
                         if weights_average == 'graphid':
                             weights_average = 'graph_id'
@@ -3289,14 +3289,61 @@ class GraphStructure():
                 res[:, 1] = res[:, 0]
             else:
                 raise ValueError(f'Binary model are not available yet')
-                if col_id:
-                    return self.model.predict_proba(X[features], X[col_id])[:,1]
-                else:
-                    return self.model.predict_proba(X[features])[:,1]
         else:
             ValueError('Not implemented')
 
         return res, res_max, res_min
+
+    def predict_model_voting_pytorch(self, X : pd.DataFrame,
+                                  features : list, target_name : bool,
+                                  autoRegression : bool, quantile=False, hard_or_soft='soft', weights_average=True,
+                                  top_model='all') -> np.array:
+        
+        isBin = target_name == 'binary'
+        assert self.model is not None
+        X.reset_index(inplace=True, drop=True)
+
+        if hasattr(self.model, 'col_id_name'):
+            col_id = self.model.col_id_name
+            if col_id not in list(X.columns):
+                X = add_aggregation_column_df(X, col_id)
+                if X is None:
+                    return np.zeros(X.shape[0])
+        else:
+            col_id = None
+
+        if not autoRegression:
+            if not isBin:
+                if self.model.post_process is not None and hasattr(self.model.post_process, 'col_id'):
+                    post_process_ids = X[self.model.post_process.col_id]
+                    if self.model.post_process.preprocessor is not None:
+                        post_process_preprocessor = X[self.model.post_process.preprocessor_id_col].values
+                    else:
+                        post_process_preprocessor = None
+                else:
+                    post_process_ids = None
+                    post_process_preprocessor = None
+
+                if isinstance(self.model, ModelVotingPytorchAndSklearn):
+                    if weights_average != 'weight' and weights_average != 'None':
+                        if weights_average == 'graphid':
+                            weights_average = 'graph_id'
+                        id_col = (weights_average, X[weights_average])
+                    else:
+                        id_col = (None, None)
+                
+                    res, y = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model, id_col=id_col)
+
+                elif isinstance(self.model, ModelVotingPytorchAndSklearn):
+                    res, y = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model)
+                else:
+                    raise ValueError(f'Not a voting model')
+            else:
+                raise ValueError(f'Binary model are not available yet')
+        else:
+            ValueError('Not implemented')
+
+        return res.reshape(-1), y
 
     def _predict_perference_with_Y(self, Y : np.array, target_name : str) -> np.array:
         res = np.empty(Y.shape[0])

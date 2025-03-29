@@ -251,7 +251,9 @@ if name_exp.find('voting') != -1:
     #voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     voting_models = []
     models = [
-            ('NetMLP', 'normal', 'filterICML-xgboost', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('NetMLP', 5.0, 'iterate', 'filter-xgboost', 'softmax' ,'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss', 5),
+            ('NetMLP', 1.0, 'iterate', 'filter-xgboost', 'softmax' ,'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss', 5),
+            ('NetMLP', 3.0, 'iterate', 'filter-xgboost', 'softmax' ,'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss', 5),
             ]
     
     staking_models = []
@@ -305,10 +307,12 @@ params = {
 if doTrain:
     for model in models:
         params['model'] = model[0]
-        params['distillation_training_mode'] = model[1]
-        params['teacher_name'] = model[2]
-        params['infos'] = model[3]
-        params['out_channels'] = model[4]
+        params['temperature'] = model[1]
+        params['distillation_training_mode'] = model[2]
+        params['teacher_name'] = model[3]
+        params['teacher_loss'] = model[4]
+        params['infos'] = model[5]
+        params['out_channels'] = model[6]
         
         wrapped_train_deep_learning_distallation(params)
 
@@ -331,7 +335,9 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                ('MLP-filterICML-xgboost-normal_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP-iterate-1.0-filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss'),
+                ('NetMLP-iterate-3.0-filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss'),
+                ('NetMLP-iterate-5.0-filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss'),
         ]
     elif graph_method == 'graph':
 

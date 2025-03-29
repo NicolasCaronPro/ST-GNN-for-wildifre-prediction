@@ -17,6 +17,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                 'days_since_rain', 'sum_consecutive_rainfall',
                 'sum_rain_last_7_days',
                 'sum_snow_last_7_days', 'snow24h', 'snow24h16',
+                'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7',
                 'elevation',
                 'population',
                 'sentinel',
@@ -58,6 +59,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
                     'sum_snow_last_7_days', 'snow24h', 'snow24h16',
+                    'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7',
                     'elevation',
                     'population',
                     #'sentinel',
@@ -66,7 +68,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'id_encoder',
                     'cluster_encoder',
                     'cosia_encoder',
-                    'vigicrues',
+                    #'vigicrues',
                     'foret',
                     'highway',
                     'cosia',
@@ -74,7 +76,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     #'Historical',
                     'Geo',
                     #'air',
-                    'nappes',
+                    #'nappes',
                     #'AutoRegressionReg',
                     'AutoRegressionBin',
                 ]
@@ -91,6 +93,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
                     'sum_snow_last_7_days', 'snow24h', 'snow24h16',
+                    'precipitationIndexN3',
                     'elevation',
                     'population',
                     'sentinel',
@@ -214,13 +217,16 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
         
         logger.info('Ground truth')
 
-        newShape = subNode.shape[1] + 4
+        newShape = len(ids_columns) + len(targets_columns)
+        columns = ids_columns + targets_columns
         Y = np.full((subNode.shape[0], newShape), 0, dtype=float)
         Y[:, :subNode.shape[1]] = subNode
         codes = []
             
         dir_mask = path / 'raster'
         dir_bin = path / 'bin'
+        dir_burned = path / 'burned'
+        dir_time = path / 'time_intervention'
         dir_proba = path / 'influence'
         dir_predictor = dir_train / 'influenceClustering'
 
@@ -237,7 +243,8 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
             mask = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_mask)
             array = read_object(f'{departement}InfluenceScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_proba)
             arrayBin = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
-            arrayTime = read_object(f'{departement}TimeScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_bin)
+            arrayTime = read_object(f'{departement}timeScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_time)
+            arrayBurned = read_object(f'{departement}burnedScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_burned)
                 
             mask_node = read_object(f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_mask)
             arrayBin_node = read_object(f'{departement}binScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir_bin)
@@ -259,22 +266,31 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                     # Influence
                     #values = np.unique(array[maskNode, int(node[4])])[0]
                     #Y[index, -1] = values
-                    Y[index, -1] = 0
+                    Y[index, columns.index('risk')] = 0
 
                     # Nb events
                     values = np.nanmax(np.unique(arrayBin[maskgraph, int(node[date_index])]))
-                    Y[index, -2] = values
+                    Y[index, columns.index('nbsinister')] = values
 
                     # Nb events
                     values = np.nanmax(np.unique(arrayBin_node[masknode, int(node[date_index])]))
-                    Y[index, -4] = values
+                    Y[index, columns.index('nbsinister_id')] = values
 
                     # Class
                     #Y[index, -3] = predictor.predict(np.asarray(Y[index, -1])).reshape(-1)
-                    Y[index, -3] = 0
+                    Y[index, columns.index('class_risk')] = 0
 
                     # Time intervention
-                    #Y[index, -4] = (np.unique(arrayTime[maskgraph, int(node[date_index])]))[0]
+                    if arrayTime is not None:
+                        Y[index, columns.index('time_intervention')] = (np.unique(arrayTime[maskgraph, int(node[date_index])]))[0]
+                    else:
+                        Y[index, columns.index('time_intervention')] = 0
+
+                    # BunredArea
+                    if arrayBurned is not None:
+                        Y[index, columns.index('burned_area')] = (np.unique(arrayBurned[maskgraph, int(node[date_index])]))[0]
+                    else:
+                        Y[index, columns.index('burned_area')] = 0
 
                 except Exception as e:
                     logger.info(f'{departement}, {node}, {np.unique(mask)}, {e}')
@@ -282,7 +298,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                 
             #Y[nodeDepartementMask, -3] = order_class(predictor, Y[nodeDepartementMask, -3]).reshape(-1, 1)
             
-        Y[:, weight_index] = Y[:, -3] + 1
+        Y[:, weight_index] = 1
         Y = Y[np.isin(Y[:, departement_index], codes)]
         #Y = Y[Y[:, ids_columns.index('weight')] > 0]
         return Y
@@ -292,7 +308,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         features : list, sinister : str, dataset_name: str, sinister_encoding :str,
                         path : Path,
                         dir_train : Path,
-                        resolution : str) -> np.array:
+                        resolution : str, use_log = True) -> np.array:
     
     assert graph.nodes is not None
     graph_construct = graph.base
@@ -304,6 +320,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     features_name, newShape = get_features_name_list(graph.scale, features, methods)
     features_name = ids_columns[:-1] + features_name
     newShape += subNode.shape[1]
+
+    print(len(features_name))
 
     def save_values(array, band, indexNode, mask):
 
@@ -348,7 +366,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         
         X[indexNode[:, 0], indexVar] = np.nansum(array[mask])
 
-    def save_value_with_encoding(array, band, indexNode, mask, encoder):
+    def save_values_with_encoding(array, band, indexNode, mask, encoder):
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         indexVar = features_name.index(f'{band}_mean')
@@ -370,6 +388,12 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     raise ValueError(f'Unknow {metstr}')
         else:
             X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
+
+    def save_value_with_encoding(array, band, indexNode, mask, encoder):
+        values = array[mask].reshape(-1,1)
+        encode_values = encoder.transform(values).values
+        indexVar = features_name.index(f'{band}')        
+        X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
 
     X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
 
@@ -412,9 +436,10 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         print(np.unique(mask), np.unique(nodeDepartement[:, id_index]))
         print(np.unique(mask_graph), np.unique(nodeDepartement[:, graph_id_index]))
 
-        if (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl').is_file():
+        if use_log and (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl').is_file():
             try:
                 X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
+                print(X_dept.shape)
                 assert X_dept is not None
                 X[nodeDepartementMask] = X_dept.reshape(X[nodeDepartementMask].shape)
                 continue
@@ -476,8 +501,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             if var not in features:
                 continue
             logger.info(var)
-            name = var +'raw.pkl'
-            array = read_object(name, dir_data)
+            if 'precipitationIndex' in var:
+                array = read_object('prec24hraw.pkl', dir_data)
+                n = int(var[-1])
+                array = calculate_precipitation_index_image_full(array, A=0.1657, n=n)
+                save_object(array, f'{var}raw.pkl', dir_data)
+            else:
+                name = var +'raw.pkl'
+                array = read_object(name, dir_data)
             if array is None:
                 continue
             for node in nodeDepartement:
@@ -594,21 +625,21 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'foret_encoder' in features:
                     if arrayForetLandcover is not None:
                         try:
-                            save_value_with_encoding(arrayForetLandcover, 'foret_encoder', index, maskNode, encoder_foret)
+                            save_values_with_encoding(arrayForetLandcover, 'foret_encoder', index, maskNode, encoder_foret)
                         except Exception as e:
                             exit(1)
 
                 if 'highway_encoder' in features:
                     if arrayOSLand is not None:
-                        save_value_with_encoding(arrayOSLand, 'highway_encoder', index, maskNode, encoder_osmnx)
+                        save_values_with_encoding(arrayOSLand, 'highway_encoder', index, maskNode, encoder_osmnx)
                 
                 if 'argile_encoder' in features:
                     if arrayARLand is not None:
-                        save_value_with_encoding(arrayARLand, 'argile_encoder', index, maskNode, encoder_argile)
+                        save_values_with_encoding(arrayARLand, 'argile_encoder', index, maskNode, encoder_argile)
 
                 if 'cosia_encoder' in features:
                     if arrayCOSIALandcover is not None:
-                        save_value_with_encoding(arrayCOSIALandcover, 'cosia_encoder', index, maskNode, encoder_cosia)
+                        save_values_with_encoding(arrayCOSIALandcover, 'cosia_encoder', index, maskNode, encoder_cosia)
 
                 if 'id_encoder' in features:
                     save_value_with_encoding(mask, 'id_encoder', index, maskNode, encoder_id)
@@ -640,7 +671,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'landcover' in features:
                     if arrayLand is not None:
                         if 'landcover_encoder' in landcover_variables:
-                            save_value_with_encoding(arrayLand[:,:], 'landcover_encoder', index, maskNode, encoder_landcover)
+                            save_values_with_encoding(arrayLand[:,:], 'landcover_encoder', index, maskNode, encoder_landcover)
 
                 if 'dynamicWorld' in features:
                     if arrayDW is not None:
@@ -791,7 +822,7 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
 
         X[indexNode[:, 0], indexVar] = np.nanmean(array[mask])
 
-    def save_value_with_encoding(array, band, indexNode, mask, encoder):
+    def save_values_with_encoding(array, band, indexNode, mask, encoder):
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         indexVar = features_name.index(f'{band}_mean')
@@ -945,21 +976,21 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
 
         if 'foret_encoder' in features:
             try:
-                save_value_with_encoding(geo['foret_encoder'].values, 'foret_encoder', index, maskNode, encoder_foret)
+                save_values_with_encoding(geo['foret_encoder'].values, 'foret_encoder', index, maskNode, encoder_foret)
             except Exception as e:
                 exit(1)
 
         if 'highway_encoder' in features:
-            save_value_with_encoding(geo['highway_encoder'].values, 'highway_encoder', index, maskNode, encoder_osmnx)
+            save_values_with_encoding(geo['highway_encoder'].values, 'highway_encoder', index, maskNode, encoder_osmnx)
         
         if 'argile_encoder' in features:
-            save_value_with_encoding(geo['argile_encoder'].values, 'argile_encoder', index, maskNode, encoder_argile)
+            save_values_with_encoding(geo['argile_encoder'].values, 'argile_encoder', index, maskNode, encoder_argile)
 
         if 'cosia_encoder' in features:
-            save_value_with_encoding(geo['cosia_encoder'].values, 'cosia_encoder', index, maskNode, encoder_cosia)
+            save_values_with_encoding(geo['cosia_encoder'].values, 'cosia_encoder', index, maskNode, encoder_cosia)
 
         if 'id_encoder' in features:
-            save_value_with_encoding(geo['id'].values, 'id_encoder', index, maskNode, encoder_id)
+            save_values_with_encoding(geo['id'].values, 'id_encoder', index, maskNode, encoder_id)
 
     logger.info('Sentinel Dynamic World')
     for node in subNode:
@@ -973,7 +1004,7 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
         
         if 'landcover' in features:
             if 'landcover_encoder' in landcover_variables:
-                save_value_with_encoding(geo['landcover_encoder'].values, 'landcover_encoder', index, maskNode, encoder_landcover)
+                save_values_with_encoding(geo['landcover_encoder'].values, 'landcover_encoder', index, maskNode, encoder_landcover)
 
         if 'dynamicWorld' in features:
             for band, var in enumerate(dynamic_world_variables):
@@ -1577,4 +1608,102 @@ def raster_past_risk(df, raster_name, dir_raster, dir_output):
                 mask = raster == id
                 res[mask] = val
 
-            save_object(res, f'X_past_risk_{int(date)}.pkl', dir_output / int2name[int(dept)])             
+            save_object(res, f'X_past_risk_{int(date)}.pkl', dir_output / int2name[int(dept)])
+
+def calculate_precipitation_index(precipitation_values, A=0.1657, n=3):
+    """
+    Calcule l'indice de précipitation globale avec un modèle de décroissance temporelle.
+
+    :param precipitation_values: Liste ou tableau numpy contenant les précipitations des n derniers jours.
+    :param A: Coefficient de décroissance (par défaut 0.1657).
+    :param n: Nombre de jours considérés (par défaut 3).
+    :return: Indice de précipitation globale.
+    """
+    if len(precipitation_values) < n:
+        raise ValueError(f"Il faut au moins {n} jours de précipitation pour calculer l'indice.")
+
+    precipitation_values = np.array(precipitation_values[:n])  # Sélectionner les n derniers jours
+    time_decay_weights = np.exp(-A * np.arange(n))  # Appliquer la décroissance exponentielle
+
+    precipitation_index = np.sum(time_decay_weights * precipitation_values)
+    return precipitation_index
+
+def calculate_precipitation_index_image(precipitation_data, A=0.1657, n=3):
+    """
+    Calcule l'indice de précipitation globale pour une image 3D (H, W, T).
+    
+    :param precipitation_data: Tableau numpy de forme (H, W, T) contenant les précipitations.
+    :param A: Coefficient de décroissance (par défaut 0.1657).
+    :param n: Nombre de jours considérés (par défaut 3).
+    :return: Image 2D (H, W) avec l'indice de précipitation calculé pixel par pixel.
+    """
+    H, W, T = precipitation_data.shape
+
+    if T < n:
+        raise ValueError(f"Il faut au moins {n} jours (T={T}) pour calculer l'indice.")
+
+    # Sélectionner uniquement les n derniers jours
+    precipitation_values = precipitation_data[:, :, :n]  # Shape (H, W, n)
+
+    # Calcul des poids de décroissance temporelle
+    time_decay_weights = np.exp(-A * np.arange(n))  # (n,)
+
+    # Calcul de l'indice de précipitation : Somme pondérée sur l'axe temporel (dernier axe)
+    precipitation_index = np.sum(precipitation_values * time_decay_weights[None, None, :], axis=2)
+
+    return precipitation_index
+
+def calculate_precipitation_index_image_full(precipitation_data, A=0.1657, n=3):
+    """
+    Calcule l'indice de précipitation globale pour chaque jour d'une image 3D (H, W, T),
+    en conservant la même shape et en remplissant les premiers jours par des zéros.
+
+    :param precipitation_data: Tableau numpy de forme (H, W, T) contenant les précipitations.
+    :param A: Coefficient de décroissance (par défaut 0.1657).
+    :param n: Nombre de jours considérés pour le calcul de l'indice (par défaut 3).
+    :return: Image 3D (H, W, T) avec l'indice de précipitation calculé.
+    """
+    H, W, T = precipitation_data.shape
+
+    # Calcul des poids de décroissance temporelle
+    time_decay_weights = np.exp(-A * np.arange(n))  # Shape (n,)
+
+    # Création du tableau final avec la même shape (H, W, T), initialisé à zéro
+    precipitation_index_series = np.zeros((H, W, T))
+
+    # Calcul glissant de l'indice de précipitation
+    for t in range(n-1, T):  # Commencer à n-1 pour respecter l'ordre temporel croissant
+        precipitation_values = precipitation_data[:, :, t-n+1:t+1]  # Prendre les n jours précédents
+        precipitation_index_series[:, :, t] = np.sum(precipitation_values * time_decay_weights[None, None, :], axis=2)
+
+    return precipitation_index_series
+
+def is_mediterranean_dept(dept_code):
+    """
+    Retourne :
+    - 1 si le département est dans le bassin méditerranéen (hors Corse),
+    - 100 si le département est 2A (Corse-du-Sud),
+    - 101 si le département est 2B (Haute-Corse),
+    - 0 sinon.
+
+    :param dept_code: int ou str (ex: 13, '2A', '2B')
+    :return: int
+    """
+    # Conversion propre du code département
+    dept_str = str(dept_code).upper().zfill(2)
+
+    # Traitement spécifique pour la Corse
+    mediterranean_depts = {
+        6,  # Alpes-Maritimes
+        11,  # Aude
+        13,  # Bouches-du-Rhône
+        30,  # Gard
+        34,  # Hérault
+        66,  # Pyrénées-Orientales
+        83,  # Var
+        84,  # Vaucluse
+        100, # Corse 2A 
+        101, # Corse 2B 
+    }
+
+    return 1 if dept_str in mediterranean_depts else 0
