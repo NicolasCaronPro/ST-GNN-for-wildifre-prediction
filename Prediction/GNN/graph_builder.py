@@ -155,13 +155,20 @@ def add_edge_features(
     src_pos = geospatial_rotation(src_pos, theta=theta_azimuthal, axis="z", unit="rad")
     dst_pos = geospatial_rotation(dst_pos, theta=theta_azimuthal, axis="z", unit="rad")
     # y values should be zero
+    if src_pos.ndim == 1:
+        src_pos = src_pos[None, :]
+        dst_pos = dst_pos[None, :]
     try:
         testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]))
     except ValueError:
         raise ValueError("Invalid projection of edge nodes to local ccordinate system")
+    
     src_pos = geospatial_rotation(src_pos, theta=theta_polar, axis="y", unit="rad")
     dst_pos = geospatial_rotation(dst_pos, theta=theta_polar, axis="y", unit="rad")
     # x values should be one, y & z values should be zero
+    if src_pos.ndim == 1:
+        src_pos = src_pos[None, :]
+        dst_pos = dst_pos[None, :]
     try:
         testing.assert_close(dst_pos[:, 0], torch.ones_like(dst_pos[:, 0]))
         testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]))
@@ -483,11 +490,12 @@ class GraphBuilder:
             print("Creating bi-directional mesh graph")
 
         multimesh_faces = self.icospheres["order_0_faces"]
-        for i in range(1, self.max_order + 1):
+        """for i in range(1, self.max_order + 1):
             multimesh_faces = np.concatenate(
                 (multimesh_faces, self.icospheres["order_" + str(i) + "_faces"])
-            )
+            )"""
 
+        multimesh_faces = self.icospheres[f"order_{self.max_order}_faces"]
         src, dst = cell_to_adj(multimesh_faces)
         src = np.asarray(src)
         dst = np.asarray(dst)
@@ -746,19 +754,17 @@ class GraphBuilder2:
 
             src = []
             dst = []
-
             for src_idx, (src_lat, src_lon) in enumerate(src_lat_lon):
                 for tgt_idx, (tgt_lat, tgt_lon) in enumerate(tgt_lat_lon):
                     #if self.haversine_distance(src_lat, src_lon, tgt_lat, tgt_lon) < 50:
                         src.append(src_idx)
                         dst.append(tgt_idx)
 
+            if len(src) == 0:
+                return None, None
             edge_type = (f"scale_{scale_src}", "coo", f"scale_{scale_dst}")
             data_dict = {edge_type: (torch.tensor(src, dtype=torch.int32), torch.tensor(dst, dtype=torch.int32))}
             hetero_graph = heterograph(data_dict)
-
-            self._add_node_and_edge_features(hetero_graph, edge_type, src_lat_lon[src], tgt_lat_lon[dst], src, dst)
-            graph_list.append(hetero_graph)
 
             # Ajout des features
             self._add_node_and_edge_features(hetero_graph, edge_type, src_lat_lon, tgt_lat_lon, src, dst)

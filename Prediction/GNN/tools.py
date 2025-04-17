@@ -185,13 +185,21 @@ def find_dates_between(start, end):
             date += delta
     return res
 
+def defines_train_dates(expe):
+    if expe == '2022':
+        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
+        all_val_dates = find_dates_between('2023-01-01', '2024-06-29')
+        all_test_dates = find_dates_between('2022-01-01', '2022-12-31')
+    else:
+        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
+        all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
+        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+
+    return all_train_dates, all_val_dates, all_test_dates
+
 allDates = find_dates_between('2017-06-12', '2024-06-29')
 years = list(np.unique([d.split('-')[0] for d in allDates]))
-#allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
-all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
-all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
-all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
-all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
 
 def save_object(obj, filename: str, path : Path):
     check_and_create_path(path)
@@ -285,7 +293,7 @@ def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution
     center_lat = latitudes[outputShape[0] // 2, outputShape[1] // 2]
     center_lon = longitudes[outputShape[0] // 2, outputShape[1] // 2]
     logger.info(center_lat, center_lon)
-    
+
     # Convertir les coordonnées géographiques en radians
     latitudes_rad = np.radians(latitudes)
     longitudes_rad = np.radians(longitudes)
@@ -296,7 +304,7 @@ def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution
     a = np.sin(delta_lat/2)**2 + np.cos(latitudes_rad) * np.cos(np.radians(center_lat)) * np.sin(delta_lon/2)**2
     c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
     distances = earth_radius * c
-    
+
     return distances
 
 def influence_index(raster, mask, dimS, mode, dim=(90,150)):
@@ -502,19 +510,19 @@ def remove_non_fire_season(df: pd.DataFrame, SAISON_FEUX: dict, departements: li
                 date_debut = allDates[0]
             if date_fin > allDates[-1]:
                 date_fin = allDates[-1]
-
+                
             if date_debut not in allDates or date_fin not in allDates:
                 continue
-
+            
             start_idx = allDates.index(date_debut) - ks
             end_idx = allDates.index(date_fin) - ks
 
             valid_indices = np.concatenate((valid_indices, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < end_idx)].index))
-            zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= end_idx) & (df['date'] < end_idx + ks)].index))
-            zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < start_idx + ks)].index))
+            #zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= end_idx) & (df['date'] < end_idx + ks)].index))
+            zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx - ks) & (df['date'] < start_idx)].index))
 
-    df.loc[zeros_dates, weights_columns] = 0
-    df = df.loc[valid_indices]
+    df.loc[zeros_dates, 'weight'] = 0
+    #df = df.loc[valid_indices]
 
     return df.reset_index(drop=True)
 
@@ -625,6 +633,9 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
             yts[:, weight_index] = 0
             y = np.concatenate((y, yts))
 
+    else:
+        y = None
+
     # Graph indexing
     ind = np.lexsort((x[:,id_index], x[:,date_index]))
     x = x[ind]
@@ -711,7 +722,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
             continue
 
         udates = np.unique(arrayNode[:, date_index])
-        
+
         # Ajouter des dates manquantes
         for ud in range_date:
             if ud not in udates:
@@ -722,6 +733,8 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
                 new_data[:, latitude_index] = arrayNode[0, latitude_index]
                 new_data[:, date_index] = ud
                 new_data[:, departement_index] = arrayNode[0, departement_index]
+                new_data[:, scale_index] = arrayNode[0, scale_index]
+                new_data[:, days_until_next_event_index] = 0
                 new_data[:, weight_index] = 0
 
                 for band in range(len(ids_columns), arrayNode.shape[1]):
@@ -739,6 +752,36 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
         # Extraire les données dans l'intervalle de date
         cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date)]
         cur_array = cur_array.astype(np.float32)
+
+        """new_data = np.copy(cur_array)
+        for band in range(len(ids_columns), cur_array.shape[1]):
+            y = cur_array[:, band]
+            x = np.arange(len(y))  # Indices (par ligne) pour interpolation
+            mask = ~np.isnan(y)    # Masque des valeurs non-NaN
+            masknan = np.isnan(y) 
+            xnan = x[masknan]
+
+            if np.any(masknan):
+                if np.sum(mask) > 1:  # Au moins 2 points valides pour interpoler
+                    f = scipy.interpolate.interp1d(
+                        x[mask], y[mask],
+                        kind='nearest',
+                        bounds_error=False,
+                        fill_value='extrapolate'
+                    )
+                    new_data[masknan, band] = f(xnan)
+                else:
+                    new_data[masknan, band] = 0  # Ou np.nan ou une autre valeur par défaut"""
+
+        """ # Afficher les indices et les valeurs concernées
+        print("Valeurs avec overflow (inf):")
+        print(cur_array[is_inf])
+
+        print("\nValeurs NaN:")
+        print(cur_array[is_nan])
+
+        print("\nIndices overflow:")
+        print(np.where(is_inf)[0])"""
                 
         res.append(cur_array[:ks+1])
 
@@ -786,6 +829,10 @@ def construct_graph_with_time_series(graph, date : int,
             yts = Y[maskts]
             yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
+
+    else:
+        y = None
+
     def get_unique_pair_indices(array, graph_id_index, date_index):
         """
         Retourne les indices des lignes uniques basées sur les paires (graph_id, date).
@@ -805,7 +852,8 @@ def construct_graph_with_time_series(graph, date : int,
 
     unique_indices = get_unique_pair_indices(y, graph_id_index=id_index, date_index=date_index)
     x = x[unique_indices]
-    y = y[unique_indices]
+    if Y is not None:
+        y = y[unique_indices]
 
     # Graph indexing
     x = concat_temporal_graph_into_time_series(x, ks, date)
@@ -874,6 +922,8 @@ def construct_time_series(date : int,
         return None, None
     if Y is not None:
         y = concat_temporal_graph_into_time_series(y, ks, date)
+    else:
+        y = None
 
     return x[:, start_features:], y
 
@@ -2218,9 +2268,9 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
         label = region.label
 
         # Si le label a déjà été modifié, passer au suivant
-        if label in changed_labels:
-            i += 1
-            continue
+        #if label in changed_labels:
+        #    i += 1
+        #    continue
 
         # Vérifier la taille du cluster actuel
         ones = np.argwhere(res == label).shape[0]
@@ -2243,7 +2293,11 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
 
                 if len(neighbor_labels) > 0:
                     # Trier les voisins par taille
-                    neighbors_size = np.sort([[neighbor_label, np.sum(res == neighbor_label)] for neighbor_label in neighbor_labels])
+                    neighbors_size = sorted(
+                        [[neighbor_label, np.sum(res == neighbor_label)] for neighbor_label in neighbor_labels],
+                        key=lambda x: x[1]  # trie par la somme (ordre croissant)
+                    )
+
                     best_neighbor = None
 
                     if mode == 'size':
@@ -2573,7 +2627,7 @@ def get_features_name_list(scale, features, methods):
             features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
         elif var == 'region_class':
             features_name += [var]
-        elif var == 'Past_risk':
+        elif var == 'Past_risk' or var == 'Past_bunredarea':
             features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
@@ -2627,7 +2681,7 @@ def get_features_name_list_old(scale, features, methods):
             features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
         elif var == 'region_class':
             features_name += [var]
-        elif var == 'Past_risk':
+        elif var == 'Past_risk' or var == 'Past_burnedarea':
             features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
@@ -2680,7 +2734,7 @@ def get_features_name_lists_2D(shape, features):
             features_name.extend([f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin])
         elif var in cluster_encoder:
             features_name.extend([var])
-        elif var == 'Past_risk':
+        elif var == 'Past_risk' or var == 'Past_burnedarea':
             features_name.extend([var])
         elif True in [tv in var for tv in varying_time_variables]:
             k = var.split('_')[-1]
@@ -4110,6 +4164,7 @@ def target_by_day(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.Data
     
     from statistics import mean
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'nbsinister', days_range, sum, col_name=f'nbsinister_sum_{target_spe}_+')
+    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'burned_area', days_range, sum, col_name=f'burnedarea_sum_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, max, col_name=f'risk_max_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, mean, col_name=f'risk_mean_{target_spe}_+')
@@ -4717,3 +4772,58 @@ def binary_closing_id(mask, selem):
         processed_mask[closed_mask] = uid  # Réinjecter les valeurs
         
     return processed_mask
+
+def generate_graph_list(scale: int, graph_construct: str, graph_method: str, dir_output: Path):
+    # Échelle disponibles en ordre croissant, avec "departement" comme la plus grande
+    if graph_construct == 'risk-regular':
+        if scale == 6:
+            available_scales = [4, 6, 'departement']
+        else:
+            available_scales = [4, 5, 7, 'departement']
+    else:
+        available_scales = [4, 5, 6, 7, 'departement']
+    
+    graph_list = []
+
+    for s in available_scales:
+        if s != 'departement' and (isinstance(s, int) and s >= scale):
+            filename = f"graph_{s}_{'None' if s == 'departement' else graph_construct}_{graph_method}.pkl"
+            graph_list.append((filename, dir_output / '..'))
+            logger.info(filename)
+        elif s == 'departement':
+            filename = f"graph_departement_None_{graph_method}.pkl"
+            graph_list.append((filename, dir_output / '..'))
+        
+            logger.info(filename)
+
+    return graph_list
+
+
+def get_static_temporal_idx(features):
+    static_idx = []
+    temporal_idx = []
+    foret_variables_name = list(foret.keys())
+    osmnx_variables_name = list(osmnxint2str.values())
+    #print(foret_variables_name)
+    for i, fet in enumerate(features):
+        #print(fet)
+        if fet in cluster_encoder or fet in geo_variables or fet in region_variables or 'encoder' in fet or fet == 'isBassin':
+            static_idx.append(i)
+            continue
+        
+        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet:
+            temporal_idx.append(i)
+            continue
+
+        fet_name, _ = fet.split('_')
+        if fet_name in sentinel_variables or fet_name in landcover_variables or fet_name in foret_variables_name or \
+              fet_name in cosia_variables or fet_name in osmnx_variables_name or fet_name in dynamic_world_variables or \
+                fet in elevation_variables or fet_name in population_variabes:
+            static_idx.append(i)
+        else:
+            temporal_idx.append(i)
+
+    static_idx, temporal_idx = np.asarray(static_idx), np.asarray(temporal_idx)
+    #logger.info(f'Static features -> {np.asarray(features)[static_idx]}')
+    #logger.info(f'Temporal features -> {np.asarray(features)[temporal_idx]}')
+    return static_idx, temporal_idx

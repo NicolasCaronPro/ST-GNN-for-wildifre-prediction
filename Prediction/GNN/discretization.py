@@ -78,7 +78,7 @@ class KMeansRiskZerosHandle:
         self.model = KMeans(n_clusters=min(self.n_clusters, np.unique(X_val).shape[0]), random_state=42, n_init=10)
         self.model.fit(X_val)
         centroids = self.model.cluster_centers_
-
+        
         if centroids.shape[1] > 1:
             magnitudes = np.linalg.norm(centroids, axis=1)
             sorted_indices = np.argsort(magnitudes)
@@ -1243,7 +1243,8 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     if graph.sequences_month is None:
         graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
 
-    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
+    #conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
+    conv_types = ['cubic']
 
     kernels = ['Specialized', 1, 3, 5]
     """
@@ -1318,7 +1319,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'])
 
             # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters)
+            class_risk = KMeansRiskZerosHandle(n_clusters=n_clusters)
             obj = ScalerClassRisk(
                 col_id='departement',
                 dir_output=dir_post_process,
@@ -1404,6 +1405,50 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             test_dataset_[train_col] = obj.predict(
                 test_dataset_['nbsinisterDaily'].values,
                 test_dataset_['nbsinisterDaily'].values,
+                test_dataset_['departement'].values,
+                test_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+
+            # Sélection du préprocesseur
+            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
+
+            # Définition de l'objet ScalerClassRisk
+            class_risk = KMeansRisk(n_clusters=n_clusters)
+            obj = ScalerClassRisk(
+                col_id='departement',
+                dir_output=dir_post_process,
+                target='burnedareaDaily',
+                scaler=None,
+                class_risk=class_risk,
+                preprocessor=preprocessor
+            )
+
+            # Application du fit et prédictions
+            obj.fit(
+                train_dataset_['burnedareaDaily'].values,
+                train_dataset_['burnedareaDaily'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            train_dataset_[train_col] = obj.predict(
+                train_dataset_['burnedareaDaily'].values,
+                train_dataset_['burnedareaDaily'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            val_dataset_[train_col] = obj.predict(
+                val_dataset_['burnedareaDaily'].values,
+                val_dataset_['burnedareaDaily'].values,
+                val_dataset_['departement'].values,
+                val_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+            test_dataset_[train_col] = obj.predict(
+                test_dataset_['burnedareaDaily'].values,
+                test_dataset_['burnedareaDaily'].values,
                 test_dataset_['departement'].values,
                 test_dataset_[['month_non_encoder', 'graph_id']].values
             )
@@ -1755,3 +1800,185 @@ def discretization(method, test_window, y_pred, pred_max, pred_min, col, target_
 
     else:
         raise ValueError(f'{method} unknow')
+
+def post_process_model_inference(train_dataset, test_dataset, dir_post_process, graph):
+
+    graph_method = graph.graph_method
+
+    new_cols = []
+
+    if graph_method == 'node':
+        train_dataset_ = train_dataset.copy(deep=True)
+        test_dataset_ = test_dataset.copy(deep=True)
+    else:
+        def keep_one_per_pair(dataset):
+            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
+            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+
+        train_dataset_ = keep_one_per_pair(train_dataset)
+        test_dataset_ = keep_one_per_pair(test_dataset)
+
+    res = {}
+
+    ####################################################################################
+    
+    obj2 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+
+    obj2.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+
+    train_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['nbsinister'].values,  train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+    test_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['nbsinister'].values,  test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
+    
+    res[obj2.name] = obj2
+
+    new_cols.append('nbsinister-kmeans-5-Class-Dept')
+
+    ###############################################################################
+
+    if graph.sequences_month is None:
+        graph.compute_sequence_month(pd.concat([train_dataset]), graph.dataset_name)
+
+    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
+
+    kernels = ['Specialized', 1, 3, 5]
+
+    ###############################################################################
+
+    n_clusters = 5
+
+    for conv_type in conv_types:
+        for kernel in kernels:
+            logger.info(f"Testing with convolution type: {conv_type}")
+
+            train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+    
+            # Sélection du préprocesseur
+            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
+
+            # Définition de l'objet ScalerClassRisk
+            class_risk = KMeansRisk(n_clusters=n_clusters)
+            obj = ScalerClassRisk(
+                col_id='departement',
+                dir_output=dir_post_process,
+                target='nbsinister',
+                scaler=None,
+                class_risk=class_risk,
+                preprocessor=preprocessor
+            )
+
+            # Application du fit et prédictions
+            obj.fit(
+                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinister'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            train_dataset_[train_col] = obj.predict(
+                train_dataset_['nbsinister'].values,
+                train_dataset_['nbsinister'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            test_dataset[train_col] = obj.predict(
+                test_dataset['nbsinister'].values,
+                test_dataset['nbsinister'].values,
+                test_dataset['departement'].values,
+                test_dataset[['month_non_encoder', 'graph_id']].values
+            )
+
+            res[obj.name] = deepcopy(obj)
+            new_cols.append(train_col)
+
+            train_col = f"nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+    
+            # Sélection du préprocesseur
+            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
+
+            # Définition de l'objet ScalerClassRisk
+            class_risk = KMeansRisk(n_clusters=n_clusters)
+            obj = ScalerClassRisk(
+                col_id='departement',
+                dir_output=dir_post_process,
+                target='nbsinisterDaily',
+                scaler=None,
+                class_risk=class_risk,
+                preprocessor=preprocessor
+            )
+
+            # Application du fit et prédictions
+            obj.fit(
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            train_dataset_[train_col] = obj.predict(
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['nbsinisterDaily'].values,
+                train_dataset_['departement'].values,
+                train_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            val_dataset_[train_col] = obj.predict(
+                val_dataset_['nbsinisterDaily'].values,
+                val_dataset_['nbsinisterDaily'].values,
+                val_dataset_['departement'].values,
+                val_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+            test_dataset_[train_col] = obj.predict(
+                test_dataset_['nbsinisterDaily'].values,
+                test_dataset_['nbsinisterDaily'].values,
+                test_dataset_['departement'].values,
+                test_dataset_[['month_non_encoder', 'graph_id']].values
+            )
+
+            res[obj.name] = deepcopy(obj)
+            new_cols.append(train_col)
+            
+    logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")
+
+    ##################### Union des risk ###########################
+    col_raw = 'nbsinister-kmeans-5-Class-Dept'
+    col_derived = 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized'
+
+    train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+    train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0
+    train_dataset_['potential_risk'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+
+    new_cols.append('union')
+    new_cols.append('potential_risk')
+
+    ################################################
+
+    logger.info(f'Post process Model -> {res}')
+
+    if graph_method == 'node':
+        test_dataset = test_dataset_
+    else:
+        def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
+            """
+            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
+            :param original_dataset: DataFrame original
+            :param updated_dataset: DataFrame avec les index et colonnes à joindre
+            :param new_cols: Liste des colonnes à ajouter
+            :return: DataFrame mis à jour avec les nouvelles colonnes
+            """
+            # Joindre les deux DataFrames sur leurs index
+            original_dataset.reset_index(drop=True, inplace=True)
+            updated_dataset.reset_index(drop=True, inplace=True)
+
+            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
+                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
+                on=['graph_id', 'date'],
+                how='left'
+            ).reset_index()
+            return joined_dataset
+
+        # Mise à jour des datasets
+        train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
+        test_dataset = join_on_index_with_new_cols(test_dataset, test_dataset_, new_cols)
+
+    return res, train_dataset, test_dataset, new_cols

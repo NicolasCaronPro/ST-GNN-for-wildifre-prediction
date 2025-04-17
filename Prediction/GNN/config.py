@@ -23,6 +23,8 @@ torch.manual_seed(42)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(42)
 
+#allDates = find_dates_between('2017-06-12', dt.datetime.now().date().strftime('%Y-%m-%d'))
+
 eps = {'departement-01-ain' : {'risk' : 0.4,
        'population' : 0.01,
        'elevation' : 5,
@@ -257,7 +259,7 @@ def get_academic_zone(name, date):
             return 'B'  # Zone de Rouen après 2016
         else:
             return dict_zones[name][1]  # Zone après la fusion en 2020
-    
+        
     # Cas général pour les autres académies
     if date < dt.datetime(2016, 1, 1):
         return dict_zones[name][0]
@@ -380,7 +382,7 @@ shape2D = {10: (24, 24),
           6  : (32,32),
           7  : (64,64),
             8 : (30,30),
-            'departement' : (64,64)}
+            'departement' : (32,32)}
 
 jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
@@ -395,7 +397,7 @@ encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
 epochs = 10000
-lr = 0.00005
+lr = 0.000005
 PATIENCE_CNT = 50
 CHECKPOINT = 50
 batch_size = 256

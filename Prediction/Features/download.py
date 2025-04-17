@@ -228,7 +228,7 @@ def download_osnmx(geo, dir_output) -> None:
     subedges['coef'] = 1
     subedges['label'] = 0
     for i, hw in enumerate(['motorway', 'primary', 'secondary', 'tertiary', 'path']):
-        subedges.loc[subedges['highway'] == hw, 'label'] = i +1
+        subedges.loc[subedges['highway'] == hw, 'label'] = i + 1
 
     subedges[['geometry', 'label']].to_file(dir_output / 'osmnx.geojson', driver='GeoJSON')
 

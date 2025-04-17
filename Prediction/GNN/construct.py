@@ -747,6 +747,7 @@ def init(args, dir_output, script):
     doPoint = args.point == "True"
     doGraph = args.graph == "True"
     doDatabase = args.database == "True"
+    print(f'Do databse -> {args.database}')
     do2D = args.database2D == "True"
     doFet = args.featuresSelection == "True"
     optimize_feature = args.optimizeFeature == "True"
@@ -886,7 +887,6 @@ def init(args, dir_output, script):
     #graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
 
     ########################## Do Database ####################################
-    print(doDatabase)
     if doDatabase:
         logger.info('#####################################')
         logger.info('#      Construct   Database         #')
@@ -931,9 +931,8 @@ def init(args, dir_output, script):
             features_name, newshape = get_features_name_list_old(graphScale.scale, features, METHODS_SPATIAL)
         else:
             features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
-    
-    newFeatures = []
 
+    newFeatures = []
     if newFeatures != [] and dataset_name != 'bdiff':
         X2, features_name_2 = get_sub_nodes_feature(
             graphScale,
@@ -960,7 +959,7 @@ def init(args, dir_output, script):
 
         for fet in features_name:
             if fet in features_name_2:    
-                new_X[:, features_name.index(fet)] = X2[:, features_name_2.index(fet)]
+                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X2[:, features_name_2.index(fet)]
             else:
                 new_X[:, features_name.index(fet) + len(ids_columns)-1] = X[:, features_name_ori.index(fet) + len(ids_columns)-1]
         
@@ -968,31 +967,72 @@ def init(args, dir_output, script):
 
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
-    X = X[:, len(ids_columns)-1:]
-    
-    ############################## Dataframe creation ###################################
+    changeFeature = []
+    if changeFeature != [] and dataset_name != 'bdiff':
+        X2, features_name_2 = get_sub_nodes_feature(
+            graphScale,
+            Y[:, :len(ids_columns) - 1],
+            departements,
+            changeFeature,
+            sinister,
+            dataset_name,
+            sinister_encoding,
+            dir_output,
+            dir_output,
+            resolution,
+            use_log=False
+        )
 
+        X2 = X2[:, len(ids_columns)-1:]
+
+        if dataset_name != 'bdiff':
+            features_name_ori, newshape = get_features_name_list_old(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
+        else:
+            features_name, newshape = get_features_name_lis(graphScale.scale, features, METHODS_SPATIAL)
+            
+        new_X = np.empty((X.shape[0], X.shape[1]))
+
+        for fet in features_name:
+            if fet in features_name_2:    
+                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X2[:, features_name_2.index(fet)]
+            else:
+                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X[:, features_name_ori.index(fet) + len(ids_columns)-1]
+        
+        X = new_X + len(ids_columns)-1
+
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
+
+    X = X[:, len(ids_columns)-1:]
+
+    ############################## Dataframe creation ###################################
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
     if dataset_name == 'bdiff':
         newFeatures = []
 
-    if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == []:
+    ############### SI CA PLANTE -> SCALE ###################
+    if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == [] and changeFeature == []:
     #if False:
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
+        print('FIRE:', df['nbsinister'].unique())
     else:
         #print(len(features_name), X.shape)
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
-        df[ids_columns + targets_columns] = Y
+        df[ids_columns[:-1] + targets_columns] = Y
         find_df = False
+
+    if scale == 'departement':
+        df['scale'] = 10
+    else:
+        df['scale'] = scale
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
     ############################## Generate 2D database #######################
-
+    
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
                                                                     sinister, dataset_name, dir_output, dir_output,
@@ -1007,17 +1047,23 @@ def init(args, dir_output, script):
                 df.drop(v, inplace=True, axis=1)
 
     df['nbsinister_0_0'] = df['nbsinister'].values
+    print('FIRE:', df['nbsinister_0_0'].unique())
+
+    df['burnedarea_0_0'] = df['burned_area'].values
+    
     df['risk_0_0'] = df['nbsinister'].values
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
+    
     trainCode = [name2int[d] for d in train_departements]
+    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(name_exp)
     train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
     shift_list = np.arange(0, 1)
     train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
 
     if dataset_name.find('bdiff') !=-1:
         df = df[df['date'] <= allDates.index('2023-12-31')]
-        
+
     #if not doDatabase:
     #    return df, graphScale, prefix, fp, features_name
 
@@ -1028,7 +1074,6 @@ def init(args, dir_output, script):
         limit_day = [7, 15, 31]
         logger.info(f'Add {limit_day} days in future')
         df = target_by_day(df, limit_day, target_spe='0')
-        print(df[df['departement'] == 13]['nbsinister_sum_0_+7'].unique())
 
     """if (dir_output / f'df_mid_{prefix}.pkl').is_file():
         df = read_object(f'df_mid_{prefix}.pkl', dir_output)
@@ -1122,9 +1167,10 @@ def init(args, dir_output, script):
     ############################## Add varying time features #############################
 
     #if dataset_name == 'bdiff' and not find_df:
-    logger.info(f'Adding time columns {10}')
-    logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-    df, _ = add_time_columns(varying_time_variables, 10, df.copy(deep=True), train_features, features_name)
+    if not find_df:
+        logger.info(f'Adding time columns {10}')
+        logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
+        df, _ = add_time_columns(varying_time_variables, 20, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 
@@ -1142,5 +1188,11 @@ def init(args, dir_output, script):
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
     test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
+
+    plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['fwi_mean'])
+    plt.savefig('test.png')
+    plt.close('all')
+    
+    print('FIRE:', df['nbsinister_0_0'].unique())
 
     return df, graphScale, prefix, fp, features_name

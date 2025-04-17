@@ -1,0 +1,1 @@
+python3.9 train.py -n test -s firepoint -se occurence -d False -dataset bdiff_evolution -test True -train True -r 2x2 -a MaxPool_5

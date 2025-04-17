@@ -142,7 +142,7 @@ class InplaceMulitpleGraphDataset(Dataset):
         self.list_graph = [read_object(f, p) for (f, p) in list_graph_file]
         self.other_scale = [graph.scale for graph in self.list_graph]
         self.Y_other_graph = []
-
+        
         for i, graph in enumerate(self.list_graph):
             if i == 0:
                 continue
@@ -340,10 +340,10 @@ def graph_collate_fn_mesh(batch):
         num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
         graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs
 
-        latitudes = features_labels_graph_index_tuple[1][:, latitude_index]
-        longtitudes = features_labels_graph_index_tuple[1][:, longitude_index]
+        latitudes = features_labels_graph_index_tuple[1][:, latitude_index, -1].reshape(-1,1)
+        longitudes = features_labels_graph_index_tuple[1][:, longitude_index, -1].reshape(-1,1)
 
-        g_lat_lon_grid = torch.concat((latitudes, longtitudes), dim=1).to('cpu')
+        g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
         g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
         graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
 
@@ -395,9 +395,18 @@ def graph_collate_fn_multiple_graph(batch):
         g_lat_lon_grid_scales = []
         for labels in features_labels_graph_index_tuple[1]:
             labels = np.asarray(labels, dtype=np.float32)
-            latitudes = torch.Tensor(labels[:, latitude_index])
-            longtitudes = torch.Tensor(labels[:, longitude_index])
-            g_lat_lon_grid = torch.concat((latitudes, longtitudes), dim=1).to('cpu')
+            if labels.ndim == 3:
+                latitudes = torch.Tensor(labels[:, latitude_index, -1])
+                longitudes = torch.Tensor(labels[:, longitude_index, -1])
+            else:
+                latitudes = torch.Tensor(labels[:, latitude_index])
+                longitudes = torch.Tensor(labels[:, longitude_index])
+
+            if latitudes.ndim == 1:
+                latitudes = latitudes[:, None]
+                longitudes = longitudes[:, None]
+
+            g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
             #g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
             g_lat_lon_grid_scales.append(g_lat_lon_grid)
 
@@ -405,33 +414,57 @@ def graph_collate_fn_multiple_graph(batch):
 
         current_graph_scale_list = graph_builder.graph_scale()
         increase_graph_scale_list, current_graph_scale_list = graph_builder.increase_scale(current_graph_scale_list)
+        if increase_graph_scale_list is None:
+            continue
         decrease_graph_scale_list = graph_builder.decrease_scale()
         
-        node_graph = current_graph_scale_list[0]
-        original_node_indices = node_graph.ndata[dgl.NID] 
-        node_features = features_labels_graph_index_tuple[0][original_node_indices]
-        node_features_list.append(node_features)
-    
         for i, labels in enumerate(features_labels_graph_index_tuple[1]):
+            node_graph = current_graph_scale_list[i]
+            original_node_indices = node_graph.ndata[dgl.NID]
+
             if i == 0:
-                labels = labels[original_node_indices]
-            
+                node_features = features_labels_graph_index_tuple[0][original_node_indices]
+                node_features_list.append(node_features)      
+                labels = labels[original_node_indices]    
+
             if 'mask_zeros' in locals():
                 if i > 0:
                     increase_graph = increase_graph_scale_list[i - 1]
+                    decrease_graph = decrease_graph_scale_list[i - 1]
+                    #print('###########################')
+                    #print(increase_graph)
+
+                    #print({ntype: increase_graph.nodes(ntype) for ntype in increase_graph.ntypes})
+
+                    #increase_graph = dgl.node_subgraph(increase_graph, nodes={ntype: increase_graph.nodes(ntype) for ntype in increase_graph.ntypes})
+                    #decrease_graph = dgl.node_subgraph(decrease_graph, nodes={ntype: decrease_graph.nodes(ntype) for ntype in decrease_graph.ntypes})
+
+                    increase_graph_scale_list[i - 1] = increase_graph
+                    decrease_graph_scale_list[i - 1] = decrease_graph
+
+                    num_nodes = current_graph_scale_list[i -1].num_nodes()
+                    labels = labels[original_node_indices]
+
+                    if labels.ndim == 2:
+                        labels = labels[None, :, :]
+
                     edge_type = list(increase_graph.canonical_etypes)[0]
                     src_nodes, dst_nodes = increase_graph.edges(etype=edge_type)
 
                     # Masque destination : destination avec -1,-1 == 0
-                    dst_mask = (labels[dst_nodes, -1, -1] == 0)
 
+                    dst_mask = (labels[dst_nodes, -1, -1] == 0)
+                    #print(increase_graph)
+                    #print(np.unique(src_nodes))
                     valid_src_mask = mask_zeros[src_nodes]
 
                     # Final: on garde les dst liés à des src masqués et eux-mêmes à 0
                     final_mask = valid_src_mask & dst_mask
 
                     labels[dst_nodes[final_mask], weight_index] = 0
-                
+            
+            if labels.shape[2] > 1:
+                labels = labels[:, :, -1]
             mask_zeros = (labels[:, weight_index, -1] == 0)
 
             labels = torch.Tensor(labels)
@@ -638,7 +671,7 @@ def create_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
-                    mesh='mesh',
+                    mesh=None,
                     mesh_file=''):
     
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
@@ -669,6 +702,7 @@ def create_dataset(graph,
 
     if mesh is None or mesh == False:
         # Création des datasets finaux
+        print('uzbdkazdkjzan')
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
         test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
@@ -682,6 +716,67 @@ def create_dataset(graph,
         test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
 
     return train_dataset, val_dataset, test_dataset
+
+def get_numpy_data(graph, df,
+                       features_name,
+                       use_temporal_as_edges : bool,
+                       ks :int):
+
+    Xset = df[ids_columns + features_name].values
+
+    X = []
+    Yset = None
+    """if graph.graph_method == 'graph':
+        graphId = np.unique(Xset[:, graph_id_index])
+        for id in graphId:
+            Xset_graph = Xset[Xset[:, graph_id_index] == id]
+            Yset_graph = Yset[Yset[:, graph_id_index] == id]
+            udates = np.unique(Xset_graph[:, date_index])
+            for date in udates:
+                if use_temporal_as_edges is None:
+                    x, y = construct_time_series(date, Xset_graph, Yset_graph, ks, len(ids_columns))
+                    if x is not None:
+                        for i in range(x.shape[0]):
+                            X.append(x[i])
+                            Y.append(y[i])
+                    continue
+                elif use_temporal_as_edges:
+                    x, y, e = construct_graph_set(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
+                else:
+                    x, y, e = construct_graph_with_time_series(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
+
+                if x is None:
+                    continue
+
+                if x.shape[0] == 0:
+                    continue
+
+                X.append(x)
+                Y.append(y)
+                E.append(e)
+    else:"""
+    graphId = np.unique(Xset[:, date_index])
+    for date in graphId:
+        if use_temporal_as_edges is None:
+            x, _ = construct_time_series(date, Xset, Yset, ks, len(ids_columns))
+            if x is not None:
+                for i in range(x.shape[0]):
+                    X.append(x[i])
+            continue
+        elif use_temporal_as_edges:
+            x, _, _ = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
+        else:
+            x, _, _ = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
+
+        if x is None:
+            continue
+
+        if x.shape[0] == 0:
+            continue
+
+        X.append(x)
+
+    return X
 
 def create_test_loader(graph, df,
                        features_name,
@@ -785,6 +880,8 @@ def load_x_from_pickle(date : int,
     features_name_2D_full, _ = get_features_name_lists_2D(6, features)
 
     leni = len(features_name_2D)
+    if date < 0:
+        return None
     x_2D = read_object(f'X_{date}.pkl', path)
 
     if x_2D is None:
@@ -793,7 +890,7 @@ def load_x_from_pickle(date : int,
     
     for i, fet_2D in enumerate(features_name_2D):
 
-        if fet_2D == 'Past_risk':
+        if fet_2D == 'Past_risk' or fet_2D == 'Past_burnedarea':
             unode = np.unique(raster) 
             for node in unode:
                 mask = (raster == node)
@@ -801,7 +898,7 @@ def load_x_from_pickle(date : int,
                 if True not in m1:
                     new_x_2D[i, mask] = 0
                 else:
-                    new_x_2D[i, mask] = x_1d[m1, features_1D.index('Past_risk')]
+                    new_x_2D[i, mask] = x_1d[m1, features_1D.index(fet_2D)]
         else:
             new_x_2D[i, :, :] = x_2D[features_name_2D_full.index(fet_2D), :, :]
         if False not in np.isnan(new_x_2D[i, :, :]):
@@ -809,6 +906,7 @@ def load_x_from_pickle(date : int,
         else:
             nan_mask = np.isnan(new_x_2D[i, :, :])
             new_x_2D[i, nan_mask] = np.nanmean(new_x_2D[i, :, :])
+            #new_x_2D[i, nan_mask] = 0.0
         #   print(np.unique(np.isnan(new_x_2D)))
     #
     #  Remplacer les NaN dans une matrice entière
@@ -959,21 +1057,45 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
 
         depts = np.unique(y[:, departement_index].astype(int))
         for dept in depts:
+            y_dept = y[y[:, departement_index, 0] == dept]
+            x_dept = x[y[:, departement_index, 0] == dept]
+            new_x = []
+            new_y = []
 
-            X, Y, raster_dept, raster_dept_graph, unodes = process_dept_raster(dept, graph, path, y[y[:, departement_index, 0] == dept], features_name_2D, ks, image_per_node, shape2D)
-            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, x[y[:, departement_index, 0] == dept], y[y[:, departement_index, 0] == dept], raster_dept, raster_dept_graph, unodes, image_per_node, shape2D)
+            sub_dir = 'image_per_node' if image_per_node else 'image_per_departement'
+
+            for i in range(x_dept.shape[0]):
+                cluster_id = y_dept[i, graph_id_index, -1]
+                if use_temporal_as_edges is None and image_per_node:
+                    is_file = (path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context / f'X_{int(id)}_{dept}_{cluster_id}.pkl').is_file()
+                else:
+                    is_file = (path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context / f'X_{int(id)}_{dept}.pkl').is_file()
+                if not is_file:
+                        new_x.append(x_dept[i])
+                        new_y.append(y_dept[i])
+                else:
+                    Xst.append(f'X_{int(id)}_{dept}_{cluster_id}.pkl')
+                    Yst.append(y_dept[i])
+            
+            if len(new_y) == 0:
+                continue
+
+            new_x = np.concatenate(new_x, axis=0)
+            new_y = np.concatenate(new_y, axis=0)
+
+            X, Y, raster_dept, raster_dept_graph, unodes = process_dept_raster(dept, graph, path, y_dept, features_name_2D, ks, image_per_node, shape2D)
+            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, x_dept, y_dept, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D)
             
             if X is None:
                 continue
-
-            sub_dir = 'image_per_node' if image_per_node else 'image_per_departement'
 
             if use_temporal_as_edges is None and image_per_node:
                 for i in range(X.shape[0]):
                     #print(np.unique(np.isnan(X[i])))
                     if True:
-                        save_object(X[i], f'X_{int(id)}_{dept}_{i}.pkl', path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context)
-                        Xst.append(f'X_{int(id)}_{dept}_{i}.pkl')
+                        cluster_id = Y[i][graph_id_index, -1]
+                        save_object(X[i], f'X_{int(id)}_{dept}_{cluster_id}.pkl', path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context)
+                        Xst.append(f'X_{int(id)}_{dept}_{cluster_id}.pkl')
                         Yst.append(Y[i])
                     else:
                         Xst.append(X[i])
@@ -1065,7 +1187,7 @@ class ModelTorch():
         self.batch_size = batch_size
         self.target_name = target_name
         self.features_name = features_name
-        self.ks = ks
+        self.ks = int(ks)
         self.lr = lr
         self.out_channels = out_channels
         self.dir_log = dir_log
@@ -1076,6 +1198,7 @@ class ModelTorch():
         self.find_log = False
         self.nbfeatures = nbfeatures
         self.student_train = False
+        self.use_temporal_as_edges = None
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1180,8 +1303,7 @@ class ModelTorch():
                 target = torch.Tensor(self.teacher.predict_proba(inputs), device=inputs.device)
                 target = target / self.temperature
                 target = torch.nn.functional.softmax(target, dim=-1)
-                #print(target[0])
-            
+
             if self.loss not in ['kldivloss']:
                 target = target.long()
 
@@ -1267,6 +1389,14 @@ class ModelTorch():
         criterion = self.get_loss(self.loss)
         criterion_val = criterion
 
+        static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+
+        if self.model_name in ['SepLSTMGNN']:
+            if custom_model_params is None:
+                custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
+            else:
+                custom_model_params.update({'static_idx': static_idx, 'temporal_idx' : temporal_idx})
+
         if new_model:
             self.model, _ = self.make_model(graph, custom_model_params)
         
@@ -1292,7 +1422,6 @@ class ModelTorch():
         if False:
             self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         else:
-            logger.info('Train model with')
             for epoch in tqdm(range(epochs), disable=not verbose):
                 val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val, teacher=teacher)
                 train_loss = train_loss.item()
@@ -1337,12 +1466,26 @@ class ModelTorch():
         
         iou = iou_score(y[:, -1], test_output)
 
-        print(f'Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}')
+        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}')
+
+        test_output, y = self._predict_test_loader(self.val_loader)
+        test_output = test_output.detach().cpu().numpy()
+
+        y = y.detach().cpu().numpy()
+
+        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        
+        iou = iou_score(y[:, -1], test_output)
+
+        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}')
 
         plt.figure(figsize=(15,5))
         plt.plot(y[y[:, departement_index] == 13, -1])
         plt.plot(test_output[y[:, departement_index] == 13])
         plt.savefig(self.dir_log / 'test.png')
+
+        self.update_weight(BEST_MODEL_PARAMS)
 
     def split_dataset(self, dataset, nb, reset=True):
         # Separate the positive and zero classes based on y
@@ -1382,15 +1525,31 @@ class ModelTorch():
             over_prediction_score_value = []
             iou = []
             
-            for id in range(id_mask):
+            for id in uids:
                 mask = (id_mask == id)
-                pred_mask = pred_mask[mask]
+                pred_mask = pred[mask]
                 y_mask = y[mask]
+                
+                if np.any(y_mask > 0):
 
-                under_prediction_score_value.append(under_prediction_score(y_mask, pred_mask))
-                over_prediction_score_value.append(over_prediction_score(y_mask, pred_mask))
+                    under_score = under_prediction_score(y_mask, pred_mask)
+                    over_score = over_prediction_score(y_mask, pred_mask)
+                    iou_val = iou_score(y_mask, pred_mask)
 
-                iou.append(iou_score(y_mask, pred_mask))
+                    # Stocker les valeurs
+                    under_prediction_score_value.append(under_score)
+                    over_prediction_score_value.append(over_score)
+                    iou.append(iou_val)
+
+                    # Log propre
+                    logger.info(
+                        f'Id {id} -> under_prediction_score: {under_score}, over_prediction_score: {over_score}, iou: {iou_val}'
+                    )
+                
+                else:
+                     logger.info(
+                        f'Id {id} -> No fire'
+                    )
 
             under_prediction_score_value = np.trapz(under_prediction_score_value)
             over_prediction_score_value = np.trapz(over_prediction_score_value)
@@ -1405,11 +1564,15 @@ class ModelTorch():
         else:
             test_percentage = np.arange(0.0, 1.05, 0.05)
 
+        if 'MultiScale' in self.model_name:
+            test_percentage = np.arange(0.5, 1.05, 0.05)
+
         under_prediction_score_scores = []
         over_prediction_score_scores = []
+        iou_scores = []
         data_log = None
         find_log = False
-
+        
         if False:
             if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                 data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
@@ -1421,10 +1584,15 @@ class ModelTorch():
 
         print(f'data_log : {data_log}')
         if data_log is not None:
-            test_percentage, under_prediction_score_scores, over_prediction_score_scores = data_log[0], data_log[1], data_log[2]
-        else:
+            try:
+                test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores = data_log[0], data_log[1], data_log[2], data_log[3]
+            except:
+                data_log = None
+
+        if data_log is None:
             y_ori = df_train[self.target_name].values 
             for tp in test_percentage:
+                df_train_copy = df_train.copy(deep=True)
 
                 if not is_unknowed_risk:
                     nb = int(tp * y_ori[y_ori == 0].shape[0])
@@ -1433,43 +1601,51 @@ class ModelTorch():
 
                 logger.info(f'Trained with {tp} -> {nb} sample of class 0')
 
-                df_combined = self.split_dataset(df_train.copy(deep=True), nb, reset=reset)
+                df_combined = self.split_dataset(df_train_copy, nb, reset=False)
 
+                # Mettre à jour df_train pour l'entraînement
+                df_train_copy['weight'] = 0
+                df_train_copy.loc[df_combined.index, 'weight'] = 1
+                
                 copy_model = deepcopy(self)
                 copy_model.under_sampling = 'full'
-                copy_model.create_train_val_test_loader(graph, df_combined, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
+                copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
                 copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
-                
-                test_loader = copy_model.create_test_loader(graph, df_test)
-                
+                test_loader = copy_model.create_test_loader(graph, df_val)
                 test_output, y = copy_model._predict_test_loader(test_loader)
                 test_output = test_output.detach().cpu().numpy()
 
                 y = y.detach().cpu().numpy()
-                id_mask = y[:, departement_index]
-                y = y[:, -1]
+                if 'MultiScale' in self.model_name:
+                    id_mask = y[:, scale_index]
+                else:
+                    id_mask = y[:, departement_index]
+                    id_mask = None
 
-                under_prediction_score_value, over_prediction_score_value, iou_score = self.calculcate_score(test_output, y, None)
+                y = y[:, -1]
+                
+                under_prediction_score_value, over_prediction_score_value, iou_score = self.calculcate_score(test_output, y, id_mask)
                
                 under_prediction_score_scores.append(under_prediction_score_value)
                 over_prediction_score_scores.append(over_prediction_score_value)
+                iou_scores.append(iou_score)
                 
                 print(f'Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou_score}')
-
+                
                 if under_prediction_score_value > over_prediction_score_value:
                     break
         
-        # Find the index where the two scores cross (i.e., where the difference changes sign)
         score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
 
-        # If no crossing point is found, use the best point based on another criterion (e.g., minimum difference)
-        index_max = np.argmin(np.abs(score_differences))
-        best_tp = test_percentage[index_max]         
-
+        #index_max = np.argmin(np.abs(score_differences))
+        index_max = np.argmax(iou_scores)
+        best_tp = test_percentage[index_max]
+        
         if is_unknowed_risk:
             plt.figure(figsize=(15, 7))
             plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
             plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], iou_scores, label='Iou')
             plt.xticks(test_percentage)
             plt.xlabel('Percentage of Unknowed sample')
             plt.ylabel('IOU Score')
@@ -1483,11 +1659,12 @@ class ModelTorch():
             # Sauvegarder et fermer la figure
             plt.savefig(self.dir_log / f'{self.name}_unknowned_scores_per_percentage.png')
             plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
+            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
         else:
             plt.figure(figsize=(15, 7))
             plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
             plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
+            plt.plot(test_percentage[:len(under_prediction_score_scores)], iou_scores, label='Iou')
             plt.xticks(test_percentage)
             plt.xlabel('Percentage of Binary sample')
             plt.ylabel('IOU Score')
@@ -1501,7 +1678,7 @@ class ModelTorch():
             # Sauvegarder et fermer la figure
             plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
             plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'test_percentage_scores.pkl', self.dir_log)
+            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'test_percentage_scores.pkl', self.dir_log)
 
         print(best_tp)
         return best_tp, find_log
@@ -1607,7 +1784,7 @@ class ModelTorch():
         predTensor = predTensor.detach().cpu().numpy()
 
         # Extraire les paires de test_dataset_dept
-        test_pairs = set(zip(df['date'], df['graph_id', 'scale']))
+        test_pairs = set(zip(df['date'], df['graph_id'], df['scale']))
 
         # Normaliser les valeurs dans YTensor
         date_values = [item for item in y[:, date_index]]
@@ -1616,7 +1793,7 @@ class ModelTorch():
 
         # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
         filtered_indices = [
-            i for i, (date, graph_id, scale) in enumerate(zip(date_values, graph_id_values)) 
+            i for i, (date, graph_id, scale) in enumerate(zip(date_values, graph_id_values, scale_index)) 
             if (date, graph_id, scale) in test_pairs
             ]
 
@@ -1706,11 +1883,11 @@ class ModelTorch():
         predTensor, YTensor = self._predict_test_loader(loader)
 
         if return_y:
-            pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
-            return pred, y
+        #    pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
+            return predTensor, YTensor
         
-        pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
-        return pred
+        #pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
+        return predTensor
     
     def predict_proba(self, df, graph=None, return_y=False):
         if graph is None:
@@ -1800,6 +1977,64 @@ class ModelTorch():
         loss_params = {'num_classes' : 5}
         return get_loss_function(loss_name, **loss_params)
 
+    def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None):
+        """
+        Visualisation des valeurs SHAP pour expliquer les prédictions.
+        :param df_set: DataFrame des caractéristiques d'entrée.
+        :param outname: Nom de sortie pour le fichier d'image.
+        :param dir_output: Répertoire où enregistrer les résultats.
+        :param mode: Mode de visualisation ('bar' ou 'beeswarm').
+        :param figsize: Taille de la figure.
+        :param samples: Échantillons spécifiques à analyser.
+        :param samples_name: Noms des échantillons à afficher.
+        """
+        if hasattr(self, 'use_temporal_as_edges'):
+            use_temporal_as_edges = self.use_temporal_as_edges
+        else:
+            use_temporal_as_edges = None
+
+        Xst = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks)
+        Xst = torch.Tensor(Xst).to(device)
+
+        # Calcul des valeurs SHAP
+        explainer = shap.DeepExplainer(self.model, Xst[:100])
+
+        shap_values = explainer.shap_values(Xst)
+
+        df = pd.DataFrame({
+            "mean_abs_shap": np.mean(np.abs(shap_values), axis=0), 
+            "stdev_abs_shap": np.std(np.abs(shap_values), axis=0), 
+            "name": self.features_name
+        })
+        df.sort_values("mean_abs_shap", ascending=False)
+        save_object(df, dir_output)
+
+        # Créer le répertoire de sortie
+        os.makedirs(dir_output, exist_ok=True)
+
+        # Sauvegarder la visualisation globale
+        plt.figure(figsize=figsize)
+        if mode == 'bar':
+            shap.summary_plot(shap_values, df, plot_type='bar', show=False)
+        elif mode == 'beeswarm':
+            shap.summary_plot(shap_values, df, show=False)
+        plt.savefig(os.path.join(dir_output, f"{outname}_shapley_additive_explanation.png"))
+        plt.close()
+
+        # Sauvegarder les visualisations spécifiques aux échantillons
+        if samples is not None and samples_name is not None:
+            sample_dir = os.path.join(dir_output, 'sample')
+            os.makedirs(sample_dir, exist_ok=True)
+            for i, sample in enumerate(samples):
+                plt.figure(figsize=figsize)
+                shap.force_plot(
+                    shap_values[sample], df.iloc[sample],
+                    matplotlib=True,
+                ).savefig(
+                    os.path.join(sample_dir, f"{outname}_{samples_name[i]}_shapley_additive_explanation.png")
+                )
+                plt.close()
+
 class ModelCNN(ModelTorch):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
@@ -1861,8 +2096,11 @@ class ModelCNN(ModelTorch):
 
                     nb = int(best_tp * len(y[y == 0]))
 
-                    df_combined = self.split_dataset(df_train, nb)
-                    df_train = df_combined
+                    df_combined = self.split_dataset(df_train, nb, reset=False)
+                    df_train['weight'] = 0
+
+                    # Mettre à jour df_train pour l'entraînement
+                    df_train.loc[df_combined.index, 'weight'] = 1
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
                 
         if False:
@@ -1925,10 +2163,15 @@ class ModelGNN(ModelTorch):
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
             features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
             
+            #exit(1)
             if self.nbfeatures != 'all':
                 self.features_name = featuresAll[:int(self.nbfeatures)]
             else:
                 self.features_name = featuresAll
+
+        static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+
+        custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
 
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
@@ -1992,14 +2235,13 @@ class ModelGNN(ModelTorch):
             
             elif self.mesh == 'mesh':
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_mesh)
-                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
+                self.val_loader = DataLoader(val_dataset,  val_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
                 self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
 
             elif self.mesh == 'mygraph':
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_multiple_graph)
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
                 self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
-
 
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
@@ -2146,125 +2388,14 @@ class ModelGNN(ModelTorch):
                 pred = torch.round(pred, decimals=1)
             
             return pred, y
-    
-    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None):
-        
-        if not is_unknowed_risk:
-            test_percentage = np.arange(0.05, 1.05, 0.05)
-        else:
-            test_percentage = np.arange(0.0, 1.05, 0.05)
-
-        under_prediction_score_scores = []
-        over_prediction_score_scores = []
-        data_log = None
-        find_log = False
-
-        """if False:
-            if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
-                data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
-        else:
-            if (self.dir_log / 'test_percentage_scores.pkl').is_file():
-                print(f'Load test_percentage_score')
-                find_log = True
-                data_log = read_object('test_percentage_scores.pkl', self.dir_log)"""
-
-        print(f'data_log : {data_log}')
-        if data_log is not None:
-            test_percentage, under_prediction_score_scores, over_prediction_score_scores = data_log[0], data_log[1], data_log[2]
-        else:
-            y_ori = df_train[self.target_name].values 
-            for tp in test_percentage:
-                df_train_copy = df_train.copy(deep=True)
-
-                if not is_unknowed_risk:
-                    nb = int(tp * y_ori[y_ori == 0].shape[0])
-                else:
-                    nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
-
-                logger.info(f'Trained with {tp} -> {nb} sample of class 0')
-
-                df_combined = self.split_dataset(df_train_copy, nb, reset=False)
-
-                # Mettre à jour df_train pour l'entraînement
-                df_train_copy['weight'] = 0
-                df_train_copy.loc[df_combined.index, 'weight'] = 1
-                
-                copy_model = deepcopy(self)
-                copy_model.under_sampling = 'full'
-                copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
-                copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
-                test_loader = copy_model.create_test_loader(graph, df_test)
-                test_output, y = copy_model._predict_test_loader(test_loader)
-                test_output = test_output.detach().cpu().numpy()
-
-                y = y.detach().cpu().numpy()
-                id_mask = y[:, departement_index]
-                y = y[:, -1]
-                
-                under_prediction_score_value, over_prediction_score_value, iou_score = self.calculcate_score(test_output, y, None)
-               
-                under_prediction_score_scores.append(under_prediction_score_value)
-                over_prediction_score_scores.append(over_prediction_score_value)
-                
-                print(f'Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou_score}')
-
-                if under_prediction_score_value > over_prediction_score_value:
-                    break
-        
-        # Find the index where the two scores cross (i.e., where the difference changes sign)
-        score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
-
-        # If no crossing point is found, use the best point based on another criterion (e.g., minimum difference)
-        index_max = np.argmin(np.abs(score_differences))
-        best_tp = test_percentage[index_max]         
-
-        if is_unknowed_risk:
-            plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
-            plt.xticks(test_percentage)
-            plt.xlabel('Percentage of Unknowed sample')
-            plt.ylabel('IOU Score')
-
-            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
-            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
-            
-            # Ajouter une légende
-            plt.legend()
-
-            # Sauvegarder et fermer la figure
-            plt.savefig(self.dir_log / f'{self.name}_unknowned_scores_per_percentage.png')
-            plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
-        else:
-            plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
-            plt.xticks(test_percentage)
-            plt.xlabel('Percentage of Binary sample')
-            plt.ylabel('IOU Score')
-
-            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
-            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
-
-            # Ajouter une légende
-            plt.legend()
-
-            # Sauvegarder et fermer la figure
-            plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
-            plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores], 'test_percentage_scores.pkl', self.dir_log)
-
-        print(best_tp)
-        return best_tp, find_log
 
 class Model_Torch(ModelTorch):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+        print(dir_log)
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
         self.graph = graph
-        print(df_train[self.target_name].unique(), self.task_type)
         
         if features_importance:
             ##################################### Select features #########################################
@@ -2310,9 +2441,58 @@ class Model_Torch(ModelTorch):
 
                     nb = int(best_tp * len(y[y == 0]))
 
-                    df_combined = self.split_dataset(df_train, nb)
-                    df_train = df_combined
+                    df_combined = self.split_dataset(df_train, nb, reset=False)
+                    df_train['weight'] = 0
+
+                    # Mettre à jour df_train pour l'entraînement
+                    df_train.loc[df_combined.index, 'weight'] = 1
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
+
+        elif 'smote' in self.over_sampling:
+            
+            if isinstance(self, ModelCNN) or isinstance(self, ModelGNN):
+                raise ValueError(f'Smote is not adaptable to images or GNN')
+            
+            if self.ks > 0:
+                raise ValueError(f'Smote is not adaptbale to time series')
+
+            # Exemple : si ta cible est dans une colonne 'target'
+            matching_ids_columns = [col for col in ids_columns if col != 'date']  # on exclut 'date' du matching
+
+            # 2. Construire X (features + ids_columns), y (target)
+            X_full = df_train[self.features_name + matching_ids_columns].copy()
+            y = df_train[self.target_name].copy()
+
+            # Configuration
+            over_sampling = 'smote-3'  # Exemple : smote avec un coefficient de 3
+            task_type = 'classification'  # ou 'binary' ou 'ordinal-classification'
+
+            # Appliquer SMOTE
+            if 'smote' in over_sampling:
+                smote_coef = int(over_sampling.split('-')[1])
+                y_negative = y[y == 0].shape[0]
+                
+                y_one = min(y[y == 1].shape[0] * smote_coef, y_negative)
+                y_two = min(y[y == 2].shape[0] * smote_coef, y_negative)
+                y_three = min(y[y == 3].shape[0] * smote_coef, y_negative)
+                y_four = min(y[y == 4].shape[0] * smote_coef, y_negative)
+
+                if task_type in ['classification', 'ordinal-classification']:
+                    sampling_strategy = {
+                        0: y_negative,
+                        1: y_one,
+                        2: y_two,
+                        3: y_three,
+                        4: y_four
+                    }
+                    smote = SMOTE(random_state=42, sampling_strategy=sampling_strategy)
+                elif task_type == 'binary':
+                    smote = SMOTE(random_state=42, sampling_strategy='auto')
+
+                X_resampled, y_resampled = smote.fit_resample(X_full, y)
+
+                df_train = X_resampled
+                df_train[self.target_name] = y_resampled
 
         self.df_train = df_train
         self.df_test = df_test
@@ -2334,7 +2514,8 @@ class Model_Torch(ModelTorch):
                                                                 self.features_name,
                                                                 self.target_name,
                                                                 None,
-                                                                self.device, self.ks)
+                                                                self.device, self.ks,
+                                                                mesh=None)
     
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)

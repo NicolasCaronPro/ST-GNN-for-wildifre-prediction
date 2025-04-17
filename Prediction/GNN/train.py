@@ -99,6 +99,8 @@ def get_grid_params(model_type):
             'early_stopping_rounds': 15,
             'verbose': False,
         }
+    elif model_type.lower() == 'lg':
+        return {}
     else:
         raise ValueError(f"Unsupported model type: {model_type}")
     
@@ -612,7 +614,7 @@ def train_xgboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
     objective = loss
 
     model_params = {
@@ -689,7 +691,7 @@ def train_logistic_regression(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     model_params = {
         'penalty': loss if loss != 'None' else None,
@@ -751,7 +753,7 @@ def train_ordered(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     model_params = {
         'distr': loss
@@ -802,8 +804,8 @@ def train_catboost(params, train=True):
     do_bayes_search = params['do_bayes_search']
     model = params['name']
     post_process = params['post_process']
-    
-    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
         
     # Map loss to CatBoost objectives
     catboost_objective = {
@@ -884,7 +886,7 @@ def train_ngboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
     
-    name, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     name = f'ngboost_{target}_{task_type}_{loss}'
     
@@ -1313,7 +1315,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     scale : int):
     
     
-    name, under_sampling, over_sampling, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
+    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
     ###############################################  Feature importance  ###########################################################
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[final_target], features, dir_output, final_target)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=final_target)
@@ -1327,7 +1329,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         train_dataset['class'] = train_dataset[final_target]
     elif task_type == 'binary':
         train_dataset['binary'] = train_dataset[final_target]
-
+        
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
     if 'weight' in list(train_dataset.columns):
@@ -1335,14 +1337,14 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
 
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
-
-    val_dataset['weight'] = 1
-    test_dataset['weight'] = 1
     
+    print(f'Minimum test date {allDates[int(test_dataset.date.min())]}')
+    print(f'Minimum test date with weight > 0 {allDates[int(test_dataset[test_dataset["weight"] > 0].date.min())]}')
+
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
     test_dataset = test_dataset[test_dataset['weight'] > 0]
-    
+
     logger.info(f'x_train shape: {train_dataset.shape}, x_val shape: {val_dataset.shape}, x_test shape: {test_dataset.shape}')
 
     logger.info(f'Train {final_target} values : {train_dataset[final_target].unique()}')
@@ -1413,8 +1415,8 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
 
-    val_dataset['weight'] = 1
-    test_dataset['weight'] = 1
+    print(f'Minimum test date {allDates[int(test_dataset.date.min())]}')
+    print(f'Minimum test date with weight > 0 {allDates[int(test_dataset[test_dataset["weight"] > 0].date.min())]}')
 
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
@@ -1453,6 +1455,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             'type_aggregation' : None,
             'col_id' : None
         }
+        print(modelt)
         model_type, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
         
         if model_type == 'xgboost':
@@ -1473,6 +1476,8 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             params = train_gam(params_temp, False)
         elif model_type == 'catboost':
             params = train_catboost(params_temp, False)
+        elif model_type == 'lg':
+            params = train_logistic_regression(params_temp, False)
         else:
             raise ValueError(f'Unknow model_type {model_type}')
         
@@ -1537,9 +1542,9 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
 
-    val_dataset['weight'] = 1
-    test_dataset['weight'] = 1
-    
+    print(f'Minimum test date {allDates[int(test_dataset.date.min())]}')
+    print(f'Minimum test date with weight > 0 {allDates[int(test_dataset[test_dataset["weight"] > 0].date.min())]}')
+
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
     test_dataset = test_dataset[test_dataset['weight'] > 0]
@@ -1684,9 +1689,6 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
 
     train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
-
-    val_dataset['weight'] = 1
-    test_dataset['weight'] = 1
 
     train_dataset = train_dataset[train_dataset['weight'] > 0]
     val_dataset = val_dataset[val_dataset['weight'] > 0]
@@ -2533,51 +2535,7 @@ def define_trees_model(training_mode, dataset_name, scale, graph_construct, post
 
 def create_model_config(model_name, undersampling, weight, clustering, conv_type, n_clusters, kernel, loss, task_type):
     train_col = f"nbsinister-{clustering}-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-    return f'{model_name}_{undersampling}_full_all_{weight}_{train_col}_{task_type}_{loss}'
-
-"""def define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
-    ##############################################
-
-    m1_undersampling = 'search'
-    m2_undersampling = 'search'
-    m3_undersampling = 'search'
-    m4_undersampling = 'search'
-
-    m1 = create_model_config('xgboost', m1_undersampling, 'one', 'kmeans', 'laplace+mean', '5', '1', 'softmax', 'classification')
-    m1 = create_model_config('xgboost', m1_undersampling, 'one', 'kmeans', 'laplace+mean', '5', '3', 'softmax', 'classification')
-    m1 = create_model_config('xgboost', m1_undersampling, 'one', 'kmeans', 'laplace+mean', '5', '5', 'softmax', 'classification')
-    m1 = create_model_config('xgboost', m1_undersampling, 'one', 'kmeans', 'laplace+mean', '5', 'Specialized', 'softmax', 'classification')
-
-    m2 = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', '1', 'softmax', 'classification')
-    m2 = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', '3', 'softmax', 'classification')
-    m2 = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', '5', 'softmax', 'classification')
-    m2 = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', 'Specialized', 'softmax', 'classification')
-
-    m3 = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', '1', 'softmax', 'classification')
-    m3 = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', '3', 'softmax', 'classification')
-    m3 = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', '5', 'softmax', 'classification')
-    m3 = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', 'Specialized', 'softmax', 'classification')
-
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'median', '5', '1', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'median', '5', '3', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'median', '5', '5', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'median', '5', 'Specialized', 'softmax', 'classification')
-
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'laplace', '5', '1', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'laplace', '5', '3', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'laplace', '5', '5', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'laplace', '5', 'Specialized', 'softmax', 'classification')
-
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'mean', '5', '1', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'mean', '5', '3', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'mean', '5', '5', 'softmax', 'classification')
-    m4 = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', 'mean', '5', 'Specialized', 'softmax', 'classification')
-
-    m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
-    #m = f'filter_full_one_union_classification_softmax'
-
-    return [(m, [m1, m2, m3, m4], None, None, None)]
-"""
+    return f'{model_name}_{undersampling}_{weight}_{train_col}_{task_type}_{loss}'
 
 def define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
 
@@ -2594,27 +2552,27 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        model = create_model_config('lg', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'l2', 'classification')
         models.append(model)
 
     # Modèles m3
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        model = create_model_config('lg', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'l2', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
     for aggregation in ['median', 'mean', 'laplace', 'laplace+mean']:
         for kernel in ['1', '3', '5', 'Specialized']:
-            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            model = create_model_config('lg', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'l2', 'classification')
             models.append(model)
 
-    mlast = f'xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filterICML-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filterICML-lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
     
-    #res.append((m, models, None, None, None))
+    res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2647,7 +2605,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     # Nom du modèle principal
     m = f'filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2681,7 +2639,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     # Nom du modèle principal
     m = f'filter-catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
 
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2724,10 +2682,10 @@ def define_voting_dl_models(training_mode, dataset_name, scale, graph_construct,
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m1_undersampling = 'search'
-    m2_undersampling = 'search'
-    m3_undersampling = 'search'
-    m4_undersampling = 'search'
+    m1_undersampling = 'search_full_all'
+    m2_undersampling = 'search_full_all'
+    m3_undersampling = 'search_full_all'
+    m4_undersampling = 'search_full_all'
 
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:

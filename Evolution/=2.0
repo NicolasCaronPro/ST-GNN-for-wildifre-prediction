@@ -1,0 +1,8 @@
+Requirement already satisfied: shimmy in /home/caron/Bureau/.conda/lib/python3.9/site-packages (2.0.0)
+Requirement already satisfied: numpy>=1.18.0 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from shimmy) (1.26.2)
+Requirement already satisfied: gymnasium>=1.0.0a1 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from shimmy) (1.1.1)
+Requirement already satisfied: cloudpickle>=1.2.0 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from gymnasium>=1.0.0a1->shimmy) (3.0.0)
+Requirement already satisfied: importlib-metadata>=4.8.0 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from gymnasium>=1.0.0a1->shimmy) (7.0.1)
+Requirement already satisfied: typing-extensions>=4.3.0 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from gymnasium>=1.0.0a1->shimmy) (4.9.0)
+Requirement already satisfied: farama-notifications>=0.0.1 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from gymnasium>=1.0.0a1->shimmy) (0.0.4)
+Requirement already satisfied: zipp>=0.5 in /home/caron/Bureau/.conda/lib/python3.9/site-packages (from importlib-metadata>=4.8.0->gymnasium>=1.0.0a1->shimmy) (3.17.0)

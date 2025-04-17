@@ -82,7 +82,6 @@ doKMEANS = args.KMEANS == 'True'
 ncluster = int(args.ncluster)
 do_grid_search = args.GridSearch ==  'True'
 do_bayes_search = args.BayesSearch == 'True'
-k_days = int(args.k_days) # Size of the time series sequence use by DL models
 days_in_futur = int(args.days_in_futur) # The target time validation
 scaling = args.scaling
 graph_construct = args.graphConstruct
@@ -186,9 +185,6 @@ if not QUICK:
 
     ############################# Training ##################################
 
-    test_dataset_unscale['weight_nbsinister'] = 1
-    test_dataset['weight'] = 1
-
     name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
     ###################### Defined ClassRisk model ######################
@@ -196,12 +192,18 @@ if not QUICK:
     dir_post_process = dir_output / 'post_process'
 
     post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+
     features_selected_str.append('Past_risk')
+    features_selected_str.append('Past_burnedarea')
     features_selected = np.arange(0, len(features_selected_str))
 
-    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+
+    train_dataset = add_past_risk(train_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    test_dataset = add_past_risk(test_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    val_dataset = add_past_risk(val_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -211,13 +213,11 @@ else:
     post_process_model_dico = None
 
     prefix = f'full_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
-
-    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
     
     graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
 
     dir_output = dir_output / name_exp
-    
+
     train_dataset = read_object(f'df_train_{prefix}.pkl', dir_output)
     val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
     test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
@@ -226,54 +226,50 @@ else:
     val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
     test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_0_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
     features_selected_str = np.asarray(features_selected_str)
     features_selected_str = list(features_selected_str[:,0])
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    #varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
     features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
+    #features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
 
-    features_selected_str = list(features_selected_str)
     features_selected = np.arange(0, len(features_selected_str))
     logger.info((features_selected_str, len(features_selected_str)))
 
-    if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns):
+    if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns) or 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns):
         dir_post_process = dir_output / 'post_process'
         post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-        features_selected = np.arange(0, len(features_selected_str))
 
-        train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-        test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-        val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
 
-        save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
-        save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
-        save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
-
-    features_selected_str.append('Past_risk')
-    
-prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
-prefix_config = deepcopy(prefix)
-name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
-
-if 'scale' not in np.unique(train_dataset.columns):
-    if scale == 'departement':
-        train_dataset['scale'] = 10
-        val_dataset['scale'] = 10
-        test_dataset['scale'] = 10
-    else:
-        train_dataset['scale'] = scale
-        val_dataset['scale'] = scale
-        test_dataset['scale'] = scale
+    train_dataset = add_past_risk(train_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    test_dataset = add_past_risk(test_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    val_dataset = add_past_risk(val_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
     save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
 
-train_dataset['weight'] = 1
-val_dataset['weight'] = 1
-test_dataset['weight'] = 1
+    features_selected_str.append('Past_risk')
+    features_selected_str.append('Past_burnedarea')
+    features_selected = np.arange(0, len(features_selected_str))
+
+######################### Tourisme ###########################
+"""tourisme_data = pd.read_csv(rootDisk / 'csv' / 'tourisme.csv')
+
+train_dataset = train_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+val_dataset = val_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+test_dataset = test_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+
+features_selected_str.append('Tourisme')"""
+
+##############################################################
+    
+prefix_config = deepcopy(prefix)
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 train_dataset['saison'] = train_dataset['date'].apply(get_saison)
 val_dataset['saison'] = val_dataset['date'].apply(get_saison)
@@ -283,11 +279,29 @@ train_dataset['isBassin'] = train_dataset['departement'].apply(is_mediterranean_
 val_dataset['isBassin'] = val_dataset['departement'].apply(is_mediterranean_dept)
 test_dataset['isBassin'] = test_dataset['departement'].apply(is_mediterranean_dept)
 
-features_selected_str.append('isBassin')
+#features_selected_str.append('isBassin')
 
 train_dataset['cluster-encoder'] = train_dataset['cluster_encoder']
 val_dataset['cluster-encoder'] = val_dataset['cluster_encoder']
 test_dataset['cluster-encoder'] = test_dataset['cluster_encoder']
+
+if scale == 'departement':
+    train_dataset['scale'] = 10
+    val_dataset['scale'] = 10
+    test_dataset['scale'] = 10
+else:
+    train_dataset['scale'] = scale
+    val_dataset['scale'] = scale
+    test_dataset['scale'] = scale
+
+save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
+print(allDates[int(test_dataset.date.min())])
+print(allDates[int(test_dataset[test_dataset['weight'] > 0].date.min())])
+
+prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
 ###################### Define models to train ######################
 
@@ -296,63 +310,79 @@ if name_exp.find('voting') != -1:
         voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
     else:
         voting_models = []
+    
+    #voting_models = []
 
-    voting_models = []
     models = [
-            #('LSTM',   'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-departement-ID', 5),
-            #('LSTM',   'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kappa', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-departement-ID', 5),
+            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
+            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
+            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
+            #('LSTM',   'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM',   'search_full_3_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM',   'search_full_2_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM',   'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice', 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('DilatedCNN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
 
-            #('LSTM',   'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_kappa', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('LSTM',   'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_kappa', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_mcewk', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_dice', 5),
+            #('NetMLP', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetMLP', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]
-
+    
     staking_models = []
     federated_models = [
-        #('NetMLP', False, 'cluster-encoder', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('NetMLP', False, 'saison', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('NetMLP', False, 'departement', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('NetMLP', False, 'cluster-encoder', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('NetMLP', False, 'saison', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('NetMLP', False, 'departement', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
         ]
     
     gnn_models = [
-                #('graphCast', False, 'icospheres/icospheres_0_1.json.gz', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('MultiScaleGraph', False, generate_graph_list(scale, graphScale.base, graphScale.graph_method, dir_output),
+                # 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 10),
+                # ('MultiScaleAttentionGraph', False, generate_graph_list(scale, graphScale.base, graphScale.graph_method, dir_output),
+                # 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 10),
+                #('graphCast', False, 'icospheres/icospheres_0_1.json.gz', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('SepLSTMGNN', False, None,'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('SepLSTMGNN', False, None,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGCN', False, None,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGAT', False, None ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGATLSTM', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGCN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGAT', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('NetGCN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
                 
-                ('MultiScaleGraph', False, [(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output / '..'), (f'graph_departement_None_{graph_method}.pkl', dir_output / '..')],
-                 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-scale-ID', 10),
                 
-                #('STGCN', False, None,'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGAT', False, None ,'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGATLSTM', False, None, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGCN', False, None, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGAT', False, None, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('NetGCN', False, None, 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-                #('STGCN', False, None, 'full_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGAT', False, None, 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGATLSTM', False, None, 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGCN', False, None, 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGAT', False, None, 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('NetGCN', False, None, 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('SepLSTMGNN', False, None,'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('SepLSTMGNN', False, None,'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('graphCast', False, 'icospheres/icospheres_0_1_2_3_4_5_6.json.gz', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('SepLSTMGNN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGAT', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('STGATLSTM', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('DSTGAT', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('NetGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
                 ]
 else:
     models = [
-            #('LSTM', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
+            #('LSTM', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
             #('NetMLP', 'full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]
-
+    
     gnn_models = [
             #('NetGCN', False, 'full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             #('ST-GCN', False, 'full_proportion-on-zero-class_burnedarea-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
@@ -361,21 +391,17 @@ else:
 
     voting_models = []
 
-test_dataset_unscale['weight_nbsinister'] = 1
-test_dataset['weight'] = 1
-
 train_loader = None
 val_loader = None
 last_bool = None
 
-params = {
+global_params = {
     "graphScale": graphScale,
     "train_dataset": train_dataset,
     "val_dataset": val_dataset,
     "test_dataset": test_dataset,
     "features_selected": features_selected,
     "features_selected_str": features_selected_str,
-    "k_days": k_days,
     "device": device,
     "optimize_feature": optimize_feature,
     "PATIENCE_CNT": PATIENCE_CNT,
@@ -390,36 +416,122 @@ params = {
     "train_dataset_unscale": train_dataset_unscale,
     "graph": graphScale,
     "name_dir": name_dir,
-    'k_days' : k_days,
     'graph_method' : graph_method
 }
 
+import multiprocessing
+
+def train_gnn(gnn_model, params):
+    params.update({
+        'model': gnn_model[0],
+        'use_temporal_as_edges': gnn_model[1],
+        'mesh_file': gnn_model[2],
+        'infos': gnn_model[3],
+        'out_channels': gnn_model[4],
+        'torch_structure': 'Model_gnn'
+    })
+    wrapped_train_deep_learning_1D(params)
+
+def train_classic(model, params):
+    params.update({
+        'model': model[0],
+        'infos': model[1],
+        'out_channels': model[2],
+        'use_temporal_as_edges': None,
+        'torch_structure': 'Model_Torch'
+    })
+    wrapped_train_deep_learning_1D(params)
+
+def train_voting(models, params):
+    params.update({
+        'model': models[0],
+        'out_channels': models[2],
+        'use_temporal_as_edges': None,
+        'torch_structure': 'Model_Torch'
+    })
+
+    wrapped_train_sklearn_api_and_pytorch_voting_model(
+        train_dataset=train_dataset.copy(deep=True),
+        val_dataset=val_dataset.copy(deep=True),
+        test_dataset=test_dataset.copy(deep=True),
+        graph_method=graph_method,
+        dir_output=dir_output / name,
+        autoRegression=autoRegression,
+        training_mode=training_mode,
+        do_grid_search=do_grid_search,
+        do_bayes_search=do_bayes_search,
+        model=models,
+        scale=scale,
+        input_params=params
+    )
+
+def train_federated(models, params):
+    params.update({
+        'model': models[0],
+        'use_temporal_as_edges': models[1],
+        'federated_cluster': models[2],
+        'infos': models[3],
+        'aggregation_method': 'median',
+        'out_channels': models[-1],
+        'torch_structure': 'Model_Torch'
+    })
+
+    wrapped_train_deep_learning_1D_federated(params)
+
+import traceback
+
+# ---------------- MAIN LOGIQUE ---------------- #
+"""if doTrain:
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        tasks = []
+
+        if len(gnn_models) > 0:
+            tasks.append(("GNN", pool.starmap_async(train_gnn, [(m, global_params) for m in gnn_models])))
+
+        if graph_method != 'graph' and len(models) > 0:
+            tasks.append(("Classic", pool.starmap_async(train_classic, [(m, global_params) for m in models])))
+
+        if len(voting_models) > 0:
+            tasks.append(("Voting", pool.starmap_async(train_voting, [(m, global_params) for m in voting_models])))
+
+        if len(federated_models) > 0:
+            tasks.append(("Federated", pool.starmap_async(train_federated, [(m, global_params) for m in federated_models])))
+
+        # Attendre les résultats et gérer les erreurs
+        for name, task in tasks:
+            try:
+                task.get()  # récupère les résultats et lève l'exception si une tâche a planté
+                print(f"✅ {name} models trained successfully.")
+            except Exception as e:
+                print(f"❌ Error while training {name} models:")
+                traceback.print_exc()"""
+
 if doTrain:
     for gnn_model in gnn_models:
-        params['model'] = gnn_model[0]
-        params['use_temporal_as_edges'] = gnn_model[1]
-        params['mesh_file'] = gnn_model[2]
-        params['infos'] = gnn_model[3]
-        params['out_channels'] = gnn_model[4]
-        params['torch_structure'] = 'Model_gnn'
+        global_params['model'] = gnn_model[0]
+        global_params['use_temporal_as_edges'] = gnn_model[1]
+        global_params['mesh_file'] = gnn_model[2]
+        global_params['infos'] = gnn_model[3]
+        global_params['out_channels'] = gnn_model[4]
+        global_params['torch_structure'] = 'Model_gnn'
 
-        wrapped_train_deep_learning_1D(params)
+        wrapped_train_deep_learning_1D(global_params)
 
     if graph_method != 'graph':
         for model in models:
-            params['model'] = model[0]
-            params['infos'] = model[1]
-            params['out_channels'] = model[2]
-            params['use_temporal_as_edges'] = None
-            params['torch_structure'] = 'Model_Torch'
+            global_params['model'] = model[0]
+            global_params['infos'] = model[1]
+            global_params['out_channels'] = model[2]
+            global_params['use_temporal_as_edges'] = None
+            global_params['torch_structure'] = 'Model_Torch'
             
-            wrapped_train_deep_learning_1D(params)
+            wrapped_train_deep_learning_1D(global_params)
 
     for models in voting_models:
-        params['model'] = models[0]
-        params['out_channels'] = models[2]
-        params['use_temporal_as_edges'] = None
-        params['torch_structure'] = 'Model_Torch'
+        global_params['model'] = models[0]
+        global_params['out_channels'] = models[2]
+        global_params['use_temporal_as_edges'] = None
+        global_params['torch_structure'] = 'Model_Torch'
         
         wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
                             val_dataset=val_dataset.copy(deep=True),
@@ -432,25 +544,25 @@ if doTrain:
                             do_bayes_search=do_bayes_search,
                             model=models,
                             scale=scale,
-                            input_params=params)
+                            input_global_params=global_params)
 
     for models in federated_models:
-        params['model'] = models[0]
-        params['use_temporal_as_edges'] = models[1]
-        params['federated_cluster'] = models[2]
-        params['infos'] = models[3]
-        params['aggregation_method'] = 'median'
-        params['out_channels'] = models[-1]
-        params['torch_structure'] = 'Model_Torch'
+        global_params['model'] = models[0]
+        global_params['use_temporal_as_edges'] = models[1]
+        global_params['federated_cluster'] = models[2]
+        global_params['infos'] = models[3]
+        global_params['aggregation_method'] = 'median'
+        global_params['out_channels'] = models[-1]
+        global_params['torch_structure'] = 'Model_Torch'
 
-        wrapped_train_deep_learning_1D_federated(params)
+        wrapped_train_deep_learning_1D_federated(global_params)
 
 if doTest:
 
     #test_dataset = test_dataset[test_dataset['weight'] > 0]
     #test_dataset_unscale = test_dataset_unscale[test_dataset_unscale['weight'] > 0]
-    if days_in_futur > 0:
-        test_dataset = set_weight_every_n_days(test_dataset, days_in_futur)
+    #if days_in_futur > 0:
+    #    test_dataset = set_weight_every_n_days(test_dataset, days_in_futur)
     host = 'pc'
 
     logger.info('############################# TEST ###############################')
@@ -458,68 +570,38 @@ if doTest:
     dn = dataset_name
     if two:
         dn += '2'
-
-    name_dir = dn + '/' + sinister + '/' + resolution + '/train' + '/'
+        
+    name_dir = dn + '/' + sinister + '/' + resolution + '/train' + '/' 
     dir_train = Path(name_dir)
-    
+
     name_dir = dn + '/' + sinister + '/' + resolution + '/test' + '/' + name_exp
     dir_output = Path(name_dir)
 
     if graph_method == 'node':
 
         models = [
-                #('federated-NetMLP-cluster-encoder_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('federated-NetMLP-saison_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('federated-NetMLP-departement_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('LSTM_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('SepLSTMGNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-                #('DilatedCNN_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_dice'),
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_ordinal-dice'),
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_kappa'),
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw'),
-                #('NetMLP_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_mcewk'),
-                
-                ('MultiScaleGraph_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-scale-ID'),
-                #('NetGCN_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGCN_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGAT_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGAT_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGCN_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGATLSTM_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-
-                #('DilatedCNN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-
-                #('filterICML-LSTM-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kappa'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw'),
-                #('NetMLP_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
-                
-                #('NetGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DSTGAT_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGCN_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGAT_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('STGATLSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-
-                #('graphCast_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('LSTM_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('SepLSTMGNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
     elif graph_method == 'graph':
 
         models = [
         ]
         
-    prefix_kmeans = f'{values_per_class}_{k_days}_{scale}_{graph_construct}_{top_cluster}'
+    prefix_kmeans = f'{values_per_class}_0_{scale}_{graph_construct}_{top_cluster}'
 
     if days_in_futur > 0:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
-
+        
     aggregated_prediction = []
     aggregated_prediction_dept = []
 
@@ -533,7 +615,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / 'all' / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=['all'],
@@ -586,7 +667,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=[dept],
@@ -661,7 +741,7 @@ if doTest:
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
 
-    for name in models:
+    """for name in models:
         model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
         band = 'prediction'
         if target_name == 'binary':
@@ -696,7 +776,7 @@ if doTest:
                                     dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
         
         train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
-        vmax_band = np.nanmax(train_dataset_dept[target_name].values)
+        vmax_band = np.nanmax(train_dataset_dept[target_name].values)"""
         
         #susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
         #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)"""

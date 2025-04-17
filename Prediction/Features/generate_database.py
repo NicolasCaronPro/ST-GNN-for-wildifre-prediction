@@ -1,3 +1,4 @@
+from numpy import size
 from download import *
 import os
 import logging
@@ -87,6 +88,8 @@ class GenerateDatabase():
             code_dept = f'0{code_dept}'
         else:
             code_dept = f'{code_dept}'
+
+        raster_sat_from_france(self.h3tif, self.h3, self.spatialParams['dir_sat'], Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / 'france' / 'data' / 'GEE' / resolution, self.dates)
 
         #raster_sat(self.h3tif, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
         #raster_land(self.h3tif, self.h3tif_high, self.spatialParams['dir_sat'], self.dir_raster, self.dates)
@@ -503,7 +506,7 @@ class GenerateDatabase():
                 '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
                 '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
                 '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
-
+        
         #n_pixel_x = 0.016133099692723363
         #n_pixel_y = 0.016133099692723363
 
@@ -633,11 +636,12 @@ if __name__ == '__main__':
     start = '2017-06-12'
     stop = '2024-06-29'
     
+    
     ################## Ain ######################
-    """launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    
     ################## Aisne ######################
-    """launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Allier ######################
     launch('departement-03-allier', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -680,15 +684,21 @@ if __name__ == '__main__':
     
     ################## Charente ######################
     launch('departement-16-charente', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    
     ################## Charente-Maritime ######################
     launch('departement-17-charente-maritime', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Cher ######################
-    #launch('departement-18-cher', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-18-cher', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Correze ######################
-    #launch('departement-19-correze', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-19-correze', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+
+    ################## Corse du sud ######################
+    #launch('departement-100-corse-du-sud', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    
+    ################## Haute Corse ######################
+    #launch('departement-101-haute-corse', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Cote-d-Or ######################
     launch('departement-21-cote-d-or', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -713,7 +723,7 @@ if __name__ == '__main__':
 
     ################## Eure-et-Loir ######################
     launch('departement-28-eure-et-loir', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-
+    
     ################## Finistere ######################
     launch('departement-29-finistere', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     

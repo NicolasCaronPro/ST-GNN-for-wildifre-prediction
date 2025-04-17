@@ -93,7 +93,6 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'days_since_rain', 'sum_consecutive_rainfall',
                     'sum_rain_last_7_days',
                     'sum_snow_last_7_days', 'snow24h', 'snow24h16',
-                    'precipitationIndexN3',
                     'elevation',
                     'population',
                     'sentinel',
@@ -320,8 +319,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     features_name, newShape = get_features_name_list(graph.scale, features, methods)
     features_name = ids_columns[:-1] + features_name
     newShape += subNode.shape[1]
-
-    print(len(features_name))
 
     def save_values(array, band, indexNode, mask):
 
@@ -1580,14 +1577,14 @@ def add_fire_zone_or_not(df, scale):
     df.loc[df[df['graph_id'].isin(ids)].index, 'fire_zone'] = 1
     return df
 
-def add_past_risk(df, col_pas):
+def add_past_risk(df, col_pas, col_type=''):
     ids_graph = df['graph_id'].unique()
-    df['Past_risk'] = 0
+    df[f'Past_{col_type}'] = 0
     for id in ids_graph:
         index = df[df['graph_id'] == id].index
-        df.loc[index, 'Past_risk'] = df.loc[index, col_pas].shift(1)
+        df.loc[index, f'Past_{col_type}'] = df.loc[index, col_pas].shift(1, fill_value=0)
 
-    df.dropna(subset='Past_risk', inplace=True)
+    df.dropna(subset=f'Past_{col_type}', inplace=True)
     return df
 
 def raster_past_risk(df, raster_name, dir_raster, dir_output):
@@ -1689,8 +1686,6 @@ def is_mediterranean_dept(dept_code):
     :param dept_code: int ou str (ex: 13, '2A', '2B')
     :return: int
     """
-    # Conversion propre du code département
-    dept_str = str(dept_code).upper().zfill(2)
 
     # Traitement spécifique pour la Corse
     mediterranean_depts = {
@@ -1706,4 +1701,4 @@ def is_mediterranean_dept(dept_code):
         101, # Corse 2B 
     }
 
-    return 1 if dept_str in mediterranean_depts else 0
+    return 1 if dept_code in mediterranean_depts else 0

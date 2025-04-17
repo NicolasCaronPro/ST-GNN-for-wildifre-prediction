@@ -38,7 +38,7 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
             for class_value in classes:
                 class_mask = np.argwhere((y[mask, -3] == class_value) & (y[mask,-2] > 0))[:, 0]
                 ax.scatter(class_mask, ypred[mask][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, marker='x', s=50)
-            ax.set_ylim(ymin=0, ymax=maxi)
+            ax.set_ylim(ymin=0, ymax=4)
         else:
             fig, ax = plt.subplots(ids.shape[0], figsize=(50, 50))
             for i, id in enumerate(ids):
@@ -59,7 +59,7 @@ def realVspredict(ypred, y, band, dir_output, on, pred_min=None, pred_max=None):
                     class_mask = np.argwhere((y[mask2, -3] == class_value) & (y[mask2,-2] > 0))[:, 0]
                     #ax[i].scatter(class_mask, ypred[mask2][class_mask], color=colors(class_value / 4), label=f'class {class_value}', alpha=1, linewidths=5, marker='x', s=200)
                     ax[i].scatter(class_mask, ypred[mask2][class_mask], color='black', label=f'Fire', alpha=1, linewidths=5, marker='x', s=200)
-                ax[i].set_ylim(ymin=0, ymax=maxi)
+                ax[i].set_ylim(ymin=0, ymax=4)
         plt.legend()
         outn = str(d) + '_' + on + '.png'
         if MLFLOW:
@@ -144,7 +144,7 @@ def iou_vis(ypred, y, band, dir_output, col_for_dict):
             date_ticks = [allDates[int(date)] for date in y[mask][index_tick][:, date_index]]
             ax.set_xticklabels(date_ticks, rotation=45, ha="right")
 
-            ax.set_ylim(ymin=0, ymax=maxi)
+            ax.set_ylim(ymin=0, ymax=4)
             ax.set_xlabel('Date')
             ax.set_ylabel('Class')
 
@@ -170,11 +170,12 @@ def iou_vis(ypred, y, band, dir_output, col_for_dict):
 
                 ax[i].set_title(f'{id}')
                 fire_mask = np.argwhere(y[mask2,-2] > 0)[:,0]
-                ax[i].set_ylim(ymin=0, ymax=maxi)
+                ax[i].set_ylim(ymin=0, ymax=4)
 
         plt.legend()
         plt.savefig(dir_output / f'iou_{col_for_dict}.png')
-
+        plt.close('all')
+        
 def plot_and_save_roc_curve(Y: np.array, ypred: np.array, dir_output: Path, target_name : str, isDept):
     """
     Trace et sauvegarde la courbe ROC dans un répertoire spécifié.

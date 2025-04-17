@@ -166,4 +166,3 @@ if __name__ == "__main__":
         print(h3.columns)
         h3.to_file(dir_data / 'spatial' / outname, driver='GeoJSON')
         h3.to_file(dir_data_disk / 'spatial' / outname, driver='GeoJSON')
-        

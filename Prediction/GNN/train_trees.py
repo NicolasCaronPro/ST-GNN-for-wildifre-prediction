@@ -58,7 +58,7 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
-QUICK = False
+QUICK = True
 
 # Input config
 dataset_name = args.dataset
@@ -144,7 +144,7 @@ if not QUICK:
 
     if MLFLOW:
         exp_name = f"{dataset_name}_train"
-        experiments = client.search_smote_experiments()
+        experiments = client.search()
 
         if exp_name not in list(map(lambda x: x.name, experiments)):
             tags = {
@@ -192,11 +192,20 @@ if not QUICK:
     dir_post_process = dir_output / 'post_process'
 
     post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+    
     features_selected.append('Past_risk')
+    features_selected.append('Past_burnedarea')
 
-    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
-    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past')
+    dir_post_process = dir_output / 'post_process'
+    post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+
+    train_dataset = add_past_risk(train_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    test_dataset = add_past_risk(test_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    val_dataset = add_past_risk(val_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -206,8 +215,6 @@ else:
     post_process_model_dico = None
 
     prefix = f'full_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
-
-    name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
     
     graphScale = read_object(f'graph_{scale}_{graph_construct}_{graph_method}.pkl', dir_output)
 
@@ -223,43 +230,132 @@ else:
 
     #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
     #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
-    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+    #test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
     features_selected = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
     features_importance = np.asarray(features_selected)
     features_selected = list(features_importance[:,0])
     features_selected.append('Past_risk')
+    features_selected.append(f'Past_burnedarea')
 
-prefix = f'full_{k_days}_{nbfeatures}_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+    if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns) or 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns):
+        dir_post_process = dir_output / 'post_process'
+        post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
+
+    train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    test_dataset = add_past_risk(test_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+    val_dataset = add_past_risk(val_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
+
+    train_dataset = add_past_risk(train_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    test_dataset = add_past_risk(test_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    val_dataset = add_past_risk(val_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+
+    train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
+    test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
+    val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
+
+    save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+    save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+    save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
+######################### Tourisme ###########################
+"""tourisme_data = pd.read_csv(rootDisk / 'csv' / 'tourisme.csv')
+
+train_dataset = train_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+val_dataset = val_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+test_dataset = test_dataset.set_index('departement').join(tourisme_data.set_index('Code')['Tourisme'], on='Code').reset_index()
+
+features_selected.append('Tourisme')"""
+
+##############################################################
+
 prefix_config = deepcopy(prefix)
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
-print(name)
+
+train_dataset['saison'] = train_dataset['date'].apply(get_saison)
+val_dataset['saison'] = val_dataset['date'].apply(get_saison)
+test_dataset['saison'] = test_dataset['date'].apply(get_saison)
+
+train_dataset['isBassin'] = train_dataset['departement'].apply(is_mediterranean_dept)
+val_dataset['isBassin'] = val_dataset['departement'].apply(is_mediterranean_dept)
+test_dataset['isBassin'] = test_dataset['departement'].apply(is_mediterranean_dept)
+
+train_dataset['cluster-encoder'] = train_dataset['cluster_encoder']
+val_dataset['cluster-encoder'] = val_dataset['cluster_encoder']
+test_dataset['cluster-encoder'] = test_dataset['cluster_encoder']
+
+print(allDates[int(test_dataset.date.min())])
+
+if scale == 'departement':
+    train_dataset['scale'] = 10
+    val_dataset['scale'] = 10
+    test_dataset['scale'] = 10
+else:
+    train_dataset['scale'] = scale
+    val_dataset['scale'] = scale
+    test_dataset['scale'] = scale
+
+save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
+save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
+save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
+
+prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
+name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
 ###################### Define models to train ######################
 
 if name_exp.find('voting') != -1: 
     voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
+    voting_models = []
     models = [
-                ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                ('lg_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                #('catboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
     ]
     
     if dataset_name == 'bdiff':
         voting_models = []
         models = [
-                ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
-                ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_CRPScore', None, None, None),
-                ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('lg_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                #('xgboost_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
            
-                ('xgboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                ('catboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-                ('lg_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
-                ('ngboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore', None, None, None),
+                #('xgboost_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('lg_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
 
-                #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
-                #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-                #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
+                #('lg_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                #('xgboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+           
+                #('xgboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('lg_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
+
+                #('lg_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                #('xgboost_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+           
+                #('xgboost_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('lg_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
+
+                #('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None),
+                #('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+           
+                #('xgboost_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('catboost_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+                #('lg_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2', None, None, None),
+
+                #('lg_search_full_0_all_one_nbsinister-binary_classification_l2', None, None, None),
+                ('xgboost_search_full_0_all_one_nbsinister-binary_classification_softmax', None, None, None),
+                #('catboost_search_full_0_all_one_nbsinister-binary_classification_softmax', None, None, None),
+
+                #('ngboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore', None, None, None),
+
+                #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+                #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+                #('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax', None, None, None),
         ]
     staking_models = []
 
@@ -272,14 +368,14 @@ elif name_exp.find('exp') != -1:
     staking_models = []
     voting_models = []
     models = [
-            ('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-            ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-            ('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-            ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
-           #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
-           #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-           #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
-           #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax-dual', None, None, None),
+            ('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('xgboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+            ('catboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None),
+           #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual', None, None, None),
+           #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+           #('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax', None, None, None),
+           #('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax-dual', None, None, None),
         ]
 else:
     models = define_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
@@ -419,6 +515,12 @@ if doTrain:
 
 if doTest:
 
+    test_dataset = test_dataset[test_dataset['weight'] > 0]
+    #test_dataset_unscale = test_dataset_unscale[test_dataset_unscale['weight'] > 0]
+    test_dataset_unscale = None
+
+    print(allDates[int(test_dataset.date.min())])
+
     host = 'pc'
 
     logger.info('############################# TEST ###############################')
@@ -500,30 +602,65 @@ if doTest:
                 ]
     else:"""
     models = [
-        #('xgboost_search_smote_all_one_union_classification_weighted'),
+        #('xgboost_search_smote-2_all_one_union_classification_weighted'),
         #('filter_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
         #('filter-catboost-soft-departement-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-soft-graphid-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        ('xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        ('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
-        ('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_CRPScore'),
+        #('xgboost_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-4_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+#
+        #('xgboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+#
+        #('xgboost_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+#
+        #('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+#
+        #('xgboost_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-4_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
+#
+        #('xgboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
+        #
+        #('xgboost_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-6_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
 
-        ('xgboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
-        ('catboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
-        ('lg_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
-        ('ngboost_search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore'),
+        ('xgboost_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        ('catboost_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        ('lg_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
+
+        ('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        ('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
         
-        #('lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet'),
-        #('ngboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal'),
+        ('xgboost_search_full_0_all_one_nbsinister-binary_classification_softmax'),
+
+        #('ngboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_CRPScore'),
+
+        #('xgboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('catboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_l2'),
+        #('ngboost_search_smote-2_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_CRPScore'),
         
-        #('filter-catboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('lg_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_elasticnet'),
+        #('ngboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_normal'),
+        
+        #('filter-catboost-soft-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-hard-None-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-hard-weight-all_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         
@@ -531,37 +668,39 @@ if doTest:
         #('filter-catboost-soft-weight-5_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         #('filter-catboost-soft-weight-1_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filterICML-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filterICML-xgboost-soft-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filterICML-catboost-soft-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filterICML-lg-soft-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
+        #('filter-xgboost-soft-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filter-xgboost-soft-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-hard-weight-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-hard-None-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-None-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-hard-weight-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-hard-None-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filter-xgboost-soft-weight-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-10_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-15_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-weight-20_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-1_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-5_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-10_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-15_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-weight-20_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filter-xgboost-soft-departement-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-graphid-all_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-departement-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-all_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filter-xgboost-soft-departement-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-graphid-1_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-departement-1_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-1_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 #
-        #('filter-xgboost-soft-departement-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        #('filter-xgboost-soft-graphid-5_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-departement-5_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        #('filter-xgboost-soft-graphid-5_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),
-        #('catboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-cubic-5_classification_softmax-dual'),
+        #('catboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-circular-5_classification_softmax'),
 
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
         #('staking_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
-        #('xgboost_search_smote_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weighted'),
+        #('xgboost_search_smote-2_all_one_nbsinister-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_softmax'),
     ]
         
     prefix_kmeans = f'full_{k_days}_{scale}_{graph_construct}_{top_cluster}'
@@ -571,7 +710,7 @@ if doTest:
 
     ####################################################### Test on all Dataset ####################################################
     metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset,
-                                test_dataset_unscale,
+                                None,
                                     'all',
                                     prefix,
                                     prefix_config,
@@ -580,7 +719,7 @@ if doTest:
                                     device,
                                     encoding,
                                     scaling,
-                                    test_dataset_unscale.departement.unique(),
+                                    test_dataset.departement.unique(),
                                     dir_train,
                                     name_exp,
                                     dir_train / 'check_none' / prefix_kmeans / 'kmeans',
@@ -600,7 +739,7 @@ if doTest:
             if two:
                 dn += '2'
             exp_name = f"{name_exp}_{dn}_{dept}_{sinister}_{sinister_encoding}_test"
-            experiments = client.search_smote_experiments()
+            experiments = client.search_experiments()
 
             if exp_name not in list(map(lambda x: x.name, experiments)):
 
@@ -662,6 +801,7 @@ if doTest:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
 
         aggregated_prediction.append(res)
+
         #aggregated_prediction_dept.append(res_dept)
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
@@ -734,8 +874,8 @@ if doTest:
     aggregated_prediction.to_csv(dir_output / 'aggregated_prediction.csv', index=False)
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
 
-    for name in models:
-        model_name, under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
+    """for name in models:
+        model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
         band = 'prediction'
         if target_name == 'binary':
             vmax_band = 1
@@ -769,7 +909,7 @@ if doTest:
                                     dir_output / name, vmax_band, dept_reg=False, sinister=sinister, sinister_point=fp)
         
         train_dataset_dept = train_dataset.groupby(['departement', 'date'])[target_name].sum().reset_index()
-        vmax_band = np.nanmax(train_dataset_dept[target_name].values)
+        vmax_band = np.nanmax(train_dataset_dept[target_name].values)"""
         
         #susectibility_map_france_daily_geojson(aggregated_prediction_dept, region_france.copy(deep=True), graphScale, np.unique(dates).astype(int), 'prediction', f'departemnnt_france',
         #                            dir_output / name, vmax_band, dept_reg=True, sinister=sinister, sinister_point=fp)"""
