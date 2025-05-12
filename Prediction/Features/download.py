@@ -148,7 +148,8 @@ def download_elevation(code_dept: int, geo, dir_output: str) -> None:
     """
     check_and_create_path(dir_output)
     print('DONWLOADING ELEVATION')
-    if not (dir_output / f'{dir_output}/COURBE_1-0__SHP_LAMB93_D0{code_dept}_2014-04-01.7z').is_file():
+    print()
+    if not (dir_output / f'{dir_output}/COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-01-01.7z').is_file():
         url = f'https://data.geopf.fr/telechargement/download/COURBES/COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-01-01/COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-01-01.7z'
         subprocess.run(['wget', url, '-O', f'{dir_output}/COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-04-01.7z'], check=True)
         unzip_7z(dir_output / f'COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-04-01.7z', dir_output)
@@ -198,9 +199,10 @@ def download_foret(code_dept: int, dept, dir_output) -> None:
     else:
         print("No date found in the URL")
     
-    if not (dir_output / f'BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z').is_file():
-        subprocess.run(['wget', url, '-O', f'{dir_output}/BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z'], check=True)
-    unzip_7z(dir_output / f'BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z', dir_output)
+    #if not (dir_output / f'BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z').is_file():
+    #    subprocess.run(['wget', url, '-O', f'{dir_output}/BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z'], check=True)
+    
+    #unzip_7z(dir_output / f'BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}.7z', dir_output)
     path = (dir_output / f'BDFORET_2-0__SHP_LAMB93_D0{code_dept}_{date}' / 'BDFORET').as_posix()
     files = glob.glob(path+'/**/*.shp', recursive=True)
     print(files, path)
@@ -243,13 +245,19 @@ def download_region(departement, dir_output):
     region = gpd.GeoDataFrame({'geometry':geom})
     region.to_file(dir_output / 'geo.geojson')
 
-def download_hexagones(path, geo, dir_output):
+def download_hexagones(path, geo, dir_output, departement):
     print('CREATE HEXAGONES')
     check_and_create_path(dir_output)
-    hexa_france = gpd.read_file(path / 'hexagones_france.gpkg')
-    hexa_france['isdep'] = hexa_france['geometry'].apply(lambda x : geo.contains(x))
-    hexa = hexa_france[hexa_france['isdep']]
-    hexa.to_file(dir_output / 'hexagones.geojson', driver='GeoJSON')
+    if 'corse' in departement:
+        hexa_france = gpd.read_file(path / 'h3_corse_7.gpkg')
+        hexa_france['isdep'] = hexa_france['geometry'].apply(lambda x : geo.contains(x))
+        hexa = hexa_france[hexa_france['isdep']]
+        hexa.to_file(dir_output / 'hexagones.geojson', driver='GeoJSON')
+    else:
+        hexa_france = gpd.read_file(path / 'hexagones_france.gpkg')
+        hexa_france['isdep'] = hexa_france['geometry'].apply(lambda x : geo.contains(x))
+        hexa = hexa_france[hexa_france['isdep']]
+        hexa.to_file(dir_output / 'hexagones.geojson', driver='GeoJSON')
 
 def haversine(p1, p2, unit = 'kilometer'):
     import math

@@ -352,7 +352,7 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
 
     val_dataset_unscale.loc[val_mask_zero, 'weight'] = 0
     test_dataset_unscale.loc[test_mask_zero, 'weight'] = 0
-
+    
     if save:
         save_object(train_dataset_unscale, 'df_unscaled_train_'+prefix+'.pkl', dir_output)
         save_object(test_dataset_unscale, 'df_unscaled_test_'+prefix+'.pkl', dir_output)
@@ -1169,6 +1169,41 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_pred_ez[mask_unknowed_sample] = 0
     iou_dict = calculate_signal_scores(y_pred_ez, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
 
+    ########################################## Gte normalized score ####################################
+    IoU_scores = []
+    F1_scores = []
+
+    positve_res = res[res['nbsinister'] > 0]
+
+    for i, department in enumerate(positve_res['departement'].unique()):
+        # Extraire les valeurs pour chaque département
+        y_true_dept = positve_res[positve_res['departement'] == department][col_class].values
+        if np.all(y_true == 0):
+            continue
+        y_pred_department = positve_res[positve_res['departement'] == department][f'prediction_{target_name}'].values  # Récupérer les prédictions associées au département
+        
+        # Calcul des scores IoU et F1
+        IoU = iou_score(y_true_dept, y_pred_department)
+        F1 = f1_score(y_true_dept > 0, y_pred_department > 0)
+        
+        IoU_scores.append(IoU)
+        F1_scores.append(F1)
+    
+    # Calcul de l'aire maximale possible (cas parfait où toutes les prédictions sont correctes)
+    max_area = np.trapz(np.ones(len(positve_res)), dx=1)
+    
+    # Calcul de l'aire sous la courbe pour l'IoU et le F1
+    IoU_area = calculate_area_under_curve(IoU_scores)
+    F1_area = calculate_area_under_curve(F1_scores)
+    
+    # Normalisation par l'aire maximale
+    normalized_IoU = IoU_area / max_area if max_area > 0 else 0
+    normalized_F1 = F1_area / max_area if max_area > 0 else 0
+    
+    # Stocker les résultats dans le dictionnaire
+    metrics['normalized_iou'] = normalized_IoU
+    metrics['normalized_f1'] = normalized_F1
+
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
         metric_key = f'{key}_class_ez'  # Ajouter un suffixe basé sur col_for_dict
@@ -1460,7 +1495,17 @@ def test_sklearn_api_model(args,
 
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
-    
+
+        metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
+        metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
+        metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
+        metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
+
+        metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
+        metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
+        metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
+        metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
+        
         #res_dept['model'] = name
 
         res_scale.append(res)
@@ -1725,7 +1770,18 @@ def test_dl_model(args,
 
             metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
                                                 test_departement, target_name, name,
-                                                dir_output, scale, pred_min = None, pred_max = None,)
+                                                dir_output, scale, pred_min = None, pred_max = None)
+
+
+            metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
+            metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
+            metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
+            metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
+
+            metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
+            metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
+            metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
+            metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
             
             if MLFLOW:
                 log_metrics_recursively(metrics[name], prefix='')
@@ -1736,7 +1792,10 @@ def test_dl_model(args,
             samples_name = [
             f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
             ]
-            #model.shapley_additive_explanation(test_dataset_dept, 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
+            
+            test_dataset_dept_sample = select_samples(test_dataset_dept, 100, kdays=int(kdays))
+
+            #model.shapley_additive_explanation(test_dataset_dept, 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
             
             res['model'] = name
             save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
@@ -1747,9 +1806,9 @@ def test_dl_model(args,
 
     ########################################## Save metrics ################################
     outname = 'metrics'+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_'+suffix+'.pkl'
-    if (dir_output / outname).is_file():
-        log_metrics = read_object(outname, dir_output)
-        metrics.update(log_metrics)
+    #if (dir_output / outname).is_file():
+    #    log_metrics = read_object(outname, dir_output)
+    #    metrics.update(log_metrics)
 
     save_object(metrics, outname, dir_output)
 
@@ -1985,6 +2044,7 @@ def wrapped_train_deep_learning_1D(params):
     graph_method = params['graph_method']
     features = params['features_selected_str']
     dir_output = params['dir_output']
+    n_run = params['n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2032,9 +2092,10 @@ def wrapped_train_deep_learning_1D(params):
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
-                                    device=device,
+                                    device=torch.device("cpu"),
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
+                                    n_run=n_run
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
@@ -2059,9 +2120,10 @@ def wrapped_train_deep_learning_1D(params):
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
-                                    device=device,
+                                    device=torch.device('cpu'),
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
+                                    n_run=n_run,
                                     graph_method = graph_method)
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -2122,6 +2184,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     loss=loss,
                                     device=device,
                                     under_sampling=under_sampling,
+                                    n_run=n_run,
                                     over_sampling=over_sampling,
                                     )
     elif torch_structure == 'Model_gnn':
@@ -2147,6 +2210,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
+                                    n_run=n_run,
                                     graph_method = graph_method)
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -2159,6 +2223,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                    over_sampling=over_sampling,
                                    target_name=target_name,
                                    post_process=None,
+                                    n_run=n_run,
                                    task_type=task_type,
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures)
@@ -2181,6 +2246,7 @@ def wrapped_train_deep_learning_2D(params):
     torch_structure = params['torch_structure']
     image_per_node = params['image_per_node']
     graph_method = params['graph_method']
+    n_run = params['n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2226,6 +2292,7 @@ def wrapped_train_deep_learning_2D(params):
                                     loss=loss,
                                     device=device,
                                     under_sampling=under_sampling,
+                                    n_run=n_run,
                                     over_sampling=over_sampling,
                                     image_per_node=image_per_node)
     else:
@@ -2247,6 +2314,7 @@ def wrapped_train_deep_learning_2D_federated(params):
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
     image_per_node = params['image_per_node']
+    n_run = params['n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2287,6 +2355,7 @@ def wrapped_train_deep_learning_2D_federated(params):
                                     task_type=task_type,
                                     loss=loss,
                                     device=device,
+                                    n_run=n_run,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     image_per_node=image_per_node)
@@ -2300,6 +2369,7 @@ def wrapped_train_deep_learning_2D_federated(params):
                                    under_sampling=under_sampling,
                                    over_sampling=over_sampling,
                                    target_name=target_name,
+                                   n_run=n_run,
                                    post_process=None,
                                    task_type=task_type,
                                    aggregation_method=aggregation_method,

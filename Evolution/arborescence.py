@@ -20,7 +20,7 @@ is_pc = get_machine_info() == 'caron-Precision-7780'
 if not is_pc:
     rootDisk = Path('/Work/Users/ncaron')
     root = rootDisk
-    root_graph = root / 'GNN'
+    root_graph = root / 'Evolution'
     root_target = root / 'Target'
 
 else:

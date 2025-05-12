@@ -107,6 +107,24 @@ class InplaceMeshGraphDataset(Dataset):
         self.leni = leni
         self.icospheres_graph_path = icospheres_graph_path
 
+        """latitudes = torch.Tensor(self.Y[0][:, latitude_index, -1].reshape(-1,1))  
+        longitudes = torch.Tensor(self.Y[0][:, longitude_index, -1].reshape(-1,1))
+
+        g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
+        g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
+        graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
+
+        graph_mesh = graph_builder.create_mesh_graph(None)
+        gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(None, graph_mesh)
+        mesh2graph = graph_builder.create_m2g_graph(None)"""
+
+        #gridh2mesh.ndata['_ID'] = torch.arange(gridh2mesh.num_nodes(), dtype=torch.int32)
+        #mesh2graph.ndata['_ID'] = torch.arange(mesh2graph.num_nodes(), dtype=torch.int32)
+        
+        #self.graph_mesh = graph_mesh
+        #self.grid2mesh = gridh2mesh
+        #self.mesh2grid = mesh2graph
+
     def __getitem__(self, index) -> tuple:
         x = self.X[index]
         y = self.Y[index]
@@ -121,7 +139,7 @@ class InplaceMeshGraphDataset(Dataset):
             torch.tensor(edges, dtype=torch.long, device=self.device),  \
             
         return X, Y, E, self.icospheres_graph_path
-
+    
     def __len__(self) -> int:
         return self.leni
     
@@ -292,12 +310,81 @@ def graph_collate_fn(batch):
 
     # Merge the PPI graphs into a single graph with multiple connected components
     node_features = torch.cat(node_features_list, 0)
+
     node_labels = torch.cat(node_labels_list, 0)
     edge_index = torch.cat(edge_index_list, 1)
     graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
     #node_indices = torch.cat(node_indice_list, 0)
     graph = dgl.graph((edge_index[0], edge_index[1]))
+
     return node_features, node_labels, graph, graph_labels_list
+
+"""def graph_collate_fn_mesh(batch):
+    #node_indice_list = []
+    node_features_list = []
+    node_labels_list = []
+    graph_labels_list = []
+
+    graph_list = []
+    graph_mesh_list = []
+    grid2mesh_list = []
+    mesh2grid_list = []
+
+    num_nodes_seen = 0
+
+    last_graph_1 = None
+    last_graph_2 = None
+    last_graph_3 = None
+
+    for graph_id, features_labels_graph_index_tuple in enumerate(batch):
+        # Collecter les caractéristiques et les étiquettes des nœuds
+        node_features_list.append(features_labels_graph_index_tuple[0])
+        node_labels_list.append(features_labels_graph_index_tuple[1])
+
+        icospheres_graph_path = features_labels_graph_index_tuple[3]
+
+        num_nodes = features_labels_graph_index_tuple[1].size(0)
+        num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
+        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs
+
+        latitudes = features_labels_graph_index_tuple[1][:, latitude_index, -1].reshape(-1,1)
+        longitudes = features_labels_graph_index_tuple[1][:, longitude_index, -1].reshape(-1,1)
+
+        g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
+        g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
+        graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
+
+        graph_mesh = graph_builder.create_mesh_graph(last_graph_1)
+        gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(last_graph_2, graph_mesh)
+        mesh2graph = graph_builder.create_m2g_graph(last_graph_3)
+
+        #gridh2mesh.ndata['_ID'] = torch.arange(gridh2mesh.num_nodes(), dtype=torch.int32)
+        #mesh2graph.ndata['_ID'] = torch.arange(mesh2graph.num_nodes(), dtype=torch.int32)
+        
+        graph_mesh_list.append(graph_mesh)
+        grid2mesh_list.append(gridh2mesh)
+        mesh2grid_list.append(mesh2graph)
+
+        #last_graph_1 = deepcopy(graph_mesh)
+        #last_graph_2 = deepcopy(gridh2mesh)
+        #last_graph_3 = deepcopy(mesh2graph)
+
+    # Merge the PPI graphs into a single graph with multiple connected components
+    node_features = torch.cat(node_features_list, 0)
+    node_labels = torch.cat(node_labels_list, 0)
+
+    for g in graph_mesh_list:  # graphs est une liste de dgl.graph
+        if '_ID' not in g.edata:
+            g.edata['_ID'] = torch.arange(g.num_edges(), dtype=torch.int32)
+        if '_ID' not in g.ndata:
+            g.ndata['_ID'] = torch.arange(g.num_nodes(), dtype=torch.int32)
+
+    graph_list.append(dgl.batch(graph_mesh_list))
+    graph_list.append(dgl.batch(grid2mesh_list))
+    graph_list.append(dgl.batch(mesh2grid_list))
+    
+    graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
+    return node_features, node_labels, graph_list, graph_labels_list"""
 
 def graph_collate_fn_mesh(batch):
     #node_indice_list = []
@@ -322,19 +409,10 @@ def graph_collate_fn_mesh(batch):
         node_labels_list.append(features_labels_graph_index_tuple[1])
 
         icospheres_graph_path = features_labels_graph_index_tuple[3]
-        
-        """graph_mesh_grid2mesh_mesh2_grid = features_labels_graph_index_tuple[2]
 
-        # Ajuster l'index des arêtes en fonction du nombre de nœuds vus
-        if edge_index.shape[0] > 2:
-            edge_index[0] += num_nodes_seen
-            edge_index[1] += num_nodes_seen
-            edge_index_list.append(edge_index)
-        else:
-            edge_index_list.append(edge_index + num_nodes_seen)
-        
-        # Ajouter l'ID du graphe pour chaque nœud
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs"""
+        #graph_mesh = features_labels_graph_index_tuple[4]
+        #gridh2mesh = features_labels_graph_index_tuple[5]
+        #mesh2graph = features_labels_graph_index_tuple[6]
 
         num_nodes = features_labels_graph_index_tuple[1].size(0)
         num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
@@ -601,7 +679,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temporal_as_edges):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temporal_as_edges, isNotmesh=False):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -640,16 +718,19 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
     for id in date_ids:
         if use_temporal_as_edges is None:
             x, y = construct_time_series(id, x_data, y_data, ks, len(ids_columns))
-            if x is not None:
+            if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
                     Ys.append(y[i])
+            elif x is not None:
+                Xs.append(x)
+                Ys.append(y)
             continue
         elif use_temporal_as_edges:
             x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, len(ids_columns))
         else:
             x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, len(ids_columns))
-        
+
         if x is None:
             continue
 
@@ -687,13 +768,13 @@ def create_dataset(graph,
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -717,6 +798,85 @@ def create_dataset(graph,
 
     return train_dataset, val_dataset, test_dataset
 
+def create_train_dataset(graph,
+                    df_train,
+                    features_name,
+                    target_name,
+                    use_temporal_as_edges : bool,
+                    device,
+                    ks : int,
+                    mesh=None,
+                    mesh_file=''):
+    
+    x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
+    
+
+    dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
+
+    logger.info(f'{dateTrain.shape}')
+
+    logger.info(f'Constructing train Dataset')
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+
+
+    # Assurez-vous que les ensembles ne sont pas vides
+    assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
+
+    if mesh is None or mesh == False:
+        # Création des datasets finaux
+        print('uzbdkazdkjzan')
+        train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
+    elif mesh == 'mesh':
+        train_dataset = InplaceMeshGraphDataset(mesh_file, Xst, Yst, Est, len(Xst), device)
+    elif mesh == 'mygraph':
+        train_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, Xst, Yst, Est, len(Xst), device)
+
+    return train_dataset
+
+def create_test_val_dataset(graph,
+                    df_val,
+                    df_test,
+                    features_name,
+                    target_name,
+                    use_temporal_as_edges : bool,
+                    device,
+                    ks : int,
+                    mesh=None,
+                    mesh_file=''):
+        
+    x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns + [target_name]].values
+
+    x_test, y_test = df_test[ids_columns + features_name].values, df_test[ids_columns + targets_columns + [target_name]].values
+
+    dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
+    dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
+
+    logger.info(f'{dateVal.shape}, {dateTest.shape}')
+
+    logger.info(f'Constructing val Dataset')
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+
+    logger.info(f'Constructing test Dataset')
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+
+    # Assurez-vous que les ensembles ne sont pas vides
+    assert len(XsV) > 0, "Le jeu de données de validation est vide"
+    assert len(XsTe) > 0, "Le jeu de données de test est vide"
+
+    if mesh is None or mesh == False:
+        # Création des datasets finaux
+        print('uzbdkazdkjzan')
+        val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
+        test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
+    elif mesh == 'mesh':
+        val_dataset = InplaceMeshGraphDataset(mesh_file, XsV, YsV, EsV, len(XsV), device)
+        test_dataset = InplaceMeshGraphDataset(mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
+    elif mesh == 'mygraph':
+        val_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsV, YsV, EsV, len(XsV), device)
+        test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
+
+    return val_dataset, test_dataset
+
 def get_numpy_data(graph, df,
                        features_name,
                        use_temporal_as_edges : bool,
@@ -725,6 +885,7 @@ def get_numpy_data(graph, df,
     Xset = df[ids_columns + features_name].values
 
     X = []
+    E = []
     Yset = None
     """if graph.graph_method == 'graph':
         graphId = np.unique(Xset[:, graph_id_index])
@@ -764,9 +925,9 @@ def get_numpy_data(graph, df,
                     X.append(x[i])
             continue
         elif use_temporal_as_edges:
-            x, _, _ = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
         else:
-            x, _, _ = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
 
         if x is None:
             continue
@@ -775,8 +936,10 @@ def get_numpy_data(graph, df,
             continue
 
         X.append(x)
+        if 'e' in locals():
+            E.append(e)
 
-    return X
+    return np.asarray(X), np.asarray(E)
 
 def create_test_loader(graph, df,
                        features_name,
@@ -889,7 +1052,12 @@ def load_x_from_pickle(date : int,
     new_x_2D = np.empty((leni, x_2D.shape[1], x_2D.shape[2]))
     
     for i, fet_2D in enumerate(features_name_2D):
-
+        
+        #print(fet_2D, np.nanmax(x_2D[features_name_2D_full.index(fet_2D)]))
+        """plt.imshow(x_2D[features_name_2D_full.index(fet_2D)])
+        plt.colorbar()
+        plt.savefig(f'{fet_2D}.png')
+        plt.close('all')       """ 
         if fet_2D == 'Past_risk' or fet_2D == 'Past_burnedarea':
             unode = np.unique(raster) 
             for node in unode:
@@ -908,6 +1076,7 @@ def load_x_from_pickle(date : int,
             new_x_2D[i, nan_mask] = np.nanmean(new_x_2D[i, :, :])
             #new_x_2D[i, nan_mask] = 0.0
         #   print(np.unique(np.isnan(new_x_2D)))
+    #exit(1)
     #
     #  Remplacer les NaN dans une matrice entière
     #nan_mean = np.nanmean(new_x_2D, axis=(1, 2), keepdims=True)  # Moyenne par plan
@@ -1012,8 +1181,11 @@ def update_node_images(X, x_node, mask, scale, k, shape2D, y_1d, date, node):
             x_band[np.isnan(x_band)] = np.nanmean(x_band)
         #index = np.argwhere((y[:, graph_id_index, 0] == node) & (y[:, date_index, :] == date))[:, 0]
         index = np.unique(np.argwhere((y_1d[:, graph_id_index, 0] == node))[:, 0])
+        print(np.unique(x_band))
         X[index, band, :, :, k] = resize_no_dim(x_band, *shape2D[scale])
-    
+        mask_nan = np.isnan(X[index, band, :, :, k])
+        #X[index, band, mask_nan, k] = 0
+    X[np.isnan(X)] = -1
     return X
 
 def process_dept_images(X, x_date, raster_dept, ks, k):
@@ -1043,7 +1215,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                         context):
     """Main function to create the dataset."""
     Xst, Yst, Est = [], [], []
-
+    leni = len(features_name_2D)
     for id in dates:
         if use_temporal_as_edges is None:
             x, y = construct_time_series(id, X_np, Y_np, ks, len(ids_columns))
@@ -1054,7 +1226,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
         
         if x is None:
             continue
-
+        
         depts = np.unique(y[:, departement_index].astype(int))
         for dept in depts:
             y_dept = y[y[:, departement_index, 0] == dept]
@@ -1062,9 +1234,9 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
             new_x = []
             new_y = []
 
-            sub_dir = 'image_per_node' if image_per_node else 'image_per_departement'
+            sub_dir = f'image_per_node_{leni}' if image_per_node else f'image_per_departement_{leni}'
 
-            for i in range(x_dept.shape[0]):
+            """for i in range(x_dept.shape[0]):
                 cluster_id = y_dept[i, graph_id_index, -1]
                 if use_temporal_as_edges is None and image_per_node:
                     is_file = (path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context / f'X_{int(id)}_{dept}_{cluster_id}.pkl').is_file()
@@ -1075,16 +1247,20 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                         new_y.append(y_dept[i])
                 else:
                     Xst.append(f'X_{int(id)}_{dept}_{cluster_id}.pkl')
-                    Yst.append(y_dept[i])
+                    Yst.append(y_dept[i])"""
             
-            if len(new_y) == 0:
-                continue
+            #if len(new_y) == 0:
+            #    continue
+            
+            #new_x = np.asarray(new_x)
+            #new_y = np.asarray(new_y)
 
-            new_x = np.concatenate(new_x, axis=0)
-            new_y = np.concatenate(new_y, axis=0)
-
-            X, Y, raster_dept, raster_dept_graph, unodes = process_dept_raster(dept, graph, path, y_dept, features_name_2D, ks, image_per_node, shape2D)
-            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, x_dept, y_dept, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D)
+            new_y = np.copy(y_dept)
+            new_x = np.copy(x_dept)
+            
+            X, Y, raster_dept, raster_dept_graph, unodes = process_dept_raster(dept, graph, path, new_y, features_name_2D, ks, image_per_node, shape2D)
+            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, new_x, new_y, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D)
+            #print(X.shape)
             
             if X is None:
                 continue
@@ -1164,7 +1340,7 @@ def create_dataset_2D(graph,
 
     logger.info(f'{len(Xst)}, {len(XsV)}, {len(XsTe)}')
 
-    sub_dir = 'image_per_node' if image_per_node else 'image_per_departement'
+    sub_dir = f'image_per_node_{len(features_name_2D)}' if image_per_node else f'image_per_departement_{len(features_name_2D)}'
     if True:
         train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'train')
         val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'val')
@@ -1175,9 +1351,22 @@ def create_dataset_2D(graph,
         test_datset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
     return train_dataset, val_dataset, test_dataset
 
+class WrapperModel(torch.nn.Module):
+    def __init__(self, original_model, F, T, edges):
+        super().__init__()
+        self.model = original_model
+        self.F = F
+        self.T = T
+        self.edges = edges
+
+    def forward(self, x_flat):
+        # reshape x_flat (B, F*T) vers (B, F, T)
+        x_orig = x_flat.reshape(-1, self.F, self.T)
+        return self.model(x_orig, self.edges)
+
 class ModelTorch():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
-                 features_name, ks, out_channels, dir_log, loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full'):
+                 features_name, ks, out_channels, dir_log, loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1):
         self.model_name = model_name
         self.name = name
         self.loss = loss
@@ -1199,6 +1388,11 @@ class ModelTorch():
         self.nbfeatures = nbfeatures
         self.student_train = False
         self.use_temporal_as_edges = None
+        self.n_run = n_run
+        self.metrics = {}
+        self.train_loader = None
+        self.test_loader = None
+        self.val_loader = None
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1348,8 +1542,9 @@ class ModelTorch():
         return total_loss
 
     def make_model(self, graph, custom_model_params):
+        print(self.features_name)
         model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
-                                graph, dropout, 'relu',
+                                graph, dropout, activation,
                                 self.ks,
                                 out_channels=self.out_channels,
                                 task_type=self.task_type,
@@ -1389,9 +1584,12 @@ class ModelTorch():
         criterion = self.get_loss(self.loss)
         criterion_val = criterion
 
-        static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+        if not isinstance(self, ModelCNN):
+            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+        else:
+            static_idx, temporal_idx = [0, 0]
 
-        if self.model_name in ['SepLSTMGNN']:
+        if self.model_name in ['SepGRUGNN']:
             if custom_model_params is None:
                 custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
             else:
@@ -1465,8 +1663,9 @@ class ModelTorch():
         over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
         
         iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
 
-        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}')
+        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}')
 
         test_output, y = self._predict_test_loader(self.val_loader)
         test_output = test_output.detach().cpu().numpy()
@@ -1477,8 +1676,9 @@ class ModelTorch():
         over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
         
         iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
 
-        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}')
+        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}')
 
         plt.figure(figsize=(15,5))
         plt.plot(y[y[:, departement_index] == 13, -1])
@@ -1499,7 +1699,12 @@ class ModelTorch():
         # Échantillonner les données non feu
         nb = min(len(df_non_fire), nb)
 
-        sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
+        if self.n_run == 1:
+        #sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
+            sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
+        else:
+            sampled_indices = np.random.RandomState().choice(len(df_non_fire), nb, replace=False)
+            
         df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
 
         # Combiner les données positives et non feu échantillonnées
@@ -1559,8 +1764,10 @@ class ModelTorch():
 
     def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None):
         
+        check_and_create_path(self.dir_log)
+
         if not is_unknowed_risk:
-            test_percentage = np.arange(0.05, 1.05, 0.05)
+                test_percentage = np.arange(0.05, 1.05, 0.05)
         else:
             test_percentage = np.arange(0.0, 1.05, 0.05)
 
@@ -1572,28 +1779,113 @@ class ModelTorch():
         iou_scores = []
         data_log = None
         find_log = False
-        
+
+        self.metrics['test_percentage'] = []
+        self.metrics['under_prediction_scores'] = []
+        self.metrics['over_predictio_scores'] = []
+        self.metrics['iou_scores'] = []
+
         if False:
             if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                 data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
         else:
             if (self.dir_log / 'test_percentage_scores.pkl').is_file():
-                print(f'Load test_percentage_score')
+                print(f'Load metrics')
                 find_log = True
                 data_log = read_object('test_percentage_scores.pkl', self.dir_log)
-
+            else:
+                xs = [0, 10]
+                for x in xs:
+                    other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
+                    print(f'{self.dir_log / ".."/ other_model / "test_percentage_scores.pkl"}')
+                    if (self.dir_log / '..'/ other_model / 'test_percentage_scores.pkl').is_file():
+                        data_log = read_object('test_percentage_scores.pkl', self.dir_log / '..'/ other_model)
+                    if data_log is not None:
+                        break
+                    
+                if data_log is None:
+                    xs = [25]
+                    for x in xs:
+                        other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
+                        print(f'{self.dir_log / ".."/ other_model / "test_percentage_scores.pkl"}')
+                        if (self.dir_log / '..'/ other_model / 'test_percentage_scores.pkl').is_file():
+                            data_log = read_object('test_percentage_scores.pkl', self.dir_log / '..'/ other_model)
+                        if data_log is not None:
+                            break
+                            
         print(f'data_log : {data_log}')
         if data_log is not None:
             try:
-                test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores = data_log[0], data_log[1], data_log[2], data_log[3]
+                self.metrics = data_log
+                #test_percentage = self.metrics['test_percentage']
+                under_prediction_score_scores = self.metrics['under_prediction_scores']
+                over_prediction_score_scores = self.metrics['over_predictio_scores']
+                iou_scores = self.metrics['iou_scores']
             except:
+                self.metrics = {}
                 data_log = None
+                pass
 
-        if data_log is None:
+            #test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores = data_log[0], data_log[1], data_log[2], data_log[3]
+
+        doSearch = True
+        if data_log is not None: #and self.n_run == data_log['n_run']:
+            for i in range(0, len(under_prediction_score_scores) - 1):
+                if iou_scores[i] > iou_scores[i + 1]:
+                    print(f'Last score {iou_scores[i]} current score {iou_scores[i + 1]}')
+                    doSearch = True
+                    break
+        
+            if doSearch:
+                start_test = np.argmax(iou_scores)
+                #start_test = len(under_prediction_score_scores) - 1
+        else:
+            start_test = 0
+        doSearch = True
+        if doSearch:
+            last_score = -math.inf if start_test == 0 else iou_scores[start_test - 1]
             y_ori = df_train[self.target_name].values 
-            for tp in test_percentage:
-                df_train_copy = df_train.copy(deep=True)
+            for i in range(start_test, test_percentage.shape[0]):
+                tp = test_percentage[i]
+                self.metrics['test_percentage'].append(tp)
+                #if tp not in self.metrics.keys():
+                if True:
+                    self.metrics[tp] = {}
+                    self.metrics[tp]['f1'] = []
+                    self.metrics[tp]['iou'] = []
+                    self.metrics[tp]['iou_val'] = []
+                    self.metrics[tp]['prec'] = []
+                    self.metrics[tp]['recall'] = []
+                    self.metrics[tp]['normalized_iou'] = []
+                    self.metrics[tp]['normalized_f1'] = []
+                    self.metrics['under_prediction_scores'].append(0)
+                    self.metrics['over_predictio_scores'].append(0)
+                    self.metrics['iou_scores'].append(0)
 
+                if self.model_name in ['ResNet', 'SepLSTMGNN', 'SepGRUGNN', 'graphCastGRU']:
+                    if tp < 0.15:
+                        iou_scores.append(0)
+                        under_prediction_score_scores.append(0)
+                        over_prediction_score_scores.append(0)
+                        self.metrics[tp]['f1'].append(0)
+                        self.metrics[tp]['iou'].append(0)
+                        self.metrics[tp]['normalized_iou'].append(0)
+                        self.metrics[tp]['normalized_f1'].append(0)
+                        self.metrics[tp]['var_f1'] = 0
+                        self.metrics[tp]['IC_f1'] = (0, 0)
+                        self.metrics[tp]['var_iou'] = 0
+                        self.metrics[tp]['IC_iou'] = (0, 0)
+                        self.metrics[tp]['var_Normalized_f1'] = 0
+                        self.metrics[tp]['IC_Normalized_f1'] = (0, 0)
+                        self.metrics[tp]['var_Normalized_iou'] = 0
+                        self.metrics[tp]['IC_Normalized_iou'] = (0, 0)
+                        self.metrics['under_prediction_scores'].append(0)
+                        self.metrics['over_predictio_scores'].append(0)
+                        self.metrics['iou_scores'].append(0)
+                        continue
+                
+                df_train_copy = df_train.copy(deep=True)
+                
                 if not is_unknowed_risk:
                     nb = int(tp * y_ori[y_ori == 0].shape[0])
                 else:
@@ -1601,45 +1893,128 @@ class ModelTorch():
 
                 logger.info(f'Trained with {tp} -> {nb} sample of class 0')
 
-                df_combined = self.split_dataset(df_train_copy, nb, reset=False)
+                for run in range(self.n_run):
 
-                # Mettre à jour df_train pour l'entraînement
-                df_train_copy['weight'] = 0
-                df_train_copy.loc[df_combined.index, 'weight'] = 1
+                    df_combined = self.split_dataset(df_train_copy, nb, reset=False)
+
+                    # Mettre à jour df_train pour l'entraînement
+                    df_train_copy['weight'] = 0
+                    df_train_copy.loc[df_combined.index, 'weight'] = 1
+                    
+                    copy_model = deepcopy(self)
+                    copy_model.under_sampling = 'full'
+                    copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
+                    copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
+                    
+                    ############################# ON set val ##############################
+                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader)
+                    prediction = test_output.detach().cpu().numpy()
+                    
+                    y = y.detach().cpu().numpy()
+                    if 'MultiScale' in self.model_name:
+                        id_mask = y[:, scale_index]
+                    else:
+                        id_mask = y[:, departement_index]
+                        id_mask = None
                 
-                copy_model = deepcopy(self)
-                copy_model.under_sampling = 'full'
-                copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
-                copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
-                test_loader = copy_model.create_test_loader(graph, df_val)
-                test_output, y = copy_model._predict_test_loader(test_loader)
-                test_output = test_output.detach().cpu().numpy()
+                    dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+                    dff['departement'] = y[:, departement_index]
+                    dff[self.target_name] = y[:, -1]
+                    y = y[:, -1]
 
-                y = y.detach().cpu().numpy()
-                if 'MultiScale' in self.model_name:
-                    id_mask = y[:, scale_index]
+                    metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+                    under_prediction_score_value = under_prediction_score(y, prediction)
+                    over_prediction_score_value = over_prediction_score(y, prediction)
+                    self.metrics[tp]['iou_val'].append(metrics_run['iou'])
+
+                    ############################# ON set test ##############################
+                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader)
+                    prediction = test_output.detach().cpu().numpy()
+                    y = y.detach().cpu().numpy()
+
+                    if 'MultiScale' in self.model_name:
+                        id_mask = y[:, scale_index]
+                    else:
+                        id_mask = y[:, departement_index]
+                        id_mask = None
+                
+                    dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+                    dff['departement'] = y[:, departement_index]
+                    dff[self.target_name] = y[:, -1]
+                    y = y[:, -1]
+
+                    metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+                    self.metrics[tp]['iou'].append(metrics_run['iou'])
+                    self.metrics[tp]['f1'].append(metrics_run['f1'])
+                    self.metrics[tp]['recall'].append(metrics_run['recall'])
+                    self.metrics[tp]['prec'].append(metrics_run['prec'])
+                    self.metrics[tp]['normalized_iou'].append(metrics_run['normalized_iou'])
+                    self.metrics[tp]['normalized_f1'].append(metrics_run['normalized_f1'])
+                    print(self.metrics)
+
+                    #under_prediction_score_value = under_prediction_score(y_val, prediction)
+                    #over_prediction_score_value = over_prediction_score(y_val, prediction)
+                    #iou = iou_score(y_val, prediction)
+                    
+                if self.n_run == 1:
+                    self.metrics[tp]['var_f1'] = 0
+                    self.metrics[tp]['IC_f1'] = (0, 0)
+                    self.metrics[tp]['var_iou'] = 0
+                    self.metrics[tp]['IC_iou'] = (0, 0)
+                    self.metrics[tp]['var_Normalized_f1'] = 0
+                    self.metrics[tp]['IC_Normalized_f1'] = (0, 0)
+                    self.metrics[tp]['var_Normalized_iou'] = 0
+                    self.metrics[tp]['IC_Normalized_iou'] = (0, 0)
                 else:
-                    id_mask = y[:, departement_index]
-                    id_mask = None
-
-                y = y[:, -1]
+                    # Calcul de la variance pour chaque métrique
+                    f1_variance = np.var(self.metrics[tp]['f1'])
+                    iou_variance = np.var(self.metrics[tp]['iou'])
+                    normalized_f1_variance = np.var(self.metrics[tp]['normalized_f1'])
+                    normalized_iou_variance = np.var(self.metrics[tp]['normalized_iou'])
+                    
+                    # Calcul de l'IC 95% pour chaque métrique
+                    f1_ic = calculate_ic95(self.metrics[tp]['f1'])
+                    iou_ic = calculate_ic95(self.metrics[tp]['iou'])
+                    normalized_f1_ic = calculate_ic95(self.metrics[tp]['normalized_f1'])
+                    normalized_iou_ic = calculate_ic95(self.metrics[tp]['normalized_iou'])
+                    
+                    # Ajout de la variance et de l'IC dans le dictionnaire avec des clefs spécifiques pour chaque métrique
+                    self.metrics[tp]['var_f1'] = f1_variance
+                    self.metrics[tp]['IC_f1'] = f1_ic
+                    self.metrics[tp]['var_iou'] = iou_variance
+                    self.metrics[tp]['IC_iou'] = iou_ic
+                    self.metrics[tp]['var_normalized_f1'] = normalized_f1_variance
+                    self.metrics[tp]['IC_normalized_f1'] = normalized_f1_ic
+                    self.metrics[tp]['var_normalized_iou'] = normalized_iou_variance
+                    self.metrics[tp]['IC_normalized_iou'] = normalized_iou_ic
                 
-                under_prediction_score_value, over_prediction_score_value, iou_score = self.calculcate_score(test_output, y, id_mask)
-               
+                iou = np.mean(self.metrics[tp]['iou_val'])
+                iou_scores.append(iou)
                 under_prediction_score_scores.append(under_prediction_score_value)
                 over_prediction_score_scores.append(over_prediction_score_value)
-                iou_scores.append(iou_score)
+
+                #save_object([test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'test_percentage_scores.pkl', self.dir_log)
+                save_object(self.metrics, 'metrics.pkl', self.dir_log)
                 
-                print(f'Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou_score}')
-                
-                if under_prediction_score_value > over_prediction_score_value:
+                print(f'Metrics achieved : {self.metrics[tp]}')
+
+                if iou > last_score:
+                    last_score = iou
+                else:
+                    print(f'Last score {iou} current score {last_score}')
                     break
-        
-        score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
+            
+        #score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
 
         #index_max = np.argmin(np.abs(score_differences))
         index_max = np.argmax(iou_scores)
         best_tp = test_percentage[index_max]
+        self.metrics['iou_score'] = iou_scores
+        self.metrics['under_prediction_scores'] = under_prediction_score_scores
+        self.metrics['over_prediction_scores'] = over_prediction_score_scores
+        self.metrics['best_tp'] = best_tp
+        self.metrics['run'] = self.n_run
+        save_object(self.metrics, 'metrics.pkl', self.dir_log)
         
         if is_unknowed_risk:
             plt.figure(figsize=(15, 7))
@@ -1993,51 +2368,103 @@ class ModelTorch():
         else:
             use_temporal_as_edges = None
 
-        Xst = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks)
-        Xst = torch.Tensor(Xst).to(device)
+        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks)
+        Xst = torch.Tensor(Xst).to(self.device)
 
-        # Calcul des valeurs SHAP
-        explainer = shap.DeepExplainer(self.model, Xst[:100])
+        B, F, T = Xst.shape
 
-        shap_values = explainer.shap_values(Xst)
+        Xst_flat = Xst.reshape((B, F*T))
+        df_features = []
+        # SHAP DeepExplainer avec wrapper du modèle
+        explainer = shap.DeepExplainer(WrapperModel(self.model, F, T, e).to(self.device), Xst_flat)
+        shap_values = explainer.shap_values(Xst_flat)
 
-        df = pd.DataFrame({
-            "mean_abs_shap": np.mean(np.abs(shap_values), axis=0), 
-            "stdev_abs_shap": np.std(np.abs(shap_values), axis=0), 
-            "name": self.features_name
-        })
-        df.sort_values("mean_abs_shap", ascending=False)
-        save_object(df, dir_output)
+        n_classes = self.out_channels
 
-        # Créer le répertoire de sortie
-        os.makedirs(dir_output, exist_ok=True)
+        # Vérifier si la sortie SHAP est multi-classes
+        if n_classes == 1:
+            shap_values = shap_values[:, :, np.newaxis]
+        
+        shap_values = np.asarray(shap_values)
+        shap_values = np.reshape(shap_values, (n_classes, B, F, T))
+        shap_values = shap_values[:, :, :, -1]
+        shap_values = np.moveaxis(shap_values, 0, 2)
+        #shap_values = shap_values.values
 
-        # Sauvegarder la visualisation globale
-        plt.figure(figsize=figsize)
-        if mode == 'bar':
-            shap.summary_plot(shap_values, df, plot_type='bar', show=False)
-        elif mode == 'beeswarm':
-            shap.summary_plot(shap_values, df, show=False)
-        plt.savefig(os.path.join(dir_output, f"{outname}_shapley_additive_explanation.png"))
-        plt.close()
+        # Pour chaque classe, calculer et sauvegarder les résultats SHAP
+        for class_idx in range(n_classes):
+            # Calcul des valeurs SHAP moyennes et écarts-types
+            shap_mean_abs = np.mean(np.abs(shap_values[:, :, class_idx]), axis=0)
+            shap_std_abs = np.std(np.abs(shap_values[:, :, class_idx]), axis=0)
+        
+            df_shap = pd.DataFrame({
+                "mean_abs_shap": shap_mean_abs,
+                "stdev_abs_shap": shap_std_abs,
+                "name": self.features_name
+            }).sort_values("mean_abs_shap", ascending=False)
 
-        # Sauvegarder les visualisations spécifiques aux échantillons
-        if samples is not None and samples_name is not None:
-            sample_dir = os.path.join(dir_output, 'sample')
-            os.makedirs(sample_dir, exist_ok=True)
-            for i, sample in enumerate(samples):
-                plt.figure(figsize=figsize)
-                shap.force_plot(
-                    shap_values[sample], df.iloc[sample],
-                    matplotlib=True,
-                ).savefig(
-                    os.path.join(sample_dir, f"{outname}_{samples_name[i]}_shapley_additive_explanation.png")
+            df_shap['class'] = class_idx
+            df_features.append(df_shap)
+
+            # Visualisation globale (summary_plot) pour chaque classe
+            plt.figure(figsize=figsize)
+            """if mode == 'bar':
+                shap.summary_plot(
+                    shap_values[:, :, class_idx],
+                    features=Xst_flat, 
+                    feature_names=self.features_name,
+                    plot_type='bar',
+                    show=False
                 )
-                plt.close()
+            elif mode == 'beeswarm':
+                #print(shap_values[:, :, class_idx].shape, df.values.shape, len(self.features_name))
+                fig, ax = plt.subplots(figsize=(10, 6))
 
+                # Générer le graphique SHAP pour une classe spécifique (class_idx)
+                shap.summary_plot(
+                    shap_values[:, :, class_idx],
+                    features=Xst_flat,
+                    feature_names=self.features_name,
+                    show=False,
+                    plot_type="dot",  # Vous pouvez choisir 'dot', 'bar', ou 'violin' comme type de plot
+                    ax=ax
+                )
+
+                # Ajouter explicitement la colorbar
+                plt.colorbar(ax.collections[0], ax=ax)
+                """
+                #plt.show()
+
+            #print(dir_output / f"{outname}_class_{class_idx}_shapley.png")
+            #plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png")
+            #plt.close()
+
+            # Visualisations spécifiques aux échantillons (force_plot)
+            if samples is not None and samples_name is not None:
+
+                for i, sample in enumerate(samples):
+                    plt.figure(figsize=figsize)
+                    shap.force_plot(
+                        explainer.expected_value[class_idx],
+                        shap_values[sample, :, class_idx],
+                        features=df.iloc[sample].values,
+                        feature_names=self.features_name,
+                        matplotlib=True,
+                        show=False
+                    )
+
+                    plt.savefig(
+                        dir_output / f"{outname}_class_{class_idx}_{samples_name[i]}_shapley.png",
+                        bbox_inches='tight'
+                    )
+                    plt.close()
+
+        df_features = pd.concat(df_features)
+        save_object(df_features, 'features_importance.pkl', dir_output)
+        
 class ModelCNN(ModelTorch):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         self.path = path
         self.features = features
         self.features_1D = features_1D
@@ -2108,6 +2535,7 @@ class ModelCNN(ModelTorch):
             self.val_loader = read_object('val_loader.pkl', self.dir_log)
             self.test_loader = read_object('test_loader.pkl', self.dir_log)
         else:
+            print(self.ks)
             train_dataset, val_dataset, test_dataset = create_dataset_2D(graph=graph,
                                                                 df_train=df_train,
                                                                 df_val=df_val,
@@ -2134,7 +2562,7 @@ class ModelCNN(ModelTorch):
             self.test_loader = test_loader
 
     def create_test_loader(self, graph, df):
-        
+
         x_test, y_test = df[ids_columns + self.features_1D].values, df[ids_columns + [self.target_name]].values
 
         dateTest = np.sort(np.unique(y_test[np.argwhere(y_test[:, weight_index] > 0), date_index]))
@@ -2142,16 +2570,16 @@ class ModelCNN(ModelTorch):
         XsTe, YsTe, EsTe = create_dataset_2D_2(graph, x_test, y_test, self.ks, dateTest,
                     self.features_name, self.features, self.features_1D, self.path, None, self.image_per_node, context='test')
         
-        sub_dir = 'image_per_node' if self.image_per_node else 'image_per_departement'
+        sub_dir = f'image_per_node_{len(self.features_name)}' if self.image_per_node else f'image_per_departement_{len(self.features_name)}'
         test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, self.path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
-        
+
         loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
         return loader
 
 class ModelGNN(ModelTorch):
-    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         self.mesh = mesh
         self.mesh_file = mesh_file
         self.graph_method = graph_method
@@ -2168,10 +2596,44 @@ class ModelGNN(ModelTorch):
                 self.features_name = featuresAll[:int(self.nbfeatures)]
             else:
                 self.features_name = featuresAll
-
+        print(self.n_run)
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
-
+        logger.info(f'Num temporal features {len(temporal_idx)} num spatial features {len(static_idx)}')
         custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
+
+        if self.val_loader is None:
+            if self.mesh == 'mesh':
+                val_dataset, test_dataset = create_test_val_dataset(graph,
+                                                    df_val,
+                                                    df_test,
+                                                    self.features_name,
+                                                    self.target_name,
+                                                    None,
+                                                    self.device, self.ks,
+                                                    self.mesh,
+                                                    self.mesh_file)
+            else:
+                val_dataset, test_dataset = create_test_val_dataset(graph,
+                                                    df_val,
+                                                    df_test,
+                                                    self.features_name,
+                                                    self.target_name,
+                                                    False,
+                                                    self.device, self.ks,
+                                                    self.mesh,
+                                                    self.mesh_file)
+                
+            if not self.mesh or self.mesh == False:            
+                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
+                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
+            
+            elif self.mesh == 'mesh':
+                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
+                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
+
+            elif self.mesh == 'mygraph':
+                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
+                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
 
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
@@ -2217,31 +2679,33 @@ class ModelGNN(ModelTorch):
             self.val_loader = read_object('val_loader.pkl', self.dir_log)
             self.test_loader = read_object('test_loader.pkl', self.dir_log)
         else:
-            train_dataset, val_dataset, test_dataset = create_dataset(graph,
-                                                                df_train,
-                                                                df_val,
-                                                                df_test,
-                                                                self.features_name,
-                                                                self.target_name,
-                                                                False,
-                                                                self.device, self.ks,
-                                                                self.mesh,
-                                                                self.mesh_file)
+            if self.mesh == 'mesh':
+                train_dataset = create_train_dataset(graph,
+                                                    df_train,
+                                                    self.features_name,
+                                                    self.target_name,
+                                                    None,
+                                                    self.device, self.ks,
+                                                    self.mesh,
+                                                    self.mesh_file)
+            else:
+                train_dataset = create_train_dataset(graph,
+                                                    df_train,
+                                                    self.features_name,
+                                                    self.target_name,
+                                                    False,
+                                                    self.device, self.ks,
+                                                    self.mesh,
+                                                    self.mesh_file)
             
             if not self.mesh or self.mesh == False:            
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
-                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
-                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
             
             elif self.mesh == 'mesh':
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_mesh)
-                self.val_loader = DataLoader(val_dataset,  val_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
-                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
 
             elif self.mesh == 'mygraph':
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_multiple_graph)
-                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
-                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
 
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
@@ -2390,9 +2854,8 @@ class ModelGNN(ModelTorch):
             return pred, y
 
 class Model_Torch(ModelTorch):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
-        print(dir_log)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
         self.graph = graph
@@ -2407,7 +2870,21 @@ class Model_Torch(ModelTorch):
                 self.features_name = featuresAll[:int(self.nbfeatures)]
             else:
                 self.features_name = featuresAll
-        
+
+        if self.val_loader is None:
+            val_dataset, test_dataset = create_test_val_dataset(graph,
+                                                                df_val,
+                                                                df_test,
+                                                                self.features_name,
+                                                                self.target_name,
+                                                                None,
+                                                                self.device, self.ks,
+                                                                mesh=None)
+            
+            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+            self.val_loader = val_loader
+            self.test_loader = test_loader
         ##################################### Define percentage of 0 samples #########################################
         if self.under_sampling != 'full':
             old_shape = df_train.shape
@@ -2507,27 +2984,21 @@ class Model_Torch(ModelTorch):
             val_dataset = read_object('val_dataset.pkl', self.dir_log)
             test_dataset = read_object('test_dataset.pkl', self.dir_log)
         else:
-            train_dataset, val_dataset, test_dataset = create_dataset(graph,
-                                                                df_train,
-                                                                df_val,
-                                                                df_test,
-                                                                self.features_name,
-                                                                self.target_name,
-                                                                None,
-                                                                self.device, self.ks,
-                                                                mesh=None)
+            train_dataset = create_train_dataset(graph,
+                                                df_train,
+                                                self.features_name,
+                                                self.target_name,
+                                                None,
+                                                self.device, self.ks,
+                                                mesh=None)
     
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
             #save_object_torch(test_dataset, 'test_dataset.pkl', self.dir_log)
 
             train_loader = DataLoader(train_dataset, batch_size, True, worker_init_fn=seed_worker, generator=g)
-            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
-            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
 
             self.train_loader = train_loader
-            self.val_loader = val_loader
-            self.test_loader = test_loader
 
     def create_test_loader(self, graph, df):
         loader = create_test_loader(graph, df,
@@ -3774,7 +4245,7 @@ class Model_susceptibility():
     
     def make_model(self, custom_model_params):
         model, params = make_model(self.model.model_name, len(self.features_name), len(self.features_name),
-                                None, dropout, 'relu',
+                                None, dropout, activation,
                                 self.ks,
                                 out_channels=self.out_channels,
                                 task_type=self.task_type,

@@ -271,6 +271,10 @@ features_selected_str.append('Tourisme')"""
 prefix_config = deepcopy(prefix)
 name = 'check_'+scaling + '/' + prefix + '/' + 'baseline'
 
+train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
+test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
+val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
+
 train_dataset['saison'] = train_dataset['date'].apply(get_saison)
 val_dataset['saison'] = val_dataset['date'].apply(get_saison)
 test_dataset['saison'] = test_dataset['date'].apply(get_saison)
@@ -314,40 +318,40 @@ if name_exp.find('voting') != -1:
     #voting_models = []
 
     models = [
-            ('NetMLP', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('NetMLP', 'search_full_0_all_one_nbsinister-binary_classification_weightedcrossentropy', 5, 5),
+            ('NetMLP', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetMLP', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetMLP', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
 
-            ('NetMLP', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('NetMLP', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            #('NetMLP', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetMLP', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetMLP', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
 
-            ('NetGCN', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetGCN', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
 
-            ('NetGCN', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetGCN', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('NetGCN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
 
             ]
     
     staking_models = []
     federated_models = [
-        #('NetMLP', False, 'cluster-encoder', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('NetMLP', False, 'saison', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-        #('NetMLP', False, 'departement', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+        #('NetMLP', False, 'cluster-encoder', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+        #('NetMLP', False, 'saison', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+        #('NetMLP', False, 'departement', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
         ]
     
     gnn_models = [
+            #('NetMLP', False, None, 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('NetGCN', False, None, 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
                 
                 ]
 else:
@@ -446,7 +450,7 @@ def train_federated(models, params):
 
     wrapped_train_deep_learning_1D_federated(params)
 
-import traceback
+"""import traceback
 
 # ---------------- MAIN LOGIQUE ---------------- #
 if doTrain:
@@ -472,15 +476,16 @@ if doTrain:
                 print(f"✅ {name} models trained successfully.")
             except Exception as e:
                 print(f"❌ Error while training {name} models:")
-                traceback.print_exc()
+                traceback.print_exc()"""
 
-"""if doTrain:
+if doTrain:
     for gnn_model in gnn_models:
         global_params['model'] = gnn_model[0]
         global_params['use_temporal_as_edges'] = gnn_model[1]
         global_params['mesh_file'] = gnn_model[2]
         global_params['infos'] = gnn_model[3]
         global_params['out_channels'] = gnn_model[4]
+        global_params['n_run'] = gnn_model[-1]
         global_params['torch_structure'] = 'Model_gnn'
 
         wrapped_train_deep_learning_1D(global_params)
@@ -491,6 +496,7 @@ if doTrain:
             global_params['infos'] = model[1]
             global_params['out_channels'] = model[2]
             global_params['use_temporal_as_edges'] = None
+            global_params['n_run'] = model[-1]
             global_params['torch_structure'] = 'Model_Torch'
             
             wrapped_train_deep_learning_1D(global_params)
@@ -500,6 +506,7 @@ if doTrain:
         global_params['out_channels'] = models[2]
         global_params['use_temporal_as_edges'] = None
         global_params['torch_structure'] = 'Model_Torch'
+        global_params['n_run'] = model[-1]
         
         wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
                             val_dataset=val_dataset.copy(deep=True),
@@ -523,7 +530,7 @@ if doTrain:
         global_params['out_channels'] = models[-1]
         global_params['torch_structure'] = 'Model_Torch'
 
-        wrapped_train_deep_learning_1D_federated(global_params)"""
+        wrapped_train_deep_learning_1D_federated(global_params)
 
 if doTest:
 
@@ -548,17 +555,20 @@ if doTest:
     if graph_method == 'node':
 
         models = [
+                #('NetGCN_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('NetMLP_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('NetMLP_search_full_0_all_one_nbsinister-binary_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
+                #('NetGCN_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('NetMLP_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetMLP_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
         ]
     elif graph_method == 'graph':
@@ -636,7 +646,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=[dept],

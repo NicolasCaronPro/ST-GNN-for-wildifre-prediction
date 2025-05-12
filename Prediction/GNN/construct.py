@@ -878,7 +878,7 @@ def init(args, dir_output, script):
 
     ######################### Encoding ######################################
 
-    if False:
+    if True:
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
@@ -927,13 +927,15 @@ def init(args, dir_output, script):
     else:
         X = read_object('X_'+prefix+'.pkl', dir_output)
         Y = read_object('Y_'+prefix+'.pkl', dir_output)
-        if dataset_name != 'bdiff':
-            features_name, newshape = get_features_name_list_old(graphScale.scale, features, METHODS_SPATIAL)
-        else:
-            features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
+        features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
+    for i, col in enumerate(ids_columns):
+        print('X', col, np.unique(X[:, i]))
+        print('Y', col, np.unique(Y[:, i]))
+
+    ################################################ Add a new feature ####################################
     newFeatures = []
-    if newFeatures != [] and dataset_name != 'bdiff':
+    if newFeatures != []:
         X2, features_name_2 = get_sub_nodes_feature(
             graphScale,
             Y[:, :len(ids_columns) - 1],
@@ -953,7 +955,7 @@ def init(args, dir_output, script):
         if dataset_name != 'bdiff':
             features_name_ori, newshape = get_features_name_list_old(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
         else:
-            features_name, newshape = get_features_name_lis(graphScale.scale, features, METHODS_SPATIAL)
+            features_name_ori, newshape = get_features_name_lis(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
             
         new_X = np.empty((X.shape[0], X.shape[1] + X2.shape[1]))
 
@@ -967,8 +969,9 @@ def init(args, dir_output, script):
 
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
+    ################################################ Change a Feature Value ####################################
     changeFeature = []
-    if changeFeature != [] and dataset_name != 'bdiff':
+    if changeFeature != []:
         X2, features_name_2 = get_sub_nodes_feature(
             graphScale,
             Y[:, :len(ids_columns) - 1],
@@ -985,21 +988,19 @@ def init(args, dir_output, script):
 
         X2 = X2[:, len(ids_columns)-1:]
 
-        if dataset_name != 'bdiff':
-            features_name_ori, newshape = get_features_name_list_old(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
-        else:
-            features_name, newshape = get_features_name_lis(graphScale.scale, features, METHODS_SPATIAL)
-            
+        print(np.unique(X2[features_name_2.index('NDVI_mean')]))
+        print(np.unique(X[len(ids_columns)-1 + features_name.index('NDVI_mean')]))
+
         new_X = np.empty((X.shape[0], X.shape[1]))
 
         for fet in features_name:
             if fet in features_name_2:    
                 new_X[:, features_name.index(fet) + len(ids_columns)-1] = X2[:, features_name_2.index(fet)]
             else:
-                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X[:, features_name_ori.index(fet) + len(ids_columns)-1]
-        
-        X = new_X + len(ids_columns)-1
+                new_X[:, features_name.index(fet) + len(ids_columns)-1] = X[:, features_name.index(fet) + len(ids_columns)-1]
 
+        X = new_X
+        
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
 
     X = X[:, len(ids_columns)-1:]
@@ -1007,12 +1008,9 @@ def init(args, dir_output, script):
     ############################## Dataframe creation ###################################
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
 
-    if dataset_name == 'bdiff':
-        newFeatures = []
-
     ############### SI CA PLANTE -> SCALE ###################
-    if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == [] and changeFeature == []:
-    #if False:
+    #if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == [] and changeFeature == []:
+    if False:
         features_name = read_object(f'features_name_{prefix}.pkl', dir_output)
         df = read_object(f'df_{prefix}.pkl', dir_output)
         find_df = not doDatabase
@@ -1021,7 +1019,7 @@ def init(args, dir_output, script):
         #print(len(features_name), X.shape)
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
-        df[ids_columns[:-1] + targets_columns] = Y
+        df[ids_columns + targets_columns] = Y
         find_df = False
 
     if scale == 'departement':
@@ -1036,7 +1034,7 @@ def init(args, dir_output, script):
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
                                                                     sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding, newFeatures=['precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7'], save=True, use_log=True)
+                                                                    resolution, graph_construct, sinister_encoding, newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
     else:
         features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
 
@@ -1047,10 +1045,7 @@ def init(args, dir_output, script):
                 df.drop(v, inplace=True, axis=1)
 
     df['nbsinister_0_0'] = df['nbsinister'].values
-    print('FIRE:', df['nbsinister_0_0'].unique())
-
     df['burnedarea_0_0'] = df['burned_area'].values
-    
     df['risk_0_0'] = df['nbsinister'].values
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
@@ -1064,10 +1059,6 @@ def init(args, dir_output, script):
     if dataset_name.find('bdiff') !=-1:
         df = df[df['date'] <= allDates.index('2023-12-31')]
 
-    #if not doDatabase:
-    #    return df, graphScale, prefix, fp, features_name
-
-    # Missing 17, 24, 27, 40, 46, 47, 48, 50, 67, 71, 75, 82, 92, 93, 94, vigicrus, nappes and Geodair
     ################################ Process Target ###############################################
 
     if dataset_name == 'bdiff' and not find_df:
@@ -1082,8 +1073,8 @@ def init(args, dir_output, script):
         save_object(df, f'df_mid_{prefix}.pkl', dir_output)"""
 
     ################################ Remove bad or correlated features #############################################
-    #if True:
-    if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
+    if True:
+    #if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
 
         if name_exp == 'occurence_less_feature':
             features_name, _ = get_features_name_list(scale, train_features, ['mean'])
@@ -1098,7 +1089,7 @@ def init(args, dir_output, script):
         df_features = df[features_name].copy(deep=True)
 
         # Remove low variance Features:
-        df_features = variance_threshold(df_features, 0.15)
+        df_features = variance_threshold(df_features, 0)
         features_name = list(df_features.columns)
         logger.info(f'Remove low Variance {leni} -> {len(features_name)}')
         leni = len(features_name)
@@ -1116,10 +1107,12 @@ def init(args, dir_output, script):
         )
         df['binary'] = df['nbsinister'] > 0
 
-        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        df_features = tr.fit_transform(df_features)
         features_name = list(df_features.columns)
         logger.info(f'Smart Correlated Selection with Pearson {leni} -> {len(features_name)}')
         leni = len(features_name)
+
+        print(features_name)
 
         tr = SmartCorrelatedSelection(
                 variables=None,
@@ -1130,10 +1123,12 @@ def init(args, dir_output, script):
                 estimator=None,
         )
 
-        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        df_features = tr.fit_transform(df_features)
         features_name = list(df_features.columns)
         logger.info(f'Smart Correlated Selection with Spearman {leni} -> {len(features_name)}')
         leni = len(features_name)
+
+        print(features_name)
 
         tr = SmartCorrelatedSelection(
                 variables=None,
@@ -1144,11 +1139,13 @@ def init(args, dir_output, script):
                 estimator=None,
         )
         
-        df_features = tr.fit_transform(df_features, df['nbsinister'])
+        df_features = tr.fit_transform(df_features)
         features_name = list(df_features.columns)
         logger.info(f'Smart Correlated Selection with Kendall {leni} -> {len(features_name)}')
         leni = len(features_name)
         
+        print(features_name)
+
         check_and_create_path(dir_output / 'features_correlation')
 
         save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
@@ -1167,10 +1164,10 @@ def init(args, dir_output, script):
     ############################## Add varying time features #############################
 
     #if dataset_name == 'bdiff' and not find_df:
-    if not find_df:
-        logger.info(f'Adding time columns {10}')
-        logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
-        df, _ = add_time_columns(varying_time_variables, 20, df.copy(deep=True), train_features, features_name)
+    #if not find_df:
+    #    logger.info(f'Adding time columns {10}')
+    #    logger.info(f'WARNING: NO TIME COLUMN ARE ADDED')
+    #    df, _ = add_time_columns(varying_time_variables, 20, df.copy(deep=True), train_features, features_name)
 
     ################################ Drop all duplicate ############################
 
@@ -1190,9 +1187,11 @@ def init(args, dir_output, script):
     test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
 
     plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['fwi_mean'])
-    plt.savefig('test.png')
+    plt.savefig('test_fwi.png')
     plt.close('all')
-    
-    print('FIRE:', df['nbsinister_0_0'].unique())
+
+    plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['NDVI_mean'])
+    plt.savefig('test_NDIV.png')
+    plt.close('all')
 
     return df, graphScale, prefix, fp, features_name

@@ -16,6 +16,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                         graph_construct : str,
                         sinister_encoding : str,
                         newFeatures: list=[],
+                        changeFeature: list=[],
                         save : bool = True,
                         use_log=True) -> tuple:
     
@@ -138,17 +139,12 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
             X = np.empty((newShape, *mask.shape))
             
             if (dir_output / departement / f'X_{unDate}.pkl').is_file() and use_log:
-                if name2int[departement] < 50:
-                    continue
-                try:
-                    X = read_object(f'X_{unDate}.pkl', dir_output / departement)
-                    if newFeatures != []:
-                        if X.shape[0] == len(features_name):
-                            continue
-
+                X = read_object(f'X_{unDate}.pkl', dir_output / departement)
+                if newFeatures != []:
+                    if X.shape[0] != len(features_name):
                         X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], newFeatures,
                                                                         sinister, dataset_name, dir_train, dir_train,
-                                                                        resolution, graph_construct, sinister_encoding, newFeatures=[], save=False, use_log=False)
+                                                                        resolution, graph_construct, sinister_encoding, newFeatures=[], chanegFeatures=[], save=False, use_log=False)
                         
                         features_name_ori, newShape = get_features_name_lists_2D(graph.scale, [fet for fet in features if fet not in newFeatures])
 
@@ -163,11 +159,33 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                         X = new_X
                         if save:
                             save_object(X, f'X_{unDate}.pkl', dir_output / departement)
-    
-                    continue
+                                
+                if changeFeature != []:
+                    X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], changeFeature,
+                                                                    sinister, dataset_name, dir_train, dir_train,
+                                                                    resolution, graph_construct, sinister_encoding, newFeatures=[], changeFeature=[], save=False, use_log=False)
+                    plt.imshow(X2[3])
+                    plt.colorbar()
+                    plt.savefig(f'NDSI.png')
+                    plt.close('all')
+                    new_X = np.empty((X.shape[0], X.shape[1], X.shape[2]))
 
-                except:
-                    pass                
+                    for fet in features_name:
+                        if fet in features_name_2:
+                            new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
+                        else:
+                            new_X[features_name.index(fet)] = X[features_name.index(fet)]
+
+                    plt.imshow(new_X[features_name.index('NDSI')] )
+                    plt.colorbar()
+                    plt.savefig(f'NDSI_2.png')
+                    plt.close('all')
+                    
+                    X = new_X
+                    if save:
+                        save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+
+                continue
 
             if 'population' in features:
                 X[features_name.index('population'), :, :] = arrayPop

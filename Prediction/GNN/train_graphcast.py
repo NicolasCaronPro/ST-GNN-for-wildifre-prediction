@@ -162,10 +162,11 @@ if not QUICK:
                                                                                         dir_output,
                                                                                         args)
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    #varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
     features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
-
+    #features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
+    features_selected_str = features_name
+    
     features_selected_str = list(features_selected_str)
     features_selected = np.arange(0, len(features_selected_str))
     logger.info((features_selected_str, len(features_selected_str)))
@@ -227,17 +228,17 @@ else:
     val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
     test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
 
-    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
-    val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
-    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+    #train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
+    #test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_0_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
     features_selected_str = np.asarray(features_selected_str)
     features_selected_str = list(features_selected_str[:,0])
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    #varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
     features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
+    #features_selected_str = get_features_selected_for_time_series(features_selected_str, features_name, varying_time_variables_2)
 
     features_selected_str = list(features_selected_str)
     features_selected = np.arange(0, len(features_selected_str))
@@ -310,24 +311,6 @@ if name_exp.find('voting') != -1:
     #voting_models = []
     
     models = [
-            #('LSTM',   'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-departement-ID', 5),
-            #('LSTM',   'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_kappa', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            #('LSTM',   'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_kappa', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]
 
     staking_models = []
@@ -339,25 +322,19 @@ if name_exp.find('voting') != -1:
     
     gnn_models = [
                 #('graphCast', False, 'icospheres/icospheres_0_1.json.gz', 'search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                ('graphCast', False, 'icospheres/icospheres_0_1_2.json.gz', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                ('graphCast', False, 'icospheres/icospheres_0_1_2.json.gz', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('graphCast', False, 'icospheres/icospheres_0_1_2_3.json.gz', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+                ('graphCast', False, 'icospheres/icospheres_0_1_2_3.json.gz', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+                #('graphCastGRU', False, 'icospheres/icospheres_0_1_2_3.json.gz', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
                 ]
 else:
     models = [
-            #('LSTM', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_all_one_burnedarea-kmeans-5-Class-Dept-laplace+mean-Specialized_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]
 
     gnn_models = [
-            #('NetGCN', False, 'full_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('ST-GCN', False, 'full_proportion-on-zero-class_burnedarea-kmeans-5-Class-Dept-both_classification_weightedcrossentropy', 5),
-            #('ST-GCN', False, 'full_proportion-on-zero-class_burnedarea-max-0-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
     ]
-
     voting_models = []
 
-test_dataset_unscale['weight_nbsinister'] = 1
+#test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 train_loader = None
@@ -377,13 +354,12 @@ params = {
     "PATIENCE_CNT": PATIENCE_CNT,
     "CHECKPOINT": CHECKPOINT,
     "epochs": epochs,
-    "lr": lr,
+    "lr": 0.0005,
     "scaling": scaling,
     "encoding": encoding,
     "prefix": prefix,
     "Rewrite": Rewrite,
     "dir_output": dir_output,
-    "train_dataset_unscale": train_dataset_unscale,
     "graph": graphScale,
     "name_dir": name_dir,
     'k_days' : k_days,
@@ -398,6 +374,7 @@ if doTrain:
         params['infos'] = gnn_model[3]
         params['out_channels'] = gnn_model[4]
         params['torch_structure'] = 'Model_gnn'
+        params['n_run'] = gnn_model[-1]
 
         wrapped_train_deep_learning_1D(params)
 
@@ -464,8 +441,11 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                ('graphCast_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('graphCast_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+               #('graphCast_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+               #('graphCast_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+               ('graphCastGRU_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+               ('graphCastGRU_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
         ]
     elif graph_method == 'graph':
 
@@ -481,8 +461,8 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
-                            test_dataset_unscale_dept=test_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=None,
+                            test_dataset_unscale_dept=None,
                             test_name='all',
                             features_name=features_selected_str,
                             prefix_train=prefix,
@@ -490,7 +470,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / 'all' / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=['all'],
@@ -506,7 +485,7 @@ if doTest:
         aggregated_prediction.append(re)
 
     ####################################################### Test by departmenent ###################################################
-
+    test_dataset_unscale = None
     for dept in departements:
         if MLFLOW:
             dn = dataset_name
@@ -534,8 +513,8 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
-                            test_dataset_unscale_dept=test_dataset_unscale,
+            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=None,
+                            test_dataset_unscale_dept=None,
                             test_name=dept,
                             features_name=features_selected_str,
                             prefix_train=prefix,
@@ -543,7 +522,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=[dept],
@@ -596,7 +574,7 @@ if doTest:
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
-        #aggregated_prediction_dept.append(res_dept)
+        #aggregated_prediction_dept.append(res_dept)"""
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)

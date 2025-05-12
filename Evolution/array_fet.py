@@ -1,4 +1,5 @@
 default_features = [
+                'sentinel',
                 'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                 'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                 'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
@@ -6,7 +7,7 @@ default_features = [
                 'days_since_rain', 'sum_consecutive_rainfall',
                 'sum_rain_last_7_days',
                 'sum_snow_last_7_days', 'snow24h', 'snow24h16',
-                #'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7',
+                'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7',
                 'elevation',
                 'population',
                 'foret',
@@ -144,9 +145,9 @@ features_dict = {
     'sum_snow_last_7_days': 28,
     'snow24h': 29,
     'snow24h16': 30,
-    #'precipitationIndexN3': 31,
-    #'precipitationIndexN5': 32,
-    #'precipitationIndexN7': 33
+    'precipitationIndexN3': 31,
+    'precipitationIndexN5': 32,
+    'precipitationIndexN7': 33
 }
 
 elevation_dict = {
@@ -203,12 +204,21 @@ valeurs_cosia_couverture = {
     'Crop': 8,
 }
 
+valeur_sentinel = {
+    'NDVI' : 0,
+    'NDWI': 1,
+    'NDBI': 2,
+    'NDSI': 3,
+    'NDMI': 4,
+}
+
 lastState_dict = {
 'lastState' : 0,
 }
 
 # Ordre voulu
 ordered_sources = [
+    ('sentinel', valeur_sentinel),
     ('meteo', features_dict),
     ("elevation", elevation_dict),
     ("population", population_dict),

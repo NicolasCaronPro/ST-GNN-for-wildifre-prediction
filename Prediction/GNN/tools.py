@@ -3667,6 +3667,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     print(np.unique(y_true_fire_clipped))
     print(np.unique(y_pred_clipped))
     iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
+    precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+    f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
     y_pred_clipped_ytrue = np.copy(y_pred)
     y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
@@ -3682,6 +3684,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         "iou_wildfire_or_pred": iou_wildfire_or_pred,
         "iou_wildfire_and_pred": iou_wildfire_and_pred,
         "iou_wildfire_detected": iou_wildfire_detected,
+        "precision_wildfire_detected": precision_wildfire_detected,
+        "f1_wildfire_detected": f1_wildfire_detected,
         "iou_no_overestimation" : iou_no_overestimation,
         
         "over_bad_prediction" : over_prediction_zeros / union if union > 0 else np.nan,
@@ -3722,6 +3726,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
         iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_graph)
         y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
@@ -3751,6 +3757,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_no_overestimation_{i}": iou_no_overestimation,
             f"iou_{i}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
             f"iou_wildfire_detected_{i}": iou_wildfire_detected,
+            f"precision_wildfire_detected_{i}": precision_wildfire_detected,
+            f"f1_wildfire_detected_{i}": f1_wildfire_detected,
 
             # Ajout du Dice coefficient pour chaque itération
             f"dice_coefficient_{i}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
@@ -3795,6 +3803,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
         iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_season)
         y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
@@ -3815,6 +3825,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_no_overestimation_{s}": iou_no_overestimation,
             f"iou_{s}": intersection_season / union_season if union_season > 0 else np.nan,  # Pour éviter la division par zéro
             f"iou_wildfire_detected_{s}": iou_wildfire_detected,
+            f"precision_wildfire_detected_{s}": precision_wildfire_detected,
+            f"f1_wildfire_detected_{s}": f1_wildfire_detected,
 
             f"over_bad_prediction_local_{s}": over_prediction_zeros_season / union_season if union_season > 0 else np.nan,
             f"under_bad_prediction_local_{s}": under_prediction_zeros_season / union_season if union_season > 0 else np.nan,
@@ -3831,7 +3843,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     ###################################### For each graph_id in each season ####################################
     # Get unique seasons
     unique_seasons = np.unique(saison)
-
+    
     # Iterate over seasons
     for season in unique_seasons:
         # Mask for the current season
@@ -3861,6 +3873,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
             iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+            precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+            f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
             y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
             y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
@@ -3881,6 +3895,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
                 f"iou_no_overestimation_graph_{i}_season_{season}": iou_no_overestimation,
                 f"iou_graph_{i}_season_{season}": intersection_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
                 f"iou_wildfire_detected_graph_{i}_season_{season}": iou_wildfire_detected,
+                f"precision_wildfire_detected_graph_{i}_season_{season}": precision_wildfire_detected,
+                f"f1_wildfire_detected_graph_{i}_season_{season}": f1_wildfire_detected,
                 
                 f"dice_coefficient_graph_{i}_season_{season}": 2 * intersection_graph_season / (union_graph_season + intersection_graph_season) if (union_graph_season + intersection_graph_season) > 0 else np.nan,
 
@@ -3926,6 +3942,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         # Calcul de la métrique IOU
         #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
         iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
@@ -3957,6 +3975,9 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_or_pred_elt_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_{unique_value}": iou_no_overestimation,
+            f"precision_wildfire_detected_elt_{unique_value}": precision_wildfire_detected,
+            f"f1_wildfire_detected_elt_{unique_value}": f1_wildfire_detected,
+
 
             f"dice_coefficient_elt_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
 
@@ -4811,12 +4832,12 @@ def get_static_temporal_idx(features):
             static_idx.append(i)
             continue
         
-        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet:
+        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet or fet in calendar_variables or 'AutoRegression' in fet:
             temporal_idx.append(i)
             continue
 
         fet_name, _ = fet.split('_')
-        if fet_name in sentinel_variables or fet_name in landcover_variables or fet_name in foret_variables_name or \
+        if fet_name in landcover_variables or fet_name in foret_variables_name or \
               fet_name in cosia_variables or fet_name in osmnx_variables_name or fet_name in dynamic_world_variables or \
                 fet in elevation_variables or fet_name in population_variabes:
             static_idx.append(i)
@@ -4827,3 +4848,37 @@ def get_static_temporal_idx(features):
     #logger.info(f'Static features -> {np.asarray(features)[static_idx]}')
     #logger.info(f'Temporal features -> {np.asarray(features)[temporal_idx]}')
     return static_idx, temporal_idx
+
+
+def select_samples(df, n_samples=1000, kdays=5):
+    # S'assurer que le département est une string si besoin
+    df['departement'] = df['departement'].astype(str)
+    
+    # Nombre de départements
+    departments = df['departement'].unique()
+    n_departments = len(departments)
+    
+    # Combien de points par département ?
+    samples_per_dept = n_samples // n_departments
+    
+    selected_rows = []
+    
+    for dept in departments:
+        # Sous-échantillonner dans chaque département
+        df_dept = df[df['departement'] == dept]
+        
+        if len(df_dept) < samples_per_dept:
+            raise ValueError(f"Pas assez de données dans le département {dept}")
+        
+        # Tirage aléatoire de samples_per_dept dates
+        selected = df_dept.sample(n=samples_per_dept, random_state=42)
+        
+        # Pour chaque date sélectionnée, ajouter tous les points où date >= date_selec - kdays
+        for date_selec in selected['date']:
+            mask = (df_dept['date'] >= date_selec - kdays) & (df_dept['date'] <= date_selec)
+            selected_rows.append(df_dept[mask])
+    
+    # Concaténer toutes les sélections
+    final_selection = pd.concat(selected_rows).drop_duplicates()
+    
+    return final_selection

@@ -82,7 +82,7 @@ class Myloader():
         if not self.doDatabase and (dir_output_features / 'features.pkl').is_file():
             res_total = read_object('features.pkl', dir_output_features)
             #plot_feature_distributions(res_total, list(final_dict.keys()), dir_output_features, ['2018', '2019', '2020', '2021', '2022', '2023'])
-            return res_total, list(final_dict.keys())
+            #return res_total, list(final_dict.keys())
         else:
             for i, year in enumerate(['2018', '2019', '2020', '2021', '2022', '2023']):
                 res = []
@@ -118,6 +118,9 @@ class Myloader():
                             elif feature in cems_variables:
                                 data_features = data_features[:, :, allDates.index(f'{year}-05-01') : allDates.index(f'{year}-10-01')]
                                 data_features = np.nanmean(data_features, axis=-1)[np.newaxis, :, :]
+                            elif feature == 'sentinel':
+                                data_features = data_features[:, :, :, allDates.index(f'{year}-05-01') : allDates.index(f'{year}-10-01')]
+                                data_features = np.nanmean(data_features, axis=-1)
 
                         n_bands = data_features.shape[0]
 
@@ -152,8 +155,10 @@ class Myloader():
 
             save_object(res_total, 'features.pkl', dir_output_features)
         
+        print(len(list(final_dict.keys())))
         res = res_total[0]
-        test_res = [res_total[0][i] for i in range(res.shape[0])]
+
+        test_res = [res_total[0][i] for i in range(res.shape[0] - 1)]
         plot_matches_on_images(test_res, list(final_dict.keys()), cmap='plasma', figsize=(50,50), dir_output=dir_output_features, name=f'features_2018', colorbar=False)
         
         test_res = [res_total[1][i] for i in range(res.shape[0])]
@@ -165,7 +170,7 @@ class Myloader():
         test_res = [res_total[3][i] for i in range(res.shape[0])]
         plot_matches_on_images(test_res, list(final_dict.keys()), cmap='plasma', figsize=(50,50), dir_output=dir_output_features, name=f'features_2021', colorbar=False)
 
-        test_res = [res_total[4][i] for i in range(res.shape[0])]
+        test_res = [res_total[4][i] for i in range(res.shape[0] - 1)]
         plot_matches_on_images(test_res, list(final_dict.keys()), cmap='plasma', figsize=(50,50), dir_output=dir_output_features, name=f'features_2022', colorbar=False)
 
         test_res = [res_total[5][i] for i in range(res.shape[0])]
@@ -229,7 +234,7 @@ class Myloader():
             rule_image[valid_mask] = rules
 
             self.valid_transitions_dict = {0 : [0, 2],
-                                           1 : [0, 2], 
+                                           1 : [0, 2],
                                            2 : [3, 1],
                                            3 : [3, 1]}
 

@@ -25,7 +25,8 @@ departements = [
     (87, 'Haute-Vienne'), (88, 'Vosges'), (89, 'Yonne'), (90, 'Territoire-de-Belfort'),
     (91, 'Essonne'), (92, 'Hauts-de-Seine'), (93, 'Seine-Saint-Denis'), (94, 'Val-de-Marne'),
     (95, 'Val-d-Oise'), (971, 'Guadeloupe'), (972, 'Martinique'), (973, 'Guyane'),
-    (974, 'La Reunion'), (976, 'Mayotte')
+    (974, 'La Reunion'), (976, 'Mayotte'),
+    (101, 'Haute-Corse'), (100, 'Corse-du-sud')
 ]
 
 int2str = {code: name.lower().replace("'", "-") for code, name in departements}
@@ -71,6 +72,7 @@ departements = [
     '91-essonne', '92-hauts-de-seine', '93-seine-saint-denis', '94-val-de-marne',
     '95-val-d-oise', '971-guadeloupe', '972-martinique', '973-guyane',
     '974-la-reunion', '976-mayotte'
+    '100-corse-du-sud', '101-huate-corse'
 ]
 
 # Départements déjà définis
@@ -177,7 +179,9 @@ dico_foret_url = {
     "departement-92-hauts-de-seine": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D092_2018-01-15/BDFORET_2-0__SHP_LAMB93_D092_2018-01-15.7z",
     "departement-93-seine-saint-denis": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D093_2018-01-15/BDFORET_2-0__SHP_LAMB93_D093_2018-01-15.7z",
     "departement-94-val-de-marne": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D094_2017-10-04/BDFORET_2-0__SHP_LAMB93_D094_2017-10-04.7z",
-    "departement-95-val-d-oise": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D095_2015-04-01/BDFORET_2-0__SHP_LAMB93_D095_2015-04-01.7z"
+    "departement-95-val-d-oise": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D095_2015-04-01/BDFORET_2-0__SHP_LAMB93_D095_2015-04-01.7z",
+    "departement-100-corse-du-sud": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D02A_2017-05-10/BDFORET_2-0__SHP_LAMB93_D02A_2017-05-10.7z",
+    "departement-101-haute-corse": "https://data.geopf.fr/telechargement/download/BDFORET/BDFORET_2-0__SHP_LAMB93_D02B_2016-02-16/BDFORET_2-0__SHP_LAMB93_D02B_2016-02-16.7z"
 }
 
 

@@ -161,10 +161,10 @@ if not QUICK:
                                                                                         dir_output,
                                                                                         args)
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
+    #varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
     features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
-
+    #features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
+    features_selected_str = features_selected
     features_selected_str = list(features_selected_str)
     features_selected = np.arange(0, len(features_selected_str))
     logger.info((features_selected_str, len(features_selected_str)))
@@ -314,32 +314,17 @@ if name_exp.find('voting') != -1:
     #voting_models = []
 
     models = [
-            #('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy-departement-ID', 5),
-            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
-            ('LSTM',   'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('LSTM',   'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM',   'search_full_3_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM',   'search_full_2_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM',   'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('LSTM', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('GRU', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('NetMLP', 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('DilatedCNN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('graphCast_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-            #('LSTM',   'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_kappa', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_mcewk', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_ordinal-dice', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_dice', 5),
-            #('NetMLP', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('NetMLP', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('LSTM', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('GRU', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('NetMLP', 'search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                ('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('graphCast_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
             ]
     
     staking_models = []
@@ -350,30 +335,13 @@ if name_exp.find('voting') != -1:
         ]
     
     gnn_models = [
-                #('MultiScaleGraph', False, generate_graph_list(scale, graphScale.base, graphScale.graph_method, dir_output),
-                # 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 10),
-                # ('MultiScaleAttentionGraph', False, generate_graph_list(scale, graphScale.base, graphScale.graph_method, dir_output),
-                # 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 10),
-                #('graphCast', False, 'icospheres/icospheres_0_1.json.gz', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                ('SepLSTMGNN', False, None,'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                ('SepLSTMGNN', False, None,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGCN', False, None,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGAT', False, None ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGATLSTM', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGCN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGAT', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('NetGCN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                
-                
-                ('SepLSTMGNN', False, None,'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                ('SepLSTMGNN', False, None,'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('graphCast', False, 'icospheres/icospheres_0_1_2_3_4_5_6.json.gz', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('SepLSTMGNN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGAT', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('STGATLSTM', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-                #('DSTGAT', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('LSTMGNNFeedback', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('LSTMGNNFeedback', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+
+                #('SepLSTMGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+                #('SepLSTMGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+
+                #('NetGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
                 #('NetGCN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
                 ]
 else:
@@ -578,20 +546,43 @@ if doTest:
     dir_output = Path(name_dir)
 
     if graph_method == 'node':
-
+        
         models = [
                 ('LSTM_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('DilatedCNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('SepLSTMGNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                
+                ('LSTM_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                ('LSTM_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                #('SepLSTMGNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('LSTMGNNFeedback_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetGCN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('graphCast_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
                 ('LSTM_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('GRU_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('NetMLP_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('DilatedCNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('SepLSTMGNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                ('LSTM_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                ('LSTM_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('DilatedCNN_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                
+                #('SepLSTMGNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('LSTMGNNFeedback_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('NetGCN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #('graphCast_search_full_0_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
+
     elif graph_method == 'graph':
 
         models = [
@@ -725,6 +716,7 @@ if doTest:
     df_metrics.reset_index(drop=True, inplace=True)
     
     check_and_create_path(dir_output / prefix)
+    print(f'Saving metrics at {dir_output / prefix}/df_metrics_{graph_method}.csv')
     df_metrics.to_csv(dir_output / prefix / f'df_metrics_{graph_method}.csv')
  
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')

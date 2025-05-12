@@ -248,6 +248,11 @@ else:
     train_dataset = add_past_risk(train_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
     test_dataset = add_past_risk(test_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
     val_dataset = add_past_risk(val_dataset, 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'burnedarea')
+    
+
+    train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
+    test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
+    val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
 
     save_object(train_dataset, 'df_train_'+prefix+'.pkl', dir_output)
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
@@ -313,18 +318,28 @@ if name_exp.find('voting') != -1:
     
     #voting_models = []
 
-    models = [
-            #('GRU', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            ('GRU', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            #('GRU', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            ('GRU', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            ]
-    
+    if days_in_futur == 0:
+        models = [
+                ('GRU', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+                #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
+                ]
+        
+    elif days_in_futur == 7:
+        models = [
+            ('GRU', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
+        ]
+    elif days_in_futur == 15:
+        models = [
+            ('GRU', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
+        ]
+    elif days_in_futur == 31:
+        models = [
+            ('GRU', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
+        ]
+        
     staking_models = []
     federated_models = [
         ]
@@ -464,6 +479,7 @@ if doTrain:
         global_params['infos'] = gnn_model[3]
         global_params['out_channels'] = gnn_model[4]
         global_params['torch_structure'] = 'Model_gnn'
+        global_params['n_run'] = gnn_model[-1]
 
         wrapped_train_deep_learning_1D(global_params)
 
@@ -474,6 +490,7 @@ if doTrain:
             global_params['out_channels'] = model[2]
             global_params['use_temporal_as_edges'] = None
             global_params['torch_structure'] = 'Model_Torch'
+            global_params['n_run'] = model[-1]
             
             wrapped_train_deep_learning_1D(global_params)
 
@@ -482,6 +499,7 @@ if doTrain:
         global_params['out_channels'] = models[2]
         global_params['use_temporal_as_edges'] = None
         global_params['torch_structure'] = 'Model_Torch'
+        global_params['n_run'] = model[-1]
         
         wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
                             val_dataset=val_dataset.copy(deep=True),
@@ -530,15 +548,28 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                ('GRU_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+            
                 ('GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                ('GRU_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('GRU_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('GRU_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
                 ('GRU_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('GRU_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
                 ('GRU_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('GRU_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                ('GRU_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw'),
+                ('GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw'),
+                ('GRU_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_cdw'),
+                
+                ('GRU_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw'),
+                ('GRU_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw'),
+                ('GRU_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_cdw'),
+
+                ('GRU_search_full_5_all_one_nbsinister-binary_classification_weightedcrossentropy'),
+                ('GRU_search_full_10_all_one_nbsinister-binary_classification_weightedcrossentropy'),
+                ('GRU_search_full_15_all_one_nbsinister-binary_classification_weightedcrossentropy'),
+
+                #('GRU_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
 
     elif graph_method == 'graph':
@@ -580,7 +611,7 @@ if doTest:
 
     ####################################################### Test by departmenent ###################################################
 
-    """for dept in departements:
+    for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
@@ -616,7 +647,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=[dept],
@@ -669,7 +699,7 @@ if doTest:
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
-        #aggregated_prediction_dept.append(res_dept)"""
+        #aggregated_prediction_dept.append(res_dept)
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)

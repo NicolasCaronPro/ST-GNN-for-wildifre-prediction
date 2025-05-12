@@ -115,11 +115,13 @@ class GraphStructure():
                     self.create_geometry_with_watershed(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date)
                 elif 'regular' in vec_base:
                     self.create_geometry_with_regular(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
+                elif 'companie' in vec_base:
+                    self.create_geometry_with_companie(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
 
             current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])]) + 1
             logger.info(f'{dept} Unique cluster : {np.unique(self.graph_ids[mask])}, {current_cluster}. {node_already_predicted}')
             node_already_predicted = current_cluster
-            
+
         self.oriIds = self.oriIds[~np.isnan(self.graph_ids)]
         self.oriLatitudes = self.oriLatitudes[~np.isnan(self.graph_ids)].reset_index(drop=True)
         self.oriGeometry = self.oriGeometry[~np.isnan(self.graph_ids)]
@@ -340,6 +342,19 @@ class GraphStructure():
         pred = watershed(-data, markers, mask=data, connectivity=1)
         self._save_feature_image(path, dept, f'pred_watershed_{image_type}', pred, raster)
         return pred
+
+    def create_geomtry_with_companie(self, dept, vec_base, path, sinister, dataset_name,
+                                       sinister_encoding, resolution, mask, node_already_predicted, train_date):
+            
+            dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+            dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
+            companie_geo = gpd.GeoDataFrame(dir_geo / 'companie.geojson')
+            pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'companie', dir_output='')
+            raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+            assert raster is not None
+            raster = raster[0]
+            pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
+            self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
     def create_geometry_with_watershed(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):

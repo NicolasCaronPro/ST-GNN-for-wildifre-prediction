@@ -62,7 +62,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'precipitationIndexN3', 'precipitationIndexN5', 'precipitationIndexN7',
                     'elevation',
                     'population',
-                    #'sentinel',
+                    'sentinel',
                     'foret_encoder',
                     'argile_encoder',
                     'id_encoder',
@@ -78,7 +78,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     #'air',
                     #'nappes',
                     #'AutoRegressionReg',
-                    'AutoRegressionBin',
+                    #'AutoRegressionBin',
                 ]
 
     elif dataset_name == 'firemen':
@@ -111,7 +111,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
                     'air',
                     'nappes',
                     #'AutoRegressionReg',
-                   'AutoRegressionBin',
+                    #'AutoRegressionBin',
                 ]
           
         elif sinister == 'inondation':

@@ -1288,7 +1288,7 @@ def raster_cosia(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, re
     cosia.loc[cosia[cosia['numero'] == 10].index, 'numero'] = 5
     cosia.loc[cosia[cosia['numero'] == 9].index, 'numero'] = 6
     cosia.loc[cosia[cosia['numero'] == 15].index, 'numero'] = 7
-    cosia.loc[cosia[cosia['numero'].isin([14, 17])].index, 'numero'] = 8
+    cosia.loc[cosia[cosia['numero'].isin([14, 17, 16])].index, 'numero'] = 8
 
     cosia = rasterisation(cosia, reslat, reslon, 'numero', defval=0, name=dept)
     cosia = resize_no_dim(cosia, tifFile_high.shape[0], tifFile_high.shape[1])
@@ -1500,8 +1500,10 @@ def raster_sat_from_france(base, geo, dir_output, dir_france, dates):
     size = '30m'
     res = np.full((5, base.shape[0], base.shape[1], len(dates)), np.nan)
     minusMask = np.argwhere(np.isnan(base))
+    
+    polygons = unary_union(geo.geometry) 
 
-    for tifFile in dir_france.glob('sentinel/*.tif'):
+    for tifFile in dir_france.glob('*.tif'):
         tifFile = tifFile.as_posix()
         dateFile = tifFile.split('/')[-1]
         date = dateFile.split('.')[0]
@@ -1514,7 +1516,7 @@ def raster_sat_from_france(base, geo, dir_output, dir_france, dates):
 
         with rasterio.open(tifFile) as src:
             # Masquage par polygone
-            out_image, out_transform = mask(src, [geo], crop=True)
+            out_image, out_transform = mask(src, [polygons], crop=True, nodata=np.nan)
             out_image = out_image.astype(np.float32)
             out_image[out_image == src.nodata] = np.nan
 
@@ -1522,20 +1524,37 @@ def raster_sat_from_france(base, geo, dir_output, dir_france, dates):
             for b in range(out_image.shape[0]):
                 # Crée un tableau vide pour le résultat interpolé
                 target = np.full(base.shape, np.nan, dtype=np.float32)
-                reproject(
+
+                #plt.imshow(out_image[b])
+                #plt.show()
+
+                """reproject(
                     source=out_image[b],
                     destination=target,
                     src_transform=out_transform,
                     src_crs=src.crs,
                     dst_transform=from_origin(0, 0, 1, 1),  # Remplacer si nécessaire
                     dst_crs=src.crs,
-                    resampling=Resampling.bilinear
-                )
-                res[b, :, :, i] = target
+                    resampling=Resampling.nearest
+                )"""
+
+                target = resize_no_dim(out_image[b], base.shape[0], base.shape[1])
+                #target[np.isnan(base)] = np.nan
+                #plt.imshow(target)
+                #plt.show()
+
+                if i + 8 > res.shape[-1]:
+                    length = res.shape[-1] - i - 1
+                    target = np.repeat(target[:, :, np.newaxis], length, axis=-1)
+                    res[b, :, :, i:-1] = target
+                else:
+                    target = np.repeat(target[:, :, np.newaxis], 8, axis=-1)
+                    res[b, :, :, i:i+8] = target
 
     # Masque les pixels NaN d'origine
     res[:, minusMask[:, 0], minusMask[:, 1], :] = np.nan
 
+    print(dir_output)
     outputName = 'sentinel.pkl'
     with open(dir_output / outputName, "wb") as f:
         pickle.dump(res, f)

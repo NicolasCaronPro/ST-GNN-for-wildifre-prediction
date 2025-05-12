@@ -56,7 +56,7 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
-QUICK = False
+QUICK = True
 
 # Input config
 dataset_name = args.dataset
@@ -233,9 +233,9 @@ else:
     val_dataset = read_object(f'df_val_{prefix}.pkl', dir_output)
     test_dataset = read_object(f'df_test_{prefix}.pkl', dir_output)
 
-    train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
+    """train_dataset_unscale = read_object(f'df_unscaled_train_{prefix}.pkl', dir_output)
     val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
-    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
+    test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)"""
 
     features_selected_str = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
     features_selected_str = np.asarray(features_selected_str)
@@ -296,7 +296,7 @@ if name_exp.find('voting') != -1:
     models = [
             #('Zhang', True, False, 'search_full_10_15_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
             #('ConvLSTM', True, False, 'search_full_10_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
-            ('ResNet', True, False, 'search_full_10_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
+            ('ResNet', True, None, 'search_full_0_30_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
             ]
     
     staking_models = []
@@ -315,7 +315,7 @@ else:
 
     voting_models = []
 
-test_dataset_unscale['weight_nbsinister'] = 1
+#test_dataset_unscale['weight_nbsinister'] = 1
 test_dataset['weight'] = 1
 
 train_loader = None
@@ -338,7 +338,7 @@ params = {
     "prefix": prefix,
     "Rewrite": Rewrite,
     "dir_output": dir_output,
-    "train_dataset_unscale": train_dataset_unscale,
+    "train_dataset_unscale": None,
     "features_name_1D": features_name,
     "features_selected_2D": features_selected,
     "features_name_2D": features_selected_str,

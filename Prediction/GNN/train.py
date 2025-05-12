@@ -173,7 +173,7 @@ def get_model_params(model_type):
 def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                              nbfeatures,
                       features, name, model_type, task_type, 
-                      params, loss, under_sampling, over_sampling, post_process):
+                      params, loss, under_sampling, over_sampling, post_process, n_run):
     
     if model_type == 'xgboost':
         #dval = xgb.DMatrix(df_val[features], label=df_val[target], weight=df_val[weight_col])
@@ -252,7 +252,7 @@ def get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                       params=params, loss=loss,
                       under_sampling=under_sampling,
                       over_sampling=over_sampling,
-                      target_name=target, post_process=post_process)
+                      target_name=target, post_process=post_process, n_run=n_run)
     return model, fit_params
 
 def explore_features(model,
@@ -443,9 +443,9 @@ def fit(params):
                     id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values), ('month_non_encoder', df_val['month_non_encoder'].values)])
     else:
         logger.info(f'Fitting model {name}')
-        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[target],
-                    X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[target],
-                    X_test=df_test[features], y_test=df_test[target],
+        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + [target]],
+                    X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + [target]],
+                    X_test=df_test[features], y_test=df_test[ids_columns + [target]],
                     y_test_score=df_test['nbsinister-kmeans-5-Class-Dept'],
                     y_train_score=df_train['nbsinister-kmeans-5-Class-Dept'],
                     y_val_score=df_val['nbsinister-kmeans-5-Class-Dept'],
@@ -536,6 +536,7 @@ def train_sklearn_api_model(params):
     grid_params = params['grid_params']
     post_process = params['post_process']
     nbfeatures = params['nbfeatures']
+    n_run = params['run']
 
     df_train, df_val, df_test = create_weight_binary(df_train, df_val, df_test, use_weight=True)
 
@@ -545,7 +546,7 @@ def train_sklearn_api_model(params):
     model, fit_params = get_model_and_fit_params(df_train, df_val, df_test, target, weight_col,
                                                  nbfeatures,
                                         relevant_features, name, model_type, task_type, 
-                                        model_params, loss, under_sampling, over_sampling, post_process)
+                                        model_params, loss, under_sampling, over_sampling, post_process, n_run)
     
     fit_params_dict = {
         'df_train': df_train,
@@ -562,7 +563,7 @@ def train_sklearn_api_model(params):
         'dir_output': dir_output,
         'type_aggregation' : params['type_aggregation'],
         'col_id' : params['col_id'],
-        'training_mode':training_mode
+        'training_mode':training_mode,
     }
 
     fit(fit_params_dict)
@@ -672,7 +673,8 @@ def train_xgboost(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_logistic_regression(params, train=True):
@@ -734,7 +736,8 @@ def train_logistic_regression(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation': params['type_aggregation'],
-        'col_id': params['col_id']
+        'col_id': params['col_id'],
+        'run' : params['run']
     })
 
 def train_ordered(params, train=True):
@@ -786,7 +789,8 @@ def train_ordered(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation': params['type_aggregation'],
-        'col_id': params['col_id']
+        'col_id': params['col_id'],
+        'run' : params['run']
     })
 
 def train_catboost(params, train=True):
@@ -867,7 +871,8 @@ def train_catboost(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation': params['type_aggregation'],
-        'col_id': params['col_id']
+        'col_id': params['col_id'],
+        'run' : params['run']
     })
 
 def train_ngboost(params, train=True):
@@ -936,7 +941,8 @@ def train_ngboost(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation': params['type_aggregation'],
-        'col_id': params['col_id']
+        'col_id': params['col_id'],
+        'run' : params['run']
     })
 
 def train_lightgbm(params, train=True):
@@ -1001,7 +1007,8 @@ def train_lightgbm(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_svm(params, train=True):
@@ -1049,7 +1056,8 @@ def train_svm(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_random_forest(params, train=True):
@@ -1102,7 +1110,8 @@ def train_random_forest(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_decision_tree(params, train=True):
@@ -1151,7 +1160,8 @@ def train_decision_tree(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_poisson(params, train=True):
@@ -1202,7 +1212,8 @@ def train_poisson(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def train_gam(params, train=True):
@@ -1261,7 +1272,8 @@ def train_gam(params, train=True):
         'model_params': model_params,
         'grid_params': grid_params,
         'type_aggregation' : params['type_aggregation'],
-        'col_id' : params['col_id']
+        'col_id' : params['col_id'],
+        'run' : params['run']
     })
 
 def search_best_model(model_list, config, train_dataset, val_dataset, test_dataset,
@@ -1362,9 +1374,10 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
         'do_grid_search': do_grid_search,
         'do_bayes_search': do_bayes_search,
         'name': model[0],
-        'post_process' : model[-1],
-        'type_aggregation' : model[-3],
-        'col_id' : model[-2]
+        'post_process' : model[-2],
+        'type_aggregation' : model[-4],
+        'col_id' : model[-3],
+        'run' : model[-1]
     }
 
     if name == 'xgboost':
@@ -1483,7 +1496,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         
         model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight', nbfeatures,
                                         features, modelt, model_type, task_type, 
-                                        params, loss, under_sampling=under_sampling, over_sampling=over_sampling, post_process=None)
+                                        params, loss, under_sampling=under_sampling, over_sampling=over_sampling, post_process=None, n_run=1)
         
         grid_params = get_grid_params(model_type)
         
@@ -1609,7 +1622,7 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
 
     model1, fit_params1 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                     features, model[0], model_type_1, task_type,
-                                    params, loss, under_sampling=under_sampling, post_process=None)
+                                    params, loss, under_sampling=under_sampling, post_process=None, n_run=1)
     
     ##########################################  Multi classification ###########################
 
@@ -1638,7 +1651,7 @@ def wrapped_train_sklearn_api_dual_model(train_dataset, val_dataset, test_datase
 
     model2, fit_params2 = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                     features, model[0], model_type_2, task_type, 
-                                    params, loss, under_sampling='full', post_process=None)
+                                    params, loss, under_sampling='full', post_process=None, n_run=1)
     
     models_list = [model1, model2]
     fit_params_list = [fit_params1, fit_params2]
@@ -1750,7 +1763,7 @@ def wrapped_train_sklearn_api_stacked_model_list(train_dataset, val_dataset, tes
         
         model_i, fit_params = get_model_and_fit_params(train_dataset, val_dataset, test_dataset, target, 'weight',
                                         features, modelt, model_type, task_type, 
-                                        params, loss, under_sampling=under_sampling, post_process=None)
+                                        params, loss, under_sampling=under_sampling, post_process=None, n_run=1)
         
         grid_params = get_grid_params(model_type)
         

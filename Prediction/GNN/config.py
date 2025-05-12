@@ -389,7 +389,7 @@ veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
             in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
-#device = torch.device("cpu") # The device on which we train each models
+device = torch.device("cpu") # The device on which we train each models
 Rewrite = True
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used
@@ -397,9 +397,9 @@ encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
 epochs = 10000
-lr = 0.000005
-PATIENCE_CNT = 50
-CHECKPOINT = 50
+lr = 0.00005
+PATIENCE_CNT = 25
+CHECKPOINT = 25
 batch_size = 256
 
 METHODS_TEMPORAL = ['mean', 'min', 'max',
@@ -436,6 +436,7 @@ METHODS_KMEANS_TRAIN = ['mean', 'min', 'max',
 
 num_lstm_layers = 1
 dropout = 0.03
+activation = 'ReLU'
 
 sklearn_model_list = ['xgboost', 'lightgbm', 'svm', 'rf', 'dt', 'ngboost']
 models_2D = ['Zhang', 'Unet', 'ConvLSTM', 'ResNet']
