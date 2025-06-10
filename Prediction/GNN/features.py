@@ -203,6 +203,7 @@ def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
     if isInference:
         train_features.pop(train_features.index('sentinel'))
         train_features.pop(train_features.index('dynamicWorld'))
+        train_features.pop(train_features.index('air'))
 
     return features, train_features, kmeans_features
 
@@ -305,6 +306,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
 def get_sub_nodes_feature(graph, subNode: np.array,
                         departements : list,
                         features : list, sinister : str, dataset_name: str, sinister_encoding :str,
+                        name_expe : str,
                         path : Path,
                         dir_train : Path,
                         resolution : str, use_log = True) -> np.array:
@@ -389,7 +391,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     def save_value_with_encoding(array, band, indexNode, mask, encoder):
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
-        indexVar = features_name.index(f'{band}')        
+        indexVar = features_name.index(f'{band}')
         X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
 
     X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
@@ -397,20 +399,20 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     X[:,:subNode.shape[1]] = subNode
     dir_encoder = dir_train / 'Encoder'
 
-    encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-    encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
-    encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
-    encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
-    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
-    encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
-    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
-
+    encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
+    encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
+    encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
-        encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
+        encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
         
     if 'Geo' in features:
-        encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
+        encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
 
     dir_mask = path / 'raster'
     logging.info(f'Shape of X {X.shape}, {np.unique(X[:,departement_index])}')
@@ -432,7 +434,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
         print(np.unique(mask), np.unique(nodeDepartement[:, id_index]))
         print(np.unique(mask_graph), np.unique(nodeDepartement[:, graph_id_index]))
-
+        use_log = False
         if use_log and (path / 'log' / f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl').is_file():
             try:
                 X_dept = read_object(f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')

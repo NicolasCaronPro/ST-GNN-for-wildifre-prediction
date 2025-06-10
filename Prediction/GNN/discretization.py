@@ -1243,14 +1243,14 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     if graph.sequences_month is None:
         graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
 
-    #conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
-    conv_types = ['cubic']
+    conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
+    #conv_types = ['cubic']
 
     kernels = ['Specialized', 1, 3, 5]
-    """
-    n_clusters = 3
+    
+    n_clusters = 5
 
-    for conv_type in conv_types:
+    """for conv_type in conv_types:
         for kernel in kernels:
             logger.info(f"Testing with convolution type: {conv_type}")
 

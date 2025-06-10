@@ -311,7 +311,7 @@ if name_exp.find('voting') != -1:
     else:
         voting_models = []
     
-    #voting_models = []
+    voting_models = []
 
     models = [
             ]
@@ -337,24 +337,24 @@ if name_exp.find('voting') != -1:
     
     if days_in_futur == 0:
         gnn_models = [
-            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
-            ('SepGRUGNN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('SepGRUGNN', False, None, 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
                 ]
         
     elif days_in_futur == 7:
         gnn_models = [
-            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
-            ('SepGRUGNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('SepGRUGNN', False, None, 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
         ]
     elif days_in_futur == 15:
         gnn_models = [
-            ('SepGRUGNN', False, None, 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
-            ('SepGRUGNN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            ('SepGRUGNN', False, None, 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('SepGRUGNN', False, None, 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
         ]
     elif days_in_futur == 31:
         gnn_models = [
-            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
-            ('SepGRUGNN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
+            ('SepGRUGNN', False, None, 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('SepGRUGNN', False, None, 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 5),
         ]
     
 else:
@@ -562,12 +562,13 @@ if doTest:
             ('SepGRUGNN_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
             ('SepGRUGNN_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-            ('SepGRUGNN_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-            ('SepGRUGNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-            ('SepGRUGNN_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-            ('SepGRUGNN_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+            #('SepGRUGNN_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+            #('SepGRUGNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+            #('SepGRUGNN_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+            #('SepGRUGNN_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
         ]
+        
     elif graph_method == 'graph':
 
         models = [

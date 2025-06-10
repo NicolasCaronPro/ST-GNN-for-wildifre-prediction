@@ -15,6 +15,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                         resolution : str, 
                         graph_construct : str,
                         sinister_encoding : str,
+                        name_exp: str,
                         newFeatures: list=[],
                         changeFeature: list=[],
                         save : bool = True,
@@ -22,7 +23,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
     
     # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
 
-    dir_output = dir_train / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}'
+    dir_output = dir_train / f'2D_database'
 
     assert graph.nodes is not None
 
@@ -34,19 +35,19 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
     dir_encoder = dir_train / 'Encoder'
 
     if dataset_name != 'bdiff':
-        encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
-    encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
-    encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
-    encoder_ids = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
-    encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
-    encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
+        encoder_landcover = read_object(f'encoder_landcover_{name_exp}.pkl', dir_encoder)
+    encoder_osmnx = read_object(f'encoder_osmnx.pkl_{name_exp}', dir_encoder)
+    encoder_foret = read_object(f'encoder_foret_{name_exp}.pkl', dir_encoder)
+    encoder_ids = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_exp}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_exp}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_exp}.pkl', dir_encoder)
 
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
-        encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
+        encoder_calendar = read_object(f'encoder_calendar_{name_exp}.pkl', dir_encoder)
 
     if 'Geo' in features:
-        encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
+        encoder_geo = read_object(f'encoder_geo_{name_exp}.pkl', dir_encoder)
 
     dir_mask = path / 'raster'
 
@@ -206,37 +207,43 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 #logger.info('Foret landcover')
                 assert encoder_foret is not None
                 assert arrayForetLandcover is not None
-                X[features_name.index('foret_encoder'), :, :] = encoder_foret.transform(arrayForetLandcover.reshape(-1,1)).values.reshape(arrayForetLandcover.shape)
+                #X[features_name.index('foret_encoder'), :, :] = encoder_foret.transform(arrayForetLandcover.reshape(-1,1)).values.reshape(arrayForetLandcover.shape)
+                X[features_name.index('foret_encoder'), :, :] = arrayForetLandcover
 
             if 'landcover_encoder' in features:
                 #logger.info('Dynamic World landcover')
                 assert encoder_landcover is not None
                 assert arrayLand is not None
-                X[features_name.index('landcover_encoder'), :, :] = encoder_landcover.transform(arrayLand.reshape(-1,1)).values.reshape(arrayLand.shape)
+                #X[features_name.index('landcover_encoder'), :, :] = encoder_landcover.transform(arrayLand.reshape(-1,1)).values.reshape(arrayLand.shape)
+                X[features_name.index('landcover_encoder'), :, :] = arrayLand
 
             if 'highway_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert arrayForetLandcover is not None
                 assert arrayOSLand is not None
-                X[features_name.index('highway_encoder'), :, :] = encoder_osmnx.transform(arrayOSLand.reshape(-1,1)).values.reshape(arrayOSLand.shape)
+                #X[features_name.index('highway_encoder'), :, :] = encoder_osmnx.transform(arrayOSLand.reshape(-1,1)).values.reshape(arrayOSLand.shape)
+                X[features_name.index('highway_encoder'), :, :] = arrayOSLand
 
             if 'argile_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert encoder_argile is not None
                 assert arrayARLand is not None
-                X[features_name.index('argile_encoder'), :, :] = encoder_argile.transform(arrayARLand.reshape(-1,1)).values.reshape(arrayARLand.shape)
+                #X[features_name.index('argile_encoder'), :, :] = encoder_argile.transform(arrayARLand.reshape(-1,1)).values.reshape(arrayARLand.shape)
+                X[features_name.index('argile_encoder'), :, :] = arrayARLand
 
             if 'id_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert encoder_ids is not None
                 assert mask_node is not None
-                X[features_name.index('id_encoder'), :, :] = encoder_ids.transform(mask_node.reshape(-1,1)).values.reshape(mask_node.shape)
+                #X[features_name.index('id_encoder'), :, :] = encoder_ids.transform(mask_node.reshape(-1,1)).values.reshape(mask_node.shape)
+                X[features_name.index('id_encoder'), :, :] = 0
 
             if 'cosia_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert encoder_cosia is not None
                 assert arrayCosiaLandcover is not None
-                X[features_name.index('cosia_encoder'), :, :] = encoder_cosia.transform(arrayCosiaLandcover.reshape(-1,1)).values.reshape(mask.shape)
+                #X[features_name.index('cosia_encoder'), :, :] = encoder_cosia.transform(arrayCosiaLandcover.reshape(-1,1)).values.reshape(mask.shape)
+                X[features_name.index('cosia_encoder'), :, :] = arrayCosiaLandcover
 
             #logger.info('Calendar')
             if 'Calendar' in features:
@@ -383,9 +390,10 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 #array = read_object(f'{departement}_{graph.scale}.pkl', dir_train / 'time_series_clustering')
                 #X[features_name.index('region_class'), :, :] = array
                 unode = np.unique(nodeDepartement[:, 0])
-                for node in unode:
-                    masknode = np.argwhere(mask == node)
-                    X[features_name.index('cluster_encoder'), masknode[:, 0], masknode[:, 1]] = df[(df['id'] == node)][f'cluster_encoder'].values[0]
+                X[features_name.index('cluster_encoder')] = 0
+                #for node in unode:
+                #    masknode = np.argwhere(mask == node)
+                #    X[features_name.index('cluster_encoder'), masknode[:, 0], masknode[:, 1]] = df[(df['id'] == node)][f'cluster_encoder'].values[0]
                 #del array
             
             if save:

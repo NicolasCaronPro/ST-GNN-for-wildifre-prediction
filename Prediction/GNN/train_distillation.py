@@ -18,7 +18,7 @@ import argparse
 parser = argparse.ArgumentParser(
     prog='Train',
     description='Create graph and database according to config.py and tained model',
-)
+) 
 parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
 parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
 parser.add_argument('-s', '--sinister', type=str, help='Sinister type')

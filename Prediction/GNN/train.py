@@ -435,20 +435,20 @@ def fit(params):
 
     if isinstance(model, ModelVoting) or isinstance(model, ModelStacking):
         logger.info(f'Fitting model {name}')
-        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[target],
-                  X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[target],
-                  X_test=df_test[features], y_test=df_test[target],
+        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + target],
+                  X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + target],
+                  X_test=df_test[features], y_test=df_test[ids_columns + target],
                     optimization=parameter_optimization_method,
                     grid_params_list=grid_params, fit_params_list=fit_params,
-                    id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values), ('month_non_encoder', df_val['month_non_encoder'].values)])
+                    id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values), ('month_non_encoder', df_val['month_non_encoder'].values)], ids_columns = ids_columns)
     else:
         logger.info(f'Fitting model {name}')
         model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + [target]],
                     X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + [target]],
                     X_test=df_test[features], y_test=df_test[ids_columns + [target]],
-                    y_test_score=df_test['nbsinister-kmeans-5-Class-Dept'],
-                    y_train_score=df_train['nbsinister-kmeans-5-Class-Dept'],
-                    y_val_score=df_val['nbsinister-kmeans-5-Class-Dept'],
+                    y_test_score=df_test[target],
+                    y_train_score=df_train[target],
+                    y_val_score=df_val[target],
                     training_mode=training_mode,
                     optimization=parameter_optimization_method,
                     grid_params=grid_params, fit_params=fit_params)
@@ -1401,6 +1401,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     elif name == 'ordered':
         score = train_ordered(params)
     elif name == 'lg':
+        print(params['run'])
         score = train_logistic_regression(params)
 
     return score
@@ -1418,7 +1419,12 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                                             do_bayes_search: bool,
                                             scale : int):
     
-    model_name, under_sampling, over_sampling, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
+    model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[final_target]
+    elif task_type == 'binary':
+        train_dataset['binary'] = train_dataset[final_target]
    
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
@@ -1469,7 +1475,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
             'col_id' : None
         }
         print(modelt)
-        model_type, under_sampling, over_sampling, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
+        model_type, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
         
         if model_type == 'xgboost':
             params = train_xgboost(params_temp, False)
@@ -2559,9 +2565,9 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m2_undersampling = 'search_full_all'
-    m3_undersampling = 'search_full_all'
-    m4_undersampling = 'search_full_all'
+    m2_undersampling = 'search_full_0_all'
+    m3_undersampling = 'search_full_0_all'
+    m4_undersampling = 'search_full_0_all'
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
@@ -2574,27 +2580,27 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'mean', 'laplace', 'laplace+mean']:
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for kernel in ['1', '3', '5', 'Specialized']:
             model = create_model_config('lg', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'l2', 'classification')
             models.append(model)
 
-    mlast = f'lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
+    mlast = f'lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filterICML-lg_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
+    m = f'filter-lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'
     
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None, 1))
 
     ##############################################
 
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m2_undersampling = 'search_full_all'
-    m3_undersampling = 'search_full_all'
-    m4_undersampling = 'search_full_all'
+    m2_undersampling = 'search_full_0_all'
+    m3_undersampling = 'search_full_0_all'
+    m4_undersampling = 'search_full_0_all'
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
@@ -2612,11 +2618,11 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
             model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
 
-    mlast = f'xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filter-xgboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-xgboost_search_0_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     
     #res.append((m, models, None, None, None))
 
@@ -2626,9 +2632,9 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     model_type = 'catboost'
 
     # Configurations de undersampling
-    m2_undersampling = 'search_full_all'
-    m3_undersampling = 'search_full_all'
-    m4_undersampling = 'search_full_all'
+    m2_undersampling = 'search_full_0_all'
+    m3_undersampling = 'search_full_0_all'
+    m4_undersampling = 'search_full_0_all'
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
@@ -2646,13 +2652,13 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
             model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
             models.append(model)
 
-    mlast = f'{model_type}_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'{model_type}_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
     models.append(mlast)
     
     # Nom du modèle principal
-    m = f'filter-catboost_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
 
-    #res.append((m, models, None, None, None))
+    res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2690,42 +2696,41 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     
     return res
 
-def define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
+def define_voting_dl_models(mt, kdays):
     ##############################################
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m1_undersampling = 'search_full_all'
-    m2_undersampling = 'search_full_all'
-    m3_undersampling = 'search_full_all'
-    m4_undersampling = 'search_full_all'
+    m1_undersampling = f'search_full_{kdays}_all'
+    m2_undersampling = f'search_full_{kdays}_all'
+    m3_undersampling = f'search_full_{kdays}_all'
+    m4_undersampling = f'search_full_{kdays}_all'
 
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('LSTM', m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config(mt, m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m3
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('LSTM', m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config(mt, m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'mean', 'laplace', 'laplace+mean']:
+    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
-            model = create_model_config('LSTM', m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
+            model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
             models.append(model)
 
-    mlast = f'LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    mlast = f'{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filterICML-LSTM_search_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    m = f'filter-{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
     #m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
 
     # Retourner la structure finale
-    return [(m, models, 5)]
-
+    return [(m, models, 5, 1)]
 
 def define_staking_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
     ##############################################

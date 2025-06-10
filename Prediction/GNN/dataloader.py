@@ -2,6 +2,7 @@ from tkinter.filedialog import test
 import torch_geometric
 from zmq import device
 from GNN.pytorch_model import *
+import re
 
 #########################################################################################################
 #                                                                                                       #
@@ -151,6 +152,24 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
             df['scale'] = scale
 
     departements, train_departements = select_departments(dataset_name, sinister)
+    if 'select' in name_exp:
+        # Utiliser findall pour capturer toutes les balises présentes
+        matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
+        for group in matches:
+            stg, edg = group[1], group[3]
+            if stg:
+                st = int(stg)
+            if edg:
+                ed = int(edg) 
+
+        name = sinister+'.csv'
+        fp = pd.read_csv(Path('sinister') / dataset_name / name)
+        fp['coef'] = 1
+        fp_gp = fp.groupby('departement')['coef'].sum().reset_index()
+        fp_gp = fp_gp.sort_values('coef', ascending=False)
+        train_departements = list(fp_gp['departement'][st:ed].values)
+        departements = list(fp_gp['departement'][st:ed].values)
+        print(train_departements)
 
     if dataset_name == 'firemen2':
         dataset_name = 'firemen'
@@ -1154,7 +1173,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     for key, value in iou_dict.items():
         metric_key = f'{key}_class_hard' # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques
-        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected' or key == 'iou_area':
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
     iou_dict = calculate_signal_scores(y_pred, df_test[col_class_2].values, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
@@ -1394,7 +1413,7 @@ def test_sklearn_api_model(args,
 
         if model_name.find('filter') != -1:
             filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
-            read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
+            read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
         else:
             read_name = name
             hard_or_soft='soft'
@@ -1486,25 +1505,22 @@ def test_sklearn_api_model(args,
         samples_name = [
         f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
         ]
-        try:
-            #model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=samples, samples_name=samples_name)
-            pass
-        except Exception as e:
-            logger.info(f'Error with shapley_additive_explanation {e}')
-            pass
+        #if model_name in ['xgboost', 'catboost']:
+        #    model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
 
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
 
-        metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
-        metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
-        metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
-        metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
+        if not isinstance(model, ModelVoting): 
+            metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
+            metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
+            metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
+            metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
 
-        metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
-        metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
-        metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
-        metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
+            metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
+            metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
+            metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
+            metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
         
         #res_dept['model'] = name
 
@@ -1526,15 +1542,17 @@ def test_sklearn_api_model(args,
     return metrics, metrics_dept, res_scale, res_departement
    
 def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args):
-    
+
+    name_exp = args['name']
+
     test_dataset_list = []
     for scale in np.unique(y[:, scale_index]):
         
         if scale == 10:
-            test_dataset_scale = read_object(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
+            test_dataset_scale = read_object(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
             print(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
         else:
-            test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{args["days_in_futur"]}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / 'occurence_voting')
+            test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{args["days_in_futur"]}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
         
         assert test_dataset_scale is not None
 
@@ -1666,7 +1684,7 @@ def test_dl_model(args,
 
         if model_name.find('filter') != -1:
             filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
-            read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
+            read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
         else:
             hard_or_soft='soft'
             weights_average=True
@@ -1694,8 +1712,6 @@ def test_dl_model(args,
 
         predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args)
 
-        print(test_dataset_deptAll[model.features_name])
-
         print(allDates[int(test_dataset_dept.date.min())])
 
         scale_unique = np.unique(y[:, scale_index])
@@ -1721,7 +1737,7 @@ def test_dl_model(args,
                 band = -2
             else:
                 band = -1
-
+                
             pred = np.full((predTensor.shape[0], 2), fill_value=np.nan)
             if name in ['Unet', 'ULSTM']:
                 pred = np.full((y.shape[0], 2), fill_value=np.nan)
@@ -1772,16 +1788,16 @@ def test_dl_model(args,
                                                 test_departement, target_name, name,
                                                 dir_output, scale, pred_min = None, pred_max = None)
 
+            if not isinstance(model, ModelVotingPytorchAndSklearn):
+                metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
+                metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
+                metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
+                metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
 
-            metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
-            metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
-            metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
-            metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
-
-            metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
-            metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
-            metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
-            metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
+                metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
+                metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
+                metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_normalized_f1']
+                metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_normalized_iou']
             
             if MLFLOW:
                 log_metrics_recursively(metrics[name], prefix='')
@@ -2247,6 +2263,7 @@ def wrapped_train_deep_learning_2D(params):
     image_per_node = params['image_per_node']
     graph_method = params['graph_method']
     n_run = params['n_run']
+    name_exp = params['name_exp']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2298,7 +2315,8 @@ def wrapped_train_deep_learning_2D(params):
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
-    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,  varying_time_variables=params['varying_time_variables'], train_features=params['train_features'], features_importance=True)
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,  varying_time_variables=params['varying_time_variables'],
+                                               train_features=params['train_features'], features_importance=True, name_exp=name_exp)
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
@@ -2523,6 +2541,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
     
     graph_method = input_params['graph_method']
     dir_output = input_params['dir_output']
+    n_run = input_params['n_run']
 
     features = input_params['features_selected_str']
     features_index = input_params['features_selected']
@@ -2531,7 +2550,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
 
     #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target], features, dir_output, target)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target)
-   
+    
+    train_dataset['class'] = target_name
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
     if 'weight' in list(train_dataset.columns):
@@ -2610,12 +2630,12 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
             fit_params_list.append(fit_params)
             grid_params_list.append(grid_params)
         
-        elif model_type in ['LSTM', 'DilatedCNN']:
+        elif model_type in ['LSTM', 'DilatedCNN', 'GRU', 'NetMLP']:
             model_i = Model_Torch(model_name=model_type,
                                     batch_size=batch_size,
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
-                                    target_name=target_name,
+                                    target_name=target,
                                     out_channels=input_params['out_channels'],
                                     features_name=features,
                                     ks=kdays,
@@ -2626,6 +2646,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
+                                    n_run=n_run
                                     )
         elif model_type in ['GNN']:
             mesh_file = 'icospheres/icospheres_0.json.gz'
@@ -2650,6 +2671,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
+                                    n_run=n_run
                                     )
         elif model_type in ['Zhang']:
             model_i = ModelCNN(model_name=model_type,
@@ -2670,10 +2692,11 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
                                     under_sampling=under_sampling,
                                     image_per_node=True,
                                     over_sampling=over_sampling,
+                                    n_run=n_run
                                     )
 
         models_list.append(model_i)
-        target_list.append(target_name)
+        target_list.append(target)
         
     custom_model_params_list = None
     params_dict = {

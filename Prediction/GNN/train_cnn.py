@@ -56,7 +56,7 @@ parser.add_argument('-training_mode', '--training_mode', type=str, help='trainin
 
 args = parser.parse_args()
 
-QUICK = True
+QUICK = False
 
 # Input config
 dataset_name = args.dataset
@@ -296,7 +296,7 @@ if name_exp.find('voting') != -1:
     models = [
             #('Zhang', True, False, 'search_full_10_15_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
             #('ConvLSTM', True, False, 'search_full_10_10_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
-            ('ResNet', True, None, 'search_full_0_30_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5)
+            ('ResNet', True, None, 'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1)
             ]
     
     staking_models = []
@@ -347,6 +347,7 @@ params = {
     'features' : features,
     "name_dir": rootDisk / 'GNN' / name_dir, 
     'graph_method' : graph_method,
+    'name_exp' : name_exp
 }
 
 if doTrain:
@@ -358,6 +359,7 @@ if doTrain:
         params['infos'] = model[3]
         params['out_channels'] = model[4]
         params['torch_structure'] = 'Model_CNN'
+        params['n_run'] = model[-1]
         
         wrapped_train_deep_learning_2D(params)
 
@@ -428,8 +430,8 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
-                            test_dataset_unscale_dept=test_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=None,
+                            test_dataset_unscale_dept=None,
                             test_name='all',
                             features_name=features_selected_str,
                             prefix_train=prefix,
@@ -437,7 +439,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / 'all' / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=['all'],
@@ -452,7 +453,7 @@ if doTest:
 
     ####################################################### Test by departmenent ###################################################
 
-    """for dept in departements:
+    for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
@@ -479,8 +480,8 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
-                            test_dataset_unscale_dept=test_dataset_unscale,
+            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=None,
+                            test_dataset_unscale_dept=None,
                             test_name=dept,
                             features_name=features_selected_str,
                             prefix_train=prefix,
@@ -488,7 +489,6 @@ if doTest:
                             models=models,
                             dir_output=dir_output / dept / prefix,
                             device=device,
-                            k_days=k_days,
                             encoding=encoding,
                             scaling=scaling,
                             test_departement=[dept],
@@ -540,7 +540,7 @@ if doTest:
         if 'df_metrics' not in locals():
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
-            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))"""
+            df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
         #aggregated_prediction_dept.append(res_dept)
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)

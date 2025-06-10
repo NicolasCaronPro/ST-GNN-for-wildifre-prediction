@@ -49,10 +49,40 @@ def look_for_information(graph, dataset_name : str,
     name = 'points.csv'
     points.to_csv(dir / sinister / name, index=False)
 
+def parse_string(s):
+    if 'degree' in s:
+        s = s.split('degree')[1]
+    elif 'hexa' in s:
+        s = s.split('hexa')[1]
+
+    # Initialiser le dictionnaire avec None
+    result = {"base": None, "attempt": None, "reduce": None, "tol": None}
+
+    # Utiliser findall pour capturer toutes les balises présentes
+    matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
+
+    for groups in matches:
+        b, a, r, t = groups[1], groups[3], groups[5], groups[7]
+        if b:
+            result["base"] = b
+        if a:
+            result["attempt"] = a
+        if r:
+            result["reduce"] = r
+        if t:
+            result["tol"] = t
+
+    return result
+
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
                     geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_date, val_date, graph_method):
     
-    graphScale = GraphStructure(scale, geo, maxDist, nmax, resolution, graph_construct, sinister, sinister_encoding, dataset_name, train_departements, graph_method)
+    print(graph_construct)
+    dico_config = parse_string(graph_construct)
+    print(dico_config)
+    graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=graph_construct, sinister=sinister,
+                                sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
+                                attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
 
     sucseptibility_map_model_config = {'type': 'Unet',
                                        'device': 'cuda',
@@ -278,6 +308,7 @@ def construct_database(
     mode: str,
     resolution: str,
     maxDate: str,
+    name_exp,
 ):
     
     scale = graphScale.scale
@@ -288,6 +319,25 @@ def construct_database(
     # Select the departments and training departments based on the dataset and sinister type
     departements, train_departements = select_departments(dataset_name, sinister)
     trainCode = [name2int[d] for d in train_departements]
+
+    if 'select' in name_exp:
+        # Utiliser findall pour capturer toutes les balises présentes
+        matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
+        for group in matches:
+            stg, edg = group[1], group[3]
+            if stg:
+                st = int(stg)
+            if edg:
+                ed = int(edg) 
+
+        name = sinister+'.csv'
+        fp = pd.read_csv(Path('sinister') / dataset_name / name)
+        fp['coef'] = 1
+        fp_gp = fp.groupby('departement')['coef'].sum().reset_index()
+        fp_gp = fp_gp.sort_values('coef', ascending=False)
+        train_departements = list(fp_gp['departement'][st:ed].values)
+        departements = list(fp_gp['departement'][st:ed].values)
+        print(train_departements)
 
     #######################################################################################
     # Convert department names to their corresponding codes for training departments
@@ -332,7 +382,7 @@ def construct_database(
 
     ################################## Try loading Y database #############################
     # Define the filename for the ground truth data
-    n = f'Y_full_{scale}_{graph_construct}_{graph_method}.pkl'
+    n = f'Y_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
     #if True:
     if not (dir_output / n).is_file():
         # If the file doesn't exist, generate the ground truth data
@@ -353,7 +403,7 @@ def construct_database(
 
     ################################## Try loading X database #############################
     # Define the filename for the features data
-    n = f'X_full_{scale}_{graph_construct}_{graph_method}.pkl'
+    n = f'X_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
     if (dir_output / n).is_file():
         # Get the list of feature names
         features_name, _ = get_features_name_list(scale, features, METHODS_SPATIAL)
@@ -633,6 +683,7 @@ def construct_database(
             sinister,
             dataset_name,
             sinister_encoding,
+            name_exp,
             dir_output,
             dir_train,
             resolution,
@@ -773,7 +824,14 @@ def init(args, dir_output, script):
     top_cluster = args.top_cluster
     graph_method = args.graph_method
     thresh_kmeans = float(args.thresh_kmeans)
+    
+    voting2normal = False
 
+    if name_exp == 'voting':
+        voting2normal = True
+        name_exp = 'normal'
+
+    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(name_exp)
     ######################## Get features and train features list ######################
 
     isInference = name_exp == 'inference'
@@ -806,7 +864,7 @@ def init(args, dir_output, script):
     else:
         prefix = f'{values_per_class}_{k_days}'
 
-    prefix += f'_{scale}_{graph_construct}_{graph_method}'
+    prefix += f'_{scale}_{graph_construct}_{graph_method}_{name_exp}'
 
     autoRegression = 'AutoRegressionReg' in train_features
     if autoRegression:
@@ -875,6 +933,43 @@ def init(args, dir_output, script):
                          maxDate,
                          sinister,
                          Path(dataset_name))
+        
+    if not dummy:
+            name = 'points.csv'
+            ps = pd.read_csv(Path(dataset_name) / sinister / name)
+            depts = [name2int[dept] for dept in departements]
+            logger.info(ps.departement.unique())
+            ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
+            logger.info(ps.departement.unique())
+    else:
+        name = sinister+'.csv'
+        fp = pd.read_csv(Path(dataset_name) / sinister / name)
+        name = 'non'+sinister+'csv'
+        nfp = pd.read_csv(Path(name_exp) / sinister / name)
+        ps = pd.concat((fp, nfp)).reset_index(drop=True)
+        ps = ps.copy(deep=True)
+        ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
+        ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
+
+    ######################### Top database ##################################
+    if 'select' in name_exp:
+        # Utiliser findall pour capturer toutes les balises présentes
+        matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
+        for group in matches:
+            stg, edg = group[1], group[3]
+            if stg:
+                st = int(stg)
+            if edg:
+                ed = int(edg) 
+
+        name = sinister+'.csv'
+        fp = pd.read_csv(Path('sinister') / dataset_name / name)
+        fp['coef'] = 1
+        fp_gp = fp.groupby('departement')['coef'].sum().reset_index()
+        fp_gp = fp_gp.sort_values('coef', ascending=False)
+        train_departements = list(fp_gp['departement'][st:ed].values)
+        departements = list(fp_gp['departement'][st:ed].values)
+        print(train_departements)
 
     ######################### Encoding ######################################
 
@@ -882,7 +977,7 @@ def init(args, dir_output, script):
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
-        encode(dir_target, trainDate, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     #graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
 
@@ -891,22 +986,6 @@ def init(args, dir_output, script):
         logger.info('#####################################')
         logger.info('#      Construct   Database         #')
         logger.info('#####################################')
-        if not dummy:
-            name = 'points.csv'
-            ps = pd.read_csv(Path(dataset_name) / sinister / name)
-            depts = [name2int[dept] for dept in departements]
-            logger.info(ps.departement.unique())
-            ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-            logger.info(ps.departement.unique())
-        else:
-            name = sinister+'.csv'
-            fp = pd.read_csv(Path(dataset_name) / sinister / name)
-            name = 'non'+sinister+'csv'
-            nfp = pd.read_csv(Path(name_exp) / sinister / name)
-            ps = pd.concat((fp, nfp)).reset_index(drop=True)
-            ps = ps.copy(deep=True)
-            ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
-            ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
 
         X, Y, features_name = construct_database(graphScale,
                                             ps, k_days,
@@ -921,7 +1000,9 @@ def init(args, dir_output, script):
                                             'full',
                                             'train',
                                             resolution,
-                                            trainDate)
+                                            trainDate,
+                                            name_exp)
+        
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
         save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
     else:
@@ -932,7 +1013,6 @@ def init(args, dir_output, script):
     for i, col in enumerate(ids_columns):
         print('X', col, np.unique(X[:, i]))
         print('Y', col, np.unique(Y[:, i]))
-
     ################################################ Add a new feature ####################################
     newFeatures = []
     if newFeatures != []:
@@ -944,18 +1024,16 @@ def init(args, dir_output, script):
             sinister,
             dataset_name,
             sinister_encoding,
+            name_exp,
             dir_output,
             dir_output,
             resolution,
             use_log=False
         )
-
+        
         X2 = X2[:, len(ids_columns)-1:]
 
-        if dataset_name != 'bdiff':
-            features_name_ori, newshape = get_features_name_list_old(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
-        else:
-            features_name_ori, newshape = get_features_name_lis(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
+        features_name_ori, newshape = get_features_name_lis(graphScale.scale, [fet for fet in features if fet not in newFeatures], METHODS_SPATIAL)
             
         new_X = np.empty((X.shape[0], X.shape[1] + X2.shape[1]))
 
@@ -980,6 +1058,7 @@ def init(args, dir_output, script):
             sinister,
             dataset_name,
             sinister_encoding,
+            name_exp,
             dir_output,
             dir_output,
             resolution,
@@ -1005,8 +1084,9 @@ def init(args, dir_output, script):
 
     X = X[:, len(ids_columns)-1:]
 
+    print(Y.shape, len(targets_columns + ids_columns))
     ############################## Dataframe creation ###################################
-    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
 
     ############### SI CA PLANTE -> SCALE ###################
     #if (dir_output / f'df_{prefix}.pkl').is_file() and not doDatabase and newFeatures == [] and changeFeature == []:
@@ -1027,14 +1107,14 @@ def init(args, dir_output, script):
     else:
         df['scale'] = scale
 
-    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
 
     ############################## Generate 2D database #######################
     
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
                                                                     sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding, newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
+                                                                    resolution, graph_construct, sinister_encoding, name_exp, newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
     else:
         features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
 
@@ -1051,7 +1131,6 @@ def init(args, dir_output, script):
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
     
     trainCode = [name2int[d] for d in train_departements]
-    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(name_exp)
     train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
     shift_list = np.arange(0, 1)
     train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
@@ -1061,10 +1140,10 @@ def init(args, dir_output, script):
 
     ################################ Process Target ###############################################
 
-    if dataset_name == 'bdiff' and not find_df:
-        limit_day = [7, 15, 31]
-        logger.info(f'Add {limit_day} days in future')
-        df = target_by_day(df, limit_day, target_spe='0')
+    #if dataset_name == 'bdiff' and not find_df:
+    limit_day = [7, 15, 31]
+    logger.info(f'Add {limit_day} days in future')
+    df = target_by_day(df, limit_day, target_spe='0')
 
     """if (dir_output / f'df_mid_{prefix}.pkl').is_file():
         df = read_object(f'df_mid_{prefix}.pkl', dir_output)
@@ -1148,14 +1227,14 @@ def init(args, dir_output, script):
 
         check_and_create_path(dir_output / 'features_correlation')
 
-        save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
-        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group.pkl', dir_output  / 'features_correlation')
-    
+        save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated_{name_exp}.pkl', dir_output / 'features_correlation')
+        save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group_{name_exp}.pkl', dir_output  / 'features_correlation')
+
         logger.info(f'Smart Correlated Selection {leni} -> {len(features_name)}')
 
         features_name = list(df_features.columns)
     
-    features_name = read_object(f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl', dir_output / 'features_correlation')
+    features_name = read_object(f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated_{name_exp}.pkl', dir_output / 'features_correlation')
     
     assert features_name is not None
 
@@ -1194,4 +1273,5 @@ def init(args, dir_output, script):
     plt.savefig('test_NDIV.png')
     plt.close('all')
 
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
     return df, graphScale, prefix, fp, features_name

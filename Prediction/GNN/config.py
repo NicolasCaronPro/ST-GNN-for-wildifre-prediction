@@ -400,7 +400,7 @@ epochs = 10000
 lr = 0.00005
 PATIENCE_CNT = 25
 CHECKPOINT = 25
-batch_size = 256
+batch_size = 64
 
 METHODS_TEMPORAL = ['mean', 'min', 'max',
         # 'std',

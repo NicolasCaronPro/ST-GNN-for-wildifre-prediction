@@ -350,9 +350,9 @@ elif name_exp.find('normal') != -1 or name_exp.find('2022') != -1 or 'year' in n
     #voting_models = define_voting_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)    
     voting_models = []
     models = [
-            #('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None, 1),
-            ('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None,None, 1),
-            ('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None, 1),
+            ('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None, 5),
+            #('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None,None, 1),
+            #('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None, 1),
         ]
     staking_models = []
 
@@ -884,7 +884,7 @@ if doTest:
     df_metrics.reset_index(drop=True, inplace=True)
     
     check_and_create_path(dir_output / prefix)
-    df_metrics.to_csv(dir_output / prefix / 'df_metrics_trees.csv')
+    df_metrics.to_csv(dir_output / prefix / 'df_metrics_trees_run.csv')
 
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')

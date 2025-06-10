@@ -1037,10 +1037,18 @@ def load_x_from_pickle(date : int,
                        features_1D,
                        raster : np.ndarray,
                        x_1d,
-                       y_1d
+                       y_1d,
+                       name_exp : str,
                        ) -> np.array:
     
     features_name_2D_full, _ = get_features_name_lists_2D(6, features)
+
+    dir_encoder = path / '../../'
+
+    encoder_osmnx = read_object(f'encoder_osmnx.pkl_{name_exp}', dir_encoder)
+    encoder_foret = read_object(f'encoder_foret_{name_exp}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_exp}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_exp}.pkl', dir_encoder)
 
     leni = len(features_name_2D)
     if date < 0:
@@ -1058,7 +1066,7 @@ def load_x_from_pickle(date : int,
         plt.colorbar()
         plt.savefig(f'{fet_2D}.png')
         plt.close('all')       """ 
-        if fet_2D == 'Past_risk' or fet_2D == 'Past_burnedarea':
+        if fet_2D == 'Past_risk' or fet_2D == 'Past_burnedarea' or fet_2D == 'cluster_encoder' or fet_2D == 'id_encoder':
             unode = np.unique(raster) 
             for node in unode:
                 mask = (raster == node)
@@ -1067,6 +1075,26 @@ def load_x_from_pickle(date : int,
                     new_x_2D[i, mask] = 0
                 else:
                     new_x_2D[i, mask] = x_1d[m1, features_1D.index(fet_2D)]
+        
+        elif fet_2D == 'foret_encoder' in features:
+            #logger.info('Foret landcover')
+            assert encoder_foret is not None
+            new_x_2D[i, :, :] = encoder_foret.transform(x_2D[features_name_2D_full.index(fet_2D), :, :].reshape(-1,1)).values.reshape((x_2D.shape[1], x_2D.shape[2]))
+
+        elif fet_2D == 'highway_encoder' in features:
+            #logger.info('OSMNX landcover')
+            new_x_2D[i, :, :] = encoder_osmnx.transform(x_2D[features_name_2D_full.index(fet_2D), :, :].reshape(-1,1)).values.reshape((x_2D.shape[1], x_2D.shape[2]))
+
+        elif fet_2D == 'argile_encoder' in features:
+            #logger.info('OSMNX landcover')
+            assert encoder_argile is not None
+            new_x_2D[i, :, :] = encoder_argile.transform(x_2D[features_name_2D_full.index(fet_2D), :, :].reshape(-1,1)).values.reshape((x_2D.shape[1], x_2D.shape[2]))
+
+        elif fet_2D == 'cosia_encoder' in features:
+            #logger.info('OSMNX landcover')
+            assert encoder_cosia is not None
+            new_x_2D[i, :, :] = encoder_cosia.transform(x_2D[features_name_2D_full.index(fet_2D), :, :].reshape(-1,1)).values.reshape((x_2D.shape[1], x_2D.shape[2]))
+
         else:
             new_x_2D[i, :, :] = x_2D[features_name_2D_full.index(fet_2D), :, :]
         if False not in np.isnan(new_x_2D[i, :, :]):
@@ -1126,11 +1154,11 @@ def process_dept_raster(dept, graph, path, y, features_name_2D, ks, image_per_no
 
     return X, Y, raster_dept, raster_dept_graph, unodes
 
-def process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, x_1d, y_1d, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D):
+def process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, x_1d, y_1d, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D, name_exp):
     """Process each time step and update X and Y arrays"""
     for k in range(ks + 1):
         date = int(id) - (ks - k)
-        x_date = load_x_from_pickle(date, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / int2name[dept], features_name_2D, features, features_1D, raster_dept, x_1d[:, :, k], y_1d[:, :, k])
+        x_date = load_x_from_pickle(date, path / f'2D_database' / int2name[dept], features_name_2D, features, features_1D, raster_dept, x_1d[:, :, k], y_1d[:, :, k], name_exp)
 
         if x_date is None:
             return None, None
@@ -1181,7 +1209,7 @@ def update_node_images(X, x_node, mask, scale, k, shape2D, y_1d, date, node):
             x_band[np.isnan(x_band)] = np.nanmean(x_band)
         #index = np.argwhere((y[:, graph_id_index, 0] == node) & (y[:, date_index, :] == date))[:, 0]
         index = np.unique(np.argwhere((y_1d[:, graph_id_index, 0] == node))[:, 0])
-        print(np.unique(x_band))
+        #print(np.unique(x_band))
         X[index, band, :, :, k] = resize_no_dim(x_band, *shape2D[scale])
         mask_nan = np.isnan(X[index, band, :, :, k])
         #X[index, band, mask_nan, k] = 0
@@ -1212,7 +1240,7 @@ def process_dept_y(Y, y_date, raster_dept, ks):
 def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                         features_name_2D, features, features_1D, path,
                         use_temporal_as_edges, image_per_node,
-                        context):
+                        context, name_exp):
     """Main function to create the dataset."""
     Xst, Yst, Est = [], [], []
     leni = len(features_name_2D)
@@ -1259,7 +1287,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
             new_x = np.copy(x_dept)
             
             X, Y, raster_dept, raster_dept_graph, unodes = process_dept_raster(dept, graph, path, new_y, features_name_2D, ks, image_per_node, shape2D)
-            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, new_x, new_y, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D)
+            X, Y = process_time_step(X, Y, dept, graph, ks, id, path, features_name_2D, features, features_1D, new_x, new_y, raster_dept, raster_dept_graph, unodes, image_per_node, shape2D, name_exp)
             #print(X.shape)
             
             if X is None:
@@ -1270,7 +1298,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                     #print(np.unique(np.isnan(X[i])))
                     if True:
                         cluster_id = Y[i][graph_id_index, -1]
-                        save_object(X[i], f'X_{int(id)}_{dept}_{cluster_id}.pkl', path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context)
+                        save_object(X[i], f'X_{int(id)}_{dept}_{cluster_id}.pkl', path / f'2D_database' / sub_dir / context)
                         Xst.append(f'X_{int(id)}_{dept}_{cluster_id}.pkl')
                         Yst.append(Y[i])
                     else:
@@ -1278,7 +1306,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                         Yst.append(y[i])
             else:
                 if True:
-                    save_object(X, f'X_{int(id)}_{dept}.pkl', path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context)
+                    save_object(X, f'X_{int(id)}_{dept}.pkl', path / f'2D_database' / sub_dir / context)
                     Xst.append(f'X_{int(id)}_{dept}.pkl')
                 else:
                     Xst.append(X)
@@ -1302,7 +1330,8 @@ def create_dataset_2D(graph,
                     image_per_node,
                     use_temporal_as_edges : bool,
                     device,
-                    ks : int):
+                    ks : int,
+                    name_exp):
     
     x_train, y_train = df_train[ids_columns + features_1D].values, df_train[ids_columns + [target_name]].values
 
@@ -1322,17 +1351,17 @@ def create_dataset_2D(graph,
 
     logger.info('Creating train dataset')
     Xst, Yst, Est = create_dataset_2D_2(graph, x_train, y_train, ks, dateTrain,
-                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='train') 
+                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='train', name_exp=name_exp) 
     
     logger.info('Creating val dataset')
     # Val
     XsV, YsV, EsV = create_dataset_2D_2(graph, x_val, y_val, ks, dateVal,
-                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='val') 
+                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='val', name_exp=name_exp)
 
     logger.info('Creating Test dataset')
     # Test
     XsTe, YsTe, EsTe = create_dataset_2D_2(graph, x_test, y_test, ks, dateTest,
-                    features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='test') 
+                    features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='test', name_exp=name_exp)
 
     assert len(Xst) > 0
     assert len(XsV) > 0
@@ -1342,9 +1371,9 @@ def create_dataset_2D(graph,
 
     sub_dir = f'image_per_node_{len(features_name_2D)}' if image_per_node else f'image_per_departement_{len(features_name_2D)}'
     if True:
-        train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'train')
-        val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'val')
-        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
+        train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / f'2D_database' / sub_dir / 'train')
+        val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path / f'2D_database' / sub_dir / 'val')
+        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path / f'2D_database' / sub_dir / 'test')
     else:
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
@@ -1486,6 +1515,9 @@ class ModelTorch():
             inputs, labels, edges = data
             graphs = None
 
+            if inputs.shape[0] == 1:
+                continue
+
             band = -1
 
             try:
@@ -1522,6 +1554,9 @@ class ModelTorch():
                 
                 inputs, labels, edges = data
                 graphs = None
+                
+                if inputs.shape[0] == 1:
+                    continue
 
                 band = -1
 
@@ -1789,17 +1824,17 @@ class ModelTorch():
             if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                 data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
         else:
-            if (self.dir_log / 'test_percentage_scores.pkl').is_file():
+            if (self.dir_log / 'metrics.pkl').is_file():
                 print(f'Load metrics')
                 find_log = True
-                data_log = read_object('test_percentage_scores.pkl', self.dir_log)
+                data_log = read_object('metrics.pkl', self.dir_log)
             else:
                 xs = [0, 10]
                 for x in xs:
                     other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
-                    print(f'{self.dir_log / ".."/ other_model / "test_percentage_scores.pkl"}')
-                    if (self.dir_log / '..'/ other_model / 'test_percentage_scores.pkl').is_file():
-                        data_log = read_object('test_percentage_scores.pkl', self.dir_log / '..'/ other_model)
+                    print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
+                    if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
+                        data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                     if data_log is not None:
                         break
                     
@@ -1807,9 +1842,9 @@ class ModelTorch():
                     xs = [25]
                     for x in xs:
                         other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
-                        print(f'{self.dir_log / ".."/ other_model / "test_percentage_scores.pkl"}')
-                        if (self.dir_log / '..'/ other_model / 'test_percentage_scores.pkl').is_file():
-                            data_log = read_object('test_percentage_scores.pkl', self.dir_log / '..'/ other_model)
+                        print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
+                        if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
+                            data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                         if data_log is not None:
                             break
                             
@@ -1819,35 +1854,43 @@ class ModelTorch():
                 self.metrics = data_log
                 #test_percentage = self.metrics['test_percentage']
                 under_prediction_score_scores = self.metrics['under_prediction_scores']
-                over_prediction_score_scores = self.metrics['over_predictio_scores']
-                iou_scores = self.metrics['iou_scores']
-            except:
+                over_prediction_score_scores = self.metrics['over_prediction_scores']
+                iou_scores = self.metrics['iou_score']
+            except Exception as e:
+                print(e)
                 self.metrics = {}
                 data_log = None
                 pass
 
             #test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores = data_log[0], data_log[1], data_log[2], data_log[3]
-
         doSearch = True
         if data_log is not None: #and self.n_run == data_log['n_run']:
-            for i in range(0, len(under_prediction_score_scores) - 1):
-                if iou_scores[i] > iou_scores[i + 1]:
-                    print(f'Last score {iou_scores[i]} current score {iou_scores[i + 1]}')
+            for i in range(0, len(iou_scores) - 1):
+                try:
+                    if data_log[test_percentage[i]]['iou_val'] > data_log[test_percentage[i + 1]]['iou_val']:
+                        print(f"Last score {data_log[test_percentage[i]]['iou_val']} current score {data_log[test_percentage[i + 1]]['iou_val']}")
+                        doSearch = False
+                except Exception as e:
+                    print(e)
                     doSearch = True
                     break
-        
+
             if doSearch:
                 start_test = np.argmax(iou_scores)
                 #start_test = len(under_prediction_score_scores) - 1
         else:
             start_test = 0
-        doSearch = True
+        
         if doSearch:
             last_score = -math.inf if start_test == 0 else iou_scores[start_test - 1]
-            y_ori = df_train[self.target_name].values 
+            y_ori = df_train[self.target_name].values
             for i in range(start_test, test_percentage.shape[0]):
                 tp = test_percentage[i]
-                self.metrics['test_percentage'].append(tp)
+                if tp in self.metrics.keys():
+                    change_value = True
+                else:
+                    change_value = False
+                    
                 #if tp not in self.metrics.keys():
                 if True:
                     self.metrics[tp] = {}
@@ -1858,11 +1901,8 @@ class ModelTorch():
                     self.metrics[tp]['recall'] = []
                     self.metrics[tp]['normalized_iou'] = []
                     self.metrics[tp]['normalized_f1'] = []
-                    self.metrics['under_prediction_scores'].append(0)
-                    self.metrics['over_predictio_scores'].append(0)
-                    self.metrics['iou_scores'].append(0)
 
-                if self.model_name in ['ResNet', 'SepLSTMGNN', 'SepGRUGNN', 'graphCastGRU']:
+                """if self.model_name in ['ResNet', 'SepLSTMGNN', 'SepGRUGNN', 'graphCastGRU']:
                     if tp < 0.15:
                         iou_scores.append(0)
                         under_prediction_score_scores.append(0)
@@ -1882,7 +1922,7 @@ class ModelTorch():
                         self.metrics['under_prediction_scores'].append(0)
                         self.metrics['over_predictio_scores'].append(0)
                         self.metrics['iou_scores'].append(0)
-                        continue
+                        continue"""
                 
                 df_train_copy = df_train.copy(deep=True)
                 
@@ -1906,7 +1946,7 @@ class ModelTorch():
                     copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
-                    ############################# ON set val ##############################
+                    ############################# On set val ##############################
                     test_output, y = copy_model._predict_test_loader(copy_model.val_loader)
                     prediction = test_output.detach().cpu().numpy()
                     
@@ -1921,13 +1961,13 @@ class ModelTorch():
                     dff['departement'] = y[:, departement_index]
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1]
-
+                    
                     metrics_run = evaluate_metrics(dff, self.target_name, prediction)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
                     self.metrics[tp]['iou_val'].append(metrics_run['iou'])
 
-                    ############################# ON set test ##############################
+                    ############################# On set test ##############################
                     test_output, y = copy_model._predict_test_loader(copy_model.test_loader)
                     prediction = test_output.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
@@ -1950,7 +1990,6 @@ class ModelTorch():
                     self.metrics[tp]['prec'].append(metrics_run['prec'])
                     self.metrics[tp]['normalized_iou'].append(metrics_run['normalized_iou'])
                     self.metrics[tp]['normalized_f1'].append(metrics_run['normalized_f1'])
-                    print(self.metrics)
 
                     #under_prediction_score_value = under_prediction_score(y_val, prediction)
                     #over_prediction_score_value = over_prediction_score(y_val, prediction)
@@ -1961,10 +2000,10 @@ class ModelTorch():
                     self.metrics[tp]['IC_f1'] = (0, 0)
                     self.metrics[tp]['var_iou'] = 0
                     self.metrics[tp]['IC_iou'] = (0, 0)
-                    self.metrics[tp]['var_Normalized_f1'] = 0
-                    self.metrics[tp]['IC_Normalized_f1'] = (0, 0)
-                    self.metrics[tp]['var_Normalized_iou'] = 0
-                    self.metrics[tp]['IC_Normalized_iou'] = (0, 0)
+                    self.metrics[tp]['var_normalized_f1'] = 0
+                    self.metrics[tp]['IC_normalized_f1'] = (0, 0)
+                    self.metrics[tp]['var_normalized_iou'] = 0
+                    self.metrics[tp]['IC_normalized_iou'] = (0, 0)
                 else:
                     # Calcul de la variance pour chaque métrique
                     f1_variance = np.var(self.metrics[tp]['f1'])
@@ -1989,9 +2028,14 @@ class ModelTorch():
                     self.metrics[tp]['IC_normalized_iou'] = normalized_iou_ic
                 
                 iou = np.mean(self.metrics[tp]['iou_val'])
-                iou_scores.append(iou)
-                under_prediction_score_scores.append(under_prediction_score_value)
-                over_prediction_score_scores.append(over_prediction_score_value)
+                if not change_value:
+                    iou_scores.append(iou)
+                    under_prediction_score_scores.append(under_prediction_score_value)
+                    over_prediction_score_scores.append(over_prediction_score_value)
+                else:
+                    iou_scores[i] = iou
+                    under_prediction_score_scores[i] = under_prediction_score_value
+                    over_prediction_score_scores[i] = over_prediction_score_value
 
                 #save_object([test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'test_percentage_scores.pkl', self.dir_log)
                 save_object(self.metrics, 'metrics.pkl', self.dir_log)
@@ -2010,10 +2054,12 @@ class ModelTorch():
         index_max = np.argmax(iou_scores)
         best_tp = test_percentage[index_max]
         self.metrics['iou_score'] = iou_scores
+        self.metrics['test_percentage'] = test_percentage
         self.metrics['under_prediction_scores'] = under_prediction_score_scores
         self.metrics['over_prediction_scores'] = over_prediction_score_scores
         self.metrics['best_tp'] = best_tp
         self.metrics['run'] = self.n_run
+        print(self.metrics)
         save_object(self.metrics, 'metrics.pkl', self.dir_log)
         
         if is_unknowed_risk:
@@ -2142,17 +2188,13 @@ class ModelTorch():
         X_val = X_val.set_index(ids_columns[:-1]).join(y_val.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
         X_test = X_test.set_index(ids_columns[:-1]).join(y_test.set_index(ids_columns[:-1])[targets_columns  + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
 
+        #if (self.dir_log / 'last.pt').is_file():
+        #    self.graph = graph
+        #    self._load_model_from_path(self.dir_log / 'best.pt', self.model)
+        #else:
         self.create_train_val_test_loader(graph, X, X_val, X_test, custom_model_params=custom_model_params)
-
-        try:
-            if self.find_log:
-                self._load_model_from_path(self.dir_log / 'best.pt', self.model)
-                return
-            else:
-                self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
-        except:
-            self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
-
+        self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
+            
     def filtering_pred(self, df, predTensor, y, graph, return_y = False):
         
         y = y.detach().cpu().numpy()
@@ -2164,11 +2206,11 @@ class ModelTorch():
         # Normaliser les valeurs dans YTensor
         date_values = [item for item in y[:, date_index]]
         graph_id_values = [item for item in y[:, graph_id_index]]
-        scale_value = [item for item in y[:, scale_index]]
+        scale_values = [item for item in y[:, scale_index]]
 
         # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
         filtered_indices = [
-            i for i, (date, graph_id, scale) in enumerate(zip(date_values, graph_id_values, scale_index)) 
+            i for i, (date, graph_id, scale) in enumerate(zip(date_values, graph_id_values, scale_values)) 
             if (date, graph_id, scale) in test_pairs
             ]
 
@@ -2176,7 +2218,7 @@ class ModelTorch():
         y = y[filtered_indices]
 
         # Créer des paires et les convertir en set
-        ytensor_pairs = set(zip(date_values, graph_id_values, scale_value))
+        ytensor_pairs = set(zip(date_values, graph_id_values, scale_values))
 
         # Filtrer les lignes en vérifiant si chaque couple (date, graph_id) appartient à ytensor_pairs
         df = df[
@@ -2235,7 +2277,7 @@ class ModelTorch():
                         continue
                     pred[mask[:, 0]] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
         else:
-            pred[:, 0] = predTensor
+            pred = predTensor
 
         if return_y:
             return pred, y
@@ -2279,9 +2321,10 @@ class ModelTorch():
                        self.ks)
         
         predTensor, YTensor = self._predict_test_loader(loader, True)
-        pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
         if return_y:
+            pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
             return pred, y
+        pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
         return pred
         
     def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_log):
@@ -2319,9 +2362,10 @@ class ModelTorch():
         plt.close('all')
 
     def _load_model_from_path(self, path : Path, model) -> None:
+        model, _ = self.make_model(self.graph, None)
         model.load_state_dict(torch.load(path, map_location=self.device, weights_only=True), strict=False)
         self.model = model
-    
+        
     def update_weight(self, weight):
         """
         Update the model's weights with the given state dictionary.
@@ -2471,7 +2515,8 @@ class ModelCNN(ModelTorch):
         self.image_per_node = image_per_node
         self.nbfeatures = nbfeatures
         
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, varying_time_variables=[], train_features=[], custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
+        assert name_exp is not None
         
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
@@ -2547,7 +2592,8 @@ class ModelCNN(ModelTorch):
                                                                 use_temporal_as_edges=None,
                                                                 image_per_node=self.image_per_node,
                                                                 device=self.device, ks=self.ks,
-                                                                path=self.path)
+                                                                path=self.path,
+                                                                name_exp=name_exp)
         
             train_loader = DataLoader(train_dataset, 16, True)
             val_loader = DataLoader(val_dataset, 16, False)
@@ -2571,7 +2617,7 @@ class ModelCNN(ModelTorch):
                     self.features_name, self.features, self.features_1D, self.path, None, self.image_per_node, context='test')
         
         sub_dir = f'image_per_node_{len(self.features_name)}' if self.image_per_node else f'image_per_departement_{len(self.features_name)}'
-        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, self.path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / 'test')
+        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, self.path / f'2D_database' / sub_dir / 'test')
 
         loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
@@ -2925,7 +2971,7 @@ class Model_Torch(ModelTorch):
                     df_train.loc[df_combined.index, 'weight'] = 1
                     logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
-        elif 'smote' in self.over_sampling:
+        if 'smote' in self.over_sampling:
             
             if isinstance(self, ModelCNN) or isinstance(self, ModelGNN):
                 raise ValueError(f'Smote is not adaptable to images or GNN')
@@ -2940,36 +2986,34 @@ class Model_Torch(ModelTorch):
             X_full = df_train[self.features_name + matching_ids_columns].copy()
             y = df_train[self.target_name].copy()
 
-            # Configuration
-            over_sampling = 'smote-3'  # Exemple : smote avec un coefficient de 3
-            task_type = 'classification'  # ou 'binary' ou 'ordinal-classification'
+            smote_coef = int(self.over_sampling.split('-')[1])
+            y_negative = y[y == 0].shape[0]
+            
+            y_one = min(y[y == 1].shape[0] * smote_coef, y_negative)
+            y_two = min(y[y == 2].shape[0] * smote_coef, y_negative)
+            y_three = min(y[y == 3].shape[0] * smote_coef, y_negative)
+            y_four = min(y[y == 4].shape[0] * smote_coef, y_negative)
 
-            # Appliquer SMOTE
-            if 'smote' in over_sampling:
-                smote_coef = int(over_sampling.split('-')[1])
-                y_negative = y[y == 0].shape[0]
-                
-                y_one = min(y[y == 1].shape[0] * smote_coef, y_negative)
-                y_two = min(y[y == 2].shape[0] * smote_coef, y_negative)
-                y_three = min(y[y == 3].shape[0] * smote_coef, y_negative)
-                y_four = min(y[y == 4].shape[0] * smote_coef, y_negative)
+            if self.task_type in ['classification', 'ordinal-classification']:
+                sampling_strategy = {
+                    0: y_negative,
+                    1: y_one,
+                    2: y_two,
+                    3: y_three,
+                    4: y_four
+                }
+                smote = SMOTE(random_state=42, sampling_strategy=sampling_strategy)
+            
+            elif self.task_type == 'binary':
+                smote = SMOTE(random_state=42, sampling_strategy='auto')
 
-                if task_type in ['classification', 'ordinal-classification']:
-                    sampling_strategy = {
-                        0: y_negative,
-                        1: y_one,
-                        2: y_two,
-                        3: y_three,
-                        4: y_four
-                    }
-                    smote = SMOTE(random_state=42, sampling_strategy=sampling_strategy)
-                elif task_type == 'binary':
-                    smote = SMOTE(random_state=42, sampling_strategy='auto')
+            X_resampled, y_resampled = smote.fit_resample(X_full, y)
 
-                X_resampled, y_resampled = smote.fit_resample(X_full, y)
+            df_train = X_resampled
+            df_train[self.target_name] = y_resampled
 
-                df_train = X_resampled
-                df_train[self.target_name] = y_resampled
+            for uy in np.unique(df_train[self.target_name]):
+                    print(f'Number of {uy} class : {df_train[df_train[self.target_name] == uy].shape}') 
 
         self.df_train = df_train
         self.df_test = df_test
@@ -3516,7 +3560,6 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         cv_folds = args['cv_folds']
         
         df_val = X_val.copy(deep=True)
-        
         df_val[y_val.columns] = y_val
 
         self.cv_results_ = []
@@ -3530,12 +3573,16 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             model.fit(graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None)
             #else:
             #    model.fit(graph, X, y[targets[i]], X_val, y_val[targets[i]], training_mode=training_mode, optimization=optimization, grid_params=grid_params_list[i], fit_params=fit_params_list[i], cv_folds=cv_folds)
-
+            target_name_model = model.target_name
+            model.target_name = self.target_name
+            print(f'Change target name {target_name_model} to {model.target_name}')
             test_loader = model.create_test_loader(graph, df_val)
             test_output, y_test_val = model._predict_test_loader(test_loader)
             test_output = test_output.detach().cpu().numpy()
             y_test_val = y_test_val.detach().cpu().numpy()[:, -1]
                 
+            model.target_name = target_name_model
+
             score_model = self.score_with_prediction(y_test_val, test_output)
             self.weights_for_model.append(score_model)
 
@@ -3575,7 +3622,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         
         elif self.task_type == 'binary':
                 assert self.post_process is not None
-                predict = self.predict_proba(X)[:, 1]
+                predict = self.predict_proba(X, return_y=False)[:, 1]
 
                 if isinstance(ids, pd.Series):
                     ids = ids.values
@@ -3594,6 +3641,97 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
             return self.post_process.predict_risk(predict, None, ids, preprocessor_ids)
 
+    def predict_with_weight(self, X, hard_or_soft='soft', weights_average='weight', weights2use=[], top_model='all'):
+        
+        models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
+        weights2use = np.asarray(weights2use)
+        
+        if hard_or_soft == 'hard':
+            if top_model != 'all':
+                top_model = int(top_model)
+                key = np.argsort(weights2use)
+                models_list = models_list[key]
+                models_list = models_list[-top_model:]
+                #weights2use = weights2use[np.asarray(key)]
+                #weights2use = weights2use[-top_model:]
+            else:
+                key = np.arange(0, len(self.best_estimator_))
+
+            models_to_mean = []
+            predictions = []
+            for i, estimator in enumerate(self.best_estimator_):
+                if estimator.target_name == self.target_name:
+                    pred, y = estimator.predict(X, return_y=True)
+                if estimator.name not in models_list:
+                    continue
+                else:
+                    if estimator.target_name == self.target_name:
+                        continue
+                    pred = estimator.predict(X, return_y=False)
+                    predictions.append(pred)
+
+                models_to_mean.append(key[i])
+
+            try:
+                weights2use = weights2use[models_to_mean]
+            except:
+                pass
+            # Aggregate predictions
+            aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights2use)
+            return aggregated_pred, y
+        else:
+            aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use)
+            predictions = np.argmax(aggregated_pred, axis=1)
+            return predictions, y
+
+    def predict_proba_with_weights(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', weights2use=[], id_col=(None, None)):
+        """
+        Predict probabilities for input data using each model and aggregate the results.
+
+        Parameters:
+        - X_list: List of data to predict probabilities for.
+        
+        Returns:
+        - Aggregated predicted probabilities.
+        """
+        models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
+        weights2use = np.asarray(weights2use)
+
+        if top_model != 'all':
+                top_model = int(top_model)
+                key = np.argsort(weights2use)
+                models_list = models_list[np.asarray(key)]
+                models_list = models_list[-top_model:]
+                #weights2use = weights2use[np.asarray(key)]
+                #weights2use = weights2use[-top_model:]
+        else:
+            key = np.arange(0, len(self.best_estimator_))
+        
+        probas = []
+        models_to_mean = []
+        print(models_list)
+        for i, estimator in enumerate(self.best_estimator_):
+            X_ = X
+            if estimator.target_name == self.target_name:
+                proba, y = estimator.predict_proba(X, return_y=True)
+            if estimator.name not in models_list:
+                continue
+            else:
+                if estimator.target_name != self.target_name:
+                    proba = estimator.predict_proba(X_, return_y=False)
+            if proba.shape[1] != 5:
+                continue
+            #print(estimator.name, np.asarray(probas).shape)
+            models_to_mean.append(key[i])
+            probas.append(proba)
+        try:
+            weights2use = weights2use[models_to_mean]
+        except:
+            pass
+        # Aggregate probabilities
+        aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights2use)
+        return aggregated_proba, y
+
     def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None)):
         """
         Predict labels for input data using each model and aggregate the results.
@@ -3604,27 +3742,51 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         Returns:
         - Aggregated predicted labels.
         """
-        print(f'Predict with {hard_or_soft} and weighs at {weights_average}')
+
+        if weights_average not in ['None', 'weight']:
+            assert id_col[0] is not None and id_col[1] is not None
+            vals = id_col[1]
+            unique_ids = np.unique(vals)
+            prediction = np.empty(X.shape[0], dtype=int)
+            y = np.empty(X.shape[0], dtype=int)
+            for id in unique_ids:
+                print(f'Prediction for {id_col[0]} {id}')
+                mask = (id_col[1] == id)
+                prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model)
+            return prediction, y
+
+        else:
+            return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model)
+
+        """print(f'Predict with {hard_or_soft} and weighs at {weights_average}')
         if hard_or_soft == 'hard':
+            if top_model != 'all':
+                top_model = int(top_model)
+                key = np.argsort(self.weights_for_model)
+                models_list = models_list[key]
+                models_list = models_list[-top_model:]
+            else:
+                key = np.arange(0, len(self.best_estimator_))
+
             predictions = []
             for i, estimator in enumerate(self.best_estimator_):
-                
-                if estimator.target_name == self.target_name:
-                    pred, y = estimator.predict(X, return_y=True)
+                if estimator.name not in models_list:
+                    continue
                 else:
                     pred = estimator.predict(X)
+                    predictions.append(pred)
 
-                predictions.append(pred)
+                models_to_mean.append(key[i])
 
             # Aggregate predictions
-            aggregated_pred = self.aggregate_predictions(predictions, weights_average)
-            return aggregated_pred, y
+            aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights_average)
+            return aggregated_pred
         else:
-            aggregated_pred, y = self.predict_proba(X, weights_average)
+            aggregated_pred = self.predict_proba(X, weights_average, top_model)
             predictions = np.argmax(aggregated_pred, axis=1)
-            return predictions, y
+            return predictions"""
 
-    def predict_proba(self, X, weights_average):
+    def predict_proba(self, X, weights_average='weight', top_model='all', id_col=(None, None)):
         """
         Predict probabilities for input data using each model and aggregate the results.
 
@@ -3634,22 +3796,54 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         Returns:
         - Aggregated predicted probabilities.
         """
+
+        if weights_average not in ['None', 'weight']:
+            assert id_col[0] is not None and id_col[1] is not None
+            vals = id_col[1]
+            unique_ids = np.unique(vals)
+            prediction = np.empty(X.shape[0], dtype=int)
+            y = np.empty(X.shape[0], dtype=int)
+            for id in unique_ids:
+                print(f'Prediction for {id_col[0]} {id}')
+                mask = (id_col[1] == id)
+                prediction[mask], y[mask] = self.predict_proba_with_weights(X[mask], hard_or_soft='soft', weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model)
+            return prediction, y
+
+        else:
+            return self.predict_proba_with_weights(X, hard_or_soft='soft', weights_average='weight', weights2use=self.weights_for_model, top_model=top_model)
+
+        """models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
+
+        if top_model != 'all':
+                top_model = int(top_model)
+                key = np.argsort(self.weights_for_model)
+                models_list = models_list[np.asarray(key)]
+                models_list = models_list[-top_model:]
+        else:
+            key = np.arange(0, len(self.best_estimator_))
+        
+        print(models_list)
         probas = []
+        models_to_mean = []
         for i, estimator in enumerate(self.best_estimator_):
+            if estimator.name not in models_list:
+                continue
+            X_ = X
             if hasattr(estimator, "predict_proba"):
-                if estimator.target_name == self.target_name:
-                    proba, y = estimator.predict_proba(X, return_y=True)
-                else:
-                    proba = estimator.predict_proba(X, return_y=False)
+                proba = estimator.predict_proba(X_)
+                if proba.shape[1] != 5:
+                    continue
+                #print(estimator.name, np.asarray(probas).shape)
+                models_to_mean.append(key[i])
                 probas.append(proba)
             else:
                 raise AttributeError(f"The model at index {i} does not support predict_proba.")
             
         # Aggregate probabilities
-        aggregated_proba = self.aggregate_probabilities(probas, weights_average)
-        return aggregated_proba, y
+        aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights_average)
+        return aggregated_proba"""
 
-    def aggregate_predictions(self, predictions_list, weights_average=True):
+    def aggregate_predictions(self, predictions_list, models_to_mean, weight2use=[], id_col=(None, None)):
         """
         Aggregate predictions from multiple models with weights.
 
@@ -3660,29 +3854,51 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         - Aggregated predictions.
         """
         predictions_array = np.array(predictions_list)
-        if weights_average:
-            weights_to_use = self.weights_for_model
-        else:
-            weights_to_use = np.ones_like(self.weights_for_model)
+        if len(weight2use) == 0 or weight2use is None:
+            weight2use = np.ones_like(self.weights_for_model)[models_to_mean]
 
-        if self.task_type == 'classification':
+        if self.task_type == 'classification' or self.task_type == 'ordinal-classification':
             # Weighted vote for classification
             unique_classes = np.arange(0, 5)
             weighted_votes = np.zeros((len(unique_classes), predictions_array.shape[1]))
 
             for i, cls in enumerate(unique_classes):
                 mask = (predictions_array == cls)
-                weighted_votes[i] = np.sum(mask * weights_to_use[:, None], axis=0)
+                weighted_votes[i] = np.sum(mask * weight2use.reshape(mask.shape[0], 1), axis=0)
 
             aggregated_pred = unique_classes[np.argmax(weighted_votes, axis=0)]
         else:
             # Weighted average for regression
-            weighted_sum = np.sum(predictions_array * weights_to_use[:, None], axis=0)
-            aggregated_pred = weighted_sum / np.sum(weights_to_use)
+            weighted_sum = np.sum(predictions_array * weight2use[:, None], axis=0)
+            aggregated_pred = weighted_sum / np.sum(weight2use)
+            #aggregated_pred = np.max(predictions_array * weight2use[:, None], axis=0)
         
         return aggregated_pred
 
-    def aggregate_probabilities(self, probas_list, weights_average=True):
+    """def aggregate_predictions_id(self, predictions_array, models_to_mean, id_col=(None, None)):
+        assert id_col[0] is not None and id_col[1] is not None
+        id = id_col[0]
+        vals = id_col[1]
+        uvals = np.unique(vals)
+
+        weight2use = np.zeros((len(models_to_mean), predictions_array.shape[1]))
+        for val in uvals:
+            mask = (vals == val)
+            weight2use[:, mask] = self.weights_id_model[id][val][models_to_mean]
+            if np.all(weight2use[:, mask] == 0):
+                weight2use[:, mask] = self.weights_for_model[models_to_mean]
+
+        unique_classes = np.arange(0, 5)
+        weighted_votes = np.zeros((len(unique_classes), predictions_array.shape[1]))
+
+        for i, cls in enumerate(unique_classes):
+            mask = (predictions_array == cls)
+            weighted_votes[i] = np.sum(mask * weight2use, axis=0)
+
+        aggregated_pred = unique_classes[np.argmax(weighted_votes, axis=0)]
+        return aggregated_pred"""   
+
+    def aggregate_probabilities(self, probas_list, models_to_mean, weight2use=[], id_col=(None, None)):
         """
         Aggregate probabilities from multiple models with weights.
 
@@ -3693,16 +3909,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         - Aggregated probabilities.
         """
         probas_array = np.array(probas_list)
-        if weights_average:
-            weights_to_use = self.weights_for_model
-        else:
-            weights_to_use = np.ones_like(self.weights_for_model)
+        if weight2use is None or len(weight2use) == 0:
+            weight2use = np.ones_like(self.weights_for_model)[models_to_mean]
         
         # Weighted average for probabilities
-        weighted_sum = np.sum(probas_array * weights_to_use[:, None, None], axis=0)
-        aggregated_proba = weighted_sum / np.sum(weights_to_use)
-        
-        return aggregated_proba 
+        weighted_sum = np.sum(probas_array * weight2use[:, None, None], axis=0)
+        aggregated_proba = weighted_sum / np.sum(weight2use)
+        #aggregated_proba = np.max(probas_array * weight2use[:, None, None], axis=0)
+        return aggregated_proba
 
     def score(self, X, y, sample_weight=None):
         """

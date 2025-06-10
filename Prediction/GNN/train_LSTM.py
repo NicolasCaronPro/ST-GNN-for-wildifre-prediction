@@ -53,10 +53,11 @@ parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
 parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
+parser.add_argument('-quick', '--quick', type=str, help='isquick', default='False')
 
 args = parser.parse_args()
 
-QUICK = True
+QUICK = args.quick == 'True'
 
 # Input config
 dataset_name = args.dataset
@@ -305,34 +306,23 @@ prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
 ###################### Define models to train ######################
 
+if days_in_futur == 0:
+    kdays = 10
+        
+elif days_in_futur == 7:
+    kdays = 7
+
+elif days_in_futur == 15:
+    kdays = 15
+
+elif days_in_futur == 31:
+    kdays = 10
+
 if name_exp.find('voting') != -1:
-    if dataset_name != 'bdiff':
-        voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
-    else:
-        voting_models = []
-    
-    #voting_models = []
+    voting_models = define_voting_dl_models('LSTM', kdays)
 
     models = [
-            ('LSTM', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('LSTM', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('LSTM', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('LSTM', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            ('LSTM', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('LSTM', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('LSTM', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-
-            #('GRU', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('LSTM', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            #('GRU', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            #('LSTM', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
             ]
     
     staking_models = []
@@ -344,10 +334,13 @@ if name_exp.find('voting') != -1:
                 ]
 else:
     models = [
+            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
             ]
     
     gnn_models = [
     ]
+    federated_models = []      
+    staking_models = []
 
     voting_models = []
 
@@ -494,7 +487,7 @@ if doTrain:
         global_params['model'] = models[0]
         global_params['out_channels'] = models[2]
         global_params['use_temporal_as_edges'] = None
-        global_params['n_run'] = gnn_model[-1]
+        global_params['n_run'] = models[-1]
         global_params['torch_structure'] = 'Model_Torch'
         
         wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
@@ -508,7 +501,7 @@ if doTrain:
                             do_bayes_search=do_bayes_search,
                             model=models,
                             scale=scale,
-                            input_global_params=global_params)
+                            input_params=global_params)
 
     for models in federated_models:
         global_params['model'] = models[0]
@@ -545,47 +538,30 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                #('LSTM_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-                #('LSTM_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                
-                #('GRU_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('GRU_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ##('LSTM_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-#
-                #('GRU_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('GRU_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('GRU_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('LSTM_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        ]
+        (f'LSTM_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-    if days_in_futur == 0:
-        models = [
-                ('LSTM', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-                ('LSTM', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-                ]
-        
-    elif days_in_futur == 7:
-        models = [
-            ('LSTM', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('LSTM', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-        ]
-    elif days_in_futur == 15:
-        models = [
-            ('LSTM', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('LSTM', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-        ]
-    elif days_in_futur == 31:
-        models = [
-            ('LSTM', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('LSTM', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
         ]
 
     elif graph_method == 'graph':
@@ -627,7 +603,7 @@ if doTest:
 
     ####################################################### Test by departmenent ###################################################
 
-    """for dept in departements:
+    for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:

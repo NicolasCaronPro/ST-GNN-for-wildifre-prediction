@@ -1,11 +1,11 @@
 from ast import arg
 from GNN.features_2D import *
 
-def encode(path_to_target, maxDate, train_departements, dir_output, resolution, graph):
+def encode(path_to_target, trainDates, expe, train_departements, dir_output, resolution, graph):
 
-    print(f'Create encoder for categorical features using {train_departements}, at max {maxDate}')
+    print(f'Create encoder for categorical features using {train_departements}, at expe {expe}')
     stop_calendar = 11
-    trainMax = allDates.index(maxDate)
+    trainDate = np.asarray([allDates.index(date) for date in trainDates])
     foret = []
     cosia = []
     gt = []
@@ -26,10 +26,10 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
         dir_data = rootDisk / 'csv' / dep /  'raster' / resolution
         #dir_data = root / 'csv' / dep /  'raster' / resolution
 
-        tar = read_object(dep+'Influence.pkl', path_to_target)
+        tar = read_object(dep+'binScale0.pkl', path_to_target)
         if tar is None:
             continue
-        tar = tar[:,:,:trainMax]
+        tar = tar[:,:,trainDate]
         gt += list(tar[~np.isnan(tar)])
 
         temporalValues.append(np.nansum(tar.reshape(-1, tar.shape[2]), axis=0))
@@ -48,7 +48,7 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
         land = read_object('dynamic_world_landcover.pkl', dir_data)
         if land is not None:
             try:
-                land = land[:,:trainMax]
+                land = land[:,trainDate]
                 landcover += list(land[~np.isnan(tar[:,:,0])])
             except:
                 pass
@@ -75,7 +75,7 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
         
         calendar = np.empty((tar.shape[2], stop_calendar))
         for i, date in enumerate(allDates):
-            if date == maxDate:
+            if date not in trainDate:
                 break
             ddate = dt.datetime.strptime(date, '%Y-%m-%d')
             calendar[i, 0] = int(date.split('-')[1]) # month
@@ -130,48 +130,48 @@ def encode(path_to_target, maxDate, train_departements, dir_output, resolution, 
     # Calendar
     encoder = CatBoostEncoder(cols=np.arange(0, stop_calendar))
     encoder.fit(calendar_array, temporalValues)
-    save_object(encoder, 'encoder_calendar.pkl', dir_output)
+    save_object(encoder, f'encoder_calendar_{expe}.pkl', dir_output)
 
     if landcover.shape == spatialValues.shape:
         # Landcover
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(landcover, spatialValues)
-        save_object(encoder, 'encoder_landcover.pkl', dir_output)
+        save_object(encoder, f'encoder_landcover_{expe}.pkl', dir_output)
 
     if foret.shape == spatialValues.shape:
         # Foret
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(foret, spatialValues)
-        save_object(encoder, 'encoder_foret.pkl', dir_output)
+        save_object(encoder, f'encoder_foret_{expe}.pkl', dir_output)
 
     if osmnx.shape == spatialValues.shape:
         # OSMNX
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(osmnx, spatialValues)
-        save_object(encoder, 'encoder_osmnx.pkl', dir_output)
+        save_object(encoder, f'encoder_osmnx_{expe}.pkl', dir_output)
 
     if argile_value.shape == spatialValues.shape:
         # OSMNX
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(argile_value, spatialValues)
-        save_object(encoder, 'encoder_argile.pkl', dir_output)
+        save_object(encoder, f'encoder_argile_{expe}.pkl', dir_output)
 
     if ids_value.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(ids_value, spatialValues)
-        save_object(encoder, f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output)
+        save_object(encoder, f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}.pkl', dir_output)
 
     if cluster_value.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(cluster_value, spatialValues)
-        save_object(encoder, f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output)
+        save_object(encoder, f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}.pkl', dir_output)
 
     if cosia.shape == spatialValues.shape:
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(cosia, spatialValues)
-        save_object(encoder, 'encoder_cosia.pkl', dir_output)
+        save_object(encoder, f'encoder_cosia_{expe}.pkl', dir_output)
     
     # Geo
     encoder = CatBoostEncoder(cols=np.arange(0, 1))
     encoder.fit(geo_array, temporalValues)
-    save_object(encoder, 'encoder_geo.pkl', dir_output)
+    save_object(encoder, f'encoder_geo_{expe}.pkl', dir_output)

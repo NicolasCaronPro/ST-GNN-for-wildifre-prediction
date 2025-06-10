@@ -186,11 +186,39 @@ def find_dates_between(start, end):
     return res
 
 def defines_train_dates(expe):
-    if expe == '2022':
+    if 'normal' in expe or 'voting' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
+        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'year-1' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2017-12-31')
+        all_val_dates = find_dates_between('2018-01-01', '2018-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'year-2' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2018-12-31')
+        all_val_dates = find_dates_between('2019-01-01', '2019-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'year-3' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2019-12-31')
+        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'year-4' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
+        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'year-5' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
+        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif '2022' in expe:
         all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
         all_val_dates = find_dates_between('2023-01-01', '2024-06-29')
         all_test_dates = find_dates_between('2022-01-01', '2022-12-31')
-    else:
+    elif 'no2022' in expe:
+        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
+        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
+        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    elif 'default' in expe:
         all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
         all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
         all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
@@ -2219,7 +2247,38 @@ def mode_filter(image, kernel_size=3):
     
     return filtered_image
 
-def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_size=math.inf, oridata=None, exclude_label=None, background=-1):
+def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
+    """
+    Calcule le nombre de pixels (res_km x res_km) dans un carré deg_size x deg_size degrés,
+    situé au centre de la France (latitude 46.5°N par défaut).
+
+    Args:
+        res_km (float): Taille d’un pixel en kilomètres (par défaut 2 km).
+        deg_size (float): Taille du carré en degrés (par défaut 0.25°).
+        lat_deg (float): Latitude (par défaut 46.5°N, centre de la France).
+
+    Returns:
+        tuple: (n_rows, n_cols, total_pixels)
+    """
+    # Longueur d’un degré de latitude (quasi constant)
+    km_per_deg_lat = 111.32
+
+    # Longueur d’un degré de longitude dépendant de la latitude
+    #km_per_deg_lon = 111.32 * math.cos(math.radians(lat_deg))
+    km_per_deg_lon = 111.32
+
+    # Dimensions du carré en km
+    height_km = deg_size * km_per_deg_lat
+    width_km = deg_size * km_per_deg_lon
+
+    # Nombre de pixels
+    n_rows = int(height_km // res_km)
+    n_cols = int(width_km // res_km)
+    total_pixels = n_rows * n_cols
+
+    return n_rows, n_cols, total_pixels
+
+def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_size=math.inf, exclude_label=None, background=-1, features=None, nb_attempt=3):
     """
     Fusionne les clusters adjacents dans une image en fonction de critères définis.
     
@@ -2247,8 +2306,7 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
     # Liste des labels qui ont été modifiés
     changed_labels = []
 
-    # Nombre d'essais pour dilater un cluster avant abandon
-    nb_attempt = 3
+    fix_label = []
 
     # Longueur initiale des régions
     len_regions = len(regions)
@@ -2266,6 +2324,9 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
             continue
 
         label = region.label
+        if label in fix_label:
+            i += 1
+            continue
 
         # Si le label a déjà été modifié, passer au suivant
         #if label in changed_labels:
@@ -2329,36 +2390,19 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                                 best_neighbor = neighbor[0]
                                 max_neighbor_size = neighbor_size
 
-                        # Si aucun voisin ne satisfait les critères, utiliser le plus grand
-                        if not find_neighbor and best_neighbor is not None:
-                            if max_neighbor_size < max_cluster_size:
-                                res[mask_label] = best_neighbor
-                                dilated_image[mask_label] = best_neighbor
-                                dilate = False
-                                logger.info(f'Use biggest neighbord label {label} -> {best_neighbor}')
-                                label = best_neighbor
-                                find_neighbor = True
-                                # Si la taille après fusion dépasse la taille maximal, appliquer l'érosion (peut être ne pas fusionner)
-                                if max_neighbor_size < max_cluster_size:
-                                    mask_label = dilated_image == label
-                                    ones = np.argwhere(mask_label == 1).shape[0]
-                                    while ones > max_cluster_size:
-                                        mask_label = morphology.erosion(mask_label, morphology.disk(3))
-                                        ones = np.argwhere(mask_label == 1).shape[0]
-
-                    elif mode == 'time_series_similarity':
+                    elif mode == 'timeSeriesSimilarity':
                         # Mode basé sur la similarité de séries temporelles (DTW)
-                        assert oridata is not None
-                        time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
+                        assert features is not None
+                        time_series_data = np.nansum(features[dilated_image == label], axis=0).reshape(-1, 1)
                         best_neighbord = None
                         min_dst = math.inf  # Cherche à minimiser la distance
-                        dst_thresh = 50
+                        dst_thresh = 1000
 
                         for neighbor in neighbors_size:
                             if neighbor[0] == label:
                                 continue
 
-                            time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
+                            time_series_data_neighbor = np.nansum(features[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
                             distance = dtw.distance(time_series_data, time_series_data_neighbor)
 
                             if distance < min_dst and distance < dst_thresh:
@@ -2375,14 +2419,14 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
 
                     elif mode == 'time_series_similarity_fast':
                         # Mode basé sur une version rapide de DTW
-                        assert oridata is not None
-                        time_series_data = np.nansum(oridata[dilated_image == label], axis=0).reshape(-1, 1)
+                        assert features is not None
+                        time_series_data = np.nansum(features[dilated_image == label], axis=0).reshape(-1, 1)
                         best_neighbord = None
                         min_simi = math.inf  # Cherche à minimiser la similarité
                         dst_thresh = 100
 
                         for neighbor in neighbors_size:
-                            time_series_data_neighbor = np.nansum(oridata[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
+                            time_series_data_neighbor = np.nansum(features[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
                             _, simi = dtw_functions.dtw(time_series_data, time_series_data_neighbor, local_dissimilarity=d.euclidean)
 
                             if simi < min_simi and simi < dst_thresh:
@@ -2395,6 +2439,27 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                             changed_labels.append(label)
                             label = best_neighbord
                             find_neighbor = True
+                    
+                    elif mode == 'BrayCurtis':
+                        assert features is not None
+                        best_neighbor, max_neighbor_size, find_neighbor, dilate = find_neighbor_by_BrayCurtis_similarity(res, features, label, min_cluster_size, max_cluster_size, mask_label_ori, dilated_image, mask_label, neighbor_labels)
+                
+                    # Si aucun voisin ne satisfait les critères, utiliser le plus grand
+                    if not find_neighbor and best_neighbor is not None:
+                        if max_neighbor_size < max_cluster_size:
+                            res[mask_label] = best_neighbor
+                            dilated_image[mask_label] = best_neighbor
+                            dilate = False
+                            logger.info(f'Use biggest neighbord label {label} -> {best_neighbor}')
+                            label = best_neighbor
+                            find_neighbor = True
+                            # Si la taille après fusion dépasse la taille maximal, appliquer l'érosion (peut être ne pas fusionner)
+                            if max_neighbor_size < max_cluster_size:
+                                mask_label = dilated_image == label
+                                ones = np.argwhere(mask_label == 1).shape[0]
+                                while ones > max_cluster_size:
+                                    mask_label = morphology.erosion(mask_label, morphology.disk(3))
+                                    ones = np.argwhere(mask_label == 1).shape[0]
 
                 # Si aucun voisin trouvé, dilater la région
                 if dilate:
@@ -2422,6 +2487,7 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                         
                         res[mask_label] = region.label
                         logger.info(f'Keep label dilated {region.label}')
+                        fix_label.append(region.label)
 
             # Mettre à jour les régions pour tenir compte des changements
             regions = measure.regionprops(res)
@@ -2429,6 +2495,7 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
             len_regions = len(regions)
             i = 0
             continue
+
         else:
             mask_label = res == region.label
             mask_before_erosion = np.copy(mask_label)
@@ -2436,11 +2503,11 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                 mask_label = morphology.erosion(mask_label, morphology.square(3))
                 ones = np.argwhere(mask_label == 1).shape[0]
 
-            res[mask_before_erosion & ~mask_label] = background
+            res[mask_before_erosion & ~mask_label] = 0
 
             # Si le cluster est assez grand, on le conserve tel quel
             logger.info(f'Keep label {region.label}')
-            
+
         i += 1
 
     return res
@@ -2490,49 +2557,57 @@ def find_clusters(image, threshold, clusters_to_ignore=None, background=0):
     
     return valid_clusters
 
-def split_large_clusters(image, size_threshold, min_cluster_size, background):
+def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, background):
     labeled_image = np.copy(image)
     
-    # Obtenir les propriétés des régions labellisées
     regions = measure.regionprops(labeled_image)
-    
-    # Initialiser une image pour les nouveaux labels après division
     new_labeled_image = np.copy(labeled_image)
     changes_made = False
 
     for region in regions:
-
         if region.label in background:
             continue
-        
-        if region.area > size_threshold:
-            # Si la région est plus grande que le seuil, la diviser
-            
-            # Extraire le sous-image du cluster
+
+        original_size = region.area
+
+        if original_size > size_threshold:
             minr, minc, maxr, maxc = region.bbox
             region_mask = (labeled_image[minr:maxr, minc:maxc] == region.label)
-            
-            # Obtenir les coordonnées des pixels du cluster
             coords = np.column_stack(np.nonzero(region_mask))
-            # Appliquer K-means pour diviser en 2 clusters
-            if len(coords) > 1:  # Assurez-vous qu'il y a suffisamment de points pour appliquer K-means
+
+            if len(coords) > 1:
+                # Appliquer KMeans
                 clusterer = KMeans(n_clusters=2, random_state=42, n_init=10).fit(coords)
-                #clusterer = HDBSCAN(min_cluster_size=size_threshold).fit(coords)
                 labels = clusterer.labels_
-                
-                # Créer deux nouveaux labels
-                new_label_1 = new_labeled_image.max() + 1
-                new_label_2 = new_labeled_image.max() + 2
-                
-                # Assigner les nouveaux labels aux pixels correspondants
-                new_labeled_image[minr:maxr, minc:maxc][region_mask] = np.where(labels == 0, new_label_1, new_label_2)
-                
-                changes_made = True
-    
-    # Si des changements ont été effectués, vérifier s'il y a des clusters à fusionner
+
+                # Calcul des tailles des deux sous-clusters
+                size_1 = np.sum(labels == 0)
+                size_2 = np.sum(labels == 1)
+
+                # Vérifier si le split améliore la proximité aux tailles voulues
+                original_diff = abs(original_size - wanted_size)
+                split_diff = abs(size_1 - wanted_size) + abs(size_2 - wanted_size)
+
+                #if split_diff < original_diff and size_1 >= min_cluster_size and size_2 >= min_cluster_size:
+                if split_diff < original_diff:
+                    # Appliquer le split
+                    new_label_1 = new_labeled_image.max() + 1
+                    new_label_2 = new_label_1 + 1
+                    full_region = new_labeled_image[minr:maxr, minc:maxc]
+
+                    new_region = np.where(region_mask, full_region, 0)
+                    # On assigne en place dans la région uniquement là où le masque est actif
+                    new_region[region_mask] = np.where(labels == 0, new_label_1, new_label_2)
+                    new_labeled_image[minr:maxr, minc:maxc][region_mask] = new_region[region_mask]
+
+                    changes_made = True
+
     if changes_made:
-        new_labeled_image = split_large_clusters(new_labeled_image, size_threshold, min_cluster_size, background)
-    
+        # Appel récursif pour gérer les divisions multiples
+        new_labeled_image = split_large_clusters(
+            new_labeled_image, size_threshold, min_cluster_size, wanted_size, background
+        )
+
     return new_labeled_image
 
 def most_frequent_neighbor(image, mask, i, j, non_cluster):
@@ -3628,6 +3703,15 @@ def calculate_ks_continous(data, score_col, event_col, dir_output=None):
     
     return ks_stat, data_sorted[[score_col, 'cum_events', 'cum_non_events', 'ks_diff']]
 
+def calculate_area_under_curve(y_values):
+    """
+    Calcule l'aire sous la courbe pour une série de valeurs données (méthode de trapèze).
+
+    :param y_values: Valeurs sur l'axe des ordonnées pour calculer l'aire sous la courbe.
+    :return: Aire sous la courbe.
+    """
+    return np.trapz(y_values, dx=1)
+
 def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     """
     Calcule les scores (aire commune, union, sous-prédiction, sur-prédiction) entre deux signaux.
@@ -3703,13 +3787,16 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     graph_sums = {g_id: y_true[graph_id == g_id].sum() for g_id in unique_graph_ids}
     sorted_graph_ids = sorted(graph_sums, key=graph_sums.get, reverse=True)
 
+    iou_scores = []
+    f1_scores = []
+
     # Parcourir les graph_id triés
     for i, g_id in enumerate(sorted_graph_ids):
         mask = graph_id == g_id
 
         y_pred_graph = y_pred[mask]
         y_true_graph = y_true[mask]
-        y_true_fire_graph = y_true_fire[mask]
+        y_true_fire_graph = y_true_fire[mask]            
 
         mask_fire_graph = (y_pred_graph > 0) | (y_true_fire_graph > 0)
         intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
@@ -3771,9 +3858,18 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"under_bad_prediction_global_{i}": under_prediction_zeros_graph / union if union_graph > 0 else np.nan,
             f"bad_prediction_global_{i}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union if union_graph > 0 else np.nan,
         }
-
+        if np.any(y_true_fire_graph > 0):
+            iou_scores.append(graph_scores[f'iou_{i}'])
+            f1_scores.append(graph_scores[f'f1_wildfire_detected_{i}'])
+        
         scores.update(graph_scores)
 
+    max_area = np.trapz(np.ones(np.unique(graph_id[y_true > 0]).shape[0]))
+    IoU_area = calculate_area_under_curve(iou_scores)
+    F1_area = calculate_area_under_curve(f1_scores)
+    scores['iou_area'] = IoU_area / max_area
+    scores['f1_area'] = F1_area / max_area
+    
     unique_seasons = np.unique(saison)
 
     # Trier les saisons en fonction de la somme de y_true
@@ -3978,12 +4074,91 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"precision_wildfire_detected_elt_{unique_value}": precision_wildfire_detected,
             f"f1_wildfire_detected_elt_{unique_value}": f1_wildfire_detected,
 
-
             f"dice_coefficient_elt_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
 
             f"over_bad_prediction_elt_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
             f"under_bad_prediction_elt_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
             f"bad_prediction_elt_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
+        }
+
+        # Ajouter les scores pour cette valeur unique à la collection globale
+        scores.update(scores_elt)
+
+    # Parcourir les valeurs uniques de y_true
+    for unique_value in np.unique(y_true[y_true > 0]):
+        # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
+        mask = (y_true >= unique_value) | (y_pred >= unique_value)
+
+        y_pred_sample = y_pred[mask]
+        y_true_sample = y_true[mask]
+        y_true_fire_sample = y_true_fire[mask]
+
+        if y_pred_sample.shape[0] == 0:
+            continue
+
+        if y_pred_sample.shape[0] == 1:
+            y_pred_sample = np.concatenate((y_pred_sample, y_pred_sample))
+            y_true_sample = np.concatenate((y_true_sample, y_true_sample))
+            y_true_fire_sample = np.concatenate((y_true_fire_sample, y_true_fire_sample))
+
+        mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
+        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        iou_wildfire_or_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+
+        mask_fire_sample = (y_pred_sample > 0) & (y_true_fire_sample > 0)
+        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
+        iou_wildfire_and_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+
+        # Limitation des signaux à un maximum de 1
+        y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
+        y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
+
+        # Calcul de la métrique IOU
+        #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+
+        y_pred_clipped_ytrue = np.copy(y_pred_sample)
+        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
+        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
+        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
+        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+
+        # Calculer les aires
+        intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
+        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
+
+        under_prediction = np.trapz(np.maximum(0, y_true_sample - y_pred_sample))
+        over_prediction = np.trapz(np.maximum(0, y_pred_sample - y_true_sample))
+
+        over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
+        under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
+
+        under_prediction_fire = np.trapz(
+            np.maximum(0, y_true_sample[y_true_sample > 0] - y_pred_sample[y_true_sample > 0])
+        )
+        over_prediction_fire = np.trapz(
+            np.maximum(0, y_pred_sample[y_true_sample > 0] - y_true_sample[y_true_sample > 0])
+        )
+
+        # Enregistrement dans un dictionnaire
+        scores_elt = {            
+            f"iou_elt_sup_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
+            f"iou_wildfire_detected_elt_sup_{unique_value}": iou_wildfire_detected,
+            f"iou_wildfire_or_pred_elt_sup_{unique_value}": iou_wildfire_or_pred_sample,
+            f"iou_wildfire_and_pred_elt_sup_{unique_value}": iou_wildfire_and_pred_sample,
+            f"iou_no_overestimation_elt_sup_{unique_value}": iou_no_overestimation,
+            f"precision_wildfire_detected_elt_sup_{unique_value}": precision_wildfire_detected,
+            f"f1_wildfire_detected_elt_sup_{unique_value}": f1_wildfire_detected,
+
+            f"dice_coefficient_elt_sup_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
+            
+            f"over_bad_prediction_elt_sup_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
+            f"under_bad_prediction_elt_sup_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
+            f"bad_prediction_elt_sup_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
         }
 
         # Ajouter les scores pour cette valeur unique à la collection globale
@@ -4832,7 +5007,7 @@ def get_static_temporal_idx(features):
             static_idx.append(i)
             continue
         
-        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet or fet in calendar_variables or 'AutoRegression' in fet:
+        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet or fet in calendar_variables or 'AutoRegression' in fet or fet in air_variables:
             temporal_idx.append(i)
             continue
 

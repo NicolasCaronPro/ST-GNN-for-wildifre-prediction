@@ -24,6 +24,7 @@ from tslearn.clustering import TimeSeriesKMeans
 from scipy.spatial.distance import cdist
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
+import re
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -37,6 +38,9 @@ class GraphStructure():
                  sinister_encoding : str,
                  dataset_name : str,
                  train_departements : list,
+                 attempt : int,
+                 reduce : int,
+                 tol : float,
                  graph_method : str == 'node'):
 
         for col in ['latitude', 'longitude', 'geometry', 'departement']:
@@ -74,6 +78,13 @@ class GraphStructure():
         self.train_departements = train_departements
         self.graph_method = graph_method
         self.susceptility_mapper = None
+        self.reduce = int(reduce) if reduce is not None else None
+        self.attempt = int(attempt) if attempt is not None else None
+        self.tol = float(tol) if tol is not None else None
+        if 'watershed' in self.base:
+            assert self.attempt is not None
+            assert self.tol is not None
+            assert self.reduce is not None
 
     def _create_sinister_region(self, base: str, path: Path, sinister: str, dataset_name:str, sinister_encoding : str, resolution, train_date) -> None:
         udept = np.unique(self.departements)
@@ -170,7 +181,7 @@ class GraphStructure():
 
         oridata = np.copy(data) 
 
-        reducor = Predictor(n_clusters=4 if self.dataset_name == 'firemen' else 5, name='risk_reducor')
+        reducor = Predictor(n_clusters=self.reduce, name='risk_reducor')
         reducor.fit(data[valid_mask].reshape(-1,1))
         data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
         data[valid_mask] = order_class(reducor, data[valid_mask])
@@ -313,7 +324,7 @@ class GraphStructure():
         logger.info(f'Cluster dispersion {self.dispersions}')
 
     def my_watershed(self, dept, data, valid_mask, raster, path, vb, image_type):
-        reducor = Predictor(n_clusters=4 if self.dataset_name == 'firemen' else 5, name='risk_reducor')
+        reducor = Predictor(n_clusters=self.reduce)
         reducor.fit(data[valid_mask].reshape(-1,1))
         data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
         data[valid_mask] = order_class(reducor, data[valid_mask])
@@ -341,6 +352,9 @@ class GraphStructure():
         # Appliquer la segmentation Watershed
         pred = watershed(-data, markers, mask=data, connectivity=1)
         self._save_feature_image(path, dept, f'pred_watershed_{image_type}', pred, raster)
+        pred_save = np.copy(pred).astype(float)
+        pred_save[np.isnan(raster)] = np.nan
+        save_object(pred_save, f'watershed_{dept}.pkl', path / 'features_geometry')
         return pred
 
     def create_geomtry_with_companie(self, dept, vec_base, path, sinister, dataset_name,
@@ -466,12 +480,22 @@ class GraphStructure():
         logger.info(f'Cluster dispersion {self.dispersions}')
 
     def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, type):
-        
-        min_cluster_size = 1 + 3 * scale * (scale + 1)
-        max_cluster_size = (int)(min_cluster_size * 2.5)
-        
+
+        if 'degree' in self.base:
+            size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
+            max_cluster_size = int(size + (self.tol * size))
+            min_cluster_size = int(size - (self.tol * size))
+            s = float(f'0.{self.scale}')
+            #size_up = count_pixels_in_france_deg_square(deg_size=s + 0.1)[-1]
+            #size_down = count_pixels_in_france_deg_square(deg_size=s - 0.1)[-1]
+            #max_cluster_size = min(max_cluster_size, size_up)
+            #min_cluster_size = max(min_cluster_size, size_down)
+        else:
+            min_cluster_size = 1 + 3 * scale * (scale + 1)
+            max_cluster_size = (int)(min_cluster_size * 2.5)
+
         if mode == 'size':
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, oridata=None, mode=mode, exclude_label=0, background=-1)
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, features=None, mode=mode, exclude_label=0, background=-1, nb_attempt=self.attempt)
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
             self._save_feature_image(path, dept, 'pred_merge', pred, raster)
 
@@ -483,7 +507,7 @@ class GraphStructure():
 
             valid_cluster = [val + 1 for val in valid_cluster]
             pred[valid_mask] += 1
-            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, valid_cluster)
+            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, size, valid_cluster)
             valid_cluster = [val - 1 for val in valid_cluster]
             pred[valid_mask] -= 1
             
@@ -491,7 +515,7 @@ class GraphStructure():
             self._save_feature_image(path, dept, f'{type}_split', pred, raster)
 
         elif mode == 'time_series_similarity':
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, oridata=bin_data, exclude_label=0, background=-1)
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=self.attempt)
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
             self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
@@ -503,13 +527,13 @@ class GraphStructure():
 
             valid_cluster = [val + 1 for val in valid_cluster]
             pred[valid_mask] += 1
-            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, valid_cluster)
+            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, size, valid_cluster)
             valid_cluster = [val - 1 for val in valid_cluster]
             pred[valid_mask] -= 1
 
         elif mode == 'time_series_similarity_fast':
             pred[~valid_mask] = -1
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, oridata=bin_data, exclude_label=0, background=-1)
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=self.nb_attempt)
             valid_cluster = find_clusters(pred, math.inf, 0, -1)
             self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
@@ -521,7 +545,7 @@ class GraphStructure():
 
             valid_cluster = [val + 1 for val in valid_cluster]
             pred[valid_mask] += 1
-            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, valid_cluster)
+            pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, size, valid_cluster)
             valid_cluster = [val - 1 for val in valid_cluster]
             pred[valid_mask] -= 1
 
@@ -556,10 +580,20 @@ class GraphStructure():
         
         self.max_target_value = None
 
-        min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
-        max_cluster_size = (int)(min_cluster_size * 2.5)
+        if 'degree' in self.base:
+            size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
+            max_cluster_size = int(size + (self.tol * size))
+            min_cluster_size = int(size - (self.tol * size))
+            s = float(f'0.{self.scale}')
+            #size_up = count_pixels_in_france_deg_square(deg_size=s + 0.1)[-1]
+            #size_down = count_pixels_in_france_deg_square(deg_size=s - 0.1)[-1]
+            #max_cluster_size = min(max_cluster_size, size_up)
+            #min_cluster_size = max(min_cluster_size, size_down)
+        else:
+            min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
+            max_cluster_size = (int)(min_cluster_size * 2.5)
         
-        pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, [-1])
+        pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, size, [-1])
         pred -= 1
         pred = pred.astype(float)
         pred[~valid_mask] = np.nan

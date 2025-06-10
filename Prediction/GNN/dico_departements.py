@@ -89,7 +89,7 @@ for code, _ in departements_list:
 def select_departments(database, sinister):
 
     if database == 'bdiff':
-        
+                    
         departements = [
             'departement-01-ain',
             'departement-02-aisne',

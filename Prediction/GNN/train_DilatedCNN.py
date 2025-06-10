@@ -53,10 +53,11 @@ parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
 parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
 parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
 parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
+parser.add_argument('-quick', '--quick', type=str, help='isquick', default='False')
 
 args = parser.parse_args()
 
-QUICK = True
+QUICK = args.quick == 'True'
 
 # Input config
 dataset_name = args.dataset
@@ -304,48 +305,21 @@ print(allDates[int(test_dataset[test_dataset['weight'] > 0].date.min())])
 prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
 ###################### Define models to train ######################
-
+if days_in_futur == 0:
+    kdays = 15
+elif days_in_futur == 7:
+    kdays = 10
+elif days_in_futur == 15:
+    kdays = 15
+elif days_in_futur == 31:
+    kdays = 31
+    
 if name_exp.find('voting') != -1:
-    if dataset_name != 'bdiff':
-        voting_models = define_voting_dl_models(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
-    else:
-        voting_models = []
+    voting_models = define_voting_dl_models('DilatedCNN', kdays)
     
-    #voting_models = []
-
     models = [
-            #('DilatedCNN', 'search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-
-            #('DilatedCNN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
-            #('DilatedCNN', 'search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            ('DilatedCNN', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
             ]
-    
-    if days_in_futur == 0:
-        models = [
-            ('DilatedCNN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('DilatedCNN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-                ]
-        
-    elif days_in_futur == 7:
-        models = [
-            ('DilatedCNN', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('DilatedCNN', 'search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-        ]
-    elif days_in_futur == 15:
-        models = [
-            ('DilatedCNN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('DilatedCNN', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-        ]
-    elif days_in_futur == 31:
-        models = [
-            ('DilatedCNN', 'search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-            ('DilatedCNN', 'search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-        ]
     
     staking_models = []
     federated_models = [
@@ -356,11 +330,14 @@ if name_exp.find('voting') != -1:
                 ]
 else:
     models = [
+            ('DilatedCNN', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
             ]
     
     gnn_models = [
     ]
-
+    staking_models = []
+    federated_models = [
+        ]
     voting_models = []
 
 train_loader = None
@@ -493,6 +470,7 @@ if doTrain:
         for model in models:
             global_params['model'] = model[0]
             global_params['infos'] = model[1]
+            global_params['n_run'] = model[-1]
             global_params['out_channels'] = model[2]
             global_params['use_temporal_as_edges'] = None
             global_params['torch_structure'] = 'Model_Torch'
@@ -503,6 +481,7 @@ if doTrain:
         global_params['model'] = models[0]
         global_params['out_channels'] = models[2]
         global_params['use_temporal_as_edges'] = None
+        global_params['n_run'] = model[-1]
         global_params['torch_structure'] = 'Model_Torch'
         
         wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset=train_dataset.copy(deep=True),
@@ -516,7 +495,7 @@ if doTrain:
                             do_bayes_search=do_bayes_search,
                             model=models,
                             scale=scale,
-                            input_global_params=global_params)
+                            input_params=global_params)
 
     for models in federated_models:
         global_params['model'] = models[0]
@@ -552,15 +531,30 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                ('DilatedCNN_search_full_5_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('DilatedCNN_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('DilatedCNN_search_full_15_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DilatedCNN_search_full_20_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-DilatedCNN-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'filter-DilatedCNN-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
 
-                ('DilatedCNN_search_full_5_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('DilatedCNN_search_full_10_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                ('DilatedCNN_search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                #('DilatedCNN_search_full_20_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'DilatedCNN_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
         ]
 
     elif graph_method == 'graph':
