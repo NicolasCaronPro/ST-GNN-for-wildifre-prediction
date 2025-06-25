@@ -1,5 +1,16 @@
 import argparse
 from pathlib import Path
+import sys
+import os
+
+# Get the directory of the current script
+current_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Get the parent directory of the current directory
+parent_dir = os.path.dirname(current_dir)
+
+# Insert the parent directory into sys.path
+sys.path.insert(0, parent_dir)
 
 from GNN.construct import init
 from GNN.dataloader import (
@@ -201,65 +212,71 @@ def main():
         "graph_method": cfg.graph_method,
     }
 
+    prefix = f"full_all_{cfg.NbFeatures}_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+
     tree_model_names = []
     dl_model_names = []
 
-    for m in cfg.get("models", []):
-        info = (
-            f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
-            f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
-        )
-        model_name = f"{m['type']}_{info}"
-        is_tree = m["type"].lower() in TREE_MODELS
-
-        if is_tree:
-            model_tuple = (model_name, None, None, None, m.get("n_run", 1))
-            wrapped_train_sklearn_api_model(
-                train_dataset=train_dataset.copy(deep=True),
-                val_dataset=val_dataset.copy(deep=True),
-                test_dataset=test_dataset.copy(deep=True),
-                model=model_tuple,
-                graph_method=cfg.graph_method,
-                dir_output=dir_output / f"check_{cfg.scaling}/{prefix}/baseline",
-                device="gpu",
-                features=features_selected_str,
-                autoRegression=False,
-                training_mode=cfg.training_mode,
-                do_grid_search=cfg.GridSearch,
-                do_bayes_search=cfg.BayesSearch,
-                scale=graphScale.scale,
+    if cfg.doTrain:
+        for m in cfg.get("models", []):
+            info = (
+                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
+                f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
             )
-            tree_model_names.append(model_name)
-        else:
-            params = dict(global_params)
-            params.update(
-                {
-                    "model": m["type"],
-                    "infos": info,
-                    "out_channels": m["out_channels"],
-                    "n_run": m["n_run"],
-                    "custom_model_params": m.get("params"),
-                    "k_days": m.get("kdays", 0),
-                }
-            )
+            model_name = f"{m['type']}_{info}"
+            is_tree = m["type"].lower() in TREE_MODELS
 
-            if m.get("mesh_file"):
-                params["mesh_file"] = m.get("mesh_file")
-                params["use_temporal_as_edges"] = m.get("use_temporal_as_edges")
-                params["torch_structure"] = "Model_gnn"
+            if is_tree:
+                name = 'check_'+cfg.scaling + '/' + prefix + '/' + 'baseline'
+                model_tuple = (model_name, None, None, None, m.get("n_run", 1))
+                wrapped_train_sklearn_api_model(
+                    train_dataset=train_dataset.copy(deep=True),
+                    val_dataset=val_dataset.copy(deep=True),
+                    test_dataset=test_dataset.copy(deep=True),
+                    model=model_tuple,
+                    graph_method=cfg.graph_method,
+                    dir_output=dir_output / name,
+                    device="gpu",
+                    features=features_selected_str,
+                    autoRegression=False,
+                    training_mode=cfg.training_mode,
+                    do_grid_search=cfg.GridSearch,
+                    do_bayes_search=cfg.BayesSearch,
+                    scale=graphScale.scale,
+                )
+                tree_model_names.append(model_name)
             else:
-                params["mesh_file"] = None
-                params["use_temporal_as_edges"] = None
-                params["torch_structure"] = "Model_Torch"
+                name = 'check_'+cfg.scaling + '/' + prefix + '/'
+                params = dict(global_params)
+                params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "dir_output" : dir_output / name
+                    }
+                )
 
-            if cfg.training_mode == "federated":
-                params["federated_cluster"] = m.get("federated_cluster", "department")
-                params["aggregation_method"] = "median"
-                wrapped_train_deep_learning_1D_federated(params)
-            else:
-                wrapped_train_deep_learning_1D(params)
+                if m.get("mesh_file"):
+                    params["mesh_file"] = m.get("mesh_file")
+                    params["use_temporal_as_edges"] = m.get("use_temporal_as_edges")
+                    params["torch_structure"] = "Model_gnn"
+                else:
+                    params["mesh_file"] = None
+                    params["use_temporal_as_edges"] = None
+                    params["torch_structure"] = "Model_Torch"
 
-            dl_model_names.append(model_name)
+                if cfg.training_mode == "federated":
+                    params["federated_cluster"] = m.get("federated_cluster", "department")
+                    params["aggregation_method"] = "median"
+                    wrapped_train_deep_learning_1D_federated(params)
+                else:
+                    wrapped_train_deep_learning_1D(params)
+
+                dl_model_names.append(model_name)
 
     if cfg.doTest:
         dir_train = Path(name_dir)
@@ -281,7 +298,28 @@ def main():
                 device,
                 encoding,
                 cfg.scaling,
-                test_dataset.departement.unique(),
+                ['all'],
+                dir_train,
+                name_exp,
+                dir_train / "check_none" / prefix_kmeans / "kmeans",
+                cfg.KMEANS,
+            )
+
+            for dept in cfg.test_departments:
+                test_sklearn_api_model(
+                cfg,
+                graphScale,
+                test_dataset[test_dataset['departement'] == name2int[dept]],
+                test_dataset_unscale[test_dataset_unscale['departement'] == name2int[dept]],
+                "all",
+                prefix,
+                prefix_config,
+                tree_model_names,
+                dir_test / "all" / prefix,
+                device,
+                encoding,
+                cfg.scaling,
+                ['all'],
                 dir_train,
                 name_exp,
                 dir_train / "check_none" / prefix_kmeans / "kmeans",
@@ -304,7 +342,7 @@ def main():
                 device,
                 encoding,
                 cfg.scaling,
-                ["all"],
+                ['all'],
                 dir_train,
                 features_selected_str,
                 dir_train / "check_none" / prefix_kmeans / "kmeans",
@@ -312,7 +350,6 @@ def main():
                 cfg.KMEANS,
                 "temp",
             )
-
 
 if __name__ == "__main__":
     main()
