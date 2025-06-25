@@ -19,7 +19,8 @@ from GNN.config import (
     encoding,
     METHODS_SPATIAL_TRAIN,
 )
-from GNN.tools import check_and_create_path, get_features_name_list
+from GNN.tools import check_and_create_path, get_features_name_list, read_object
+from GNN.features import add_past_risk
 import numpy as np
 
 TREE_MODELS = {
@@ -50,6 +51,7 @@ def main():
     args = parser.parse_args()
 
     cfg = ConfigParser(args.config)
+    QUICK = bool(cfg.get("quick", False))
 
     dataset_name = cfg.dataset
     sinister = cfg.sinister
@@ -60,23 +62,119 @@ def main():
     dir_output = Path(name_dir)
     check_and_create_path(dir_output)
 
-    df, graphScale, prefix, fp, features_selected = init(cfg, dir_output, "train_any")
-    dir_output = dir_output / f"{cfg.sinisterEncoding}_{name_exp}"
+    if not QUICK:
+        df, graphScale, prefix, fp, features_selected = init(cfg, dir_output, "train_any")
+        dir_output = dir_output / f"{cfg.sinisterEncoding}_{name_exp}"
 
-    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(
-        graphScale,
-        df,
-        features_selected,
-        cfg.train_departments,
-        prefix,
-        dir_output,
-        cfg,
-        cfg,
-    )
+        train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(
+            graphScale,
+            df,
+            features_selected,
+            cfg.train_departments,
+            prefix,
+            dir_output,
+            cfg,
+            cfg,
+        )
 
-    features_name, _ = get_features_name_list(graphScale.scale, cfg.features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = list(features_name)
-    features_selected = np.arange(len(features_selected_str))
+        features_name, _ = get_features_name_list(graphScale.scale, cfg.features, METHODS_SPATIAL_TRAIN)
+        features_selected_str = list(features_name)
+        features_selected_str.append("Past_risk")
+        features_selected_str.append("Past_burnedarea")
+        features_selected = np.arange(len(features_selected_str))
+
+        train_dataset = add_past_risk(
+            train_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+        test_dataset = add_past_risk(
+            test_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+        val_dataset = add_past_risk(
+            val_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+
+        train_dataset = add_past_risk(
+            train_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
+        test_dataset = add_past_risk(
+            test_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
+        val_dataset = add_past_risk(
+            val_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
+    else:
+        prefix = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+        graphScale = read_object(f"graph_{cfg.scale}_{cfg.graphConstruct}_{cfg.graph_method}.pkl", dir_output)
+
+        dir_output = dir_output / f"{cfg.sinisterEncoding}_{name_exp}"
+
+        train_dataset = read_object(f"df_train_{prefix}.pkl", dir_output)
+        val_dataset = read_object(f"df_val_{prefix}.pkl", dir_output)
+        test_dataset = read_object(f"df_test_{prefix}.pkl", dir_output)
+
+        train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
+        val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
+        test_dataset_unscale = read_object(f"df_unscaled_test_{prefix}.pkl", dir_output)
+
+        features_selected_str = read_object(
+            "features_importance.pkl",
+            dir_output
+            / "features_importance"
+            / f"{cfg.nbpoint}_{getattr(cfg, 'k_days', 0)}_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{graphScale.base}_{graphScale.graph_method}",
+        )
+        if features_selected_str is not None:
+            features_selected_str = list(np.asarray(features_selected_str)[:, 0])
+        else:
+            features_name, _ = get_features_name_list(graphScale.scale, cfg.features, METHODS_SPATIAL_TRAIN)
+            features_selected_str = list(features_name)
+
+        features_selected_str.append("Past_risk")
+        features_selected_str.append("Past_burnedarea")
+        features_selected = np.arange(len(features_selected_str))
+
+        train_dataset = add_past_risk(
+            train_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+        test_dataset = add_past_risk(
+            test_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+        val_dataset = add_past_risk(
+            val_dataset,
+            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "risk",
+        )
+
+        train_dataset = add_past_risk(
+            train_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
+        test_dataset = add_past_risk(
+            test_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
+        val_dataset = add_past_risk(
+            val_dataset,
+            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+            "burnedarea",
+        )
 
     global_params = {
         "graphScale": graphScale,
