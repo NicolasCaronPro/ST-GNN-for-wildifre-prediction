@@ -28,5 +28,29 @@
   "sinisterEncoding": "encoder",
   "top_cluster": "1",
   "graph_method": "node",
+  "training_mode": "vote",
+  "train_script": "train_any_model.py",
+  "models": [
+    {
+      "type": "NetMLP",
+      "use_temporal_as_edges": false,
+      "mesh_file": null,
+      "under_sampling": "search",
+      "over_sampling": "full",
+      "kdays": 0,
+      "nbfeatures": "all",
+      "target": "nbsinister-kmeans-5-Class-Dept",
+      "task": "classification",
+      "loss": "weightedcrossentropy",
+      "out_channels": 5,
+      "n_run": 1,
+      "params": {"hidden_dim": 64}
+    }
+  ],
+  "hyperparameters": {
+    "epochs": 30,
+    "batch_size": 64,
+    "lr": 0.001
+  }
   "training_mode": "normal"
 }

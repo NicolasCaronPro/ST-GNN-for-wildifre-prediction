@@ -11,88 +11,63 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 from GNN.construct import *
 import geopandas as gpd
+from GNN.config_parser import ConfigParser
 import argparse
 
 ########################### Input Arg ######################################
-
 parser = argparse.ArgumentParser(
-    prog='Train',
-    description='Create graph and database according to config.py and tained model',
+    prog="Train",
+    description="Create graph and database according to config file",
 )
-parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
-parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
-parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-p', '--point', type=str, help='Construct points')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of points')
-parser.add_argument('-d', '--database', type=str, help='Do database')
-parser.add_argument('-g', '--graph', type=str, help='Construct graph')
-parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
-parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
-parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
-parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
-parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
-parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
-parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
-parser.add_argument('-test', '--doTest', type=str, help='Launch test')
-parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
-parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
-parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
-parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
-parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
-parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
-parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
-parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
-parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
-parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
-parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
-parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
-parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
-parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
-parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
-parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
-parser.add_argument('-quick', '--quick', type=str, help='isquick', default='False')
+parser.add_argument("-c", "--config", default="config/config.json", help="Path to config file")
 
 args = parser.parse_args()
+config = ConfigParser(args.config)
 
-QUICK = args.quick == 'True'
+QUICK = bool(config.get("quick", False))
 
 # Input config
-dataset_name = args.dataset
-name_exp = args.name
-maxDate = args.maxDate
-trainDate = args.trainDate
-doEncoder = args.encoder == "True"
-doPoint = args.point == "True"
-doGraph = args.graph == "True"
-doDatabase = args.database == "True"
-do2D = args.database2D == "True"
-doFet = args.featuresSelection == "True"
-optimize_feature = args.optimizeFeature == "True"
-doTest = args.doTest == "True"
-doTrain = args.doTrain == "True"
-nbfeatures = args.NbFeatures
-sinister = args.sinister
-values_per_class = args.nbpoint
-scale = int(args.scale) if args.scale != 'departement' else args.scale
-resolution = args.resolution
-doPCA = args.pca == 'True'
-doKMEANS = args.KMEANS == 'True'
-ncluster = int(args.ncluster)
-do_grid_search = args.GridSearch ==  'True'
-do_bayes_search = args.BayesSearch == 'True'
-days_in_futur = int(args.days_in_futur) # The target time validation
-scaling = args.scaling
-graph_construct = args.graphConstruct
-sinister_encoding = args.sinisterEncoding
-weights_version = args.weights
-top_cluster = args.top_cluster
-graph_method = args.graph_method
-shift = args.shift
-thresh_kmeans = args.thresh_kmeans
-training_mode = args.training_mode
+dataset_name = config.dataset
+name_exp = config.name
+maxDate = config.maxDate
+trainDate = config.trainDate
+doEncoder = bool(config.get("encoder", False))
+doPoint = bool(config.get("point", False))
+doGraph = bool(config.get("graph", False))
+doDatabase = bool(config.get("database", False))
+do2D = bool(config.get("database2D", False))
+doFet = bool(config.featuresSelection)
+optimize_feature = bool(config.optimizeFeature)
+doTest = bool(config.doTest)
+doTrain = bool(config.doTrain)
+nbfeatures = config.NbFeatures
+sinister = config.sinister
+values_per_class = config.nbpoint
+scale = int(config.scale) if config.scale != 'departement' else config.scale
+resolution = config.resolution
+doPCA = bool(config.get("pca", False))
+doKMEANS = bool(config.KMEANS)
+ncluster = int(config.get("ncluster", 0))
+do_grid_search = bool(config.GridSearch)
+do_bayes_search = bool(config.BayesSearch)
+days_in_futur = int(config.days_in_futur)
+scaling = config.scaling
+graph_construct = config.graphConstruct
+sinister_encoding = config.sinisterEncoding
+weights_version = config.get("weights")
+top_cluster = config.top_cluster
+graph_method = config.graph_method
+shift = config.get("shift")
+thresh_kmeans = config.get("thresh_kmeans")
+training_mode = config.training_mode
+
+# Hyperparameters
+if config.epochs is not None:
+    epochs = config.epochs
+if config.batch_size is not None:
+    batch_size = config.batch_size
+if config.lr is not None:
+    lr = config.lr
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
@@ -130,7 +105,7 @@ if autoRegression:
 if not QUICK:
     ####################### INIT ################################
 
-    df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_gnn')
+    df, graphScale, prefix, fp, features_selected = init(config, dir_output, 'train_gnn')
     save_object(df.columns, 'features_name.pkl', dir_output)
 
     if MLFLOW:
@@ -160,7 +135,7 @@ if not QUICK:
                                                                                         features_selected, train_departements,
                                                                                         prefix,
                                                                                         dir_output,
-                                                                                        args)
+                                                                                        config)
 
     #varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
     features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
@@ -311,56 +286,16 @@ prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
 ###################### Define models to train ######################
 
-if days_in_futur == 0:
-    kdays = 10
-elif days_in_futur == 7:
-    kdays = 7
-elif days_in_futur == 15:
-    kdays = 15
-elif days_in_futur == 31:
-    kdays = 31
-
-if name_exp.find('voting') != -1:
-    #voting_models = define_voting_dl_models('GRU', kdays)
-    voting_models = []
-    models = [
-                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-                #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-                ]
-        
-    staking_models = []
-    federated_models = [
-            #('GRU', None, 'departement', 'median',f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('GRU', None, 'saison', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            
-            #('GRU', None, 'departement', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('GRU', None, 'saison', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-
-            #('GRU', None, 'departement', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'saison', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-
-        ]
-    
-    gnn_models = [
-               
-                ]
-else:
-    models = [
-                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ]
-    
-    gnn_models = [
-    ]
-
-    staking_models = []
-
-    federated_models = [
-        ]
-    
-    voting_models = []
+models = []
+gnn_models = []
+federated_models = []
+voting_models = []
+for m in config.get("models", []):
+    info = f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_all_one_{m['target']}_{m['task']}_{m['loss']}"
+    if m.get('mesh_file'):
+        gnn_models.append((m['type'], m.get('use_temporal_as_edges'), m.get('mesh_file'), info, m['out_channels'], m['n_run'], m.get('params')))
+    else:
+        models.append((m['type'], info, m['out_channels'], m['n_run'], m.get('params')))
 
 train_loader = None
 val_loader = None
@@ -379,6 +314,7 @@ global_params = {
     "CHECKPOINT": CHECKPOINT,
     "epochs": epochs,
     "lr": lr,
+    "batch_size": batch_size,
     "scaling": scaling,
     "encoding": encoding,
     "prefix": prefix,
@@ -485,7 +421,8 @@ if doTrain:
         global_params['infos'] = gnn_model[3]
         global_params['out_channels'] = gnn_model[4]
         global_params['torch_structure'] = 'Model_gnn'
-        global_params['n_run'] = gnn_model[-1]
+        global_params['n_run'] = gnn_model[5]
+        global_params['custom_model_params'] = gnn_model[6]
 
         wrapped_train_deep_learning_1D(global_params)
 
@@ -496,7 +433,8 @@ if doTrain:
             global_params['out_channels'] = model[2]
             global_params['use_temporal_as_edges'] = None
             global_params['torch_structure'] = 'Model_Torch'
-            global_params['n_run'] = model[-1]
+            global_params['n_run'] = model[3]
+            global_params['custom_model_params'] = model[4]
             
             wrapped_train_deep_learning_1D(global_params)
 
@@ -604,7 +542,7 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(cfg=config, graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name='all',
                             features_name=features_selected_str,
@@ -656,7 +594,7 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+            metrics, metrics_dept, res, res_dept = test_dl_model(cfg=config, graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name=dept,
                             features_name=features_selected_str,
