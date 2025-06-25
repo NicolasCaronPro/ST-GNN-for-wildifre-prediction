@@ -1404,7 +1404,7 @@ class ModelTorch():
         self.optimizer = None
         self.batch_size = batch_size
         self.target_name = target_name
-        self.features_name = features_name
+        self.features_name = [str(fet) for fet in features_name]
         self.ks = int(ks)
         self.lr = lr
         self.out_channels = out_channels
@@ -1468,11 +1468,11 @@ class ModelTorch():
 
         return labels
 
-    def calculate_loss(self, criterion, output, target, weights, label):
+    def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
 
         if 'ID' in self.loss:
             id_mask = label[:, criterion.id, -1]
-        
+
         if self.task_type == 'regression':
             target = target.view(output.shape)
             weights = weights.view(output.shape)
@@ -1483,7 +1483,8 @@ class ModelTorch():
             loss = criterion(output, target, weights)
         else:
             weights = weights.long()
-            target = target.long()
+            if not self.student_train:
+                target = target.long()
             
             target = target[weights.gt(0)]
             output = output[weights.gt(0)]
@@ -1493,8 +1494,8 @@ class ModelTorch():
 
             weights = torch.masked_select(weights, weights.gt(0))
 
-            if self.loss not in ['kldivloss']:
-                    target = target.long()
+            if tolong:
+                target = target.long()
 
             if self.loss in ['kappa', 'cdw', 'mcewk']:
                 target = target.to('cpu')
@@ -1519,23 +1520,30 @@ class ModelTorch():
                 continue
 
             band = -1
-
+            
             try:
                 target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
             except Exception as e:
                 target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
             
-            if self.student_train:
-                target = torch.Tensor(self.teacher.predict_proba(inputs), device=inputs.device)
-                target = target / self.temperature
-                target = torch.nn.functional.softmax(target, dim=-1)
-
             if self.loss not in ['kldivloss']:
                 target = target.long()
 
             output = self.model(inputs, edges)
 
             loss = self.calculate_loss(criterion, output, target, weights, labels)
+
+            if self.student_train:
+                criterion_teacher = self.get_loss('kldivloss')
+                df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
+                df_test.columns = df_test.columns.astype(str)
+                pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+                target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+                target = target / self.temperature_value
+
+                loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+
+                loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
 
             optimizer.zero_grad()
             loss.backward()
@@ -1565,17 +1573,25 @@ class ModelTorch():
                 except Exception as e:
                     target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
 
-                if self.student_train:
-                    target = torch.Tensor(self.teacher.predict_proba(inputs), device=inputs.device)
-                    target = target / self.temperature
-                    target = torch.nn.functional.softmax(target, dim=-1)
-
                 output = self.model(inputs, edges)
                 loss = self.calculate_loss(criterion, output, target, weights, labels)
+
+                if self.student_train:
+                    criterion_teacher = self.get_loss('kldivloss')
+                    df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
+                    df_test.columns = df_test.columns.astype(str)
+                    pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+                    target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+                    target = target / self.temperature_value
+
+                    loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+
+                    loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+
                 total_loss += loss.item()
 
         return total_loss
-
+    
     def make_model(self, graph, custom_model_params):
         print(self.features_name)
         model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
@@ -1630,7 +1646,7 @@ class ModelTorch():
             else:
                 custom_model_params.update({'static_idx': static_idx, 'temporal_idx' : temporal_idx})
 
-        if new_model:
+        if new_model or self.model is None:
             self.model, _ = self.make_model(graph, custom_model_params)
         
         parameters = self.model.parameters()
@@ -1797,7 +1813,7 @@ class ModelTorch():
 
             return under_prediction_score_value, over_prediction_score_value, iou
 
-    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None):
+    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None, use_log=True):
         
         check_and_create_path(self.dir_log)
 
@@ -1820,34 +1836,35 @@ class ModelTorch():
         self.metrics['over_predictio_scores'] = []
         self.metrics['iou_scores'] = []
 
-        if False:
-            if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
-                data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
-        else:
-            if (self.dir_log / 'metrics.pkl').is_file():
-                print(f'Load metrics')
-                find_log = True
-                data_log = read_object('metrics.pkl', self.dir_log)
+        if use_log:
+            if False:
+                if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
+                    data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
             else:
-                xs = [0, 10]
-                for x in xs:
-                    other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
-                    print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
-                    if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
-                        data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
-                    if data_log is not None:
-                        break
-                    
-                if data_log is None:
-                    xs = [25]
+                if (self.dir_log / 'metrics.pkl').is_file():
+                    print(f'Load metrics')
+                    find_log = True
+                    data_log = read_object('metrics.pkl', self.dir_log)
+                else:
+                    xs = [0, 10]
                     for x in xs:
-                        other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
+                        other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
                         print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
                         if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
                             data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                         if data_log is not None:
                             break
-                            
+                        
+                    if data_log is None:
+                        xs = [25]
+                        for x in xs:
+                            other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
+                            print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
+                            if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
+                                data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
+                            if data_log is not None:
+                                break
+
         print(f'data_log : {data_log}')
         if data_log is not None:
             try:
@@ -3058,7 +3075,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all'):
+                 aggregation_method='max', nbfeatures='all', n_run=1):
         """
         Initialize the Federated Learning Model.
 
@@ -3081,6 +3098,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.aggregation_method = aggregation_method  # Méthode d'agrégation
         self.global_model = deepcopy(federated_model)  # Modèle global
         self.nbfeatures = nbfeatures
+        self.n_run = n_run
 
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -3150,6 +3168,10 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                 df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
                     df_train, df_val, df_test, cluster
                 )
+
+                if np.all(df_train[local_model.target_name].values == 0):
+                    print(f'Skipping {cluster} due to no positif samples')
+                    continue
 
                 if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
                     print(f'Skipping {cluster} due to empty dataset')
@@ -3260,26 +3282,28 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
 class ModelKnowledgeDistillation(ModelTorch):
-    def __init__(self, temperature, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device, 
+    def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device, 
                 under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss):
 
         super().__init__(f'{model_name}', nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, \
         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
         
-        self.teacher_name = teacher_name
         self.teacher_loss = teacher_loss
         self.distillation_training_mode = distillation_training_mode
         self.teacher_name = teacher_name
         self.student_name = student_name
         self.weight_type = weight_type
         self.temperature = temperature
+        self.alpha = alpha
+        self.temperature_value = float(temperature) if temperature != 'search' else None
+        self.alpha_value = float(alpha) if alpha != 'search' else None
         self.student_train = True
         self.load_teacher = True
 
         if 'group' in self.distillation_training_mode:
             self.model_list = []
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
 
         #if self.teacher_name in sklearn_model_list or 'xgboost' in self.target_name:
@@ -3291,7 +3315,11 @@ class ModelKnowledgeDistillation(ModelTorch):
         check_and_create_path(self.dir_log)
 
         if self.load_teacher:
-            full_teacher_name = f'{self.teacher_name}_{self.under_sampling}_{self.over_sampling}_{self.nbfeatures}_{self.weight_type}_{self.target_name}_{self.task_type}_{self.teacher_loss}'
+            filter_name, model_type, hard_or_soft, weights_average, top_model = self.teacher_name.split('-')
+            self.hard_or_soft = hard_or_soft
+            self.weights_average = weights_average
+            self.top_model = top_model
+            full_teacher_name = f'{filter_name}-{model_type}_{self.under_sampling}_{self.over_sampling}_0_{self.nbfeatures}_{self.weight_type}_{self.target_name}_{self.task_type}_{self.teacher_loss}'
             self.teacher = read_object(f'{full_teacher_name}.pkl', self.dir_log / '..' / 'baseline' / full_teacher_name)
             self.load_teacher = False
 
@@ -3316,7 +3344,7 @@ class ModelKnowledgeDistillation(ModelTorch):
 
                 elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                         if self.under_sampling == 'search':
-                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params)
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params, use_log=use_log)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3430,7 +3458,48 @@ class ModelKnowledgeDistillation(ModelTorch):
 
         return loader
 
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
+    def search_temperature_alpha(self, graph, PATIENCE_CNT, CHECKPOINT, epoch, verbose=True, custom_model_params=None, new_model=True):
+        temperature_grid = [4.0, 5.0, 6.0, 7.0] if self.temperature == 'search' else [self.temperature_value]
+        alpha_grid = [.1, .2, .3, .4, .5, .6, .7, .8, .9, 1.0] if self.alpha == 'search' else [self.alpha_value]
+        
+        if False and (self.dir_log / 'log_parameters.pkl').is_file():
+            parameters = read_object('log_parameters.pkl', self.dir_log)
+            self.temperature_value = parameters['temperature']
+            self.alpha_value = parameters['alpha']
+        else:
+            score_0 = 0
+            patience_i = 0
+            patience_c = 5
+            top_temp = 0
+            top_al = 0
+            for temp in temperature_grid:
+                for al in alpha_grid:
+                    
+                    logger.info(f'########### temperature {temp}, alpha {al} #############')
+
+                    self.temperature_value = temp
+                    self.alpha_value = al
+                    self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, search=False)
+                    score = self.score(self.df_test, self.df_test[self.target_name])
+                    if score > score_0:
+                        logger.info(f'temperature {temp}, alpha {al} -> {score}')
+                        score_0 = score
+                        top_temp = temp
+                        top_al = al
+                    else:
+                        patience_i += 1
+                        if patience_i == patience_c:
+                            break
+            parameters = {'temperature' : top_temp, 'alpha' : top_al}
+            self.alpha_value = top_al
+            self.temperature_value = top_temp
+            save_object(parameters, 'log_parameters.pkl', self.dir_log) 
+
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, search=True):
+
+        if (self.temperature == 'search' or self.alpha == 'search') and search:
+            self.search_temperature_alpha(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
+            
         if self.distillation_training_mode == 'iterate':
             sub_teachers = np.asarray([estimator for estimator in self.teacher.best_estimator_])
             weights2use = self.teacher.weights_for_model
@@ -3448,7 +3517,7 @@ class ModelKnowledgeDistillation(ModelTorch):
                 else:
                     new_model = True
 
-                self.create_train_val_test_loader_teacher(graph, self.df_train, self.df_val, self.df_test, sub_teacher, feature_importance=False)
+                self.create_train_val_test_loader_teacher(graph, self.df_train, self.df_val, self.df_test, sub_teacher, features_importance=False)
 
                 #print(self.target_name)
                 super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)

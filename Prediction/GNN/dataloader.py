@@ -1544,10 +1544,10 @@ def test_sklearn_api_model(args,
 def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args):
 
     name_exp = args['name']
-
+    
     test_dataset_list = []
     for scale in np.unique(y[:, scale_index]):
-        
+        print(scale)
         if scale == 10:
             test_dataset_scale = read_object(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
             print(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
@@ -1622,8 +1622,8 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, a
     args = np.argwhere(y[:, weight_index] > 0)[:, 0]
     predTensor = predTensor[args]
     y = y[args]
-
-    test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
+    
+    #test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     return predTensor, y, test_dataset_dept
    
 def test_dl_model(args,
@@ -1646,6 +1646,7 @@ def test_dl_model(args,
                            name_exp,
                            doKMEANS,
                            suffix,
+                           distallation=False
                            ):
     
     res_scale = []
@@ -1665,7 +1666,7 @@ def test_dl_model(args,
 
     #################################### GNN ###################################################
     for name in models:
-        
+
         model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
         is_2D_model = model_name in models_2D
@@ -1682,7 +1683,7 @@ def test_dl_model(args,
         logger.info(f'       {name}          ')
         logger.info('#########################')
 
-        if model_name.find('filter') != -1:
+        if model_name.find('filter') != -1 and not distallation:
             filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
             read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
         else:
@@ -1711,9 +1712,7 @@ def test_dl_model(args,
             predTensor = predTensor.detach().cpu().numpy()
 
         predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args)
-
-        print(allDates[int(test_dataset_dept.date.min())])
-
+        print(test_dataset_deptAll.shape)
         scale_unique = np.unique(y[:, scale_index])
         for scale in scale_unique:
             scale = int(scale)
@@ -1731,7 +1730,6 @@ def test_dl_model(args,
                     mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
                 else:
                     mlflow.start_run(run_name=f'{run}', nested=True)
-
 
             if target_name == 'binary' or target_name == 'nbsinister':
                 band = -2
@@ -1788,7 +1786,9 @@ def test_dl_model(args,
                                                 test_departement, target_name, name,
                                                 dir_output, scale, pred_min = None, pred_max = None)
 
-            if not isinstance(model, ModelVotingPytorchAndSklearn):
+            print(model)
+
+            if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) and not isinstance(model, FederatedLearningModel):
                 metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
                 metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
                 metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
@@ -1799,6 +1799,9 @@ def test_dl_model(args,
                 metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_normalized_f1']
                 metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_normalized_iou']
             
+            if isinstance(model, ModelKnowledgeDistillation):
+                logger.info(f'Temperature : {model.temperature_value}, alpha : {model.alpha_value}')
+
             if MLFLOW:
                 log_metrics_recursively(metrics[name], prefix='')
                 
@@ -2158,6 +2161,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     dir_output = params['dir_output']
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
+    n_run = params['n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2231,7 +2235,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
-    name = f'federated-{model}-{federated_cluster}_{infos}'
+    name = f'federated-{model}-{federated_cluster}-{aggregation_method}_{infos}'
     model = FederatedLearningModel(wrapped_model, features=features, federated_cluster=federated_cluster,
                                    loss=loss, name=name,
                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
@@ -2409,6 +2413,7 @@ def wrapped_train_deep_learning_distallation(params):
     distillation_training_mode = params['distillation_training_mode']
     teacher_name = params['teacher_name']
     temperature = params['temperature']
+    alpha = params['alpha']
     teacher_loss = params['teacher_loss']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
@@ -2421,9 +2426,6 @@ def wrapped_train_deep_learning_distallation(params):
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
     #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
-
-    logger.info(f'Fitting model {model}_{infos}')
-    logger.info('Try loading loader')
 
     if task_type == 'classification' or task_type == 'ordinal-classification':
         train_dataset['class'] = train_dataset[target_name]
@@ -2439,10 +2441,14 @@ def wrapped_train_deep_learning_distallation(params):
 
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
-    student_name=f"{model}-{distillation_training_mode}-{temperature}-{teacher_name}_{infos}"
+    student_name=f"{model}-{distillation_training_mode}-{temperature}-{alpha}-{teacher_name}_{infos}"
+
+    logger.info(f'Fitting model {student_name}_{infos}')
+    logger.info('Try loading loader')
 
     wrapped_model = ModelKnowledgeDistillation(
                                 temperature=temperature,
+                                alpha=alpha,
                                 distillation_training_mode=distillation_training_mode,
                                 teacher_name=teacher_name,
                                 model_name=model,
@@ -2460,7 +2466,7 @@ def wrapped_train_deep_learning_distallation(params):
                                 teacher_loss=teacher_loss
                                 )
     
-    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset, use_log=False)
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.student_name}.pkl', wrapped_model.dir_log)
 
@@ -2630,7 +2636,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_datase
             fit_params_list.append(fit_params)
             grid_params_list.append(grid_params)
         
-        elif model_type in ['LSTM', 'DilatedCNN', 'GRU', 'NetMLP']:
+        elif model_type in ['LSTM', 'DilatedCNN', 'GRU', 'NetMLP', 'TransformerNet']:
             model_i = Model_Torch(model_name=model_type,
                                     batch_size=batch_size,
                                     nbfeatures=nbfeatures,

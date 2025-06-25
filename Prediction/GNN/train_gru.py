@@ -321,15 +321,27 @@ elif days_in_futur == 31:
     kdays = 31
 
 if name_exp.find('voting') != -1:
-    voting_models = define_voting_dl_models('GRU', kdays)
-
+    #voting_models = define_voting_dl_models('GRU', kdays)
+    voting_models = []
     models = [
-                ('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
                 #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
                 ]
         
     staking_models = []
     federated_models = [
+            #('GRU', None, 'departement', 'median',f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', None, 'cluster-encoder', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('GRU', None, 'saison', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            
+            #('GRU', None, 'departement', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', None, 'cluster-encoder', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('GRU', None, 'saison', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+
+            #('GRU', None, 'departement', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', None, 'cluster-encoder', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            #('GRU', None, 'saison', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+
         ]
     
     gnn_models = [
@@ -337,14 +349,17 @@ if name_exp.find('voting') != -1:
                 ]
 else:
     models = [
-                ('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
             ]
     
     gnn_models = [
     ]
+
     staking_models = []
+
     federated_models = [
         ]
+    
     voting_models = []
 
 train_loader = None
@@ -509,9 +524,10 @@ if doTrain:
         global_params['model'] = models[0]
         global_params['use_temporal_as_edges'] = models[1]
         global_params['federated_cluster'] = models[2]
-        global_params['infos'] = models[3]
-        global_params['aggregation_method'] = 'median'
-        global_params['out_channels'] = models[-1]
+        global_params['aggregation_method'] =  models[3]
+        global_params['infos'] = models[4]
+        global_params['out_channels'] = models[-2]
+        global_params['n_run'] = models[-1]
         global_params['torch_structure'] = 'Model_Torch'
 
         wrapped_train_deep_learning_1D_federated(global_params)
@@ -539,27 +555,37 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-                (f'filter-GRU-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-                (f'filter-GRU-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+                (f'federated-GRU-departement-median_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-departement-mean_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-departement-max_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-cluster-encoder-median_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-cluster-encoder-max_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-cluster-encoder-mean_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-saison-median_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-saison-max_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'federated-GRU-saison-mean_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+
+                #(f'filter-GRU-soft-None-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-GRU-soft-None-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                #(f'filter-GRU-soft-None-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
                 (f'GRU_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
@@ -691,13 +717,16 @@ if doTest:
             df_metrics = pd.DataFrame.from_dict(metrics, orient='index').reset_index()
         else:
             df_metrics = pd.concat((df_metrics, pd.DataFrame.from_dict(metrics, orient='index').reset_index()))
-        #aggregated_prediction_dept.append(res_dept)
+        #aggregated_prediction_dept.append(res_dept)"""
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)
     
     check_and_create_path(dir_output / prefix)
-    df_metrics.to_csv(dir_output / prefix / f'df_metrics_GRU_{graph_method}.csv')
+    if len(federated_models) > 0:
+        df_metrics.to_csv(dir_output / prefix / f'df_metrics_GRU_{graph_method}_federated.csv')
+    else:
+        df_metrics.to_csv(dir_output / prefix / f'df_metrics_GRU_{graph_method}.csv')
  
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Loss_function')

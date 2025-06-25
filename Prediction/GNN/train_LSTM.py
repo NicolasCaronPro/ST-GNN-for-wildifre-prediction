@@ -156,15 +156,13 @@ if not QUICK:
 
     prefix_config = deepcopy(prefix)
 
-    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, features_selected = get_train_val_test_set(graphScale, df,
+    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix,  = get_train_val_test_set(graphScale, df,
                                                                                         features_selected, train_departements,
                                                                                         prefix,
                                                                                         dir_output,
                                                                                         args)
 
-    varying_time_variables_2 = get_time_columns(varying_time_variables, k_days, train_dataset.copy(), train_features)
-    features_name, newshape = get_features_name_list(graphScale.scale, train_features, METHODS_SPATIAL_TRAIN)
-    features_selected_str = get_features_selected_for_time_series(features_selected, features_name, varying_time_variables_2)
+    features_selected_str = features_selected
 
     features_selected_str = list(features_selected_str)
     features_selected = np.arange(0, len(features_selected_str))
@@ -538,27 +536,27 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-        (f'filter-LSTM-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
-        (f'filter-LSTM-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+        (f'filter-LSTM-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
         (f'LSTM_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
@@ -603,7 +601,7 @@ if doTest:
 
     ####################################################### Test by departmenent ###################################################
 
-    for dept in departements:
+    """for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
