@@ -511,7 +511,7 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(config), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(cfg=config, graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name='all',
                             features_name=features_selected_str,
@@ -563,7 +563,7 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(config), graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
+            metrics, metrics_dept, res, res_dept = test_dl_model(cfg=config, graphScale=graphScale, test_dataset_dept=test_dataset_dept, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name=dept,
                             features_name=features_selected_str,

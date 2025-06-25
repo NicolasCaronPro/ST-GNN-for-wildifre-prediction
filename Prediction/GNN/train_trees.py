@@ -758,7 +758,7 @@ if doTest:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(config), graphScale, test_dataset,
+    metrics, metrics_dept, res, res_dept = test_sklearn_api_model(config, graphScale, test_dataset,
                                 None,
                                     'all',
                                     prefix,
@@ -808,7 +808,7 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["id"].values)}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(config), graphScale, test_dataset_dept,
+            metrics, metrics_dept, res, res_dept = test_sklearn_api_model(config, graphScale, test_dataset_dept,
                                 test_dataset_unscale_dept,
                                     dept,
                                     prefix,

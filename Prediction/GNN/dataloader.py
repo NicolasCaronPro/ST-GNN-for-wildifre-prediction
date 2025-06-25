@@ -1374,7 +1374,7 @@ def test_fire_index_model(args,
 
     return metrics, metrics_dept, res_scale, res_departement
     
-def test_sklearn_api_model(args,
+def test_sklearn_api_model(cfg,
                            graphScale,
                           test_dataset_dept,
                           test_dataset_unscale_dept,
@@ -1468,7 +1468,7 @@ def test_sklearn_api_model(args,
             mlflow.set_tag(f"Training", f"{name}")
             mlflow.log_param(f'relevant_feature_name', features_selected)
             mlflow.log_params(model.get_params(deep=True))
-            mlflow.log_params({'scale' : args['scale']})
+            mlflow.log_params({'scale': cfg.scale})
             #_ = mlflow.sklearn.log_model(
             #sk_model=model,
             #artifact_path=f'{name}',
@@ -1487,17 +1487,17 @@ def test_sklearn_api_model(args,
             features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
             df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
             df['prediction'] = pred[:, 0]
-            shift = int(args['shift'])
+            shift = int(cfg.shift)
             shift_list = np.arange(0, shift+1)
-            prefix_kmeans = f'{args["nbpoint"]}_{scale}_{graphScale.base}_{graphScale.graph_method}'
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-            test_dataset_dept['nbsinister'] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-            test_dataset_dept['risk'] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-            pred[:, 0] = df[f"prediction_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-            y[:, risk_index] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-            y[:, nbsinister_index] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+            prefix_kmeans = f'{cfg.nbpoint}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+            test_dataset_dept['nbsinister'] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+            test_dataset_dept['risk'] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+            pred[:, 0] = df[f"prediction_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+            y[:, risk_index] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+            y[:, nbsinister_index] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
 
         metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
                                                test_departement, target_name, name,
@@ -1548,18 +1548,18 @@ def test_sklearn_api_model(args,
 
     return metrics, metrics_dept, res_scale, res_departement
    
-def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args):
+def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg):
 
-    name_exp = args['name']
+    name_exp = cfg.name
     
     test_dataset_list = []
     for scale in np.unique(y[:, scale_index]):
         print(scale)
         if scale == 10:
-            test_dataset_scale = read_object(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
-            print(f'df_test_full_departement_{args["days_in_futur"]}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
+            test_dataset_scale = read_object(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
+            print(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
         else:
-            test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{args["days_in_futur"]}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
+            test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{cfg.days_in_futur}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
         
         assert test_dataset_scale is not None
 
@@ -1626,14 +1626,14 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, a
     y = y[ind]
     predTensor = predTensor[ind]
     
-    args = np.argwhere(y[:, weight_index] > 0)[:, 0]
-    predTensor = predTensor[args]
-    y = y[args]
+    sel_indices = np.argwhere(y[:, weight_index] > 0)[:, 0]
+    predTensor = predTensor[sel_indices]
+    y = y[sel_indices]
     
     #test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     return predTensor, y, test_dataset_dept
    
-def test_dl_model(args,
+def test_dl_model(cfg,
                   graphScale, test_dataset_dept,
                           test_dataset_unscale_dept,
                           train_dataset,
@@ -1718,7 +1718,7 @@ def test_dl_model(args,
             y = YTensor.detach().cpu().numpy()
             predTensor = predTensor.detach().cpu().numpy()
 
-        predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, args)
+        predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg)
         print(test_dataset_deptAll.shape)
         scale_unique = np.unique(y[:, scale_index])
         for scale in scale_unique:
@@ -1764,7 +1764,7 @@ def test_dl_model(args,
             if MLFLOW:
                 mlflow.set_tag(f"Testing", f"{name}")
                 mlflow.log_param(f'relevant_feature_name', features)
-                mlflow.log_params(args)
+                mlflow.log_params({k: str(v) for k, v in cfg._data.items()})
             
             if doKMEANS:
                 kmeans_features = cfg.kmeans_features
@@ -1774,18 +1774,18 @@ def test_dl_model(args,
                 features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
                 df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
                 df['prediction'] = pred[:, 0]
-                shift = int(args['shift'])
+                shift = int(cfg.shift)
                 shift_list = np.arange(0, shift+1)
-                prefix_kmeans = f'{args["nbpoint"]}_{scale}_{graphScale.base}_{graphScale.graph_method}'
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(args['thresh_kmeans']), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-                
-                test_dataset_dept['nbsinister'] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-                test_dataset_dept['risk'] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-                pred[:, 0] = df[f"prediction_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-                y[:, risk_index] = df[f"risk_{args['shift']}_{float(args['thresh_kmeans'])}"].values
-                y[:, nbsinister_index] = df[f"nbsinister_{args['shift']}_{float(args['thresh_kmeans'])}"].values
+                prefix_kmeans = f'{cfg.nbpoint}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+
+                test_dataset_dept['nbsinister'] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                test_dataset_dept['risk'] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                pred[:, 0] = df[f"prediction_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                y[:, risk_index] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                y[:, nbsinister_index] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
 
                 pred[:, 0] = df[target_name]
 
