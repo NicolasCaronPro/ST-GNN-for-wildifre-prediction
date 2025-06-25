@@ -17,7 +17,6 @@ def main():
 
     cfg = ConfigParser(args.config)
     models = cfg.get("models", [])
-    hyperparams = cfg.get("hyperparameters", {})
 
     for m in models:
         script = m.get("script")
@@ -26,14 +25,6 @@ def main():
             continue
         script_path = Path(__file__).parent / script
         cmd = [sys.executable, str(script_path), "-c", args.config]
-
-        # merge explicit params for this model and global hyperparameters
-        params = {}
-        params.update(hyperparams)
-        params.update(m.get("params", {}))
-
-        for key, value in params.items():
-            cmd.extend([f"--{key}", str(value)])
 
         print("Executing", " ".join(cmd))
         try:
