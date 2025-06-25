@@ -32,7 +32,6 @@
   "train_script": "train_any_model.py",
   "models": [
     {
-      "script": "train_gru.py",
       "type": "NetMLP",
       "use_temporal_as_edges": false,
       "mesh_file": null,
@@ -53,4 +52,5 @@
     "batch_size": 64,
     "lr": 0.001
   }
+  "training_mode": "normal"
 }

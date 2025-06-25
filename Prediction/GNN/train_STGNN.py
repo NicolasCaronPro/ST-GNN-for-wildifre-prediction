@@ -59,7 +59,6 @@ sinister_encoding = config.sinisterEncoding
 top_cluster = config.top_cluster
 graph_method = config.graph_method
 training_mode = config.training_mode
-
 # Hyperparameters
 if config.epochs is not None:
     epochs = config.epochs
