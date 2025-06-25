@@ -21,6 +21,8 @@ from GNN.config import (
 )
 from GNN.tools import check_and_create_path, get_features_name_list, read_object
 from GNN.features import add_past_risk
+from GNN.dico_departements import select_departments, name2int
+import pandas as pd
 import numpy as np
 
 TREE_MODELS = {
@@ -57,6 +59,8 @@ def main():
     sinister = cfg.sinister
     resolution = cfg.resolution
     name_exp = cfg.name
+
+    departements, _ = select_departments(dataset_name, sinister)
 
     name_dir = f"{dataset_name}/{sinister}/{resolution}/train/"
     dir_output = Path(name_dir)
@@ -262,13 +266,20 @@ def main():
             dl_model_names.append(model_name)
 
     if cfg.doTest:
+        host = "pc"
         dir_train = Path(name_dir)
-        dir_test = Path(f"{dataset_name}/{sinister}/{resolution}/test/{cfg.sinisterEncoding}_{name_exp}")
+        dir_test = Path(
+            f"{dataset_name}/{sinister}/{resolution}/test/{cfg.sinisterEncoding}_{name_exp}"
+        )
         prefix_config = prefix
-        prefix_kmeans = f"{cfg.nbpoint}_{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}"
+        prefix_kmeans = (
+            f"{cfg.nbpoint}_{graphScale.scale}_{graphScale.base}_{graphScale.graph_method}"
+        )
+
+        df_metrics = None
 
         if tree_model_names:
-            test_sklearn_api_model(
+            metrics, _, _, _ = test_sklearn_api_model(
                 cfg,
                 graphScale,
                 test_dataset,
@@ -287,9 +298,10 @@ def main():
                 dir_train / "check_none" / prefix_kmeans / "kmeans",
                 cfg.KMEANS,
             )
+            df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
 
         if dl_model_names:
-            test_dl_model(
+            metrics, _, _, _ = test_dl_model(
                 cfg,
                 graphScale,
                 test_dataset,
@@ -312,6 +324,96 @@ def main():
                 cfg.KMEANS,
                 "temp",
             )
+            if df_metrics is None:
+                df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
+            else:
+                df_metrics = pd.concat(
+                    (df_metrics, pd.DataFrame.from_dict(metrics, orient="index").reset_index())
+                )
+
+        for dept in departements:
+            test_dataset_dept = test_dataset[
+                test_dataset["departement"] == name2int[dept]
+            ].reset_index(drop=True)
+            if test_dataset_unscale is not None:
+                test_dataset_unscale_dept = test_dataset_unscale[
+                    test_dataset_unscale["departement"] == name2int[dept]
+                ].reset_index(drop=True)
+            else:
+                test_dataset_unscale_dept = None
+
+            if test_dataset_dept.shape[0] < 5:
+                continue
+
+            if tree_model_names:
+                metrics, _, _, _ = test_sklearn_api_model(
+                    cfg,
+                    graphScale,
+                    test_dataset_dept,
+                    test_dataset_unscale_dept,
+                    dept,
+                    prefix,
+                    prefix_config,
+                    tree_model_names,
+                    dir_test / dept / prefix,
+                    device,
+                    encoding,
+                    cfg.scaling,
+                    [dept],
+                    dir_train,
+                    name_exp,
+                    dir_train / "check_none" / prefix_kmeans / "kmeans",
+                    cfg.KMEANS,
+                )
+                if df_metrics is None:
+                    df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
+                else:
+                    df_metrics = pd.concat(
+                        (
+                            df_metrics,
+                            pd.DataFrame.from_dict(metrics, orient="index").reset_index(),
+                        )
+                    )
+
+            if dl_model_names:
+                metrics, _, _, _ = test_dl_model(
+                    cfg,
+                    graphScale,
+                    test_dataset_dept,
+                    test_dataset_unscale_dept,
+                    train_dataset_unscale,
+                    dept,
+                    features_selected_str,
+                    prefix,
+                    prefix_config,
+                    dl_model_names,
+                    dir_test / dept / prefix,
+                    device,
+                    encoding,
+                    cfg.scaling,
+                    [dept],
+                    dir_train,
+                    features_selected_str,
+                    dir_train / "check_none" / prefix_kmeans / "kmeans",
+                    name_exp,
+                    cfg.KMEANS,
+                    "temp",
+                )
+                if df_metrics is None:
+                    df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
+                else:
+                    df_metrics = pd.concat(
+                        (
+                            df_metrics,
+                            pd.DataFrame.from_dict(metrics, orient="index").reset_index(),
+                        )
+                    )
+
+        if df_metrics is not None:
+            df_metrics.rename({"index": "Run"}, inplace=True, axis=1)
+            df_metrics.reset_index(drop=True, inplace=True)
+            check_and_create_path(dir_test / prefix)
+            df_metrics.to_csv(dir_test / prefix / "df_metrics_any.csv")
 
 
 if __name__ == "__main__":
