@@ -121,7 +121,7 @@ class AugmentedInplaceGraphDataset(Dataset):
         pass
 
 #################################### NUMPY #############################################################
-def get_train_val_test_set(graphScale, df, features_name, train_departements, prefix, dir_output, args):
+def get_train_val_test_set(graphScale, df, features_name, train_departements, prefix, dir_output, args, cfg=None):
     # Input config
     maxDate = args.maxDate
     trainDate = args.trainDate
@@ -151,7 +151,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         else:
             df['scale'] = scale
 
-    departements, train_departements = select_departments(dataset_name, sinister)
+    departements = cfg.train_departments + cfg.test_departments
+    train_departements = cfg.train_departments
     if 'select' in name_exp:
         # Utiliser findall pour capturer toutes les balises présentes
         matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
@@ -176,7 +177,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     save_object(features_name, 'features_name.pkl', dir_output)
 
-    _, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, name_exp == 'inference')
+    train_features = cfg.features
+    kmeans_features = cfg.kmeans_features
     features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
     
     prefix = f'full_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}'
@@ -254,13 +256,15 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     df = df[columns]
     
     # Preprocess
-    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(df=df, scaling=scaling, maxDate=maxDate,
+    train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(
+                                                    df=df, scaling=scaling, maxDate=maxDate,
                                                     trainDate=trainDate, train_departements=train_departements,
-                                                    departements = departements,
+                                                    departements=departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
                                                     futur_met=futur_met, ncluster=ncluster, graph=graphScale,
-                                                    args=args)
+                                                    args=args,
+                                                    cfg=cfg)
     
     print(train_dataset.nbsinister.unique())
 
@@ -321,8 +325,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
 def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, train_departements: list, departements: list, ks: int,
                dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
-               args : dict,
-               save = True):
+               args: dict, cfg=None,
+               save=True):
     
     global features
 
@@ -354,7 +358,10 @@ def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, tra
     #val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
     #test_mask = ((df['date'] >= allDates.index(maxDate) + ks) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
 
-    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(args.name)
+    if cfg is None:
+        all_train_dates, all_val_dates, all_test_dates = defines_train_dates_from_exp(args.name)
+    else:
+        all_train_dates, all_val_dates, all_test_dates = defines_train_dates(cfg)
 
     print('df weight', df.weight.unique())
 
@@ -1473,7 +1480,7 @@ def test_sklearn_api_model(args,
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
         if doKMEANS:
-            _, _ , kmeans_features = get_features_for_sinister_prediction(dataset_name=args['dataset'], sinister=args['sinister'], isInference=args['name'] == 'inference')
+            kmeans_features = cfg.kmeans_features
             df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
             df[ids_columns] = test_dataset_dept[ids_columns]
             df[targets_columns] = test_dataset_dept[targets_columns]
@@ -1760,7 +1767,7 @@ def test_dl_model(args,
                 mlflow.log_params(args)
             
             if doKMEANS:
-                _, _ , kmeans_features = get_features_for_sinister_prediction(dataset_name=args['dataset'], sinister=args['sinister'], isInference=args['name'] == 'inference')
+                kmeans_features = cfg.kmeans_features
                 df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
                 df[ids_columns] = test_dataset_dept[ids_columns]
                 df[targets_columns] = test_dataset_dept[targets_columns]
@@ -1888,7 +1895,7 @@ def test_simple_model(args,
     pred = graphScale._predict_perference_with_Y(y, target_name)
 
     if doKMEANS:
-        _, _ , kmeans_features = get_features_for_sinister_prediction(dataset_name=args['dataset'], sinister=args['sinister'], isInference=args['name'] == 'inference')
+        kmeans_features = cfg.kmeans_features
         df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
         df[ids_columns] = test_dataset_dept[ids_columns]
         features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)

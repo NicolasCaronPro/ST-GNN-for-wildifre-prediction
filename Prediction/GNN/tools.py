@@ -185,7 +185,27 @@ def find_dates_between(start, end):
             date += delta
     return res
 
-def defines_train_dates(expe):
+def defines_train_dates(cfg):
+    """Return train/val/test dates based on years provided in the config."""
+
+    def _expand_years(years):
+        dates = []
+        for y in years:
+            start = f"{y}-01-01"
+            end = f"{y}-12-31"
+            if y == 2017:
+                start = '2017-06-12'
+            dates += find_dates_between(start, end)
+        return dates
+
+    all_train_dates = _expand_years(cfg.train_years)
+    all_val_dates = _expand_years(cfg.val_years)
+    all_test_dates = _expand_years(cfg.test_years)
+
+    return all_train_dates, all_val_dates, all_test_dates
+
+def defines_train_dates_from_exp(expe):
+    """Backward compatible behaviour based on experiment name."""
     if 'normal' in expe or 'voting' in expe:
         all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
         all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
@@ -223,7 +243,10 @@ def defines_train_dates(expe):
         all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
         all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
         all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-
+    else:
+        all_train_dates = []
+        all_val_dates = []
+        all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
 allDates = find_dates_between('2017-06-12', '2024-06-29')
