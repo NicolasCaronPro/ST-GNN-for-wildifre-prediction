@@ -2103,7 +2103,7 @@ def wrapped_train_deep_learning_1D(params):
     val_dataset['weight'] = 1 * val_dataset['weight']
     test_dataset['weight'] = 1 * test_dataset['weight']
 
-    custom_model_params = None
+    custom_model_params = params.get('custom_model_params')
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
@@ -2126,7 +2126,9 @@ def wrapped_train_deep_learning_1D(params):
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
         if isinstance(mesh_file, list):
-            custom_model_params = {'num_output_scale' : len(mesh_file)}
+            if custom_model_params is None:
+                custom_model_params = {}
+            custom_model_params['num_output_scale'] = len(mesh_file)
             mesh = 'mygraph'
         elif mesh_file is not None and 'icospheres' in mesh_file:
             mesh = 'mesh'

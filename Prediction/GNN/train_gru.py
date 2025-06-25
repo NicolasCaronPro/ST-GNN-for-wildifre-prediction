@@ -60,6 +60,14 @@ graph_method = config.graph_method
 shift = config.get("shift")
 thresh_kmeans = config.get("thresh_kmeans")
 training_mode = config.training_mode
+
+# Hyperparameters
+if config.epochs is not None:
+    epochs = config.epochs
+if config.batch_size is not None:
+    batch_size = config.batch_size
+if config.lr is not None:
+    lr = config.lr
 ######################## Get features and train features list ######################
 
 isInference = name_exp == 'inference'
@@ -278,56 +286,16 @@ prefix = f'full_all_{scale}_{days_in_futur}_{graph_construct}_{graph_method}'
 
 ###################### Define models to train ######################
 
-if days_in_futur == 0:
-    kdays = 10
-elif days_in_futur == 7:
-    kdays = 7
-elif days_in_futur == 15:
-    kdays = 15
-elif days_in_futur == 31:
-    kdays = 31
-
-if name_exp.find('voting') != -1:
-    #voting_models = define_voting_dl_models('GRU', kdays)
-    voting_models = []
-    models = [
-                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-                #('GRU', 'search_full_15_all_one_burnedarea-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 2),
-                ]
-        
-    staking_models = []
-    federated_models = [
-            #('GRU', None, 'departement', 'median',f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('GRU', None, 'saison', 'median', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            
-            #('GRU', None, 'departement', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ('GRU', None, 'saison', 'max', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-
-            #('GRU', None, 'departement', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'cluster-encoder', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            #('GRU', None, 'saison', 'mean', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-
-        ]
-    
-    gnn_models = [
-               
-                ]
-else:
-    models = [
-                #('GRU', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
-            ]
-    
-    gnn_models = [
-    ]
-
-    staking_models = []
-
-    federated_models = [
-        ]
-    
-    voting_models = []
+models = []
+gnn_models = []
+federated_models = []
+voting_models = []
+for m in config.get("models", []):
+    info = f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_all_one_{m['target']}_{m['task']}_{m['loss']}"
+    if m.get('mesh_file'):
+        gnn_models.append((m['type'], m.get('use_temporal_as_edges'), m.get('mesh_file'), info, m['out_channels'], m['n_run'], m.get('params')))
+    else:
+        models.append((m['type'], info, m['out_channels'], m['n_run'], m.get('params')))
 
 train_loader = None
 val_loader = None
@@ -346,6 +314,7 @@ global_params = {
     "CHECKPOINT": CHECKPOINT,
     "epochs": epochs,
     "lr": lr,
+    "batch_size": batch_size,
     "scaling": scaling,
     "encoding": encoding,
     "prefix": prefix,
@@ -452,7 +421,8 @@ if doTrain:
         global_params['infos'] = gnn_model[3]
         global_params['out_channels'] = gnn_model[4]
         global_params['torch_structure'] = 'Model_gnn'
-        global_params['n_run'] = gnn_model[-1]
+        global_params['n_run'] = gnn_model[5]
+        global_params['custom_model_params'] = gnn_model[6]
 
         wrapped_train_deep_learning_1D(global_params)
 
@@ -463,7 +433,8 @@ if doTrain:
             global_params['out_channels'] = model[2]
             global_params['use_temporal_as_edges'] = None
             global_params['torch_structure'] = 'Model_Torch'
-            global_params['n_run'] = model[-1]
+            global_params['n_run'] = model[3]
+            global_params['custom_model_params'] = model[4]
             
             wrapped_train_deep_learning_1D(global_params)
 

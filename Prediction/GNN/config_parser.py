@@ -22,6 +22,12 @@ class ConfigParser:
         self.train_departments = data.get("train_departments", [])
         self.test_departments = data.get("test_departments", [])
 
+        # hyperparameters section
+        self.hyperparameters = data.get("hyperparameters", {})
+        self.epochs = self.hyperparameters.get("epochs")
+        self.batch_size = self.hyperparameters.get("batch_size")
+        self.lr = self.hyperparameters.get("lr")
+
         # expose all remaining entries as attributes
         for key, value in data.items():
             if not hasattr(self, key):

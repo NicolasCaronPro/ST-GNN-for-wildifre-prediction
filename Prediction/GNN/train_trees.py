@@ -43,6 +43,14 @@ doTrain = bool(config.doTrain)
 nbfeatures = config.NbFeatures
 sinister = config.sinister
 values_per_class = config.nbpoint
+
+# Hyperparameters
+if config.epochs is not None:
+    epochs = config.epochs
+if config.batch_size is not None:
+    batch_size = config.batch_size
+if config.lr is not None:
+    lr = config.lr
 scale = int(config.scale) if config.scale != 'departement' else config.scale
 resolution = config.resolution
 doPCA = bool(config.get("pca", False))
