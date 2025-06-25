@@ -13,89 +13,54 @@ sys.path.insert(0, parent_dir)
 
 from GNN.construct import *
 import geopandas as gpd
+from GNN.config_parser import ConfigParser
 import argparse
-
-########################### Input Arg ######################################
-
 parser = argparse.ArgumentParser(
-    prog='Train',
-    description='Create graph and database according to config.py and tained model',
+    prog="Train",
+    description="Create graph and database according to config file",
 )
-parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
-parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
-parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
-parser.add_argument('-p', '--point', type=str, help='Construct points')
-parser.add_argument('-np', '--nbpoint', type=str, help='Number of points')
-parser.add_argument('-d', '--database', type=str, help='Do database')
-parser.add_argument('-g', '--graph', type=str, help='Construct graph')
-parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
-parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
-parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
-parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
-parser.add_argument('-sc', '--scale', type=str, help='Scale')
-parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
-parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
-parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
-parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
-parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
-parser.add_argument('-test', '--doTest', type=str, help='Launch test')
-parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
-parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
-parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
-parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
-parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
-parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
-parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
-parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
-parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
-parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
-parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
-parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
-parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
-parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
-parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
-parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
-parser.add_argument('-quick', '--quick', type=str, help='isquick', default='False')
+parser.add_argument("-c", "--config", default="config/config.json", help="Path to config file")
 
 args = parser.parse_args()
+config = ConfigParser(args.config)
 
-QUICK = args.quick == 'True'
+QUICK = bool(config.get("quick", False))
 
 # Input config
-dataset_name = args.dataset
-name_exp = args.name
-maxDate = args.maxDate
-trainDate = args.trainDate
-doEncoder = args.encoder == "True"
-doPoint = args.point == "True"
-doGraph = args.graph == "True"
-doDatabase = args.database == "True"
-do2D = args.database2D == "True"
-doFet = args.featuresSelection == "True"
-training_mode = args.optimizeFeature == "True"
-doTest = args.doTest == "True"
-doTrain = args.doTrain == "True"
-nbfeatures = args.NbFeatures
-sinister = args.sinister
-values_per_class = args.nbpoint
-scale = int(args.scale) if args.scale != 'departement' else args.scale
-resolution = args.resolution
-doPCA = args.pca == 'True'
-doKMEANS = args.KMEANS == 'True'
-ncluster = int(args.ncluster)
-do_grid_search = args.GridSearch ==  'True'
-do_bayes_search = args.BayesSearch == 'True'
-k_days = int(args.k_days) # Size of the time series sequence use by DL models
-days_in_futur = int(args.days_in_futur) # The target time validation
-scaling = args.scaling
-graph_construct = args.graphConstruct
-sinister_encoding = args.sinisterEncoding
-weights_version = args.weights
-top_cluster = args.top_cluster
-graph_method = args.graph_method
-shift = args.shift
-thresh_kmeans = args.thresh_kmeans
-training_mode = args.training_mode
+dataset_name = config.dataset
+name_exp = config.name
+maxDate = config.maxDate
+trainDate = config.trainDate
+doEncoder = bool(config.get("encoder", False))
+doPoint = bool(config.get("point", False))
+doGraph = bool(config.get("graph", False))
+doDatabase = bool(config.get("database", False))
+do2D = bool(config.get("database2D", False))
+doFet = bool(config.featuresSelection)
+training_mode = bool(config.optimizeFeature)
+doTest = bool(config.doTest)
+doTrain = bool(config.doTrain)
+nbfeatures = config.NbFeatures
+sinister = config.sinister
+values_per_class = config.nbpoint
+scale = int(config.scale) if config.scale != 'departement' else config.scale
+resolution = config.resolution
+doPCA = bool(config.get("pca", False))
+doKMEANS = bool(config.KMEANS)
+ncluster = int(config.get("ncluster", 0))
+do_grid_search = bool(config.GridSearch)
+do_bayes_search = bool(config.BayesSearch)
+k_days = int(config.k_days) # Size of the time series sequence use by DL models
+days_in_futur = int(config.days_in_futur) # The target time validation
+scaling = config.scaling
+graph_construct = config.graphConstruct
+sinister_encoding = config.sinisterEncoding
+weights_version = config.get("weights")
+top_cluster = config.top_cluster
+graph_method = config.graph_method
+shift = config.shift
+thresh_kmeans = config.thresh_kmeans
+training_mode = config.training_mode
 
 assert values_per_class == 'full'
 assert graph_method == 'node'
@@ -141,7 +106,7 @@ if not QUICK:
     
     ####################### INIT ################################
 
-    df, graphScale, prefix, fp, features_selected = init(args, dir_output, 'train_trees')
+    df, graphScale, prefix, fp, features_selected = init(config, dir_output, 'train_trees')
 
     if MLFLOW:
         exp_name = f"{dataset_name}_train"
@@ -170,7 +135,7 @@ if not QUICK:
                                                                                         features_selected, train_departements,
                                                                                         prefix,
                                                                                         dir_output,
-                                                                                        args)
+                                                                                        config)
     if MLFLOW:
         train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
         val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
@@ -785,7 +750,7 @@ if doTest:
         prefix_kmeans += f'_{days_in_futur}_{futur_met}'
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset,
+    metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(config), graphScale, test_dataset,
                                 None,
                                     'all',
                                     prefix,
@@ -835,7 +800,7 @@ if doTest:
         logger.info(f'{dept} test : {test_dataset_dept.shape}, {np.unique(test_dataset_dept["id"].values)}')
 
         if host == 'pc':
-            metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(args), graphScale, test_dataset_dept,
+            metrics, metrics_dept, res, res_dept = test_sklearn_api_model(vars(config), graphScale, test_dataset_dept,
                                 test_dataset_unscale_dept,
                                     dept,
                                     prefix,
