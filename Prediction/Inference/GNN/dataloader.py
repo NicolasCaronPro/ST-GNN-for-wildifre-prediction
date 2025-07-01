@@ -2,6 +2,7 @@ from tkinter.filedialog import test
 import torch_geometric
 from zmq import device
 from GNN.pytorch_model import *
+from sklearn.metrics import cohen_kappa_score
 
 #########################################################################################################
 #                                                                                                       #
@@ -1117,6 +1118,10 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     accuracy = round(accuracy_score(y_true, y_pred), 2)
     metrics[f'accuracy'] = accuracy
     logger.info(f'accuracy = {accuracy}')
+
+    auoc = round(cohen_kappa_score(y_true.astype(int), y_pred.astype(int), weights='linear'), 3)
+    metrics['auoc'] = auoc
+    logger.info(f'auoc = {auoc}')
     
     ori_compare = np.copy(y_pred)
 
