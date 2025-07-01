@@ -1524,10 +1524,10 @@ class ModelTorch():
                 if m.sum() == 0:
                     continue
                 l = compute_single_loss(output[m], target[m], weights[m], None)
-                values.append(1 - l)
+                values.append(l)
             if len(values) > 0:
                 vals = torch.stack(values)
-                area_score = torch.trapz(vals) / torch.trapz(torch.ones(len(vals)))
+                area_score = torch.trapz(vals)
             else:
                 area_score = torch.tensor(0.0, device=output.device)
 
