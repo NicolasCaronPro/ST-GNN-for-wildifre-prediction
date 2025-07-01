@@ -1,4 +1,6 @@
 from numpy import dtype
+import numpy as np
+import random
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
@@ -10,6 +12,9 @@ from PIL import Image
 import torchvision.transforms.functional as TF
 
 from GNN.discretization import *
+from GNN.tools import calculate_area_under_curve
+from GNN.config import graph_id_index
+from sklearn.metrics import f1_score, jaccard_score
 
 import dgl
 
@@ -1469,43 +1474,70 @@ class ModelTorch():
         return labels
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
+        def compute_single_loss(out, tar, wei, mask_id=None):
+            if self.task_type == 'regression':
+                tar = tar.view(out.shape)
+                wei = wei.view(out.shape)
+
+                tar = torch.masked_select(tar, wei.gt(0))
+                out = torch.masked_select(out, wei.gt(0))
+                wei = torch.masked_select(wei, wei.gt(0))
+                return criterion(out, tar, wei)
+            else:
+                wei = wei.long()
+                if not self.student_train:
+                    tar = tar.long()
+
+                tar = tar[wei.gt(0)]
+                out = out[wei.gt(0)]
+
+                if mask_id is not None:
+                    mask_id = mask_id[wei.gt(0)]
+
+                wei = torch.masked_select(wei, wei.gt(0))
+
+                if tolong:
+                    tar = tar.long()
+
+                if self.loss in ['kappa', 'cdw', 'mcewk']:
+                    tar = tar.to('cpu')
+                    out = out.to('cpu')
+
+                if mask_id is not None:
+                    return criterion(out, tar, id_mask=mask_id)
+                else:
+                    return criterion(out, tar)
 
         if 'ID' in self.loss:
             id_mask = label[:, criterion.id, -1]
-
-        if self.task_type == 'regression':
-            target = target.view(output.shape)
-            weights = weights.view(output.shape)
-            
-            target = torch.masked_select(target, weights.gt(0))
-            output = torch.masked_select(output, weights.gt(0))
-            weights = torch.masked_select(weights, weights.gt(0))
-            loss = criterion(output, target, weights)
         else:
-            weights = weights.long()
-            if not self.student_train:
-                target = target.long()
-            
-            target = target[weights.gt(0)]
-            output = output[weights.gt(0)]
+            id_mask = None
 
-            if 'id_mask' in locals():
-                id_mask = id_mask[weights.gt(0)]
+        base_loss = compute_single_loss(output, target, weights, id_mask)
 
-            weights = torch.masked_select(weights, weights.gt(0))
-
-            if tolong:
-                target = target.long()
-
-            if self.loss in ['kappa', 'cdw', 'mcewk']:
-                target = target.to('cpu')
-                output = output.to('cpu')
-
-            if 'id_mask' in locals():
-                loss = criterion(output, target, id_mask=id_mask)
+        if 'area' in self.loss:
+            area_mask = label[:, criterion.id, -1]
+            unique_ids = torch.unique(area_mask)
+            values = []
+            for aid in unique_ids:
+                m = area_mask == aid
+                if m.sum() == 0:
+                    continue
+                l = compute_single_loss(output[m], target[m], weights[m], None)
+                values.append(1 - l)
+            if len(values) > 0:
+                vals = torch.stack(values)
+                area_score = torch.trapz(vals) / torch.trapz(torch.ones(len(vals)))
             else:
-                loss = criterion(output, target)
-        
+                area_score = torch.tensor(0.0, device=output.device)
+
+            if 'area-global' in self.loss:
+                loss = area_score * base_loss
+            else:
+                loss = area_score
+        else:
+            loss = base_loss
+
         return loss
     
     def launch_train_loader(self, loader, criterion, optimizer, teacher=None):
@@ -1715,8 +1747,9 @@ class ModelTorch():
         
         iou = iou_score(y[:, -1], test_output)
         f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}')
+        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
         test_output, y = self._predict_test_loader(self.val_loader)
         test_output = test_output.detach().cpu().numpy()
@@ -1728,8 +1761,9 @@ class ModelTorch():
         
         iou = iou_score(y[:, -1], test_output)
         f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}')
+        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
         plt.figure(figsize=(15,5))
         plt.plot(y[y[:, departement_index] == 13, -1])
@@ -1812,6 +1846,32 @@ class ModelTorch():
             iou = np.trapz(iou)
 
             return under_prediction_score_value, over_prediction_score_value, iou
+
+    def compute_area_score(self, pred, y_true, graph_ids):
+        unique_graphs = np.unique(graph_ids)
+        graph_sums = {gid: y_true[graph_ids == gid].sum() for gid in unique_graphs}
+        sorted_graphs = sorted(graph_sums, key=graph_sums.get, reverse=True)
+
+        iou_scores = []
+        f1_scores = []
+
+        for gid in sorted_graphs:
+            mask = graph_ids == gid
+            y_g = y_true[mask]
+            pred_g = pred[mask]
+            if np.any(y_g > 0):
+                iou = jaccard_score((y_g > 0).astype(int), (pred_g > 0).astype(int))
+                f1 = f1_score((y_g > 0).astype(int), (pred_g > 0).astype(int))
+                iou_scores.append(iou)
+                f1_scores.append(f1)
+
+        if len(iou_scores) == 0:
+            return 0.0, 0.0
+
+        max_area = np.trapz(np.ones(np.unique(graph_ids[y_true > 0]).shape[0]))
+        IoU_area = calculate_area_under_curve(iou_scores)
+        F1_area = calculate_area_under_curve(f1_scores)
+        return IoU_area / max_area, F1_area / max_area
 
     def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None, use_log=True):
         
