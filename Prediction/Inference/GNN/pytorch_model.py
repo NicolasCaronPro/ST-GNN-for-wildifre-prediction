@@ -2358,7 +2358,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         del model_params
         
         # Vérifier que la méthode d'agrégation est implémentée
-        if self.aggregation_method not in ['mean', 'median', 'weighted']:
+        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
 
         # Récupération des paramètres d'entraînement
@@ -2382,6 +2382,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
 
             local_models = []
             local_weights = []
+            sample_counts = []
 
             for cluster in clusters:
                 print(f"\nTraining local model for cluster: {cluster}")
@@ -2410,9 +2411,10 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
 
                 # Stocker les poids des modèles locaux
                 local_weights.append(deepcopy(local_model.model.state_dict()))
+                sample_counts.append(len(df_train_cluster))
 
             # Agréger les modèles locaux dans le modèle global
-            self.aggregate_models(local_weights)
+            self.aggregate_models(local_weights, sample_counts)
 
             # Évaluer le modèle global
             global_score = self.global_model.score(df_val, df_val[self.target_name])
@@ -2446,7 +2448,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         
         raise NotImplementedError(f"Federated clustering method '{self.federated_cluster}' is not implemented.")
 
-    def aggregate_models(self, local_weights):
+    def aggregate_models(self, local_weights, sample_counts=None):
         """
         Aggregate local models into the global model using the chosen method.
         """
@@ -2462,9 +2464,16 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                 new_state_dict[key] = torch.mean(stacked_params, dim=0)
             elif self.aggregation_method == 'median':
                 new_state_dict[key] = torch.median(stacked_params, dim=0)[0]
+            elif self.aggregation_method == 'max':
+                new_state_dict[key] = torch.max(stacked_params, dim=0)[0]
             elif self.aggregation_method == 'weighted':
-                weights = torch.tensor([1 / len(local_weights)] * len(local_weights))  # Uniform weights
-                new_state_dict[key] = torch.sum(stacked_params * weights[:, None, None], dim=0)
+                if sample_counts is not None and len(sample_counts) == len(local_weights):
+                    weights = torch.tensor(sample_counts, dtype=torch.float32)
+                    weights = weights / weights.sum()
+                else:
+                    weights = torch.tensor([1 / len(local_weights)] * len(local_weights), dtype=torch.float32)
+                view_shape = [len(local_weights)] + [1] * (stacked_params.dim() - 1)
+                new_state_dict[key] = torch.sum(stacked_params * weights.view(*view_shape), dim=0)
 
         # Mettre à jour les poids du modèle global
         self.global_model.update_weight(new_state_dict)
