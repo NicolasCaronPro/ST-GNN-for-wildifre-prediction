@@ -11,9 +11,12 @@ torch.set_printoptions(precision=3, sci_mode=False)
 from PIL import Image
 import torchvision.transforms.functional as TF
 
+from copy import deepcopy
+import itertools
+from matplotlib import pyplot as plt
 from GNN.discretization import *
 from GNN.tools import calculate_area_under_curve
-from GNN.config import graph_id_index
+from GNN.config import graph_id_index, departement_index
 from sklearn.metrics import f1_score, jaccard_score
 
 import dgl
@@ -1398,10 +1401,10 @@ class WrapperModel(torch.nn.Module):
         x_orig = x_flat.reshape(-1, self.F, self.T)
         return self.model(x_orig, self.edges)
 
-class ModelTorch():
+class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
-                 loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
+                 loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
                  constrastive=False):
         
         self.model_name = model_name
@@ -2608,9 +2611,10 @@ class ModelTorch():
         df_features = pd.concat(df_features)
         save_object(df_features, 'features_importance.pkl', dir_output)
         
-class ModelCNN(ModelTorch):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run):
+class ModelCNN(SplitTraining):
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal'):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+        self.training_mode = training_mode
         self.path = path
         self.features = features
         self.features_1D = features_1D
@@ -2657,25 +2661,30 @@ class ModelCNN(ModelTorch):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.under_sampling == 'search':
-                        best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False)
-                        self.find_log = find_log
+                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
+                        sample_zero = len(df_train[df_train[self.target_name] == 0])
+                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
+                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
                     else:
-                        vec = self.under_sampling.split('-')
-                        try:
-                            best_tp = float(vec[-1])
-                        except ValueError:
-                            logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
-                            best_tp = 0.3
+                        if self.under_sampling == 'search':
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False)
+                            self.find_log = find_log
+                        else:
+                            vec = self.under_sampling.split('-')
+                            try:
+                                best_tp = float(vec[-1])
+                            except ValueError:
+                                logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
+                                best_tp = 0.3
 
-                    nb = int(best_tp * len(y[y == 0]))
+                        nb = int(best_tp * len(y[y == 0]))
 
-                    df_combined = self.split_dataset(df_train, nb, reset=False)
-                    df_train['weight'] = 0
+                        df_combined = self.split_dataset(df_train, nb, reset=False)
+                        df_train['weight'] = 0
 
-                    # Mettre à jour df_train pour l'entraînement
-                    df_train.loc[df_combined.index, 'weight'] = 1
-                    logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
+                        # Mettre à jour df_train pour l'entraînement
+                        df_train.loc[df_combined.index, 'weight'] = 1
+                        logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
                 
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_log)
@@ -2725,9 +2734,10 @@ class ModelCNN(ModelTorch):
 
         return loader
 
-class ModelGNN(ModelTorch):
-    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+class ModelGNN(SplitTraining):
+    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run, training_mode='normal'):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+        self.training_mode = training_mode
         self.mesh = mesh
         self.mesh_file = mesh_file
         self.graph_method = graph_method
@@ -2802,25 +2812,30 @@ class ModelGNN(ModelTorch):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.under_sampling == 'search':
-                        best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False, False, custom_model_params=custom_model_params)
-                        self.find_log = find_log
+                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
+                        sample_zero = len(df_train[df_train[self.target_name] == 0])
+                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
+                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
                     else:
-                        vec = self.under_sampling.split('-')
-                        try:
-                            best_tp = float(vec[-1])
-                        except ValueError:
-                            logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
-                            best_tp = 0.3
+                        if self.under_sampling == 'search':
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False, False, custom_model_params=custom_model_params)
+                            self.find_log = find_log
+                        else:
+                            vec = self.under_sampling.split('-')
+                            try:
+                                best_tp = float(vec[-1])
+                            except ValueError:
+                                logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
+                                best_tp = 0.3
 
-                    nb = int(best_tp * len(y[y == 0]))
+                        nb = int(best_tp * len(y[y == 0]))
 
-                    df_combined = self.split_dataset(df_train, nb, reset=False)
-                    df_train['weight'] = 0
+                        df_combined = self.split_dataset(df_train, nb, reset=False)
+                        df_train['weight'] = 0
 
-                    # Mettre à jour df_train pour l'entraînement
-                    df_train.loc[df_combined.index, 'weight'] = 1
-                    logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
+                        # Mettre à jour df_train pour l'entraînement
+                        df_train.loc[df_combined.index, 'weight'] = 1
+                        logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
             
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_log)
@@ -3001,12 +3016,14 @@ class ModelGNN(ModelTorch):
             
             return pred, y
 
-class Model_Torch(ModelTorch):
+class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
-                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
+                 training_mode='normal'):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
+        self.training_mode = training_mode
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
         self.graph = graph
@@ -3056,25 +3073,30 @@ class Model_Torch(ModelTorch):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.under_sampling == 'search':
-                        best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params)
-                        self.find_log = find_log
+                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
+                        sample_zero = len(df_train[df_train[self.target_name] == 0])
+                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
+                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
                     else:
-                        vec = self.under_sampling.split('-')
-                        try:
-                            best_tp = float(vec[-1])
-                        except ValueError:
-                            logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
-                            best_tp = 0.3
+                        if self.under_sampling == 'search':
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params)
+                            self.find_log = find_log
+                        else:
+                            vec = self.under_sampling.split('-')
+                            try:
+                                best_tp = float(vec[-1])
+                            except ValueError:
+                                logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
+                                best_tp = 0.3
 
-                    nb = int(best_tp * len(y[y == 0]))
+                        nb = int(best_tp * len(y[y == 0]))
 
-                    df_combined = self.split_dataset(df_train, nb, reset=False)
-                    df_train['weight'] = 0
+                        df_combined = self.split_dataset(df_train, nb, reset=False)
+                        df_train['weight'] = 0
 
-                    # Mettre à jour df_train pour l'entraînement
-                    df_train.loc[df_combined.index, 'weight'] = 1
-                    logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
+                        # Mettre à jour df_train pour l'entraînement
+                        df_train.loc[df_combined.index, 'weight'] = 1
+                        logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
         if 'smote' in self.over_sampling:
             
@@ -3558,7 +3580,7 @@ class MOONFederatedLearning(FederatedLearningModel):
 
 ############################################ Split training ##############################################################
 
-class SplitLearning(ModelTorch):
+class SplitTraining(Training):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         
@@ -3615,6 +3637,53 @@ class SplitLearning(ModelTorch):
         model = self.create_server_model_from_cut_layer().to(self.device)
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         return model, optimizer
+
+    def split_dataset(self, dataset, nb, reset=True):
+        """Split ``dataset`` per cluster with negative sampling.
+
+        Parameters
+        ----------
+        dataset : pandas.DataFrame
+            Dataset containing a ``self.federated_cluster`` column.
+        nb : int
+            Number of negative samples to keep for each cluster.
+        reset : bool, default True
+            Whether to reset DataFrame indices.
+
+        Returns
+        -------
+        dict
+            Mapping cluster ids to the sampled DataFrame for that cluster.
+        """
+
+        if self.federated_cluster not in dataset.columns:
+            raise KeyError(f"{self.federated_cluster} column missing from dataset")
+
+        result = {}
+        clusters = dataset[self.federated_cluster].unique()
+
+        for cluster in clusters:
+            df_cluster = dataset[dataset[self.federated_cluster] == cluster]
+
+            pos_mask = df_cluster[self.target_name] > 0
+            non_fire_mask = df_cluster[self.target_name] == 0
+            df_positive = df_cluster[pos_mask]
+            df_non_fire = df_cluster[non_fire_mask]
+
+            nb_c = min(len(df_non_fire), nb)
+            if getattr(self, "n_run", 1) == 1:
+                sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb_c, replace=False)
+            else:
+                sampled_indices = np.random.RandomState().choice(len(df_non_fire), nb_c, replace=False)
+
+            df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
+            df_combined = pd.concat([df_positive, df_non_fire_sampled])
+            if reset:
+                df_combined.reset_index(drop=True, inplace=True)
+
+            result[cluster] = df_combined
+
+        return result
 
     def prepare_batch_data(self, df_train, clusters, batch_size):
         batch_data = []
@@ -3673,7 +3742,7 @@ class SplitLearning(ModelTorch):
             out.backward(grad)
             optimizer.step()
     
-    def fit(self, df_train, df_val, df_test, graph, args):
+    def train_split(self, df_train, df_val, df_test, graph, args):
         import torch
         from torch import nn
 
@@ -3700,6 +3769,7 @@ class SplitLearning(ModelTorch):
         criterion = self.get_loss(self.loss_name)
 
         best_loss = float('inf')
+        best_server_state = None
         patience_counter = 0
 
         for epoch in range(global_epochs):
@@ -3707,7 +3777,7 @@ class SplitLearning(ModelTorch):
 
             batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
             epoch_loss = 0
-            
+
             for batch_idx in range(num_batches):
                 activations, inputs_for_backward, labels = self.clients_forward(batch_data, batch_idx, batch_size, client_models)
                 loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
@@ -3715,16 +3785,34 @@ class SplitLearning(ModelTorch):
                 epoch_loss += loss_value
 
             avg_loss = epoch_loss / num_batches
-            print(f"Avg Epoch Loss: {avg_loss:.4f}")
 
-            if avg_loss < best_loss:
-                best_loss = avg_loss
+            # Compute validation loss for early stopping
+            val_batch_data, val_num_batches = self.prepare_batch_data(df_val, clusters, batch_size)
+            val_loss_total = 0
+            for batch_idx in range(val_num_batches):
+                activations, _, labels = self.clients_forward(val_batch_data, batch_idx, batch_size, client_models)
+                server_model.eval()
+                with torch.no_grad():
+                    concat = torch.cat(activations, dim=1)
+                    output = server_model(concat)
+                    vloss = criterion(output, labels)
+                val_loss_total += vloss.item()
+            val_loss = val_loss_total / val_num_batches
+
+            print(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_server_state = deepcopy(server_model.state_dict())
                 patience_counter = 0
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
                     print("Early stopping triggered.")
                     break
+
+        if best_server_state is not None:
+            server_model.load_state_dict(best_server_state)
 
         self.client_models = client_models
         self.server_model = server_model
@@ -3758,9 +3846,165 @@ class SplitLearning(ModelTorch):
 
         print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
+        plt.figure(figsize=(15,5))
+        plt.plot(y[y[:, departement_index] == 13, -1])
+        plt.plot(test_output[y[:, departement_index] == 13])
+        plt.savefig(self.dir_log / 'test.png')
+        plt.close('all')
+
+        self.update_weight(server_model.state_dict())
+
+    def _predict_test_loader(self, X: DataLoader, proba: bool = False):
+        """Generate predictions using the split learning setup."""
+
+        if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
+            raise ValueError("Model is not fitted. Please train the model before predicting.")
+
+        self.server_model.eval()
+        for model in self.client_models.values():
+            model.eval()
+
+        preds = []
+        ys = []
+
+        with torch.no_grad():
+            for data in X:
+                inputs, labels, _ = data
+                labels = labels.to(self.device)
+                labels_last = labels[:, :, -1]
+                clusters = labels[:, departement_index, -1].long().tolist()
+
+                for i in range(inputs.size(0)):
+                    cluster = clusters[i]
+                    client = self.client_models.get(cluster)
+                    if client is None:
+                        raise KeyError(f"No client model for cluster {cluster}")
+
+                    activation = client(inputs[i:i+1].to(self.device))
+                    output = self.server_model(activation)
+                    if output.shape[1] > 1 and not proba:
+                        output = torch.argmax(output, dim=1)
+
+                    preds.append(output.squeeze(0))
+                    ys.append(labels_last[i])
+
+        pred_tensor = torch.stack(preds, 0)
+        y_tensor = torch.stack(ys, 0)
+
+        if self.target_name in ["binary", "risk", "nbsinister"]:
+            pred_tensor = torch.round(pred_tensor, decimals=1)
+
+        return pred_tensor, y_tensor
+
+    def predict(self, df, graph=None, return_y=False):
+        if graph is None:
+            graph = self.graph
+
+        if self.target_name not in list(df.columns):
+            df[self.target_name] = 0
+
+        loader = create_test_loader(
+            graph,
+            df,
+            self.features_name,
+            self.device,
+            None,
+            self.target_name,
+            self.ks,
+        )
+
+        pred_tensor, y_tensor = self._predict_test_loader(loader)
+
+        if return_y:
+            return pred_tensor, y_tensor
+
+        return pred_tensor
+
+    def predict_proba(self, df, graph=None, return_y=False):
+        if graph is None:
+            graph = self.graph
+
+        if self.target_name not in list(df.columns):
+            df[self.target_name] = 0
+
+        loader = create_test_loader(
+            graph,
+            df,
+            self.features_name,
+            self.device,
+            None,
+            self.target_name,
+            self.ks,
+        )
+
+        pred_tensor, y_tensor = self._predict_test_loader(loader, True)
+
+        if return_y:
+            pred, y = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=True)
+            return pred, y
+
+        pred = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=False)
+        return pred
+
+    def search_sample_limit_per_cluster(self, graph, df_train, df_val, df_test, sample_limits, args=None):
+        """Search optimal zero sample limits for each cluster.
+
+        Parameters
+        ----------
+        graph : dgl.DGLGraph
+            Graph used for training.
+        df_train, df_val, df_test : pandas.DataFrame
+            Datasets containing a ``self.federated_cluster`` column.
+        sample_limits : list[int]
+            Candidate numbers of zero samples for each cluster.
+        args : dict, optional
+            Additional arguments forwarded to :func:`train_split`.
+
+        Returns
+        -------
+        dict
+            Mapping cluster id to chosen zero count.
+        float
+            IoU score obtained with the best combination.
+        """
+
+        if args is None:
+            args = {}
+
+        clusters = df_train[self.federated_cluster].unique()
+        best_score = -float("inf")
+        best_combination = None
+        best_state = None
+
+        for combo in itertools.product(sample_limits, repeat=len(clusters)):
+            df_parts = []
+            for cluster, nb in zip(clusters, combo):
+                df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                sampled = self.split_dataset(df_cluster, nb, reset=True)[cluster]
+                df_parts.append(sampled)
+
+            df_train_split = pd.concat(df_parts).reset_index(drop=True)
+
+            model_copy = deepcopy(self)
+            model_copy.training_mode = 'normal'
+            model_copy.train_split(df_train_split, df_val, df_test, graph, args)
+
+            pred, y = model_copy._predict_test_loader(model_copy.val_loader)
+            iou = iou_score(y.detach().cpu().numpy()[:, -1], pred.detach().cpu().numpy())
+
+            if iou > best_score:
+                best_score = iou
+                best_combination = dict(zip(clusters, combo))
+                best_state = deepcopy(model_copy.server_model.state_dict())
+
+        if best_state is not None:
+            self.server_model.load_state_dict(best_state)
+
+        return best_combination, best_score
+
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
-class ModelKnowledgeDistillation(ModelTorch):
+class ModelKnowledgeDistillation(Training):
     def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device, 
                 under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss):
 

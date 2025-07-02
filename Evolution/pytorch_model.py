@@ -93,7 +93,7 @@ def get_model_from_string(model_type: str, config_string: str, **kwargs):
         raise ValueError(f"Type de modèle inconnu : {model_type}")
     
 # Classe mère
-class ModelTorch():
+class Training():
     def __init__(
         self,
         model_name=None,
@@ -816,7 +816,7 @@ class ModelTorch():
             print(f"✅ SHAP plot sauvegardé pour classe {class_index} : {save_path}")
             plt.close()
 
-class ModelCNN(ModelTorch):
+class ModelCNN(Training):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -936,7 +936,7 @@ class ModelCNN(ModelTorch):
         X_tensor = torch.tensor(all_data, dtype=torch.float32, device=self.device)
         return X_tensor
     
-class ModelGNN(ModelTorch):
+class ModelGNN(Training):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
@@ -1075,7 +1075,7 @@ class ModelGNN(ModelTorch):
         X_tensor = torch.tensor(all_data, dtype=torch.float32, device=self.device)
         return X_tensor
 
-class Model_Torch(ModelTorch):
+class Model_Torch(Training):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 

@@ -878,9 +878,9 @@ def create_dataset_2D(graph,
         test_datset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
     return train_dataset, val_dataset, test_dataset
 
-class ModelTorch():
+class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
-                 features_name, ks, out_channels, dir_log, loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full'):
+                 features_name, ks, out_channels, dir_log, loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full'):
         self.model_name = model_name
         self.name = name
         self.loss = loss
@@ -1355,7 +1355,7 @@ class ModelTorch():
         loss_params = {'num_classes' : 5}
         return get_loss_function(loss_name, **loss_params)
 
-class ModelCNN(ModelTorch):
+class ModelCNN(Training):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
         self.path = path
@@ -1648,7 +1648,7 @@ class ModelCNN(ModelTorch):
             logger.info(f'################ Loss parameter ###################')
             logger.info(criterion.ratio_matrix)
             
-class ModelGNN(ModelTorch):
+class ModelGNN(Training):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
         self.mesh = mesh
@@ -2007,7 +2007,7 @@ class ModelGNN(ModelTorch):
             
             return pred, y
 
-class Model_Torch(ModelTorch):
+class Model_Torch(Training):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
 
