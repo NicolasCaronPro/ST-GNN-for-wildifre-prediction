@@ -1625,7 +1625,7 @@ class ModelTorch():
         for i, data in enumerate(loader, 0):
 
             loss = self.launch_batch(data, criterion)
-            
+
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -1660,18 +1660,18 @@ class ModelTorch():
             self.model_params = params
         return model, params
     
-    def func_epoch(self, train_loader, val_loader, optimizer, criterion, criterion_val, teacher=None):
+    def func_epoch(self, train_loader, val_loader, optimizer, criterion, criterion_val):
 
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer, teacher)
+        train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
 
         if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion_val, teacher)
+            val_loss = self.launch_val_test_loader(val_loader, criterion_val)
         else:
             val_loss = train_loss.item()
 
         return val_loss, train_loss
 
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, teacher=None):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
         """
         Train neural network model
         """
@@ -1727,7 +1727,7 @@ class ModelTorch():
             self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         else:
             for epoch in tqdm(range(epochs), disable=not verbose):
-                val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val, teacher=teacher)
+                val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
                 train_loss = train_loss.item()
                 val_loss = round(val_loss, 3)
                 train_loss = round(train_loss, 3)
@@ -2871,7 +2871,7 @@ class ModelGNN(ModelTorch):
 
         return loader
 
-    def launch_train_loader(self, loader, criterion, optimizer, teacher=None):
+    def launch_train_loader(self, loader, criterion, optimizer):
         
         self.model.train()
         for i, data in enumerate(loader, 0):
@@ -3002,8 +3002,11 @@ class ModelGNN(ModelTorch):
             return pred, y
 
 class Model_Torch(ModelTorch):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
+                         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                         over_sampling=over_sampling, n_run=n_run)
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
         self.graph = graph
@@ -3322,7 +3325,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             stacked_params = torch.stack([weights[key] for weights in local_weights])
 
             if self.aggregation_method == 'mean':
-                new_state_dict[key] = torch.mean(stacked_params, dim=0)[0]
+                new_state_dict[key] = torch.mean(stacked_params, dim=0)
             elif self.aggregation_method == 'median':
                 new_state_dict[key] = torch.median(stacked_params, dim=0)[0]
             elif self.aggregation_method == 'max':
@@ -3372,6 +3375,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         return self.global_model._predict_test_loader(X)
 
 ############################################ MOON Federated Model ##############################################################
+
 class MOONFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
@@ -3432,10 +3436,11 @@ class MOONFederatedLearning(FederatedLearningModel):
         
         print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
 
+        local_models = {}
+        
         for epoch in range(global_epochs):
             print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
 
-            local_models = {}
             local_weights = []
             sample_counts = []
             
@@ -3533,7 +3538,7 @@ class MOONFederatedLearning(FederatedLearningModel):
             stacked_params = torch.stack([weights[key] for weights in local_weights])
 
             if self.aggregation_method == 'mean':
-                new_state_dict[key] = torch.mean(stacked_params, dim=0)[0]
+                new_state_dict[key] = torch.mean(stacked_params, dim=0)
             elif self.aggregation_method == 'median':
                 new_state_dict[key] = torch.median(stacked_params, dim=0)[0]
             elif self.aggregation_method == 'max':
@@ -3550,6 +3555,208 @@ class MOONFederatedLearning(FederatedLearningModel):
         # Mettre à jour les poids du modèle global
         self.global_model.update_weight(new_state_dict)
         print("\n--- Global Model Weights Updated ---")
+
+############################################ Split training ##############################################################
+
+class SplitLearning(ModelTorch):
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
+        
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
+                         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                         over_sampling=over_sampling, n_run=n_run)
+    
+    def create_client_model_upto_cut_layer(self):
+        """
+        Crée un sous-modèle client contenant les couches jusqu'à (non inclus) la couche de découpe.
+        """
+        from torch import nn
+
+        layers = []
+        for name, layer in self.model.named_children():
+            if name == self.cut_layer_name:
+                break
+            layers.append(layer)
+        
+        client_model = nn.Sequential(*layers)
+        return client_model
+
+    def create_server_model_from_cut_layer(self):
+        """
+        Crée un sous-modèle serveur contenant les couches à partir de la couche de découpe (incluse).
+        """
+        from torch import nn
+
+        start_adding = False
+        layers = []
+
+        for name, layer in self.model.named_children():
+            if name == self.cut_layer_name:
+                start_adding = True
+            if start_adding:
+                layers.append(layer)
+        
+        server_model = nn.Sequential(*layers)
+        return server_model
+
+    def initialize_clients(self, clusters, learning_rate=1e-3):
+        client_models = {}
+        client_optimizers = {}
+
+        for cluster in clusters:
+            model = self.create_client_model_upto_cut_layer().to(self.device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+            client_models[cluster] = model
+            client_optimizers[cluster] = optimizer
+
+        return client_models, client_optimizers
+    
+    def initialize_server(self, learning_rate=1e-3):
+        model = self.create_server_model_from_cut_layer().to(self.device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        return model, optimizer
+
+    def prepare_batch_data(self, df_train, clusters, batch_size):
+        batch_data = []
+
+        for cluster in clusters:
+            df_c = df_train[df_train[self.federated_cluster] == cluster]
+            X = torch.tensor(df_c[self.features_name].values, dtype=torch.float32)
+            y = torch.tensor(df_c[self.target_name].values, dtype=torch.float32).unsqueeze(1)
+            batch_data.append((cluster, X, y))
+
+        num_batches = min(len(X) // batch_size for _, X, _ in batch_data)
+        return batch_data, num_batches
+    
+    def clients_forward(self, batch_data, batch_idx, batch_size, client_models):
+        activations = []
+        inputs_for_backward = {}
+        labels = None
+
+        for cluster, X_full, y_full in batch_data:
+            model = client_models[cluster]
+            model.train()
+            X_batch = X_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
+            y_batch = y_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
+
+            X_batch.requires_grad = True
+            out = model(X_batch)
+            out.retain_grad()
+
+            activations.append(out)
+            inputs_for_backward[cluster] = (X_batch, out)
+            if labels is None:
+                labels = y_batch
+
+        return activations, inputs_for_backward, labels
+    
+    def server_forward_backward(self, server_model, server_optimizer, activations, labels, criterion):
+        server_model.train()
+        server_optimizer.zero_grad()
+
+        concat = torch.cat(activations, dim=1)
+        output = server_model(concat)
+        loss = criterion(output, labels)
+        loss.backward()
+
+        server_optimizer.step()
+        return loss.item(), concat.grad
+
+    def clients_backward_update(self, inputs_for_backward, grad_concat, client_models, client_optimizers):
+        split_sizes = [out.shape[1] for _, out in inputs_for_backward.values()]
+        grads = torch.split(grad_concat, split_sizes, dim=1)
+
+        for (cluster, (X_batch, out)), grad in zip(inputs_for_backward.items(), grads):
+            optimizer = client_optimizers[cluster]
+            model = client_models[cluster]
+            optimizer.zero_grad()
+            out.backward(grad)
+            optimizer.step()
+    
+    def fit(self, df_train, df_val, df_test, graph, args):
+        import torch
+        from torch import nn
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
+
+        # Features
+        importance_df = calculate_and_plot_feature_importance(
+            df_train[self.features_name], df_train[self.target_name],
+            self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(
+            importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        self.features_name = featuresAll[:int(self.nbfeatures)] if self.nbfeatures != 'all' else featuresAll
+
+        clusters = df_train[self.federated_cluster].unique()
+        batch_size = args.get('batch_size', 32)
+        global_epochs = args.get('global_epochs', 10)
+        lr = args.get('lr', 1e-3)
+        patience = args.get('patience_count_global', 3)
+
+        client_models, client_optimizers = self.initialize_clients(clusters, lr)
+        server_model, server_optimizer = self.initialize_server(lr)
+        criterion = self.get_loss(self.loss_name)
+
+        best_loss = float('inf')
+        patience_counter = 0
+
+        for epoch in range(global_epochs):
+            print(f"\nEpoch {epoch+1}/{global_epochs}")
+
+            batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
+            epoch_loss = 0
+            
+            for batch_idx in range(num_batches):
+                activations, inputs_for_backward, labels = self.clients_forward(batch_data, batch_idx, batch_size, client_models)
+                loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
+                self.clients_backward_update(inputs_for_backward, grad_concat, client_models, client_optimizers)
+                epoch_loss += loss_value
+
+            avg_loss = epoch_loss / num_batches
+            print(f"Avg Epoch Loss: {avg_loss:.4f}")
+
+            if avg_loss < best_loss:
+                best_loss = avg_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print("Early stopping triggered.")
+                    break
+
+        self.client_models = client_models
+        self.server_model = server_model
+        self.is_fitted_ = True
+
+        test_output, y = self._predict_test_loader(self.test_loader)
+        test_output = test_output.detach().cpu().numpy()
+
+        y = y.detach().cpu().numpy()
+
+        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        
+        iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+
+        test_output, y = self._predict_test_loader(self.val_loader)
+        test_output = test_output.detach().cpu().numpy()
+        
+        y = y.detach().cpu().numpy()
+
+        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        
+        iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
