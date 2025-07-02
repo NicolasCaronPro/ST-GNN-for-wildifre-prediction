@@ -1400,7 +1400,10 @@ class WrapperModel(torch.nn.Module):
 
 class ModelTorch():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
-                 features_name, ks, out_channels, dir_log, loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1):
+                 features_name, ks, out_channels, dir_log,
+                 loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
+                 constrastive=False):
+        
         self.model_name = model_name
         self.name = name
         self.loss = loss
@@ -1427,6 +1430,7 @@ class ModelTorch():
         self.train_loader = None
         self.test_loader = None
         self.val_loader = None
+        self.constrastive = constrastive
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1485,7 +1489,7 @@ class ModelTorch():
                 return criterion(out, tar, wei)
             else:
                 wei = wei.long()
-                if not self.student_train:
+                if not self.student_train: # works on probability
                     tar = tar.long()
 
                 tar = tar[wei.gt(0)]
@@ -1508,15 +1512,15 @@ class ModelTorch():
                 else:
                     return criterion(out, tar)
 
-        if 'ID' in self.loss:
+        if 'ID' in self.loss: # Calculate loss per ID (specify loss-ID)
             id_mask = label[:, criterion.id, -1]
         else:
             id_mask = None
 
         base_loss = compute_single_loss(output, target, weights, id_mask)
 
-        if 'area' in self.loss:
-            area_mask = label[:, criterion.id, -1]
+        if 'area' in self.loss: # Calculate area loss (specify loss-area)
+            area_mask = label[:, graph_id_index, -1]
             unique_ids = torch.unique(area_mask)
             values = []
             for aid in unique_ids:
@@ -1531,7 +1535,7 @@ class ModelTorch():
             else:
                 area_score = torch.tensor(0.0, device=output.device)
 
-            if 'area-global' in self.loss:
+            if 'area-global' in self.loss:  # Calculate area * global (classic) loss  (specify loss-area-global)
                 loss = area_score * base_loss
             else:
                 loss = area_score
@@ -1540,43 +1544,88 @@ class ModelTorch():
 
         return loss
     
-    def launch_train_loader(self, loader, criterion, optimizer, teacher=None):
+    def calculate_contrastive_moon_loss(self, z, zprev, zglob, temperature=0.5):
+        """
+        Computes the MOON contrastive loss.
+
+        Args:
+            z       : Tensor of shape [batch_size, dim] from current local model.
+            zprev   : Tensor of shape [batch_size, dim] from previous local model.
+            zglob   : Tensor of shape [batch_size, dim] from global model.
+            temperature (float): Temperature parameter τ for scaling similarities.
+
+        Returns:
+            loss (Tensor): Scalar contrastive loss for the batch.
+        """
+        # Normalize representations to compute cosine similarity
+        z = F.normalize(z, dim=1)
+        zprev = F.normalize(zprev, dim=1)
+        zglob = F.normalize(zglob, dim=1)
+
+        # Cosine similarities
+        sim_pos = torch.sum(z * zglob, dim=1) / temperature  # similarity with global (positive)
+        sim_neg = torch.sum(z * zprev, dim=1) / temperature   # similarity with previous (negative)
+
+        # Contrastive loss per sample
+        logits = torch.stack([sim_pos, sim_neg], dim=1)  # shape: [batch_size, 2]
+        labels = torch.zeros(z.size(0), dtype=torch.long, device=z.device)  # positive is at index 0
+
+        # Use cross-entropy to compute: -log( exp(sim_pos) / (exp(sim_pos) + exp(sim_neg)) )
+        loss = F.cross_entropy(logits, labels)
+
+        return loss
+    
+    def launch_batch(self, data, criterion):
+        inputs, labels, edges = data
+        graphs = None
+
+        if inputs.shape[0] == 1:
+            return 0
+
+        band = -1
+        
+        try:
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
+        except Exception as e:
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+        
+        if self.loss not in ['kldivloss']: # works on probability
+            target = target.long()
+
+        if self.model.return_hidden:
+            output, hidden = self.model(inputs, edges)
+        else:
+            output = self.model(inputs, edges)
+
+        loss = self.calculate_loss(criterion, output, target, weights, labels)
+
+        if self.student_train: # distallation traning
+            criterion_teacher = self.get_loss('kldivloss')
+            df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
+            df_test.columns = df_test.columns.astype(str)
+            pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+            target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+            target = target / self.temperature_value
+
+            loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+
+            loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+        
+        if self.constrastive: # MOON federated training
+            _, zprev = self.prev_model(inputs, edges)
+            _, zglob = self.global_model(inputs, edges)
+            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
+            loss = loss + self.smooth_value * loss_constrastive
+        
+        return loss
+    
+    def launch_train_loader(self, loader, criterion, optimizer):
 
         self.model.train()
         for i, data in enumerate(loader, 0):
 
-            inputs, labels, edges = data
-            graphs = None
-
-            if inputs.shape[0] == 1:
-                continue
-
-            band = -1
+            loss = self.launch_batch(data, criterion)
             
-            try:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-            except Exception as e:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-            
-            if self.loss not in ['kldivloss']:
-                target = target.long()
-
-            output = self.model(inputs, edges)
-
-            loss = self.calculate_loss(criterion, output, target, weights, labels)
-
-            if self.student_train:
-                criterion_teacher = self.get_loss('kldivloss')
-                df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
-                df_test.columns = df_test.columns.astype(str)
-                pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
-                target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
-                target = target / self.temperature_value
-
-                loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
-
-                loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
-
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -1592,33 +1641,7 @@ class ModelTorch():
 
             for i, data in enumerate(loader, 0):
                 
-                inputs, labels, edges = data
-                graphs = None
-                
-                if inputs.shape[0] == 1:
-                    continue
-
-                band = -1
-
-                try:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-                except Exception as e:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-                output = self.model(inputs, edges)
-                loss = self.calculate_loss(criterion, output, target, weights, labels)
-
-                if self.student_train:
-                    criterion_teacher = self.get_loss('kldivloss')
-                    df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
-                    df_test.columns = df_test.columns.astype(str)
-                    pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
-                    target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
-                    target = target / self.temperature_value
-
-                    loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
-
-                    loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+                loss = self.launch_batch(data, criterion)
 
                 total_loss += loss.item()
 
@@ -1753,7 +1776,7 @@ class ModelTorch():
 
         test_output, y = self._predict_test_loader(self.val_loader)
         test_output = test_output.detach().cpu().numpy()
-
+        
         y = y.detach().cpu().numpy()
 
         under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
@@ -1871,6 +1894,8 @@ class ModelTorch():
         max_area = np.trapz(np.ones(np.unique(graph_ids[y_true > 0]).shape[0]))
         IoU_area = calculate_area_under_curve(iou_scores)
         F1_area = calculate_area_under_curve(f1_scores)
+        if max_area == 0:
+            return 0, 0
         return IoU_area / max_area, F1_area / max_area
 
     def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None, use_log=True):
@@ -1925,7 +1950,7 @@ class ModelTorch():
                             if data_log is not None:
                                 break
 
-        print(f'data_log : {data_log}')
+        print(f'data_logcompute_area_score : {data_log}')
         if data_log is not None:
             try:
                 self.metrics = data_log
@@ -3345,6 +3370,186 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     
     def _predict_test_loader(self, X):
         return self.global_model._predict_test_loader(X)
+
+############################################ MOON Federated Model ##############################################################
+class MOONFederatedLearning(FederatedLearningModel):
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+                 name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
+                 target_name='nbsinister', post_process=None, task_type='classification', 
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
+        
+        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
+                         name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
+                         target_name=target_name, post_process=post_process, task_type=task_type,
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+        
+        self.temperature_value = temperature
+        self.smooth_value = smooth
+    
+    def fit(self, df_train, df_val, df_test, graph, args):
+        """
+        Train local models for each federated cluster, aggregate them into a global model, 
+        and stop training once the global score does not improve for patience_count_global epochs.
+        """
+
+        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        
+        if self.nbfeatures != 'all':
+            self.features_name = featuresAll[:int(self.nbfeatures)]
+        else:
+            self.features_name = featuresAll
+
+        self.global_model.features_name = self.features_name
+        self.global_model.nbfeatures = 'all'
+        self.global_model.graph = graph
+
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+        self.global_model.model = deepcopy(initiate_model)
+        self.global_model.model_params = deepcopy(model_params)
+        self.model_params = deepcopy(model_params)
+        del initiate_model
+        del model_params
+        
+        # Vérifier que la méthode d'agrégation est implémentée
+        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
+            raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
+
+        # Récupération des paramètres d'entraînement
+        global_epochs = args.get('global_epochs', 10)
+        local_epochs = args.get('local_epochs', 5)
+        patience_count_global = args.get('patience_count_global', 3)
+        patience_count_local = args.get('patience_count_local', 2)
+
+        if self.federated_cluster in np.unique(df_train.columns):
+            clusters = df_train[self.federated_cluster].unique()
+        else:
+            raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
+
+        best_global_score = float('-inf')
+        patience_counter = 0  # Compteur pour l'arrêt anticipé
+        
+        print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
+
+        for epoch in range(global_epochs):
+            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+
+            local_models = {}
+            local_weights = []
+            sample_counts = []
+            
+            for cluster in clusters:
+                print(f"\nTraining local model for cluster: {cluster}")
+
+                # Initialisation du modèle local
+                local_model = deepcopy(self.global_model)
+                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+                local_model.global_model = self.global_model
+                local_model.temperature_value = self.temperature_value
+                local_model.smooth_value = self.smooth_value
+
+                if epoch == 0:
+                    local_model.prev_model = self.global_model.model
+                    check_and_create_path(local_model.dir_log)
+                else:
+                    local_model.prev_model = local_models[cluster].model
+                
+                local_model.global_model = self.global_model.model
+
+                local_model.features_name = self.features_name
+                local_model.nbfeatures = 'all'
+
+                # Création des datasets pour le cluster fédéré
+                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                    df_train, df_val, df_test, cluster
+                )
+
+                if np.all(df_train[local_model.target_name].values == 0):
+                    print(f'Skipping {cluster} due to no positif samples')
+                    continue
+
+                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                    print(f'Skipping {cluster} due to empty dataset')
+                    continue
+
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, False)
+
+                # Entraînement du modèle local
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                
+                local_models[cluster] = local_model
+
+                # Stocker les poids des modèles locaux
+                local_weights.append(deepcopy(local_model.model.state_dict()))
+                sample_counts.append(len(df_train_cluster))
+
+            # Agréger les modèles locaux dans le modèle global
+            self.aggregate_models(local_weights, sample_counts)
+
+            # Évaluer le modèle global
+            global_score = self.global_model.score(df_val, df_val[self.target_name])
+            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+            # Vérifier si le score s'est amélioré
+            if global_score > best_global_score:
+                best_global_score = global_score
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            # Arrêt anticipé si le score global ne s'améliore plus
+            if patience_counter >= patience_count_global:
+                print("\nEarly stopping: Global model score did not improve.")
+                break
+
+        self.is_fitted_ = True
+        print("\n--- Federated Learning Training Complete ---")
+
+    def create_cluster_set(self, df_train, df_val, df_test, cluster):
+        """
+        Create training, validation, and test datasets for a given cluster.
+        """
+        if self.federated_cluster in np.unique(df_train.columns):
+            X_cluster = df_train[df_train[self.federated_cluster] == cluster].reset_index(drop=True)
+            X_val_cluster = df_val[df_val[self.federated_cluster] == cluster].reset_index(drop=True)
+            X_test_cluster = df_test[df_test[self.federated_cluster] == cluster].reset_index(drop=True)
+
+            return X_cluster, X_val_cluster, X_test_cluster
+        
+        raise NotImplementedError(f"Federated clustering method '{self.federated_cluster}' is not implemented.")
+
+    def aggregate_models(self, local_weights, sample_counts=None):
+        """
+        Aggregate local models into the global model using the chosen method.
+        """
+        print(f"\n--- Aggregating models using {self.aggregation_method} ---")
+
+        param_keys = local_weights[0].keys()
+        new_state_dict = {}
+
+        for key in param_keys:
+            stacked_params = torch.stack([weights[key] for weights in local_weights])
+
+            if self.aggregation_method == 'mean':
+                new_state_dict[key] = torch.mean(stacked_params, dim=0)[0]
+            elif self.aggregation_method == 'median':
+                new_state_dict[key] = torch.median(stacked_params, dim=0)[0]
+            elif self.aggregation_method == 'max':
+                new_state_dict[key] = torch.max(stacked_params, dim=0)[0]
+            elif self.aggregation_method == 'weighted':
+                if sample_counts is not None and len(sample_counts) == len(local_weights):
+                    weights = torch.tensor(sample_counts, dtype=torch.float32)
+                    weights = weights / weights.sum()
+                else:
+                    weights = torch.tensor([1 / len(local_weights)] * len(local_weights), dtype=torch.float32)
+                view_shape = [len(local_weights)] + [1] * (stacked_params.dim() - 1)
+                new_state_dict[key] = torch.sum(stacked_params * weights.view(*view_shape), dim=0)
+
+        # Mettre à jour les poids du modèle global
+        self.global_model.update_weight(new_state_dict)
+        print("\n--- Global Model Weights Updated ---")
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
