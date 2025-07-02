@@ -17,10 +17,8 @@ from GNN.config import graph_id_index
 from sklearn.metrics import f1_score, jaccard_score
 
 import dgl
-from .training import Training
 
 from graph_builder import *
-
 
 from tqdm import tqdm
 
@@ -1399,7 +1397,7 @@ class WrapperModel(torch.nn.Module):
         x_orig = x_flat.reshape(-1, self.F, self.T)
         return self.model(x_orig, self.edges)
 
-class ModelTorch(Training):
+class ModelTorch():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
                  loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
@@ -3002,7 +3000,7 @@ class ModelGNN(ModelTorch):
             
             return pred, y
 
-class NormalTraining(ModelTorch):
+class Model_Torch(ModelTorch):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
