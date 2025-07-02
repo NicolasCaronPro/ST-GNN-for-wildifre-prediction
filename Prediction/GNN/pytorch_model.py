@@ -1,6 +1,7 @@
 from numpy import dtype
 import numpy as np
 import random
+from sympy import false
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
@@ -1953,7 +1954,7 @@ class Training():
                             if data_log is not None:
                                 break
 
-        print(f'data_logcompute_area_score : {data_log}')
+        print(f'data_log : {data_log}')
         if data_log is not None:
             try:
                 self.metrics = data_log
@@ -2610,10 +2611,412 @@ class Training():
 
         df_features = pd.concat(df_features)
         save_object(df_features, 'features_importance.pkl', dir_output)
+
+############################################ Split training ##############################################################
+
+class SplitTraining(Training):
+    def __init__(self, federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
+                         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                         over_sampling=over_sampling, n_run=n_run)
+            
+        self.federated_cluster = federated_cluster
+    
+    def create_client_model_upto_cut_layer(self):
+        """
+        Crée un sous-modèle client contenant les couches jusqu'à (non inclus) la couche de découpe.
+        """
+        from torch import nn
+
+        layers = []
+        for name, layer in self.model.named_children():
+            if name == self.cut_layer_name:
+                break
+            layers.append(layer)
+        
+        client_model = nn.Sequential(*layers)
+        return client_model
+
+    def create_server_model_from_cut_layer(self):
+        """
+        Crée un sous-modèle serveur contenant les couches à partir de la couche de découpe (incluse).
+        """
+        from torch import nn
+
+        start_adding = False
+        layers = []
+
+        for name, layer in self.model.named_children():
+            if name == self.cut_layer_name:
+                start_adding = True
+            if start_adding:
+                layers.append(layer)
+        
+        server_model = nn.Sequential(*layers)
+        return server_model
+
+    def initialize_clients(self, clusters, learning_rate=1e-3):
+        client_models = {}
+        client_optimizers = {}
+
+        for cluster in clusters:
+            model = self.create_client_model_upto_cut_layer().to(self.device)
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+            client_models[cluster] = model
+            client_optimizers[cluster] = optimizer
+
+        return client_models, client_optimizers
+    
+    def initialize_server(self, learning_rate=1e-3):
+        model = self.create_server_model_from_cut_layer().to(self.device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+        return model, optimizer
+
+    def prepare_batch_data(self, df_train, clusters, batch_size):
+        batch_data = []
+
+        for cluster in clusters:
+            df_c = df_train[df_train[self.federated_cluster] == cluster]
+            X = torch.tensor(df_c[self.features_name].values, dtype=torch.float32)
+            y = torch.tensor(df_c[self.target_name].values, dtype=torch.float32).unsqueeze(1)
+            batch_data.append((cluster, X, y))
+
+        num_batches = min(len(X) // batch_size for _, X, _ in batch_data)
+        return batch_data, num_batches
+    
+    def clients_forward(self, batch_data, batch_idx, batch_size, client_models):
+        activations = []
+        inputs_for_backward = {}
+        labels = None
+
+        for cluster, X_full, y_full in batch_data:
+            model = client_models[cluster]
+            model.train()
+            X_batch = X_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
+            y_batch = y_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
+
+            X_batch.requires_grad = True
+            out = model(X_batch)
+            out.retain_grad()
+
+            activations.append(out)
+            inputs_for_backward[cluster] = (X_batch, out)
+            if labels is None:
+                labels = y_batch
+
+        return activations, inputs_for_backward, labels
+    
+    def server_forward_backward(self, server_model, server_optimizer, activations, labels, criterion):
+        server_model.train()
+        server_optimizer.zero_grad()
+
+        concat = torch.cat(activations, dim=1)
+        output = server_model(concat)
+        loss = criterion(output, labels)
+        loss.backward()
+
+        server_optimizer.step()
+        return loss.item(), concat.grad
+
+    def clients_backward_update(self, inputs_for_backward, grad_concat, client_models, client_optimizers):
+        split_sizes = [out.shape[1] for _, out in inputs_for_backward.values()]
+        grads = torch.split(grad_concat, split_sizes, dim=1)
+
+        for (cluster, (X_batch, out)), grad in zip(inputs_for_backward.items(), grads):
+            optimizer = client_optimizers[cluster]
+            model = client_models[cluster]
+            optimizer.zero_grad()
+            out.backward(grad)
+            optimizer.step()
+    
+    def train(self, df_train, df_val, df_test, graph, args):
+
+        if self.training_mode == 'normal':
+            return super().train(df_train, df_val, df_test, graph, args)
+        
+        import torch
+        from torch import nn
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
+
+        # Features
+        importance_df = calculate_and_plot_feature_importance(
+            df_train[self.features_name], df_train[self.target_name],
+            self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(
+            importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        self.features_name = featuresAll[:int(self.nbfeatures)] if self.nbfeatures != 'all' else featuresAll
+
+        clusters = df_train[self.federated_cluster].unique()
+        batch_size = args.get('batch_size', 32)
+        global_epochs = args.get('global_epochs', 10)
+        lr = args.get('lr', 1e-3)
+        patience = args.get('patience_count_global', 3)
+
+        client_models, client_optimizers = self.initialize_clients(clusters, lr)
+        server_model, server_optimizer = self.initialize_server(lr)
+        criterion = self.get_loss(self.loss_name)
+
+        best_loss = float('inf')
+        best_server_state = None
+        patience_counter = 0
+
+        for epoch in range(global_epochs):
+            print(f"\nEpoch {epoch+1}/{global_epochs}")
+
+            batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
+            epoch_loss = 0
+
+            for batch_idx in range(num_batches):
+                activations, inputs_for_backward, labels = self.clients_forward(batch_data, batch_idx, batch_size, client_models)
+                loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
+                self.clients_backward_update(inputs_for_backward, grad_concat, client_models, client_optimizers)
+                epoch_loss += loss_value
+
+            avg_loss = epoch_loss / num_batches
+
+            # Compute validation loss for early stopping
+            val_batch_data, val_num_batches = self.prepare_batch_data(df_val, clusters, batch_size)
+            val_loss_total = 0
+            for batch_idx in range(val_num_batches):
+                activations, _, labels = self.clients_forward(val_batch_data, batch_idx, batch_size, client_models)
+                server_model.eval()
+                with torch.no_grad():
+                    concat = torch.cat(activations, dim=1)
+                    output = server_model(concat)
+                    vloss = criterion(output, labels)
+                val_loss_total += vloss.item()
+            val_loss = val_loss_total / val_num_batches
+
+            print(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
+
+            if val_loss < best_loss:
+                best_loss = val_loss
+                best_server_state = deepcopy(server_model.state_dict())
+                patience_counter = 0
+            else:
+                patience_counter += 1
+                if patience_counter >= patience:
+                    print("Early stopping triggered.")
+                    break
+
+        if best_server_state is not None:
+            server_model.load_state_dict(best_server_state)
+
+        self.client_models = client_models
+        self.server_model = server_model
+        self.is_fitted_ = True
+
+        test_output, y = self._predict_test_loader(self.test_loader)
+        test_output = test_output.detach().cpu().numpy()
+
+        y = y.detach().cpu().numpy()
+
+        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        
+        iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+
+        test_output, y = self._predict_test_loader(self.val_loader)
+        test_output = test_output.detach().cpu().numpy()
+        
+        y = y.detach().cpu().numpy()
+
+        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        
+        iou = iou_score(y[:, -1], test_output)
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+
+        plt.figure(figsize=(15,5))
+        plt.plot(y[y[:, departement_index] == 13, -1])
+        plt.plot(test_output[y[:, departement_index] == 13])
+        plt.savefig(self.dir_log / 'test.png')
+        plt.close('all')
+
+        self.update_weight(server_model.state_dict())
+
+    def _predict_test_loader(self, X: DataLoader, proba: bool = False):
+        """Generate predictions using the split learning setup."""
+
+        if self.training_mode == 'training':
+            return super().predict(X, proba=proba)
+
+        if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
+            raise ValueError("Model is not fitted. Please train the model before predicting.")
+
+        self.server_model.eval()
+        for model in self.client_models.values():
+            model.eval()
+
+        preds = []
+        ys = []
+
+        with torch.no_grad():
+            for data in X:
+                inputs, labels, _ = data
+                labels = labels.to(self.device)
+                labels_last = labels[:, :, -1]
+                clusters = labels[:, departement_index, -1].long().tolist()
+
+                for i in range(inputs.size(0)):
+                    cluster = clusters[i]
+                    client = self.client_models.get(cluster)
+                    if client is None:
+                        raise KeyError(f"No client model for cluster {cluster}")
+
+                    activation = client(inputs[i:i+1].to(self.device))
+                    output = self.server_model(activation)
+                    if output.shape[1] > 1 and not proba:
+                        output = torch.argmax(output, dim=1)
+
+                    preds.append(output.squeeze(0))
+                    ys.append(labels_last[i])
+
+        pred_tensor = torch.stack(preds, 0)
+        y_tensor = torch.stack(ys, 0)
+
+        if self.target_name in ["binary", "risk", "nbsinister"]:
+            pred_tensor = torch.round(pred_tensor, decimals=1)
+
+        return pred_tensor, y_tensor
+
+    def predict(self, df, graph=None, return_y=False):
+        if self.training_mode == 'normal':
+            return super().predict(df, graph=graph, return_y=return_y)
+        
+        if graph is None:
+            graph = self.graph
+
+        if self.target_name not in list(df.columns):
+            df[self.target_name] = 0
+
+        loader = create_test_loader(
+            graph,
+            df,
+            self.features_name,
+            self.device,
+            None,
+            self.target_name,
+            self.ks,
+        )
+
+        pred_tensor, y_tensor = self._predict_test_loader(loader)
+
+        if return_y:
+            return pred_tensor, y_tensor
+
+        return pred_tensor
+
+    def predict_proba(self, df, graph=None, return_y=False):
+        if self.training_mode == 'normal':
+            return super().predict_proba(df, graph=graph, return_y=return_y)
+
+        if graph is None:
+            graph = self.graph
+
+        if self.target_name not in list(df.columns):
+            df[self.target_name] = 0
+
+        loader = create_test_loader(
+            graph,
+            df,
+            self.features_name,
+            self.device,
+            None,
+            self.target_name,
+            self.ks,
+        )
+
+        pred_tensor, y_tensor = self._predict_test_loader(loader, True)
+
+        if return_y:
+            pred, y = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=True)
+            return pred, y
+
+        pred = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=False)
+        return pred
+
+    def search_samples_proportion_per_cluster(self, graph, df_train, df_val, df_test, args=None):
+        """Search optimal zero sample limits for each cluster.
+
+        Parameters
+        ----------
+        graph : dgl.DGLGraph
+            Graph used for training.
+        df_train, df_val, df_test : pandas.DataFrame
+            Datasets containing a ``self.federated_cluster`` column.
+        args : dict, optional
+            Additional arguments forwarded to :func:`train_split`.
+
+        Returns
+        -------
+        dict
+            Mapping cluster id to chosen zero count.
+        float
+            IoU score obtained with the best combination.
+        """
+
+        if args is None:
+            args = {}
+
+        clusters = df_train[self.federated_cluster].unique()
+        best_score = -float("inf")
+        best_combination = None
+        best_state = None
+        sample_limits = np.arange(0.05, 1.0, 0.05)
+
+        patience = 50
+        i = 0
+        for combo in itertools.product(sample_limits, repeat=len(clusters)):
+            df_parts = []
+            for cluster, tp in zip(clusters, combo):
+                df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                nb = int(len(df_cluster[df_cluster[self.target_name] == 0]) * tp)
+                sampled = self.split_dataset(df_cluster, nb, reset=False)[cluster]
+                df_parts.append(sampled)
+
+            df_train_split = pd.concat(df_parts).reset_index(drop=True)
+
+            model_copy = deepcopy(self)
+            model_copy.training_mode = 'normal'
+            model_copy.train_split(df_train_split, df_val, df_test, graph, args)
+
+            pred, y = model_copy._predict_test_loader(model_copy.val_loader)
+            iou = iou_score(y.detach().cpu().numpy()[:, -1], pred.detach().cpu().numpy())
+
+            if iou > best_score:
+                best_score = iou
+                best_combination = dict(zip(clusters, combo))
+                best_state = deepcopy(model_copy.server_model.state_dict())
+            else:
+                i += 1
+                if i == patience:
+                    break
+
+        if best_state is not None:
+            self.server_model.load_state_dict(best_state)
+
+        return best_combination
+    
 class ModelCNN(SplitTraining):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal'):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
+                 ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster=''):
+        super().__init__(federated_cluster, model_name, nbfeatures, batch_size, lr, target_name,
+                         task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name,
+                         device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+        
         self.training_mode = training_mode
         self.path = path
         self.features = features
@@ -2661,10 +3064,15 @@ class ModelCNN(SplitTraining):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
-                        sample_zero = len(df_train[df_train[self.target_name] == 0])
-                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
-                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
+                    if self.training_mode == 'splittraining':
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        df_parts = []
+                        for cluster, nb in best_combinaison:
+                            df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                            sampled = self.split_dataset(df_cluster, nb, reset=True)[cluster]
+                            df_parts.append(sampled)
+
+                        df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
                             best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False)
@@ -2735,7 +3143,7 @@ class ModelCNN(SplitTraining):
         return loader
 
 class ModelGNN(SplitTraining):
-    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run, training_mode='normal'):
+    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run, training_mode='normal', federated_cluster=''):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         self.training_mode = training_mode
         self.mesh = mesh
@@ -2812,10 +3220,15 @@ class ModelGNN(SplitTraining):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
-                        sample_zero = len(df_train[df_train[self.target_name] == 0])
-                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
-                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
+                    if self.training_mode == 'splittraining':
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        df_parts = []
+                        for cluster, nb in best_combinaison:
+                            df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                            sampled = self.split_dataset(df_cluster, nb, reset=True)[cluster]
+                            df_parts.append(sampled)
+
+                        df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
                             best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False, False, custom_model_params=custom_model_params)
@@ -3019,8 +3432,8 @@ class ModelGNN(SplitTraining):
 class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 training_mode='normal'):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
+                 training_mode='normal', federated_cluster=''):
+        super().__init__(federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
         self.training_mode = training_mode
@@ -3073,10 +3486,15 @@ class Model_Torch(SplitTraining):
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train.shape}')
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
-                    if self.training_mode == 'splittraining' and self.under_sampling == 'search':
-                        sample_zero = len(df_train[df_train[self.target_name] == 0])
-                        sample_limits = [int(p * sample_zero) for p in [0.25, 0.5, 0.75]]
-                        self.search_sample_limit_per_cluster(graph, df_train, df_val, df_test, sample_limits, {'batch_size': self.batch_size})
+                    if self.training_mode == 'splittraining':
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        df_parts = []
+                        for cluster, nb in best_combinaison:
+                            df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                            sampled = self.split_dataset(df_cluster, nb, reset=True)[cluster]
+                            df_parts.append(sampled)
+
+                        df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
                             best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params)
@@ -3577,430 +3995,6 @@ class MOONFederatedLearning(FederatedLearningModel):
         # Mettre à jour les poids du modèle global
         self.global_model.update_weight(new_state_dict)
         print("\n--- Global Model Weights Updated ---")
-
-############################################ Split training ##############################################################
-
-class SplitTraining(Training):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
-                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
-        
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
-                         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run)
-    
-    def create_client_model_upto_cut_layer(self):
-        """
-        Crée un sous-modèle client contenant les couches jusqu'à (non inclus) la couche de découpe.
-        """
-        from torch import nn
-
-        layers = []
-        for name, layer in self.model.named_children():
-            if name == self.cut_layer_name:
-                break
-            layers.append(layer)
-        
-        client_model = nn.Sequential(*layers)
-        return client_model
-
-    def create_server_model_from_cut_layer(self):
-        """
-        Crée un sous-modèle serveur contenant les couches à partir de la couche de découpe (incluse).
-        """
-        from torch import nn
-
-        start_adding = False
-        layers = []
-
-        for name, layer in self.model.named_children():
-            if name == self.cut_layer_name:
-                start_adding = True
-            if start_adding:
-                layers.append(layer)
-        
-        server_model = nn.Sequential(*layers)
-        return server_model
-
-    def initialize_clients(self, clusters, learning_rate=1e-3):
-        client_models = {}
-        client_optimizers = {}
-
-        for cluster in clusters:
-            model = self.create_client_model_upto_cut_layer().to(self.device)
-            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-            client_models[cluster] = model
-            client_optimizers[cluster] = optimizer
-
-        return client_models, client_optimizers
-    
-    def initialize_server(self, learning_rate=1e-3):
-        model = self.create_server_model_from_cut_layer().to(self.device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-        return model, optimizer
-
-    def split_dataset(self, dataset, nb, reset=True):
-        """Split ``dataset`` per cluster with negative sampling.
-
-        Parameters
-        ----------
-        dataset : pandas.DataFrame
-            Dataset containing a ``self.federated_cluster`` column.
-        nb : int
-            Number of negative samples to keep for each cluster.
-        reset : bool, default True
-            Whether to reset DataFrame indices.
-
-        Returns
-        -------
-        dict
-            Mapping cluster ids to the sampled DataFrame for that cluster.
-        """
-
-        if self.federated_cluster not in dataset.columns:
-            raise KeyError(f"{self.federated_cluster} column missing from dataset")
-
-        result = {}
-        clusters = dataset[self.federated_cluster].unique()
-
-        for cluster in clusters:
-            df_cluster = dataset[dataset[self.federated_cluster] == cluster]
-
-            pos_mask = df_cluster[self.target_name] > 0
-            non_fire_mask = df_cluster[self.target_name] == 0
-            df_positive = df_cluster[pos_mask]
-            df_non_fire = df_cluster[non_fire_mask]
-
-            nb_c = min(len(df_non_fire), nb)
-            if getattr(self, "n_run", 1) == 1:
-                sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb_c, replace=False)
-            else:
-                sampled_indices = np.random.RandomState().choice(len(df_non_fire), nb_c, replace=False)
-
-            df_non_fire_sampled = df_non_fire.iloc[sampled_indices]
-            df_combined = pd.concat([df_positive, df_non_fire_sampled])
-            if reset:
-                df_combined.reset_index(drop=True, inplace=True)
-
-            result[cluster] = df_combined
-
-        return result
-
-    def prepare_batch_data(self, df_train, clusters, batch_size):
-        batch_data = []
-
-        for cluster in clusters:
-            df_c = df_train[df_train[self.federated_cluster] == cluster]
-            X = torch.tensor(df_c[self.features_name].values, dtype=torch.float32)
-            y = torch.tensor(df_c[self.target_name].values, dtype=torch.float32).unsqueeze(1)
-            batch_data.append((cluster, X, y))
-
-        num_batches = min(len(X) // batch_size for _, X, _ in batch_data)
-        return batch_data, num_batches
-    
-    def clients_forward(self, batch_data, batch_idx, batch_size, client_models):
-        activations = []
-        inputs_for_backward = {}
-        labels = None
-
-        for cluster, X_full, y_full in batch_data:
-            model = client_models[cluster]
-            model.train()
-            X_batch = X_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
-            y_batch = y_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
-
-            X_batch.requires_grad = True
-            out = model(X_batch)
-            out.retain_grad()
-
-            activations.append(out)
-            inputs_for_backward[cluster] = (X_batch, out)
-            if labels is None:
-                labels = y_batch
-
-        return activations, inputs_for_backward, labels
-    
-    def server_forward_backward(self, server_model, server_optimizer, activations, labels, criterion):
-        server_model.train()
-        server_optimizer.zero_grad()
-
-        concat = torch.cat(activations, dim=1)
-        output = server_model(concat)
-        loss = criterion(output, labels)
-        loss.backward()
-
-        server_optimizer.step()
-        return loss.item(), concat.grad
-
-    def clients_backward_update(self, inputs_for_backward, grad_concat, client_models, client_optimizers):
-        split_sizes = [out.shape[1] for _, out in inputs_for_backward.values()]
-        grads = torch.split(grad_concat, split_sizes, dim=1)
-
-        for (cluster, (X_batch, out)), grad in zip(inputs_for_backward.items(), grads):
-            optimizer = client_optimizers[cluster]
-            model = client_models[cluster]
-            optimizer.zero_grad()
-            out.backward(grad)
-            optimizer.step()
-    
-    def train_split(self, df_train, df_val, df_test, graph, args):
-        import torch
-        from torch import nn
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
-
-        # Features
-        importance_df = calculate_and_plot_feature_importance(
-            df_train[self.features_name], df_train[self.target_name],
-            self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(
-            importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
-        self.features_name = featuresAll[:int(self.nbfeatures)] if self.nbfeatures != 'all' else featuresAll
-
-        clusters = df_train[self.federated_cluster].unique()
-        batch_size = args.get('batch_size', 32)
-        global_epochs = args.get('global_epochs', 10)
-        lr = args.get('lr', 1e-3)
-        patience = args.get('patience_count_global', 3)
-
-        client_models, client_optimizers = self.initialize_clients(clusters, lr)
-        server_model, server_optimizer = self.initialize_server(lr)
-        criterion = self.get_loss(self.loss_name)
-
-        best_loss = float('inf')
-        best_server_state = None
-        patience_counter = 0
-
-        for epoch in range(global_epochs):
-            print(f"\nEpoch {epoch+1}/{global_epochs}")
-
-            batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
-            epoch_loss = 0
-
-            for batch_idx in range(num_batches):
-                activations, inputs_for_backward, labels = self.clients_forward(batch_data, batch_idx, batch_size, client_models)
-                loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
-                self.clients_backward_update(inputs_for_backward, grad_concat, client_models, client_optimizers)
-                epoch_loss += loss_value
-
-            avg_loss = epoch_loss / num_batches
-
-            # Compute validation loss for early stopping
-            val_batch_data, val_num_batches = self.prepare_batch_data(df_val, clusters, batch_size)
-            val_loss_total = 0
-            for batch_idx in range(val_num_batches):
-                activations, _, labels = self.clients_forward(val_batch_data, batch_idx, batch_size, client_models)
-                server_model.eval()
-                with torch.no_grad():
-                    concat = torch.cat(activations, dim=1)
-                    output = server_model(concat)
-                    vloss = criterion(output, labels)
-                val_loss_total += vloss.item()
-            val_loss = val_loss_total / val_num_batches
-
-            print(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
-
-            if val_loss < best_loss:
-                best_loss = val_loss
-                best_server_state = deepcopy(server_model.state_dict())
-                patience_counter = 0
-            else:
-                patience_counter += 1
-                if patience_counter >= patience:
-                    print("Early stopping triggered.")
-                    break
-
-        if best_server_state is not None:
-            server_model.load_state_dict(best_server_state)
-
-        self.client_models = client_models
-        self.server_model = server_model
-        self.is_fitted_ = True
-
-        test_output, y = self._predict_test_loader(self.test_loader)
-        test_output = test_output.detach().cpu().numpy()
-
-        y = y.detach().cpu().numpy()
-
-        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
-        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
-        
-        iou = iou_score(y[:, -1], test_output)
-        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
-        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
-
-        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
-
-        test_output, y = self._predict_test_loader(self.val_loader)
-        test_output = test_output.detach().cpu().numpy()
-        
-        y = y.detach().cpu().numpy()
-
-        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
-        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
-        
-        iou = iou_score(y[:, -1], test_output)
-        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
-        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
-
-        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
-
-        plt.figure(figsize=(15,5))
-        plt.plot(y[y[:, departement_index] == 13, -1])
-        plt.plot(test_output[y[:, departement_index] == 13])
-        plt.savefig(self.dir_log / 'test.png')
-        plt.close('all')
-
-        self.update_weight(server_model.state_dict())
-
-    def _predict_test_loader(self, X: DataLoader, proba: bool = False):
-        """Generate predictions using the split learning setup."""
-
-        if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
-            raise ValueError("Model is not fitted. Please train the model before predicting.")
-
-        self.server_model.eval()
-        for model in self.client_models.values():
-            model.eval()
-
-        preds = []
-        ys = []
-
-        with torch.no_grad():
-            for data in X:
-                inputs, labels, _ = data
-                labels = labels.to(self.device)
-                labels_last = labels[:, :, -1]
-                clusters = labels[:, departement_index, -1].long().tolist()
-
-                for i in range(inputs.size(0)):
-                    cluster = clusters[i]
-                    client = self.client_models.get(cluster)
-                    if client is None:
-                        raise KeyError(f"No client model for cluster {cluster}")
-
-                    activation = client(inputs[i:i+1].to(self.device))
-                    output = self.server_model(activation)
-                    if output.shape[1] > 1 and not proba:
-                        output = torch.argmax(output, dim=1)
-
-                    preds.append(output.squeeze(0))
-                    ys.append(labels_last[i])
-
-        pred_tensor = torch.stack(preds, 0)
-        y_tensor = torch.stack(ys, 0)
-
-        if self.target_name in ["binary", "risk", "nbsinister"]:
-            pred_tensor = torch.round(pred_tensor, decimals=1)
-
-        return pred_tensor, y_tensor
-
-    def predict(self, df, graph=None, return_y=False):
-        if graph is None:
-            graph = self.graph
-
-        if self.target_name not in list(df.columns):
-            df[self.target_name] = 0
-
-        loader = create_test_loader(
-            graph,
-            df,
-            self.features_name,
-            self.device,
-            None,
-            self.target_name,
-            self.ks,
-        )
-
-        pred_tensor, y_tensor = self._predict_test_loader(loader)
-
-        if return_y:
-            return pred_tensor, y_tensor
-
-        return pred_tensor
-
-    def predict_proba(self, df, graph=None, return_y=False):
-        if graph is None:
-            graph = self.graph
-
-        if self.target_name not in list(df.columns):
-            df[self.target_name] = 0
-
-        loader = create_test_loader(
-            graph,
-            df,
-            self.features_name,
-            self.device,
-            None,
-            self.target_name,
-            self.ks,
-        )
-
-        pred_tensor, y_tensor = self._predict_test_loader(loader, True)
-
-        if return_y:
-            pred, y = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=True)
-            return pred, y
-
-        pred = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=False)
-        return pred
-
-    def search_sample_limit_per_cluster(self, graph, df_train, df_val, df_test, sample_limits, args=None):
-        """Search optimal zero sample limits for each cluster.
-
-        Parameters
-        ----------
-        graph : dgl.DGLGraph
-            Graph used for training.
-        df_train, df_val, df_test : pandas.DataFrame
-            Datasets containing a ``self.federated_cluster`` column.
-        sample_limits : list[int]
-            Candidate numbers of zero samples for each cluster.
-        args : dict, optional
-            Additional arguments forwarded to :func:`train_split`.
-
-        Returns
-        -------
-        dict
-            Mapping cluster id to chosen zero count.
-        float
-            IoU score obtained with the best combination.
-        """
-
-        if args is None:
-            args = {}
-
-        clusters = df_train[self.federated_cluster].unique()
-        best_score = -float("inf")
-        best_combination = None
-        best_state = None
-
-        for combo in itertools.product(sample_limits, repeat=len(clusters)):
-            df_parts = []
-            for cluster, nb in zip(clusters, combo):
-                df_cluster = df_train[df_train[self.federated_cluster] == cluster]
-                sampled = self.split_dataset(df_cluster, nb, reset=True)[cluster]
-                df_parts.append(sampled)
-
-            df_train_split = pd.concat(df_parts).reset_index(drop=True)
-
-            model_copy = deepcopy(self)
-            model_copy.training_mode = 'normal'
-            model_copy.train_split(df_train_split, df_val, df_test, graph, args)
-
-            pred, y = model_copy._predict_test_loader(model_copy.val_loader)
-            iou = iou_score(y.detach().cpu().numpy()[:, -1], pred.detach().cpu().numpy())
-
-            if iou > best_score:
-                best_score = iou
-                best_combination = dict(zip(clusters, combo))
-                best_state = deepcopy(model_copy.server_model.state_dict())
-
-        if best_state is not None:
-            self.server_model.load_state_dict(best_state)
-
-        return best_combination, best_score
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
