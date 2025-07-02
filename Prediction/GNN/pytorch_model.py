@@ -16,13 +16,21 @@ from copy import deepcopy
 import itertools
 from matplotlib import pyplot as plt
 from GNN.discretization import *
-from GNN.tools import calculate_area_under_curve
+from GNN.tools import (
+    calculate_area_under_curve,
+    under_prediction_score,
+    over_prediction_score,
+    iou_score,
+    evaluate_metrics,
+    calculate_ic95,
+)
 from GNN.config import graph_id_index, departement_index
 from sklearn.metrics import f1_score, jaccard_score
 
 import dgl
 
 from graph_builder import *
+from tools import check_and_create_path, save_object, read_object
 
 
 from tqdm import tqdm
@@ -2971,42 +2979,114 @@ class SplitTraining(Training):
         if args is None:
             args = {}
 
+        check_and_create_path(self.dir_log)
+        self.metrics = read_object('metrics_cluster.pkl', self.dir_log) or {}
+        scores = self.metrics.get('scores', {})
+
         clusters = df_train[self.federated_cluster].unique()
-        best_score = -float("inf")
-        best_combination = None
+        best_score = self.metrics.get('best_score', -float("inf"))
+        best_combination = self.metrics.get('best_combination')
         best_state = None
         sample_limits = np.arange(0.05, 1.0, 0.05)
 
         patience = 50
         i = 0
         for combo in itertools.product(sample_limits, repeat=len(clusters)):
-            df_parts = []
-            for cluster, tp in zip(clusters, combo):
-                df_cluster = df_train[df_train[self.federated_cluster] == cluster]
-                nb = int(len(df_cluster[df_cluster[self.target_name] == 0]) * tp)
-                sampled = self.split_dataset(df_cluster, nb, reset=False)[cluster]
-                df_parts.append(sampled)
+            metrics_combo = scores.get(combo, {
+                'f1': [], 'iou': [], 'iou_val': [], 'prec': [],
+                'recall': [], 'normalized_iou': [], 'normalized_f1': [],
+                'under_prediction': [], 'over_prediction': []
+            })
 
-            df_train_split = pd.concat(df_parts).reset_index(drop=True)
+            if len(metrics_combo['iou']) >= self.n_run:
+                iou_mean = float(np.mean(metrics_combo['iou_val']))
+                if iou_mean > best_score:
+                    best_score = iou_mean
+                    best_combination = dict(zip(clusters, combo))
+                continue
 
-            model_copy = deepcopy(self)
-            model_copy.training_mode = 'normal'
-            model_copy.train_split(df_train_split, df_val, df_test, graph, args)
+            for run in range(len(metrics_combo['iou']), self.n_run):
+                df_parts = []
+                for cluster, tp in zip(clusters, combo):
+                    df_cluster = df_train[df_train[self.federated_cluster] == cluster]
+                    nb = int(len(df_cluster[df_cluster[self.target_name] == 0]) * tp)
+                    sampled = self.split_dataset(df_cluster, nb, reset=False)
+                    df_parts.append(sampled)
 
-            pred, y = model_copy._predict_test_loader(model_copy.val_loader)
-            iou = iou_score(y.detach().cpu().numpy()[:, -1], pred.detach().cpu().numpy())
+                df_train_split = pd.concat(df_parts).reset_index(drop=True)
 
-            if iou > best_score:
-                best_score = iou
+                model_copy = deepcopy(self)
+                model_copy.training_mode = 'normal'
+                model_copy.train_split(df_train_split, df_val, df_test, graph, args)
+
+                pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader)
+                y_val_np = y_val.detach().cpu().numpy()[:, -1]
+                pred_val_np = pred_val.detach().cpu().numpy()
+                metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
+                metrics_combo['iou_val'].append(metrics_val['iou'])
+
+                pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader)
+                y_test_np = y_test.detach().cpu().numpy()[:, -1]
+                pred_test_np = pred_test.detach().cpu().numpy()
+                metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
+
+                metrics_combo['iou'].append(metrics_test['iou'])
+                metrics_combo['f1'].append(metrics_test['f1'])
+                metrics_combo['recall'].append(metrics_test['recall'])
+                metrics_combo['prec'].append(metrics_test['prec'])
+                metrics_combo['normalized_iou'].append(metrics_test['normalized_iou'])
+                metrics_combo['normalized_f1'].append(metrics_test['normalized_f1'])
+                metrics_combo['under_prediction'].append(under_prediction_score(y_test_np, pred_test_np))
+                metrics_combo['over_prediction'].append(over_prediction_score(y_test_np, pred_test_np))
+
+                scores[combo] = metrics_combo
+                self.metrics['scores'] = scores
+                save_object(self.metrics, 'metrics_cluster.pkl', self.dir_log)
+
+            if self.n_run == 1:
+                metrics_combo['var_f1'] = 0
+                metrics_combo['IC_f1'] = (0, 0)
+                metrics_combo['var_iou'] = 0
+                metrics_combo['IC_iou'] = (0, 0)
+                metrics_combo['var_normalized_f1'] = 0
+                metrics_combo['IC_normalized_f1'] = (0, 0)
+                metrics_combo['var_normalized_iou'] = 0
+                metrics_combo['IC_normalized_iou'] = (0, 0)
+            else:
+                metrics_combo['var_f1'] = np.var(metrics_combo['f1'])
+                metrics_combo['IC_f1'] = calculate_ic95(metrics_combo['f1'])
+                metrics_combo['var_iou'] = np.var(metrics_combo['iou'])
+                metrics_combo['IC_iou'] = calculate_ic95(metrics_combo['iou'])
+                metrics_combo['var_normalized_f1'] = np.var(metrics_combo['normalized_f1'])
+                metrics_combo['IC_normalized_f1'] = calculate_ic95(metrics_combo['normalized_f1'])
+                metrics_combo['var_normalized_iou'] = np.var(metrics_combo['normalized_iou'])
+                metrics_combo['IC_normalized_iou'] = calculate_ic95(metrics_combo['normalized_iou'])
+
+            iou_mean = float(np.mean(metrics_combo['iou_val']))
+            if iou_mean > best_score:
+                best_score = iou_mean
                 best_combination = dict(zip(clusters, combo))
                 best_state = deepcopy(model_copy.server_model.state_dict())
+                i = 0
             else:
                 i += 1
                 if i == patience:
                     break
 
+            scores[combo] = metrics_combo
+            self.metrics['scores'] = scores
+            self.metrics['best_score'] = best_score
+            self.metrics['best_combination'] = best_combination
+            save_object(self.metrics, 'metrics_cluster.pkl', self.dir_log)
+
         if best_state is not None:
             self.server_model.load_state_dict(best_state)
+
+        self.metrics['scores'] = scores
+        self.metrics['best_score'] = best_score
+        self.metrics['best_combination'] = best_combination
+        self.metrics['run'] = self.n_run
+        save_object(self.metrics, 'metrics_cluster.pkl', self.dir_log)
 
         return best_combination
     
