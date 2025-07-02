@@ -1399,10 +1399,10 @@ class WrapperModel(torch.nn.Module):
         x_orig = x_flat.reshape(-1, self.F, self.T)
         return self.model(x_orig, self.edges)
 
-class ModelTorch(Training):
+class NormalTraining(Training):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
-                 loss='mse', name='ModelTorch', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
+                 loss='mse', name='NormalTraining', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
                  constrastive=False):
         
         self.model_name = model_name
@@ -2609,7 +2609,7 @@ class ModelTorch(Training):
         df_features = pd.concat(df_features)
         save_object(df_features, 'features_importance.pkl', dir_output)
         
-class ModelCNN(ModelTorch):
+class ModelCNN(NormalTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         self.path = path
@@ -2726,7 +2726,7 @@ class ModelCNN(ModelTorch):
 
         return loader
 
-class ModelGNN(ModelTorch):
+class ModelGNN(NormalTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         self.mesh = mesh
@@ -3002,7 +3002,7 @@ class ModelGNN(ModelTorch):
             
             return pred, y
 
-class NormalTraining(ModelTorch):
+class NormalTraining(NormalTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
@@ -3559,7 +3559,7 @@ class MOONFederatedLearning(FederatedLearningModel):
 
 ############################################ Split training ##############################################################
 
-class SplitLearning(ModelTorch):
+class SplitLearning(NormalTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         
@@ -3761,7 +3761,7 @@ class SplitLearning(ModelTorch):
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
-class ModelKnowledgeDistillation(ModelTorch):
+class ModelKnowledgeDistillation(NormalTraining):
     def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device, 
                 under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss):
 
