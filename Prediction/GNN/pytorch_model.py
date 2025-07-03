@@ -1443,6 +1443,9 @@ class Training():
         self.test_loader = None
         self.val_loader = None
         self.constrastive = constrastive
+        self.use_prototypes = False
+        self.prototype_weight = 1.0
+        self.prototypes = None
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1586,6 +1589,22 @@ class Training():
         loss = F.cross_entropy(logits, labels)
 
         return loss
+
+    def calculate_prototype_loss(self, hidden, target, prototypes):
+        """Compute prototype alignment loss."""
+        loss = 0.0
+        classes = torch.unique(target)
+        for cls in classes:
+            cls_idx = int(cls.item())
+            if prototypes is None or cls_idx not in prototypes:
+                continue
+            proto = prototypes[cls_idx].to(hidden.device)
+            mask = target == cls
+            if mask.sum() == 0:
+                continue
+            diff = hidden[mask] - proto
+            loss += torch.mean(torch.norm(diff, dim=1))
+        return loss
     
     def launch_batch(self, data, criterion):
         inputs, labels, edges = data
@@ -1628,7 +1647,13 @@ class Training():
             _, zglob = self.global_model(inputs, edges)
             loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
             loss = loss + self.smooth_value * loss_constrastive
-        
+
+        if self.use_prototypes and self.prototypes is not None:
+            if not self.model.return_hidden:
+                raise ValueError('Model must return hidden states for prototype training')
+            proto_loss = self.calculate_prototype_loss(hidden, target, self.prototypes)
+            loss = loss + self.prototype_weight * proto_loss
+
         return loss
     
     def launch_train_loader(self, loader, criterion, optimizer):
@@ -4029,6 +4054,163 @@ class MOONFederatedLearning(FederatedLearningModel):
                 patience_counter += 1
 
             # Arrêt anticipé si le score global ne s'améliore plus
+            if patience_counter >= patience_count_global:
+                print("\nEarly stopping: Global model score did not improve.")
+                break
+
+        self.is_fitted_ = True
+        print("\n--- Federated Learning Training Complete ---")
+
+############################################ Proto Federated Learning ############################################
+
+class ProtoFederatedLearning(FederatedLearningModel):
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
+                 name='ProtoFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
+                 target_name='nbsinister', post_process=None, task_type='classification',
+                 aggregation_method='max', nbfeatures='all', n_run=1, prototype_weight=1.0):
+
+        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
+                         name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
+                         target_name=target_name, post_process=post_process, task_type=task_type,
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+
+        self.prototype_weight = prototype_weight
+        self.global_prototypes = {}
+
+    def compute_local_prototypes(self, model):
+        prototypes = {}
+        counts = {}
+        loader = model.train_loader
+        model.model.eval()
+        with torch.no_grad():
+            for data in loader:
+                inputs, labels, edges = data
+                _, hidden = model.model(inputs, edges)
+                target, _ = model.compute_weights_and_target(labels, -1, ids_columns, model.model.is_graph_or_node, None)
+                target = target.long()
+                for cls in torch.unique(target):
+                    cls_idx = int(cls.item())
+                    mask = target == cls
+                    if mask.sum() == 0:
+                        continue
+                    vec = hidden[mask].mean(dim=0)
+                    if cls_idx in prototypes:
+                        prototypes[cls_idx] += vec * mask.sum()
+                        counts[cls_idx] += mask.sum()
+                    else:
+                        prototypes[cls_idx] = vec * mask.sum()
+                        counts[cls_idx] = mask.sum()
+        for k in prototypes:
+            prototypes[k] /= counts[k]
+        return prototypes
+
+    def aggregate_prototypes(self, prototypes_list):
+        aggregated = {}
+        counts = {}
+        for proto in prototypes_list:
+            for cls, vec in proto.items():
+                if cls in aggregated:
+                    aggregated[cls] += vec
+                    counts[cls] += 1
+                else:
+                    aggregated[cls] = vec.clone()
+                    counts[cls] = 1
+        for cls in aggregated:
+            aggregated[cls] /= counts[cls]
+        self.global_prototypes = aggregated
+
+    def fit(self, df_train, df_val, df_test, graph, args):
+        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+
+        if self.nbfeatures != 'all':
+            self.features_name = featuresAll[:int(self.nbfeatures)]
+        else:
+            self.features_name = featuresAll
+
+        self.global_model.features_name = self.features_name
+        self.global_model.nbfeatures = 'all'
+        self.global_model.graph = graph
+
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+        self.global_model.model = deepcopy(initiate_model)
+        self.global_model.model_params = deepcopy(model_params)
+        self.model_params = deepcopy(model_params)
+        del initiate_model
+        del model_params
+
+        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
+            raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
+
+        global_epochs = args.get('global_epochs', 10)
+        local_epochs = args.get('local_epochs', 5)
+        patience_count_global = args.get('patience_count_global', 3)
+        patience_count_local = args.get('patience_count_local', 2)
+
+        if self.federated_cluster in np.unique(df_train.columns):
+            clusters = df_train[self.federated_cluster].unique()
+        else:
+            raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
+
+        best_global_score = float('-inf')
+        patience_counter = 0
+
+        print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
+
+        for epoch in range(global_epochs):
+            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+
+            local_weights = []
+            sample_counts = []
+            local_prototypes = []
+
+            for cluster in clusters:
+                print(f"\nTraining local model for cluster: {cluster}")
+
+                local_model = deepcopy(self.global_model)
+                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+                if epoch == 0:
+                    check_and_create_path(local_model.dir_log)
+
+                local_model.features_name = self.features_name
+                local_model.nbfeatures = 'all'
+                local_model.use_prototypes = len(self.global_prototypes) > 0
+                local_model.prototype_weight = self.prototype_weight
+                local_model.prototypes = self.global_prototypes
+
+                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                    df_train, df_val, df_test, cluster
+                )
+
+                if np.all(df_train[local_model.target_name].values == 0):
+                    print(f'Skipping {cluster} due to no positif samples')
+                    continue
+
+                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                    print(f'Skipping {cluster} due to empty dataset')
+                    continue
+
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+
+                local_weights.append(deepcopy(local_model.model.state_dict()))
+                sample_counts.append(len(df_train_cluster))
+                local_prototypes.append(self.compute_local_prototypes(local_model))
+
+            self.aggregate_models(local_weights, sample_counts)
+            self.aggregate_prototypes(local_prototypes)
+
+            global_score = self.global_model.score(df_val, df_val[self.target_name])
+            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+            if global_score > best_global_score:
+                best_global_score = global_score
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
             if patience_counter >= patience_count_global:
                 print("\nEarly stopping: Global model score did not improve.")
                 break
