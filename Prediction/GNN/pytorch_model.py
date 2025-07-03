@@ -1741,10 +1741,8 @@ class Training():
             for epoch in tqdm(range(epochs), disable=not verbose):
                 val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
                 train_loss = train_loss.item()
-                val_loss = round(val_loss, 3)
-                train_loss = round(train_loss, 3)
-                val_loss_list.append(val_loss)
-                train_loss_list.append(train_loss)
+                val_loss_list.append(round(val_loss, 3))
+                train_loss_list.append(round(train_loss, 3))
                 epochs_list.append(epoch)
                 if val_loss < BEST_VAL_LOSS:
                     BEST_VAL_LOSS = val_loss
@@ -1771,6 +1769,8 @@ class Training():
             save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
             plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+
+        ##################################### TEST #################################################
 
         test_output, y = self._predict_test_loader(self.test_loader)
         test_output = test_output.detach().cpu().numpy()
@@ -1910,7 +1910,7 @@ class Training():
             return 0, 0
         return IoU_area / max_area, F1_area / max_area
 
-    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, reset=True, custom_model_params=None, use_log=True):
+    def search_samples_proportion(self, graph, df_train, df_val, df_test, is_unknowed_risk, epochs, PATIENCE_CNT, CHECKPOINT, reset=True, custom_model_params=None, use_log=True):
         
         check_and_create_path(self.dir_log)
 
@@ -2306,7 +2306,7 @@ class Training():
         #    self.graph = graph
         #    self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         #else:
-        self.create_train_val_test_loader(graph, X, X_val, X_test, custom_model_params=custom_model_params)
+        self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
             
     def filtering_pred(self, df, predTensor, y, graph, return_y = False):
@@ -2631,7 +2631,7 @@ class SplitTraining(Training):
                          over_sampling=over_sampling, n_run=n_run)
             
         self.federated_cluster = federated_cluster
-    
+
     def create_client_model_upto_cut_layer(self):
         """
         Crée un sous-modèle client contenant les couches jusqu'à (non inclus) la couche de découpe.
@@ -2739,31 +2739,20 @@ class SplitTraining(Training):
             out.backward(grad)
             optimizer.step()
     
-    def train(self, df_train, df_val, df_test, graph, args):
-
-        if self.training_mode == 'normal':
-            return super().train(df_train, df_val, df_test, graph, args)
+    def train_split(self, df_train, df_val, df_test, graph, epochs, PATIENCE_CNT, CHECKPOINT):
         
         import torch
         from torch import nn
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
-
-        # Features
-        importance_df = calculate_and_plot_feature_importance(
-            df_train[self.features_name], df_train[self.target_name],
-            self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(
-            importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
-        self.features_name = featuresAll[:int(self.nbfeatures)] if self.nbfeatures != 'all' else featuresAll
-
+        #self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
+        
         clusters = df_train[self.federated_cluster].unique()
-        batch_size = args.get('batch_size', 32)
-        global_epochs = args.get('global_epochs', 10)
-        lr = args.get('lr', 1e-3)
-        patience = args.get('patience_count_global', 3)
+        batch_size = self.batch_size
+        
+        lr = self.lr
+        patience = PATIENCE_CNT
 
         client_models, client_optimizers = self.initialize_clients(clusters, lr)
         server_model, server_optimizer = self.initialize_server(lr)
@@ -2773,8 +2762,8 @@ class SplitTraining(Training):
         best_server_state = None
         patience_counter = 0
 
-        for epoch in range(global_epochs):
-            print(f"\nEpoch {epoch+1}/{global_epochs}")
+        for epoch in range(epochs):
+            logger.info(f"\nEpoch {epoch+1}/{epochs}")
 
             batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
             epoch_loss = 0
@@ -2800,7 +2789,8 @@ class SplitTraining(Training):
                 val_loss_total += vloss.item()
             val_loss = val_loss_total / val_num_batches
 
-            print(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
+            if epoch % CHECKPOINT:
+                logger.info(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
 
             if val_loss < best_loss:
                 best_loss = val_loss
@@ -2809,7 +2799,7 @@ class SplitTraining(Training):
             else:
                 patience_counter += 1
                 if patience_counter >= patience:
-                    print("Early stopping triggered.")
+                    logger.info("Early stopping triggered.")
                     break
 
         if best_server_state is not None:
@@ -2831,7 +2821,7 @@ class SplitTraining(Training):
         f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
         iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+        logger.info(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
         test_output, y = self._predict_test_loader(self.val_loader)
         test_output = test_output.detach().cpu().numpy()
@@ -2845,7 +2835,7 @@ class SplitTraining(Training):
         f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
         iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+        logger.info(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
         plt.figure(figsize=(15,5))
         plt.plot(y[y[:, departement_index] == 13, -1])
@@ -2858,8 +2848,8 @@ class SplitTraining(Training):
     def _predict_test_loader(self, X: DataLoader, proba: bool = False):
         """Generate predictions using the split learning setup."""
 
-        if self.training_mode == 'training':
-            return super().predict(X, proba=proba)
+        if self.training_mode == 'normal':
+            return super()._predict_test_loader(X, proba=proba)
 
         if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
             raise ValueError("Model is not fitted. Please train the model before predicting.")
@@ -2956,7 +2946,7 @@ class SplitTraining(Training):
         pred = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=False)
         return pred
 
-    def search_samples_proportion_per_cluster(self, graph, df_train, df_val, df_test, args=None):
+    def search_samples_proportion_per_cluster(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT):
         """Search optimal zero sample limits for each cluster.
 
         Parameters
@@ -3017,7 +3007,7 @@ class SplitTraining(Training):
 
                 model_copy = deepcopy(self)
                 model_copy.training_mode = 'normal'
-                model_copy.train_split(df_train_split, df_val, df_test, graph, args)
+                model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
 
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader)
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
@@ -3093,10 +3083,12 @@ class SplitTraining(Training):
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
                  ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster=''):
-        super().__init__(federated_cluster, model_name, nbfeatures, batch_size, lr, target_name,
-                         task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name,
-                         device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
         
+        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
+                         target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
+                         out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                         over_sampling=over_sampling, n_run=n_run)
+
         self.training_mode = training_mode
         self.path = path
         self.features = features
@@ -3104,7 +3096,7 @@ class ModelCNN(SplitTraining):
         self.image_per_node = image_per_node
         self.nbfeatures = nbfeatures
         
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
         assert name_exp is not None
         
         if features_importance:
@@ -3145,7 +3137,7 @@ class ModelCNN(SplitTraining):
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                     if self.training_mode == 'splittraining':
-                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT)
                         df_parts = []
                         for cluster, nb in best_combinaison:
                             df_cluster = df_train[df_train[self.federated_cluster] == cluster]
@@ -3155,7 +3147,7 @@ class ModelCNN(SplitTraining):
                         df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
-                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False)
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False, epochs, PATIENCE_CNT, CHECKPOINT)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3224,13 +3216,15 @@ class ModelCNN(SplitTraining):
 
 class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run, training_mode='normal', federated_cluster=''):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, n_run=n_run)
+        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
+                         out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                         over_sampling=over_sampling, n_run=n_run)
         self.training_mode = training_mode
         self.mesh = mesh
         self.mesh_file = mesh_file
         self.graph_method = graph_method
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None):
         
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
@@ -3301,7 +3295,7 @@ class ModelGNN(SplitTraining):
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                     if self.training_mode == 'splittraining':
-                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT)
                         df_parts = []
                         for cluster, nb in best_combinaison:
                             df_cluster = df_train[df_train[self.federated_cluster] == cluster]
@@ -3311,7 +3305,9 @@ class ModelGNN(SplitTraining):
                         df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
-                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False, False, custom_model_params=custom_model_params)
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False,
+                                                                               epochs, PATIENCE_CNT, CHECKPOINT, False,
+                                                                               custom_model_params=custom_model_params)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3513,12 +3509,18 @@ class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
                  training_mode='normal', federated_cluster=''):
-        super().__init__(federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
-                         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+
+        #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+        #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
+        
+        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
+                         target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
+                         out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
+        
         self.training_mode = training_mode
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None):
         self.graph = graph
         
         if features_importance:
@@ -3567,7 +3569,7 @@ class Model_Torch(SplitTraining):
 
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                     if self.training_mode == 'splittraining':
-                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, {'batch_size': self.batch_size})
+                        best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT)
                         df_parts = []
                         for cluster, nb in best_combinaison:
                             df_cluster = df_train[df_train[self.federated_cluster] == cluster]
@@ -3577,7 +3579,9 @@ class Model_Torch(SplitTraining):
                         df_train = pd.concat(df_parts).reset_index(drop=True)
                     else:
                         if self.under_sampling == 'search':
-                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params)
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False,
+                                                                            epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT,
+                                                                            custom_model_params=custom_model_params)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3786,7 +3790,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
 
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, False)
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
 
                 # Entraînement du modèle local
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
@@ -3999,7 +4003,7 @@ class MOONFederatedLearning(FederatedLearningModel):
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
 
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, False)
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
 
                 # Entraînement du modèle local
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
@@ -4100,7 +4104,7 @@ class ModelKnowledgeDistillation(Training):
         if 'group' in self.distillation_training_mode:
             self.model_list = []
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True, custom_model_params=None, use_log=True):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
 
         #if self.teacher_name in sklearn_model_list or 'xgboost' in self.target_name:
@@ -4141,7 +4145,9 @@ class ModelKnowledgeDistillation(Training):
 
                 elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                         if self.under_sampling == 'search':
-                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False, custom_model_params=custom_model_params, use_log=use_log)
+                            best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False,
+                                                                               epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT,
+                                                                               custom_model_params=custom_model_params, use_log=use_log)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
