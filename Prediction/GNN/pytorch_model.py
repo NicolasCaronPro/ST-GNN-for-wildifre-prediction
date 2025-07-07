@@ -1665,7 +1665,24 @@ class Training():
 
             optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            if not self.ALATraining:
+                optimizer.step()
+            else:
+                self.params_p = list(self.model.parameters())[-self.layer_idx:]
+                self.params_gp = list(self.global_model.parameters())[-self.layer_idx:]
+                self.params_tp = list(deepcopy(self).model.parameters())[-self.layer_idx:]
+                
+                for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
+                                                        self.params_gp, self.weights):
+                    print(param_t.grad)
+                    weight.data = torch.clamp(
+                        weight - self.eta * (param_t.grad * (param_g - param)), 0, 1)
+                
+                for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
+                                                        self.params_gp, self.weights):
+                    param_t.data = param + (param_g - param) * weight
+                
+                #self.update_weight()
 
         return loss
 
@@ -3988,16 +4005,19 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
 class FederatedALA(FederatedLearningModel):
     """Federated learning strategy relying on the :class:`Training` class for local training."""
 
-    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
+    def __init__(self, federated_model, eta, layer_idx, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
                  aggregation_method='max', nbfeatures='all', n_run=1):
+        
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
                          n_run=n_run)
-        
+        self.eta = eta
+        self.layer_idx = layer_idx
+
     def fit(self, df_train, df_val, df_test, graph, args):
         """
         Train local models for each federated cluster, aggregate them into a global model, 
@@ -4018,9 +4038,12 @@ class FederatedALA(FederatedLearningModel):
         self.global_model.graph = graph
 
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
-        initiate_model.ALATraining = True
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
+        self.global_model.ALATraining = True
+        self.global_model.eta = self.eta
+        self.global_model.layer_idx = self.layer_idx
+
         self.model_params = deepcopy(model_params)
         del initiate_model
         del model_params
@@ -4028,7 +4051,7 @@ class FederatedALA(FederatedLearningModel):
         # Vérifier que la méthode d'agrégation est implémentée
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
-
+        
         # Récupération des paramètres d'entraînement
         global_epochs = args.get('global_epochs', 10)
         local_epochs = args.get('local_epochs', 5)
@@ -4057,25 +4080,26 @@ class FederatedALA(FederatedLearningModel):
                 print(f"\nTraining local model for cluster: {cluster}")
 
                 # Initialisation du modèle local
-                if epochs == 0:
+                if epoch == 0:
                     local_model = deepcopy(self.global_model)
                 else:
                     local_model = local_models[cluster]
-                    
-                local_model.params_p = local_model.model.parameters()[-self.layer_idx:]
-                local_model.params_gp = self.global_model.model.parameters()[-self.layer_idx:]
-                local_model.params_tp = deepcopy(local_model).model.parameters()[-self.layer_idx:]
+
+                local_model.global_model = self.global_model.model     
+                local_model.params_p = list(local_model.model.parameters())[-self.layer_idx:]
+                local_model.params_gp = list(self.global_model.model.parameters())[-self.layer_idx:]
+                local_model.params_tp = list(deepcopy(local_model).model.parameters())[-self.layer_idx:]
                 
-                for param in local_model.params_t[:-self.layer_idx]:
+                for param in local_model.params_tp:
                     param.requires_grad = False
-                
+
+                if epoch == 0:
+                    local_model.weights = [torch.ones_like(param.data).to(local_model.device) for param in local_model.params_p]
+
                 for param_t, param, param_g, weight in zip(local_model.params_tp, local_model.params_p, local_model.params_gp,
                                             local_model.weights):
                     param_t.data = param + (param_g - param) * weight
-                
-                if epochs == 0:
-                    local_model.weights = [torch.ones_like(param.data).to(self.device) for param in params_p]
-                
+                                    
                 local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
                 local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
 
