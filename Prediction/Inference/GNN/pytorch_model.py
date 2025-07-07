@@ -2509,6 +2509,22 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     
     def _predict_test_loader(self, X):
         return self.global_model._predict_test_loader(X)
+class FederatedALA(FederatedLearningModel):
+    """Federated learning strategy relying on the :class:`Training` class for local training."""
+
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
+                 name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
+                 target_name='nbsinister', post_process=None, task_type='classification',
+                 aggregation_method='max', nbfeatures='all', n_run=1):
+        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
+                         loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
+                         over_sampling=over_sampling, target_name=target_name, post_process=post_process,
+                         task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
+                         n_run=n_run)
+
+    def fit(self, df_train, df_val, df_test, graph, args):
+        """Train the federated model using clusters defined in `federated_cluster`."""
+        return super().fit(df_train, df_val, df_test, graph, args)
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification'):
