@@ -284,7 +284,6 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
             inputDep = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
                                                              creneaux, sat0, sinister, sinister_encoding, n_pixel_y, n_pixel_x, dir_output, dept, dir_output / 'bin' / resolution / 'log.txt')
             
-    
             inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
             save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 

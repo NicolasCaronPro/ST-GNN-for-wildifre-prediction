@@ -1685,7 +1685,6 @@ class Training():
         return total_loss
     
     def make_model(self, graph, custom_model_params):
-        print(self.features_name)
         model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
                                 graph, dropout, activation,
                                 self.ks,
@@ -2082,7 +2081,7 @@ class Training():
                     
                     copy_model = deepcopy(self)
                     copy_model.under_sampling = 'full'
-                    copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, features_importance=False, custom_model_params=custom_model_params)
+                    copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
@@ -2302,7 +2301,10 @@ class Training():
                     #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
                     inputs_model = inputs
-                    output = self.model(inputs_model)
+                    if self.model.return_hidden:
+                        output, _ = self.model(inputs_model)
+                    else:
+                        output = self.model(inputs_model)
 
                     if output.shape[1] > 1 and not proba:
                         output = torch.argmax(output, dim=1)
@@ -2323,6 +2325,7 @@ class Training():
                 return pred, y
 
     def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None):
+        
         X = X.set_index(ids_columns[:-1]).join(y.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
         X_val = X_val.set_index(ids_columns[:-1]).join(y_val.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
         X_test = X_test.set_index(ids_columns[:-1]).join(y_test.set_index(ids_columns[:-1])[targets_columns  + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
@@ -2648,7 +2651,8 @@ class Training():
 ############################################ Split training ##############################################################
 
 class SplitTraining(Training):
-    def __init__(self, federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+    def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
+                 nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
         
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
@@ -2656,23 +2660,25 @@ class SplitTraining(Training):
                          over_sampling=over_sampling, n_run=n_run)
             
         self.federated_cluster = federated_cluster
+        self.cut_layer_name = cut_layer_name
+        self.input_server_model = input_server_model
 
-    def create_client_model_upto_cut_layer(self):
+    def create_client_model_upto_cut_layer(self, model):
         """
         Crée un sous-modèle client contenant les couches jusqu'à (non inclus) la couche de découpe.
         """
         from torch import nn
 
         layers = []
-        for name, layer in self.model.named_children():
+        for name, layer in model.named_children():
             if name == self.cut_layer_name:
                 break
             layers.append(layer)
-        
+
         client_model = nn.Sequential(*layers)
         return client_model
 
-    def create_server_model_from_cut_layer(self):
+    def create_server_model_from_cut_layer(self, model):
         """
         Crée un sous-modèle serveur contenant les couches à partir de la couche de découpe (incluse).
         """
@@ -2681,7 +2687,7 @@ class SplitTraining(Training):
         start_adding = False
         layers = []
 
-        for name, layer in self.model.named_children():
+        for name, layer in model.named_children():
             if name == self.cut_layer_name:
                 start_adding = True
             if start_adding:
@@ -2690,54 +2696,74 @@ class SplitTraining(Training):
         server_model = nn.Sequential(*layers)
         return server_model
 
-    def initialize_clients(self, clusters, learning_rate=1e-3):
+    def initialize_clients(self, base_model, clusters, learning_rate=1e-3):
         client_models = {}
         client_optimizers = {}
 
         for cluster in clusters:
-            model = self.create_client_model_upto_cut_layer().to(self.device)
+            model = deepcopy(base_model)
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
             client_models[cluster] = model
             client_optimizers[cluster] = optimizer
-
+        
         return client_models, client_optimizers
     
-    def initialize_server(self, learning_rate=1e-3):
-        model = self.create_server_model_from_cut_layer().to(self.device)
+    def initialize_server(self, model, learning_rate=1e-3):
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
         return model, optimizer
 
-    def prepare_batch_data(self, df_train, clusters, batch_size):
+    def prepare_batch_data(self, df_train, graph, clusters, batch_size):
         batch_data = []
 
         for cluster in clusters:
             df_c = df_train[df_train[self.federated_cluster] == cluster]
-            X = torch.tensor(df_c[self.features_name].values, dtype=torch.float32)
-            y = torch.tensor(df_c[self.target_name].values, dtype=torch.float32).unsqueeze(1)
-            batch_data.append((cluster, X, y))
 
-        num_batches = min(len(X) // batch_size for _, X, _ in batch_data)
-        return batch_data, num_batches
+            train_dataset = create_train_dataset(graph, df_c,
+                                                 self.features_name,
+                                                 self.target_name,
+                                                 None, self.device, 
+                                                 self.ks, False, '')
+
+            loader = DataLoader(train_dataset, train_dataset.__len__(),
+                                False, worker_init_fn=seed_worker,
+                                generator=g)
+
+            batch_data.append((cluster, loader))
+            
+        return batch_data
     
-    def clients_forward(self, batch_data, batch_idx, batch_size, client_models):
+    def clients_forward(self, batch_data, client_models):
         activations = []
         inputs_for_backward = {}
-        labels = None
+        labels_list = []
 
-        for cluster, X_full, y_full in batch_data:
+        for cluster, batch in batch_data:
             model = client_models[cluster]
             model.train()
-            X_batch = X_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
-            y_batch = y_full[batch_idx*batch_size:(batch_idx+1)*batch_size].to(self.device)
+            for data in batch:
+                inputs, labels, edges = data
+                graphs = None
 
-            X_batch.requires_grad = True
-            out = model(X_batch)
-            out.retain_grad()
+                if inputs.shape[0] == 1:
+                    return 0
 
-            activations.append(out)
-            inputs_for_backward[cluster] = (X_batch, out)
-            if labels is None:
-                labels = y_batch
+                band = -1
+                
+                try:
+                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, model.is_graph_or_node, graphs)
+                except Exception as e:
+                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+                
+                if self.loss not in ['kldivloss']: # works on probability
+                    target = target.long()
+                
+                output = model(inputs)
+
+                output.retain_grad()
+
+                activations.append(output)
+                inputs_for_backward[cluster] = (inputs, output)
+                labels_list.append(labels)
 
         return activations, inputs_for_backward, labels
     
@@ -2763,58 +2789,89 @@ class SplitTraining(Training):
             optimizer.zero_grad()
             out.backward(grad)
             optimizer.step()
+
+    #def fit(self, **args):
+    #    return self.train_split(**args)
     
-    def train_split(self, df_train, df_val, df_test, graph, epochs, PATIENCE_CNT, CHECKPOINT):
+    def train_split(self, df_train, df_val, df_test, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None):
         
         import torch
         from torch import nn
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        #self.create_train_val_test_loader(graph, df_train, df_val, df_test, False)
-        
+        self.test_loader = create_test_loader(graph, df_test,
+                            self.features_name,
+                            self.device,
+                            False,
+                            self.target_name,
+                            self.ks,
+                            False,
+                            '')
+
         clusters = df_train[self.federated_cluster].unique()
         batch_size = self.batch_size
         
         lr = self.lr
         patience = PATIENCE_CNT
 
-        client_models, client_optimizers = self.initialize_clients(clusters, lr)
-        server_model, server_optimizer = self.initialize_server(lr)
-        criterion = self.get_loss(self.loss_name)
+        model, _ = make_model(f'{self.model_name}CutClient', len(self.features_name), len(self.features_name),
+                                graph, dropout, activation,
+                                self.ks,
+                                out_channels=self.out_channels,
+                                task_type=self.task_type,
+                                device=device, num_lstm_layers=num_lstm_layers,
+                                custom_model_params=custom_model_params)
+
+        client_models, client_optimizers = self.initialize_clients(model, clusters, lr)
+
+        model, _ = make_model(f'{self.model_name}CutServer', self.input_server_model * clusters.shape[0], len(self.features_name),
+                                graph, dropout, activation,
+                                self.ks,
+                                out_channels=self.out_channels,
+                                task_type=self.task_type,
+                                device=device, num_lstm_layers=num_lstm_layers,
+                                custom_model_params=custom_model_params)
+                                
+        server_model, server_optimizer = self.initialize_server(model, lr)
+
+        criterion = self.get_loss(self.loss)
 
         best_loss = float('inf')
         best_server_state = None
         patience_counter = 0
+        
+        batch_data = self.prepare_batch_data(df_train, graph, clusters, batch_size)
+        val_batch_data = self.prepare_batch_data(df_val, graph, clusters, batch_size)
+        
+        val_num_batches = len(val_batch_data)
+        num_batch = len(batch_data)
 
         for epoch in range(epochs):
-            logger.info(f"\nEpoch {epoch+1}/{epochs}")
+            if verbose:
+                logger.info(f"\nEpoch {epoch+1}/{epochs}")
 
-            batch_data, num_batches = self.prepare_batch_data(df_train, clusters, batch_size)
             epoch_loss = 0
 
-            for batch_idx in range(num_batches):
-                activations, inputs_for_backward, labels = self.clients_forward(batch_data, batch_idx, batch_size, client_models)
-                loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
-                self.clients_backward_update(inputs_for_backward, grad_concat, client_models, client_optimizers)
-                epoch_loss += loss_value
+            activations, inputs_for_backward, labels = self.clients_forward(batch_data, client_models)
+            loss_value, grad_concat = self.server_forward_backward(server_model, server_optimizer, activations, labels, criterion)
+            self.clients_backward_update(inputs_for_backward, grad_concat, client_models, client_optimizers)
+            epoch_loss += loss_value
 
-            avg_loss = epoch_loss / num_batches
+            avg_loss = epoch_loss / num_batch
 
             # Compute validation loss for early stopping
-            val_batch_data, val_num_batches = self.prepare_batch_data(df_val, clusters, batch_size)
             val_loss_total = 0
-            for batch_idx in range(val_num_batches):
-                activations, _, labels = self.clients_forward(val_batch_data, batch_idx, batch_size, client_models)
-                server_model.eval()
-                with torch.no_grad():
-                    concat = torch.cat(activations, dim=1)
-                    output = server_model(concat)
-                    vloss = criterion(output, labels)
-                val_loss_total += vloss.item()
+            activations, _, labels = self.clients_forward(val_batch_data, client_models)
+            server_model.eval()
+            with torch.no_grad():
+                concat = torch.cat(activations, dim=1)
+                output = server_model(concat)
+                vloss = criterion(output, labels)
+            val_loss_total += vloss.item()
             val_loss = val_loss_total / val_num_batches
 
-            if epoch % CHECKPOINT:
+            if epoch % CHECKPOINT and verbose:
                 logger.info(f"Avg Epoch Loss: {avg_loss:.4f} | Val Loss: {val_loss:.4f}")
 
             if val_loss < best_loss:
@@ -2823,7 +2880,7 @@ class SplitTraining(Training):
                 patience_counter = 0
             else:
                 patience_counter += 1
-                if patience_counter >= patience:
+                if patience_counter >= patience and verbose:
                     logger.info("Early stopping triggered.")
                     break
 
@@ -2831,7 +2888,7 @@ class SplitTraining(Training):
             server_model.load_state_dict(best_server_state)
 
         self.client_models = client_models
-        self.server_model = server_model
+        self.model = server_model
         self.is_fitted_ = True
 
         test_output, y = self._predict_test_loader(self.test_loader)
@@ -2873,8 +2930,11 @@ class SplitTraining(Training):
     def _predict_test_loader(self, X: DataLoader, proba: bool = False):
         """Generate predictions using the split learning setup."""
 
-        if self.training_mode == 'normal':
-            return super()._predict_test_loader(X, proba=proba)
+        try:
+            if self.training_mode == 'normal':
+                return super()._predict_test_loader(X, proba=proba)
+        except:
+                return super()._predict_test_loader(X, proba=proba)
 
         if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
             raise ValueError("Model is not fitted. Please train the model before predicting.")
@@ -2885,27 +2945,25 @@ class SplitTraining(Training):
 
         preds = []
         ys = []
+        activations = []
 
         with torch.no_grad():
-            for data in X:
-                inputs, labels, _ = data
+            for (cluster, data) in X:
+                model = client = self.client_models.get(cluster)
+                inputs, labels, edges = data
                 labels = labels.to(self.device)
                 labels_last = labels[:, :, -1]
-                clusters = labels[:, departement_index, -1].long().tolist()
 
-                for i in range(inputs.size(0)):
-                    cluster = clusters[i]
-                    client = self.client_models.get(cluster)
-                    if client is None:
-                        raise KeyError(f"No client model for cluster {cluster}")
+                activation = client(inputs)
+                activations.append(activation)
 
-                    activation = client(inputs[i:i+1].to(self.device))
-                    output = self.server_model(activation)
-                    if output.shape[1] > 1 and not proba:
-                        output = torch.argmax(output, dim=1)
+                ys.append(labels_last)
 
-                    preds.append(output.squeeze(0))
-                    ys.append(labels_last[i])
+            output = self.model(activations)
+            if output.shape[1] > 1 and not proba:
+                output = torch.argmax(output, dim=1)
+
+                preds.append(output.squeeze(0))
 
         pred_tensor = torch.stack(preds, 0)
         y_tensor = torch.stack(ys, 0)
@@ -2916,8 +2974,12 @@ class SplitTraining(Training):
         return pred_tensor, y_tensor
 
     def predict(self, df, graph=None, return_y=False):
-        if self.training_mode == 'normal':
-            return super().predict(df, graph=graph, return_y=return_y)
+        
+        try:
+            if self.training_mode == 'normal':
+                return super().predict(df, graph=graph, return_y=return_y)
+        except:
+                return super().predict(df, graph=graph, return_y=return_y)
         
         if graph is None:
             graph = self.graph
@@ -2925,15 +2987,7 @@ class SplitTraining(Training):
         if self.target_name not in list(df.columns):
             df[self.target_name] = 0
 
-        loader = create_test_loader(
-            graph,
-            df,
-            self.features_name,
-            self.device,
-            None,
-            self.target_name,
-            self.ks,
-        )
+        loader = self.prepare_batch_data(df, graph, df[self.federated_cluster].unique(), 1)
 
         pred_tensor, y_tensor = self._predict_test_loader(loader)
 
@@ -2943,9 +2997,12 @@ class SplitTraining(Training):
         return pred_tensor
 
     def predict_proba(self, df, graph=None, return_y=False):
-        if self.training_mode == 'normal':
-            return super().predict_proba(df, graph=graph, return_y=return_y)
-
+        try:
+            if self.training_mode == 'normal':
+                return super().predict_proba(df, graph=graph, return_y=return_y)
+        except:
+                return super().predict_proba(df, graph=graph, return_y=return_y)
+        
         if graph is None:
             graph = self.graph
 
@@ -2991,9 +3048,6 @@ class SplitTraining(Training):
             IoU score obtained with the best combination.
         """
 
-        if args is None:
-            args = {}
-
         check_and_create_path(self.dir_log)
         self.metrics = read_object('metrics_cluster.pkl', self.dir_log) or {}
         scores = self.metrics.get('scores', {})
@@ -3006,7 +3060,8 @@ class SplitTraining(Training):
 
         patience = 50
         i = 0
-        for combo in itertools.product(sample_limits, repeat=len(clusters)):
+        for numb_combo, combo in enumerate(itertools.product(sample_limits, repeat=len(clusters))):
+            logger.info(f'################ {numb_combo} ##################')
             metrics_combo = scores.get(combo, {
                 'f1': [], 'iou': [], 'iou_val': [], 'prec': [],
                 'recall': [], 'normalized_iou': [], 'normalized_f1': [],
@@ -3019,10 +3074,11 @@ class SplitTraining(Training):
                     best_score = iou_mean
                     best_combination = dict(zip(clusters, combo))
                 continue
-
+            
             for run in range(len(metrics_combo['iou']), self.n_run):
                 df_parts = []
                 for cluster, tp in zip(clusters, combo):
+                    #logger.info(f'Config : {cluster}, {tp}')
                     df_cluster = df_train[df_train[self.federated_cluster] == cluster]
                     nb = int(len(df_cluster[df_cluster[self.target_name] == 0]) * tp)
                     sampled = self.split_dataset(df_cluster, nb, reset=False)
@@ -3032,7 +3088,7 @@ class SplitTraining(Training):
 
                 model_copy = deepcopy(self)
                 model_copy.training_mode = 'normal'
-                model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
+                model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT, verbose=False)
 
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader)
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
@@ -3107,9 +3163,9 @@ class SplitTraining(Training):
     
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
-                 ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster=''):
+                 ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
         
-        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
+        super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
@@ -3240,8 +3296,11 @@ class ModelCNN(SplitTraining):
         return loader
 
 class ModelGNN(SplitTraining):
-    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run, training_mode='normal', federated_cluster=''):
-        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
+    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type,
+                 out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
+                 n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
+
+        super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
         self.training_mode = training_mode
@@ -3533,19 +3592,20 @@ class ModelGNN(SplitTraining):
 class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 training_mode='normal', federated_cluster=''):
+                 training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
 
         #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
         #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
         
-        super().__init__(federated_cluster=federated_cluster, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
+        super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model,
+                         model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run)
         
         self.training_mode = training_mode
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
         
         if features_importance:
@@ -3606,7 +3666,7 @@ class Model_Torch(SplitTraining):
                         if self.under_sampling == 'search':
                             best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, is_unknowed_risk=False,
                                                                             epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT,
-                                                                            custom_model_params=custom_model_params)
+                                                                            custom_model_params=custom_model_params, use_log=use_log)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3743,14 +3803,14 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         and stop training once the global score does not improve for patience_count_global epochs.
         """
 
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
         #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
         
-        if self.nbfeatures != 'all':
-            self.features_name = featuresAll[:int(self.nbfeatures)]
-        else:
-            self.features_name = featuresAll
+        #if self.nbfeatures != 'all':
+        #    self.features_name = featuresAll[:int(self.nbfeatures)]
+        #else:
+            #features_name = featuresAll
 
         self.global_model.features_name = self.features_name
         self.global_model.nbfeatures = 'all'
@@ -3766,12 +3826,13 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         # Vérifier que la méthode d'agrégation est implémentée
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
-
+        
+        print(args)
         # Récupération des paramètres d'entraînement
-        global_epochs = args.get('global_epochs', 10)
-        local_epochs = args.get('local_epochs', 5)
-        patience_count_global = args.get('patience_count_global', 3)
-        patience_count_local = args.get('patience_count_local', 2)
+        global_epochs = args.get('global_epochs')
+        local_epochs = args.get('local_epochs')
+        patience_count_global = args.get('patience_count_global')
+        patience_count_local = args.get('patience_count_local')
 
         if self.federated_cluster in np.unique(df_train.columns):
             clusters = df_train[self.federated_cluster].unique()
@@ -3923,7 +3984,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def _predict_test_loader(self, X):
         return self.global_model._predict_test_loader(X)
 
-############################################ MOON Federated Model ##############################################################
+############################################ ALA Federated Model ##############################################################
 class FederatedALA(FederatedLearningModel):
     """Federated learning strategy relying on the :class:`Training` class for local training."""
 
@@ -3936,10 +3997,141 @@ class FederatedALA(FederatedLearningModel):
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
                          n_run=n_run)
-
+        
     def fit(self, df_train, df_val, df_test, graph, args):
-        """Train the federated model using clusters defined in `federated_cluster`."""
-        return super().fit(df_train, df_val, df_test, graph, args)
+        """
+        Train local models for each federated cluster, aggregate them into a global model, 
+        and stop training once the global score does not improve for patience_count_global epochs.
+        """
+
+        #importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        
+        #if self.nbfeatures != 'all':
+        #    self.features_name = featuresAll[:int(self.nbfeatures)]
+        #else:
+        #    self.features_name = featuresAll
+
+        self.global_model.features_name = self.features_name
+        self.global_model.nbfeatures = 'all'
+        self.global_model.graph = graph
+
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+        initiate_model.ALATraining = True
+        self.global_model.model = deepcopy(initiate_model)
+        self.global_model.model_params = deepcopy(model_params)
+        self.model_params = deepcopy(model_params)
+        del initiate_model
+        del model_params
+        
+        # Vérifier que la méthode d'agrégation est implémentée
+        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
+            raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
+
+        # Récupération des paramètres d'entraînement
+        global_epochs = args.get('global_epochs', 10)
+        local_epochs = args.get('local_epochs', 5)
+        patience_count_global = args.get('patience_count_global', 3)
+        patience_count_local = args.get('patience_count_local', 2)
+
+        if self.federated_cluster in np.unique(df_train.columns):
+            clusters = df_train[self.federated_cluster].unique()
+        else:
+            raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
+
+        best_global_score = float('-inf')
+        patience_counter = 0  # Compteur pour l'arrêt anticipé
+        
+        print(f"\n--- Training ALA Federated Model for {global_epochs} global epochs ---")
+
+        local_models = {}
+        
+        for epoch in range(global_epochs):
+            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+
+            local_weights = []
+            sample_counts = []
+            
+            for cluster in clusters:
+                print(f"\nTraining local model for cluster: {cluster}")
+
+                # Initialisation du modèle local
+                if epochs == 0:
+                    local_model = deepcopy(self.global_model)
+                else:
+                    local_model = local_models[cluster]
+                    
+                local_model.params_p = local_model.model.parameters()[-self.layer_idx:]
+                local_model.params_gp = self.global_model.model.parameters()[-self.layer_idx:]
+                local_model.params_tp = deepcopy(local_model).model.parameters()[-self.layer_idx:]
+                
+                for param in local_model.params_t[:-self.layer_idx]:
+                    param.requires_grad = False
+                
+                for param_t, param, param_g, weight in zip(local_model.params_tp, local_model.params_p, local_model.params_gp,
+                                            local_model.weights):
+                    param_t.data = param + (param_g - param) * weight
+                
+                if epochs == 0:
+                    local_model.weights = [torch.ones_like(param.data).to(self.device) for param in params_p]
+                
+                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+
+                if epoch == 0:
+                    check_and_create_path(local_model.dir_log)
+
+                local_model.features_name = self.features_name
+                local_model.nbfeatures = 'all'
+
+                # Création des datasets pour le cluster fédéré
+                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                    df_train, df_val, df_test, cluster
+                )
+
+                if np.all(df_train[local_model.target_name].values == 0):
+                    print(f'Skipping {cluster} due to no positif samples')
+                    continue
+
+                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                    print(f'Skipping {cluster} due to empty dataset')
+                    continue
+
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+
+                # Entraînement du modèle local
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epochs == 0 else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                
+                local_models[cluster] = local_model
+                
+                # Stocker les poids des modèles locaux
+                local_weights.append(deepcopy(local_model.model.state_dict()))
+                sample_counts.append(len(df_train_cluster))
+
+            # Agréger les modèles locaux dans le modèle global
+            self.aggregate_models(local_weights, sample_counts)
+
+            # Évaluer le modèle global
+            global_score = self.global_model.score(df_val, df_val[self.target_name])
+            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+            # Vérifier si le score s'est amélioré
+            if global_score > best_global_score:
+                best_global_score = global_score
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            # Arrêt anticipé si le score global ne s'améliore plus
+            if patience_counter >= patience_count_global:
+                print("\nEarly stopping: Global model score did not improve.")
+                break
+
+        self.is_fitted_ = True
+        print("\n--- ALA Federated Learning Training Complete ---")
+
+############################################ MOON Federated Model ##############################################################
 
 class MOONFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
@@ -3974,7 +4166,9 @@ class MOONFederatedLearning(FederatedLearningModel):
         self.global_model.nbfeatures = 'all'
         self.global_model.graph = graph
 
-        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+        self.global_model.constrastive = True
+
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params={'return_hidden' : True})
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
         self.model_params = deepcopy(model_params)
@@ -3986,10 +4180,10 @@ class MOONFederatedLearning(FederatedLearningModel):
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
 
         # Récupération des paramètres d'entraînement
-        global_epochs = args.get('global_epochs', 10)
-        local_epochs = args.get('local_epochs', 5)
-        patience_count_global = args.get('patience_count_global', 3)
-        patience_count_local = args.get('patience_count_local', 2)
+        global_epochs = args.get('global_epochs')
+        local_epochs = args.get('local_epochs')
+        patience_count_global = args.get('patience_count_global')
+        patience_count_local = args.get('patience_count_local')
 
         if self.federated_cluster in np.unique(df_train.columns):
             clusters = df_train[self.federated_cluster].unique()
@@ -4047,7 +4241,7 @@ class MOONFederatedLearning(FederatedLearningModel):
                 local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
 
                 # Entraînement du modèle local
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
                 
                 local_models[cluster] = local_model
 
@@ -4082,13 +4276,12 @@ class MOONFederatedLearning(FederatedLearningModel):
 class ProtoFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='ProtoFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, prototype_weight=1.0):
+                 target_name='nbsinister', post_process=None, task_type='classification', nbfeatures='all', n_run=1, prototype_weight=1.0):
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+                         aggregation_method='median', nbfeatures=nbfeatures, n_run=n_run)
 
         self.prototype_weight = prototype_weight
         self.global_prototypes = {}
@@ -4102,7 +4295,11 @@ class ProtoFederatedLearning(FederatedLearningModel):
             for data in loader:
                 inputs, labels, edges = data
                 _, hidden = model.model(inputs, edges)
-                target, _ = model.compute_weights_and_target(labels, -1, ids_columns, model.model.is_graph_or_node, None)
+                try:
+                    target, _ = model.compute_weights_and_target(labels, -1, ids_columns, model.model.is_graph_or_node, None)
+                except:
+                    target, _ = model.compute_weights_and_target(labels, -1, ids_columns, False, None)
+
                 target = target.long()
                 for cls in torch.unique(target):
                     cls_idx = int(cls.item())
@@ -4135,20 +4332,20 @@ class ProtoFederatedLearning(FederatedLearningModel):
             aggregated[cls] /= counts[cls]
         self.global_prototypes = aggregated
 
-    def fit(self, df_train, df_val, df_test, graph, args):
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+    def fit(self, df_train, df_val, df_test, graph, **args):
+        #importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
 
         if self.nbfeatures != 'all':
             self.features_name = featuresAll[:int(self.nbfeatures)]
         else:
-            self.features_name = featuresAll
+            self.features_name = self.features_name
 
         self.global_model.features_name = self.features_name
         self.global_model.nbfeatures = 'all'
         self.global_model.graph = graph
 
-        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params={'return_hidden' : True})
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
         self.model_params = deepcopy(model_params)
@@ -4209,13 +4406,12 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
                 local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
 
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
 
                 local_weights.append(deepcopy(local_model.model.state_dict()))
                 sample_counts.append(len(df_train_cluster))
                 local_prototypes.append(self.compute_local_prototypes(local_model))
 
-            self.aggregate_models(local_weights, sample_counts)
             self.aggregate_prototypes(local_prototypes)
 
             global_score = self.global_model.score(df_val, df_val[self.target_name])
@@ -4246,37 +4442,6 @@ class ProtoFederatedLearning(FederatedLearningModel):
             return X_cluster, X_val_cluster, X_test_cluster
         
         raise NotImplementedError(f"Federated clustering method '{self.federated_cluster}' is not implemented.")
-
-    def aggregate_models(self, local_weights, sample_counts=None):
-        """
-        Aggregate local models into the global model using the chosen method.
-        """
-        print(f"\n--- Aggregating models using {self.aggregation_method} ---")
-
-        param_keys = local_weights[0].keys()
-        new_state_dict = {}
-
-        for key in param_keys:
-            stacked_params = torch.stack([weights[key] for weights in local_weights])
-
-            if self.aggregation_method == 'mean':
-                new_state_dict[key] = torch.mean(stacked_params, dim=0)
-            elif self.aggregation_method == 'median':
-                new_state_dict[key] = torch.median(stacked_params, dim=0)[0]
-            elif self.aggregation_method == 'max':
-                new_state_dict[key] = torch.max(stacked_params, dim=0)[0]
-            elif self.aggregation_method == 'weighted':
-                if sample_counts is not None and len(sample_counts) == len(local_weights):
-                    weights = torch.tensor(sample_counts, dtype=torch.float32)
-                    weights = weights / weights.sum()
-                else:
-                    weights = torch.tensor([1 / len(local_weights)] * len(local_weights), dtype=torch.float32)
-                view_shape = [len(local_weights)] + [1] * (stacked_params.dim() - 1)
-                new_state_dict[key] = torch.sum(stacked_params * weights.view(*view_shape), dim=0)
-
-        # Mettre à jour les poids du modèle global
-        self.global_model.update_weight(new_state_dict)
-        print("\n--- Global Model Weights Updated ---")
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
@@ -5006,6 +5171,67 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
+    
+class ModelPerID(RegressorMixin, ClassifierMixin):
+    def __init__(self, model, dir_log, cluster="departement"):
+        self.base_model = model
+        self.cluster_col = cluster
+        self.models = {}
+        self.is_fitted_ = False
+        self.name = f'unique-{cluster}-{model.name}'
+        self.dir_log = dir_log
+
+    def fit(self, df_train, df_val, df_test, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params, **args):
+        """Train one model per cluster value."""
+        self.models = {}
+        values = df_train[self.cluster_col].unique()
+        for val in values:
+            train_subset = df_train[df_train[self.cluster_col] == val].reset_index(drop=True)
+            val_subset = df_val[df_val[self.cluster_col] == val].reset_index(drop=True)
+            test_subset = df_test[df_test[self.cluster_col] == val].reset_index(drop=True)
+            model = deepcopy(self.base_model)
+            model.dir_log = self.base_model.dir_log / f'unique-{val}-{self.base_model.name}'
+            if hasattr(model, "name"):
+                model.name = f"{val}_{model.name}"
+            if hasattr(model, "fit"):
+                args['PATIENCE_CNT'] = PATIENCE_CNT
+                args['CHECKPOINT'] = CHECKPOINT
+                args['epochs'] = epochs
+                args['custom_model_params'] = custom_model_params
+                model.fit(train_subset, val_subset, test_subset, graph, **args)
+            else:
+                raise ValueError("Base model must implement fit method")
+            self.models[val] = model
+        self.is_fitted_ = True
+
+    def predict_proba(self, X, **kwargs):
+        proba = None
+        result = []
+        for val, model in self.models.items():
+            mask = X[self.cluster_col] == val
+            if mask.any():
+                preds = model.predict_proba(X[mask], **kwargs)
+                if proba is None:
+                    proba = np.zeros((len(X), preds.shape[1]))
+                proba[mask] = preds
+        return proba
+
+    def predict(self, X, **kwargs):
+        preds = np.zeros(len(X))
+        for val, model in self.models.items():
+            mask = X[self.cluster_col] == val
+            if mask.any():
+                preds[mask] = model.predict(X[mask], **kwargs)
+        return preds
+
+    def _predict_test_loader(self, loader):
+        preds_list = []
+        ys_list = []
+        for val, model in self.models.items():
+            pred, y = model._predict_test_loader(loader)
+            preds_list.append(pred)
+            ys_list.append(y)
+        return torch.cat(preds_list, 0), torch.cat(ys_list, 0)
 
 class Model_susceptibility():
     def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log):
