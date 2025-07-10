@@ -89,6 +89,17 @@ class GenerateDatabase():
         else:
             code_dept = f'{code_dept}'
 
+        file_subpaths = [
+                    '197475/Results/U2018_CLC2012_V2020_20u1_raster100m/U2018_CLC2012_V2020_20u1_raster100m/',
+                ]
+        years = ['2018']
+        raster_corine(self.h3, self.dir_raster, file_subpaths, self.h3tif, self.h3tif_high, src_bounds_path, years, self.dates)
+
+        file_path = [
+                 'ROUTE500_2-1__SHP_LAMB93_FXX_2018-04-09/ROUTE500/1_DONNEES_LIVRAISON_2021-05-00012/R500_2-1_SHP_LAMB93_FXX-ED181/RESEAU_ROUTIER']
+        
+        raster_route(self.dir_raster, self.h3tif, self.h3tif_high, self.resLon_high, self.resLat_high, file_subpaths, self.h3, self.dates, years)
+
         #if 'corse' not in self.departement:
         #    raster_sat_from_france(self.h3tif, self.h3, self.dir_raster, Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / 'france' / 'data' / 'GEE' / resolution, self.dates)
         #else:
@@ -640,7 +651,7 @@ if __name__ == '__main__':
     
     
     ################## Ain ######################
-    """launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Aisne ######################
     launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -921,18 +932,18 @@ if __name__ == '__main__':
 
     ################## Essonne ######################
     launch('departement-91-essonne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    
     ################## Hauts-de-Seine ######################
-    #launch('departement-92-hauts-de-seine', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-92-hauts-de-seine', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Seine-Saint-Denis ######################
-    #launch('departement-93-seine-saint-denis', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-93-seine-saint-denis', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Val-de-Marne ######################
-    #launch('departement-94-val-de-marne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-94-val-de-marne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Val-d-Oise ######################
-    #launch('departement-95-val-d-oise', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-95-val-d-oise', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     """
     ################## Guadeloupe ######################
     launch('departement-971-guadeloupe', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
