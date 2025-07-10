@@ -4938,6 +4938,17 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             # Aggregate predictions
             aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights2use)
             return aggregated_pred, y
+        elif hard_or_soft == 'None':
+            top_model = int(top_model)
+            key = np.argsort(weights2use)
+            idx = key[-top_model]
+            estimator = self.best_estimator_[idx]
+            if estimator.target_name == self.target_name:
+                pred, y = estimator.predict(X, return_y=True)
+            else:
+                pred = estimator.predict(X, return_y=False)
+                y = None
+            return pred, y
         else:
             aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use)
             predictions = np.argmax(aggregated_pred, axis=1)
@@ -4969,6 +4980,18 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         probas = []
         models_to_mean = []
         print(models_list)
+
+        if hard_or_soft == 'None':
+            top_model = int(top_model)
+            idx = np.argsort(weights2use)[-top_model]
+            estimator = self.best_estimator_[idx]
+            if estimator.target_name == self.target_name:
+                proba, y = estimator.predict_proba(X, return_y=True)
+            else:
+                proba = estimator.predict_proba(X, return_y=False)
+                y = None
+            return proba, y
+
         for i, estimator in enumerate(self.best_estimator_):
             X_ = X
             if estimator.target_name == self.target_name:
