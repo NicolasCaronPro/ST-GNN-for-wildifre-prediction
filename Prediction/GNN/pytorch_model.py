@@ -1446,6 +1446,7 @@ class Training():
         self.use_prototypes = False
         self.prototype_weight = 1.0
         self.prototypes = None
+        self.ALATraining = False
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1605,6 +1606,40 @@ class Training():
             diff = hidden[mask] - proto
             loss += torch.mean(torch.norm(diff, dim=1))
         return loss
+
+    def calculate_prototype_alignment_loss(self, hidden, target, prototypes):
+        """
+        Compute prototype alignment loss:
+        Sum over classes of L2 distance squared between local and global prototypes.
+
+        Arguments:
+            hidden (Tensor): Embeddings of shape [batch_size, embedding_dim].
+            target (Tensor): Class labels of shape [batch_size].
+            prototypes (dict): {class_id: global_prototype_tensor}
+
+        Returns:
+            loss (Tensor): Scalar tensor representing the total alignment loss.
+        """
+        loss = 0.0
+        classes = torch.unique(target)
+        for cls in classes:
+            cls_idx = int(cls.item())
+            if prototypes is None or cls_idx not in prototypes:
+                continue
+            # Global prototype
+            proto_global = prototypes[cls_idx].to(hidden.device)
+            
+            # Local prototype for class cls
+            mask = target == cls
+            if mask.sum() == 0:
+                continue
+            proto_local = hidden[mask].mean(dim=0)
+            
+            # L2 distance squared between local and global prototype
+            diff = proto_local - proto_global
+            loss += torch.sum(diff ** 2)
+            
+        return loss
     
     def launch_batch(self, data, criterion):
         inputs, labels, edges = data
@@ -1622,7 +1657,7 @@ class Training():
         
         if self.loss not in ['kldivloss']: # works on probability
             target = target.long()
-
+        
         if self.model.return_hidden:
             output, hidden = self.model(inputs, edges)
         else:
@@ -1651,8 +1686,13 @@ class Training():
         if self.use_prototypes and self.prototypes is not None:
             if not self.model.return_hidden:
                 raise ValueError('Model must return hidden states for prototype training')
-            proto_loss = self.calculate_prototype_loss(hidden, target, self.prototypes)
+            
+            proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
             loss = loss + self.prototype_weight * proto_loss
+            print(loss)
+
+        if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
+            loss += self.model.kl_loss()
 
         return loss
     
@@ -1665,23 +1705,26 @@ class Training():
 
             optimizer.zero_grad()
             loss.backward()
-            if not self.ALATraining:
-                optimizer.step()
-            else:
+            
+            if self.ALATraining: # Fed ALA training
                 self.params_p = list(self.model.parameters())[-self.layer_idx:]
-                self.params_gp = list(self.global_model.parameters())[-self.layer_idx:]
-                self.params_tp = list(deepcopy(self).model.parameters())[-self.layer_idx:]
+                self.params_gp = self.params_gp
+                self.params_tp = self.params_tp
                 
                 for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
                                                         self.params_gp, self.weights):
-                    print(param_t.grad)
                     weight.data = torch.clamp(
-                        weight - self.eta * (param_t.grad * (param_g - param)), 0, 1)
-                
+                        weight - self.eta * (param.grad * (param_g - param)), 0, 1)
+                    
                 for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
                                                         self.params_gp, self.weights):
                     param_t.data = param + (param_g - param) * weight
-                
+
+                for param, param_t in zip(self.params_p, self.params_tp):
+                    param.data = param_t.data.clone()
+            
+            optimizer.step()
+
                 #self.update_weight()
 
         return loss
@@ -2789,6 +2832,7 @@ class SplitTraining(Training):
         server_optimizer.zero_grad()
 
         concat = torch.cat(activations, dim=1)
+        print(f'concat : {concat.shape}')
         output = server_model(concat)
         loss = criterion(output, labels)
         loss.backward()
@@ -2841,15 +2885,14 @@ class SplitTraining(Training):
                                 custom_model_params=custom_model_params)
 
         client_models, client_optimizers = self.initialize_clients(model, clusters, lr)
-
-        model, _ = make_model(f'{self.model_name}CutServer', self.input_server_model * clusters.shape[0], len(self.features_name),
+        model, _ = make_model(f'{self.model_name}CutServer', self.input_server_model, len(self.features_name),
                                 graph, dropout, activation,
                                 self.ks,
                                 out_channels=self.out_channels,
                                 task_type=self.task_type,
                                 device=device, num_lstm_layers=num_lstm_layers,
                                 custom_model_params=custom_model_params)
-                                
+        
         server_model, server_optimizer = self.initialize_server(model, lr)
 
         criterion = self.get_loss(self.loss)
@@ -3105,6 +3148,7 @@ class SplitTraining(Training):
 
                 model_copy = deepcopy(self)
                 model_copy.training_mode = 'normal'
+                model_copy.under_sampling = 'full'
                 model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT, verbose=False)
 
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader)
@@ -3970,7 +4014,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.global_model.update_weight(new_state_dict)
         print("\n--- Global Model Weights Updated ---")
 
-    def predict(self, X):
+    def predict(self, X, graph=None, return_y=False):
         """
         Predict using the aggregated global model.
         """
@@ -3978,7 +4022,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             raise ValueError("Model is not fitted. Please train the model before predicting.")
 
         print(f'Predicting using Global Model')
-        return self.global_model.predict(X)
+        return self.global_model.predict(X, graph, return_y)
 
     def predict_proba(self, X):
         """
@@ -4040,7 +4084,6 @@ class FederatedALA(FederatedLearningModel):
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
-        self.global_model.ALATraining = True
         self.global_model.eta = self.eta
         self.global_model.layer_idx = self.layer_idx
 
@@ -4053,10 +4096,10 @@ class FederatedALA(FederatedLearningModel):
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
         
         # Récupération des paramètres d'entraînement
-        global_epochs = args.get('global_epochs', 10)
-        local_epochs = args.get('local_epochs', 5)
-        patience_count_global = args.get('patience_count_global', 3)
-        patience_count_local = args.get('patience_count_local', 2)
+        global_epochs = args.get('global_epochs')
+        local_epochs = args.get('local_epochs')
+        patience_count_global = args.get('patience_count_global')
+        patience_count_local = args.get('patience_count_local')
 
         if self.federated_cluster in np.unique(df_train.columns):
             clusters = df_train[self.federated_cluster].unique()
@@ -4084,11 +4127,12 @@ class FederatedALA(FederatedLearningModel):
                     local_model = deepcopy(self.global_model)
                 else:
                     local_model = local_models[cluster]
-
-                local_model.global_model = self.global_model.model     
+                
+                local_model.global_model = self.global_model.model
                 local_model.params_p = list(local_model.model.parameters())[-self.layer_idx:]
                 local_model.params_gp = list(self.global_model.model.parameters())[-self.layer_idx:]
                 local_model.params_tp = list(deepcopy(local_model).model.parameters())[-self.layer_idx:]
+                local_model.ALATraining = epoch > 0
                 
                 for param in local_model.params_tp:
                     param.requires_grad = False
@@ -4096,12 +4140,13 @@ class FederatedALA(FederatedLearningModel):
                 if epoch == 0:
                     local_model.weights = [torch.ones_like(param.data).to(local_model.device) for param in local_model.params_p]
 
-                for param_t, param, param_g, weight in zip(local_model.params_tp, local_model.params_p, local_model.params_gp,
-                                            local_model.weights):
-                    param_t.data = param + (param_g - param) * weight
+                if epoch > 0:
+                    for param_t, param, param_g, weight in zip(local_model.params_tp, local_model.params_p, local_model.params_gp,
+                                                local_model.weights):
+                        param_t.data = param + (param_g - param) * weight
                                     
                 local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+                local_model.dir_log = self.global_model.dir_log / '..' / 'alafederated' / local_model.name
 
                 if epoch == 0:
                     check_and_create_path(local_model.dir_log)
@@ -4121,11 +4166,11 @@ class FederatedALA(FederatedLearningModel):
                 if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
-
+                
                 local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
 
                 # Entraînement du modèle local
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epochs == 0 else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epoch < 1  else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
                 
                 local_models[cluster] = local_model
                 
@@ -4190,9 +4235,8 @@ class MOONFederatedLearning(FederatedLearningModel):
         self.global_model.nbfeatures = 'all'
         self.global_model.graph = graph
 
-        self.global_model.constrastive = True
-
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params={'return_hidden' : True})
+
         self.global_model.model = deepcopy(initiate_model)
         self.global_model.model_params = deepcopy(model_params)
         self.model_params = deepcopy(model_params)
@@ -4233,13 +4277,16 @@ class MOONFederatedLearning(FederatedLearningModel):
                 # Initialisation du modèle local
                 local_model = deepcopy(self.global_model)
                 local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+                local_model.dir_log = self.global_model.dir_log / '..' / 'moonfederated' / local_model.name
                 local_model.global_model = self.global_model
                 local_model.temperature_value = self.temperature_value
                 local_model.smooth_value = self.smooth_value
+                #local_model.constrastive = epoch > 0
+                local_model.constrastive = True
 
                 if epoch == 0:
                     local_model.prev_model = self.global_model.model
+                    local_model.constrastive = False
                     check_and_create_path(local_model.dir_log)
                 else:
                     local_model.prev_model = local_models[cluster].model
@@ -4262,7 +4309,7 @@ class MOONFederatedLearning(FederatedLearningModel):
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
 
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
 
                 # Entraînement du modèle local
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
@@ -4330,6 +4377,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
                     mask = target == cls
                     if mask.sum() == 0:
                         continue
+                    
                     vec = hidden[mask].mean(dim=0)
                     if cls_idx in prototypes:
                         prototypes[cls_idx] += vec * mask.sum()
@@ -4337,6 +4385,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
                     else:
                         prototypes[cls_idx] = vec * mask.sum()
                         counts[cls_idx] = mask.sum()
+
         for k in prototypes:
             prototypes[k] /= counts[k]
         return prototypes
@@ -4356,7 +4405,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
             aggregated[cls] /= counts[cls]
         self.global_prototypes = aggregated
 
-    def fit(self, df_train, df_val, df_test, graph, **args):
+    def fit(self, df_train, df_val, df_test, graph, args):
         #importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
         #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
 
@@ -4379,10 +4428,10 @@ class ProtoFederatedLearning(FederatedLearningModel):
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
 
-        global_epochs = args.get('global_epochs', 10)
-        local_epochs = args.get('local_epochs', 5)
-        patience_count_global = args.get('patience_count_global', 3)
-        patience_count_local = args.get('patience_count_local', 2)
+        global_epochs = args.get('global_epochs')
+        local_epochs = args.get('local_epochs')
+        patience_count_global = args.get('patience_count_global')
+        patience_count_local = args.get('patience_count_local')
 
         if self.federated_cluster in np.unique(df_train.columns):
             clusters = df_train[self.federated_cluster].unique()
@@ -4391,6 +4440,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
         best_global_score = float('-inf')
         patience_counter = 0
+        self.local_models = {}
 
         print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
 
@@ -4404,9 +4454,13 @@ class ProtoFederatedLearning(FederatedLearningModel):
             for cluster in clusters:
                 print(f"\nTraining local model for cluster: {cluster}")
 
-                local_model = deepcopy(self.global_model)
+                if epoch == 0:
+                    local_model = deepcopy(self.global_model)
+                else:
+                    local_model = self.local_models[cluster]
+
                 local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
+                local_model.dir_log = self.global_model.dir_log / '..' / 'protofederated' / local_model.name
                 if epoch == 0:
                     check_and_create_path(local_model.dir_log)
 
@@ -4428,17 +4482,18 @@ class ProtoFederatedLearning(FederatedLearningModel):
                     print(f'Skipping {cluster} due to empty dataset')
                     continue
 
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
 
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
-
+                
+                self.local_models[cluster] = local_model
                 local_weights.append(deepcopy(local_model.model.state_dict()))
                 sample_counts.append(len(df_train_cluster))
                 local_prototypes.append(self.compute_local_prototypes(local_model))
 
             self.aggregate_prototypes(local_prototypes)
 
-            global_score = self.global_model.score(df_val, df_val[self.target_name])
+            global_score = self.score(df_val, df_val[self.target_name])
             print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
 
             if global_score > best_global_score:
@@ -4466,6 +4521,144 @@ class ProtoFederatedLearning(FederatedLearningModel):
             return X_cluster, X_val_cluster, X_test_cluster
         
         raise NotImplementedError(f"Federated clustering method '{self.federated_cluster}' is not implemented.")
+
+    def score_with_prediction(self, y_pred, y, sample_weight=None):
+        
+        return iou_score(y, y_pred)
+    
+    def score(self, X, y, sample_weight=None):
+        """
+        Evaluate the model's performance for each ID.
+
+        Parameters:
+        - X_val: Validation data.
+        - y_val: True labels.
+        - id_val: List of IDs corresponding to validation data.
+
+        Returns:
+        - Mean score across all IDs.
+        """
+        predictions, y = self.predict(X, return_y=True)
+        y = y[:, -1]
+        return self.score_with_prediction(predictions, y, sample_weight)
+    
+    def predict(self, df, graph=None, return_y=False):
+        """
+        Prédit les classes via le modèle local et les prototypes globaux.
+        """
+        if graph is None:
+            graph = self.global_model.graph
+
+        if self.target_name not in df.columns:
+            df = df.copy()
+            df[self.target_name] = 0
+
+        if self.federated_cluster not in df.columns:
+            logger.info(f'{self.federated_cluster} must be in dataframe for inference')
+            exit(1)
+
+        final_pred = []
+        ys = []
+        clusters_values = df[self.federated_cluster].values
+        for cluster in np.unique(clusters_values):
+            mask = clusters_values == cluster
+
+            loader = self.create_test_loader(graph, df[df[self.federated_cluster] == cluster])
+
+            pred, y = self._predict_test_loader(loader, proba=False, cluster=cluster)
+            
+            final_pred.append(pred)
+            ys.append(y)
+
+        final_pred = torch.concatenate(final_pred, dim=0)
+        ys = torch.concatenate(ys, dim=0)
+        print(ys.shape)
+
+        return (final_pred, ys) if return_y else pred
+
+    def predict_proba(self, df, graph=None, return_y=False):
+        """
+        Renvoie les probabilités de classe via softmax inversé sur les distances aux prototypes.
+        """
+        if graph is None:
+            graph = self.global_model.graph
+            
+        if self.target_name not in df.columns:
+            df = df.copy()
+            df[self.target_name] = 0
+
+        final_pred = []
+        clusters_values = df[self.federated_cluster].values
+        ys = []
+        for cluster in np.unique(clusters_values):
+            loader = self.create_test_loader(graph, df[df[self.federated_cluster] == cluster])
+
+            pred, y = self._predict_test_loader(loader, proba=True, cluster=cluster)
+
+            final_pred.append(pred)
+            ys.append(y)
+        
+        final_pred = torch.concatenate(final_pred, dim=0)
+        ys = torch.concatenate(ys, dim=0)
+
+        return (final_pred, ys) if return_y else pred
+
+    def _predict_test_loader(self, loader, proba: bool = False, cluster = None):
+        """
+        Effectue la prédiction sur un DataLoader en utilisant le modèle local
+        + les prototypes globaux (style FedProto).
+        """
+        if cluster is None:
+            logger.info(f'Need to provide the correspond cluster of the batch ({self.federated_cluster})')
+        assert cluster is not None
+        if cluster in self.local_models.keys():
+            model = self.local_models[cluster].model
+            model.eval()
+        else:
+            model = None
+        preds = []
+        targets = []
+        
+        with torch.no_grad():
+            for data in loader:
+
+                inputs, y, _ = data
+                y = y[:, :, -1]
+
+                batch_preds = []
+                
+                # Obtenir l'embedding via le modèle local
+                if model is not None:
+                    _, embeddings = model(inputs)
+                else:
+                    embeddings = torch.zeros(inputs.shape[0])
+
+                # Comparer aux prototypes globaux
+                for emb in embeddings:
+                    distances = {
+                        cls: torch.norm(emb - proto.to(embeddings.device))
+                        for cls, proto in self.global_prototypes.items()
+                    }
+                    if proba:
+                        # Convertir les distances en "scores inversés"
+                        inv = torch.tensor(
+                            [-d.item() for d in distances.values()]
+                        )
+                        probs = torch.softmax(inv, dim=0)
+                        batch_preds.append(probs)
+                    else:
+                        pred_class = min(distances, key=distances.get)
+                        batch_preds.append(pred_class)
+
+                preds.extend(batch_preds)
+                targets.extend(y.cpu().tolist())
+
+        if proba:
+            preds = torch.stack(preds)  # [N, num_classes]
+        else:
+            preds = torch.tensor(preds)
+
+        return preds, torch.tensor(targets)
 
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
@@ -4683,8 +4876,8 @@ class ModelKnowledgeDistillation(Training):
             parameters = {'temperature' : top_temp, 'alpha' : top_al}
             self.alpha_value = top_al
             self.temperature_value = top_temp
-            save_object(parameters, 'log_parameters.pkl', self.dir_log) 
-
+            save_object(parameters, 'log_parameters.pkl', self.dir_log)
+            
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, search=True):
 
         if (self.temperature == 'search' or self.alpha == 'search') and search:
@@ -4924,10 +5117,10 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                 if estimator.name not in models_list:
                     continue
                 else:
-                    if estimator.target_name == self.target_name:
-                        continue
-                    pred = estimator.predict(X, return_y=False)
-                    predictions.append(pred)
+                    if estimator.target_name != self.target_name:
+                        pred = estimator.predict(X, return_y=False)
+
+                    predictions.append(pred.detach().cpu().numpy())
 
                 models_to_mean.append(key[i])
 
@@ -4937,7 +5130,9 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                 pass
             # Aggregate predictions
             aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights2use)
-            return aggregated_pred, y
+            #print(aggregated_pred)
+            #print(y)
+            return aggregated_pred, y.detach().cpu().numpy()
         elif hard_or_soft == 'None':
             top_model = int(top_model)
             key = np.argsort(weights2use)
@@ -4945,10 +5140,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
                 pred, y = estimator.predict(X, return_y=True)
+                return pred.detach().cpu().numpy(), y.detach().cpu().numpy(),
             else:
                 pred = estimator.predict(X, return_y=False)
                 y = None
-            return pred, y
+                for estimator in self.best_estimator_:
+                    if estimator.target_name == self.target_name:
+                        _, y = estimator.predict(X, return_y=True)
+                        return pred.detach().cpu().numpy(), y.detach().cpu().numpy(),
         else:
             aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use)
             predictions = np.argmax(aggregated_pred, axis=1)
@@ -4986,11 +5185,15 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             idx = np.argsort(weights2use)[-top_model]
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
-                proba, y = estimator.predict_proba(X, return_y=True)
+                pred, y = estimator.predict_proba(X, return_y=True)
+                return pred.detach().cpu().numpy(), y.detach().cpu().numpy()
             else:
-                proba = estimator.predict_proba(X, return_y=False)
+                pred = estimator.predict(X, return_y=False)
                 y = None
-            return proba, y
+                for estimator in self.best_estimator_:
+                    if estimator.target_name == self.target_name:
+                        _, y = estimator.predict_proba(X, return_y=True)
+                        return pred.detach().cpu().numpy(), y.detach().cpu().numpy()
 
         for i, estimator in enumerate(self.best_estimator_):
             X_ = X
@@ -5036,7 +5239,6 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                 mask = (id_col[1] == id)
                 prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model)
             return prediction, y
-
         else:
             return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model)
 
@@ -5218,7 +5420,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
-    
+     
 class ModelPerID(RegressorMixin, ClassifierMixin):
     def __init__(self, model, dir_log, cluster="departement"):
         self.base_model = model
