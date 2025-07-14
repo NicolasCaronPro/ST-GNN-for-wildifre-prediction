@@ -3343,10 +3343,19 @@ class GraphStructure():
 
         return res, res_max, res_min
 
-    def predict_model_voting_pytorch(self, X : pd.DataFrame,
-                                  features : list, target_name : bool,
-                                  autoRegression : bool, quantile=False, hard_or_soft='soft', weights_average=True,
-                                  top_model='all') -> np.array:
+    def predict_model_voting_pytorch(
+        self,
+        X: pd.DataFrame,
+        features: list,
+        target_name: bool,
+        autoRegression: bool,
+        quantile=False,
+        hard_or_soft='soft',
+        weights_average=True,
+        top_model='all',
+        model_per_task=None,
+        generalized_departement=None,
+    ) -> np.array:
         
         isBin = target_name == 'binary'
         assert self.model is not None
@@ -3380,11 +3389,32 @@ class GraphStructure():
                         id_col = (weights_average, X[weights_average])
                     else:
                         id_col = (None, None)
-                
-                    res, y = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model, id_col=id_col)
+
+                    if model_per_task is not None:
+                        res, y = self.model.predict_with_tasks(
+                            X,
+                            hard_or_soft=hard_or_soft,
+                            weights_average=weights_average,
+                            model_per_task=model_per_task,
+                            generalized_departement=generalized_departement,
+                            id_col=id_col,
+                        )
+                    else:
+                        res, y = self.model.predict(
+                            X,
+                            hard_or_soft=hard_or_soft,
+                            weights_average=weights_average,
+                            top_model=top_model,
+                            id_col=id_col,
+                        )
 
                 elif isinstance(self.model, ModelVotingPytorchAndSklearn):
-                    res, y = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model)
+                    res, y = self.model.predict(
+                        X,
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        top_model=top_model,
+                    )
                 else:
                     raise ValueError(f'Not a voting model')
             else:
