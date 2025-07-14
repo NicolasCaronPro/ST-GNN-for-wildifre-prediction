@@ -5402,6 +5402,82 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         #aggregated_proba = np.max(probas_array * weight2use[:, None, None], axis=0)
         return aggregated_proba
 
+    def predict_with_tasks(
+        self,
+        X,
+        hard_or_soft="soft",
+        weights_average="weight",
+        model_per_task=None,
+        generalized_departement=None,
+        id_col=(None, None),
+    ):
+        """Predict with a specific ``top_model`` per task.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame
+            Input dataframe.
+        hard_or_soft : str
+            Mode passed to :func:`predict_with_weight`.
+        weights_average : str
+            Weighting mode for aggregation.
+        model_per_task : dict
+            Mapping of task names to number of models to use.
+        generalized_departement : list
+            Departments for which to apply ``generalized_prediction`` task.
+        id_col : tuple
+            Id column information for weighted predictions.
+        """
+
+        if model_per_task is None:
+            model_per_task = {}
+
+        # Normal prediction for all samples
+        top_model = model_per_task.get("normal_predictions", "all")
+        predictions, y = self.predict_with_weight(
+            X,
+            hard_or_soft=hard_or_soft,
+            weights_average=weights_average,
+            weights2use=self.weights_for_model,
+            top_model=top_model,
+        )
+
+        predictions = np.asarray(predictions)
+
+        # Generalized prediction
+        if (
+            model_per_task.get("generalized_prediction") is not None
+            and generalized_departement is not None
+            and "departement" in X.columns
+        ):
+            mask = X["departement"].isin(generalized_departement).values
+            if mask.any():
+                preds_gen, _ = self.predict_with_weight(
+                    X[mask],
+                    hard_or_soft=hard_or_soft,
+                    weights_average=weights_average,
+                    weights2use=self.weights_for_model,
+                    top_model=model_per_task["generalized_prediction"],
+                )
+                predictions[mask] = preds_gen
+
+        # Class-specific refinements
+        for val in [2, 3, 4]:
+            task_name = f"class_value_{val}_predictions"
+            if task_name in model_per_task:
+                mask = predictions == val
+                if mask.any():
+                    preds_cls, _ = self.predict_with_weight(
+                        X[mask],
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        weights2use=self.weights_for_model,
+                        top_model=model_per_task[task_name],
+                    )
+                    predictions[mask] = preds_cls
+
+        return predictions, y
+
     def score(self, X, y, sample_weight=None):
         """
         Evaluate the model's performance for each ID.

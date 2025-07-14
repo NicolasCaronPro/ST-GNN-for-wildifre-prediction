@@ -1714,7 +1714,17 @@ def test_dl_model(cfg,
         graphScale._set_model(model)
 
         if isinstance(model, ModelVotingPytorchAndSklearn):
-            predTensor, y = graphScale.predict_model_voting_pytorch(test_dataset_dept, model.feature_names, target_name, False, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model)
+            predTensor, y = graphScale.predict_model_voting_pytorch(
+                test_dataset_dept,
+                model.feature_names,
+                target_name,
+                False,
+                hard_or_soft=hard_or_soft,
+                weights_average=weights_average,
+                top_model=top_model,
+                model_per_task=None,
+                generalized_departement=None,
+            )
         else:
             test_loader = model.create_test_loader(graphScale, test_dataset_dept)
 
