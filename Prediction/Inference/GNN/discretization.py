@@ -1263,35 +1263,63 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             )
 
             # Application du fit et prédictions
+            ids_train = np.stack([
+                train_dataset_['month_non_encoder'].values,
+                train_dataset_['graph_id'].values,
+            ], axis=1)
+
             obj.fit(
                 train_dataset_['nbsinister'].values,
                 train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
             )
 
             train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
             val_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
             test_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
 
-            train_dataset_[train_col] = obj.predict(
+            pred_train = obj.predict(
                 train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
+            )
+            train_dataset_[train_col] = xr.DataArray(
+                pred_train,
+                dims=train_dataset_['nbsinister'].dims,
+                coords=train_dataset_['nbsinister'].coords,
             )
 
-            val_dataset_[val_col] = obj.predict(
+            ids_val = np.stack([
+                val_dataset_['month_non_encoder'].values,
+                val_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_val = obj.predict(
                 val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                val_dataset_['nbsinister'].values,
                 val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_val,
             )
-            test_dataset_[test_col] = obj.predict(
+            val_dataset_[val_col] = xr.DataArray(
+                pred_val,
+                dims=val_dataset_['nbsinister'].dims,
+                coords=val_dataset_['nbsinister'].coords,
+            )
+            ids_test = np.stack([
+                test_dataset_['month_non_encoder'].values,
+                test_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_test = obj.predict(
                 test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                test_dataset_['nbsinister'].values,
                 test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_test,
+            )
+            test_dataset_[test_col] = xr.DataArray(
+                pred_test,
+                dims=test_dataset_['nbsinister'].dims,
+                coords=test_dataset_['nbsinister'].coords,
             )
 
             # Stockage des résultats
@@ -1324,35 +1352,63 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             )
 
             # Application du fit et prédictions
+            ids_train = np.stack([
+                train_dataset_['month_non_encoder'].values,
+                train_dataset_['graph_id'].values,
+            ], axis=1)
+
             obj.fit(
                 train_dataset_['nbsinister'].values,
                 train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
             )
 
             train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
             val_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
             test_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
 
-            train_dataset_[train_col] = obj.predict(
+            pred_train = obj.predict(
                 train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
+            )
+            train_dataset_[train_col] = xr.DataArray(
+                pred_train,
+                dims=train_dataset_['nbsinister'].dims,
+                coords=train_dataset_['nbsinister'].coords,
             )
 
-            val_dataset_[val_col] = obj.predict(
+            ids_val = np.stack([
+                val_dataset_['month_non_encoder'].values,
+                val_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_val = obj.predict(
                 val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                val_dataset_['nbsinister'].values,
                 val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_val,
             )
-            test_dataset_[test_col] = obj.predict(
+            val_dataset_[val_col] = xr.DataArray(
+                pred_val,
+                dims=val_dataset_['nbsinister'].dims,
+                coords=val_dataset_['nbsinister'].coords,
+            )
+            ids_test = np.stack([
+                test_dataset_['month_non_encoder'].values,
+                test_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_test = obj.predict(
                 test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                test_dataset_['nbsinister'].values,
                 test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_test,
+            )
+            test_dataset_[test_col] = xr.DataArray(
+                pred_test,
+                dims=test_dataset_['nbsinister'].dims,
+                coords=test_dataset_['nbsinister'].coords,
             )
 
             # Stockage des résultats
@@ -1376,11 +1432,16 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             )
 
             # Application du fit et prédictions
+            ids_train = np.stack([
+                train_dataset_['month_non_encoder'].values,
+                train_dataset_['graph_id'].values,
+            ], axis=1)
+
             obj.fit(
                 train_dataset_['nbsinister'].values,
                 train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
             )
 
             train_dataset_[train_col] = obj.predict(
@@ -1438,24 +1499,47 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             val_col = f"nbsinister-MinMax-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
             test_col = f"nbsinister-MinMax-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
 
-            train_dataset_[train_col] = obj.predict(
+            pred_train = obj.predict(
                 train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                train_dataset_['nbsinister'].values,
                 train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_train,
+            )
+            train_dataset_[train_col] = xr.DataArray(
+                pred_train,
+                dims=train_dataset_['nbsinister'].dims,
+                coords=train_dataset_['nbsinister'].coords,
             )
 
-            val_dataset_[val_col] = obj.predict(
+            ids_val = np.stack([
+                val_dataset_['month_non_encoder'].values,
+                val_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_val = obj.predict(
                 val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                val_dataset_['nbsinister'].values,
                 val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_val,
             )
-            test_dataset_[test_col] = obj.predict(
+            val_dataset_[val_col] = xr.DataArray(
+                pred_val,
+                dims=val_dataset_['nbsinister'].dims,
+                coords=val_dataset_['nbsinister'].coords,
+            )
+            ids_test = np.stack([
+                test_dataset_['month_non_encoder'].values,
+                test_dataset_['graph_id'].values,
+            ], axis=1)
+            pred_test = obj.predict(
                 test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
+                test_dataset_['nbsinister'].values,
                 test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
+                ids_test,
+            )
+            test_dataset_[test_col] = xr.DataArray(
+                pred_test,
+                dims=test_dataset_['nbsinister'].dims,
+                coords=test_dataset_['nbsinister'].coords,
             )
 
             # Stockage des résultats
@@ -1509,23 +1593,17 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         test_dataset = test_dataset_
     else:
         def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
-            """
-            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
-            :param original_dataset: DataFrame original
-            :param updated_dataset: DataFrame avec les index et colonnes à joindre
-            :param new_cols: Liste des colonnes à ajouter
-            :return: DataFrame mis à jour avec les nouvelles colonnes
-            """
-            # Joindre les deux DataFrames sur leurs index
-            original_dataset.reset_index(drop=True, inplace=True)
-            updated_dataset.reset_index(drop=True, inplace=True)
+            """Join two ``xarray`` datasets on ``graph_id``/``date`` and append new columns."""
+            orig_df = original_dataset.to_dataframe().reset_index()
+            upd_df = updated_dataset.to_dataframe().reset_index()
 
-            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
-                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
-                on=['graph_id', 'date'],
-                how='left'
+            joined = orig_df.set_index(["graph_id", "date"]).join(
+                upd_df.set_index(["graph_id", "date"])[new_cols],
+                on=["graph_id", "date"],
+                how="left"
             ).reset_index()
-            return joined_dataset
+
+            return xr.Dataset.from_dataframe(joined)
 
         # Mise à jour des datasets
         train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
