@@ -38,6 +38,7 @@ from sklearn.preprocessing import MinMaxScaler, normalize
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from shapely.geometry import box
+import xarray as xr
 from skimage import morphology
 from skimage.segmentation import watershed
 from scipy.interpolate import interp1d
@@ -2058,3 +2059,214 @@ def read_object(filename: str, path : Path):
         print(f'{path / filename} not found')
         return None
     return pickle.load(open(path / filename, 'rb'))
+
+
+############################### Raster loaders #################################
+
+def _expand_static(data: np.ndarray, n_dates: int) -> np.ndarray:
+    """Expand a static raster to have a date dimension."""
+    if data.ndim == 2:
+        return np.repeat(data[..., np.newaxis], n_dates, axis=2)
+    if data.ndim == 3:
+        return np.repeat(data[..., np.newaxis], n_dates, axis=3)
+    return data
+
+
+def load_rasterise_meteo(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load meteo rasters produced by ``rasterise_meteo_data`` into an xarray."""
+    data_vars = {}
+    lat, lon = None, None
+    for file in sorted(dir_raster.glob("*raw.pkl")):
+        with open(file, "rb") as f:
+            values = pickle.load(f)
+        var = file.stem.replace("raw", "")
+        if lat is None:
+            lat = np.arange(values.shape[0])
+            lon = np.arange(values.shape[1])
+        data_vars[var] = (("latitude", "longitude", "date"), values)
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_cosia(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load COSIA rasters and broadcast them on the date dimension."""
+    cosia = pickle.load(open(dir_raster / "cosia.pkl", "rb"))
+    cosia_landcover = pickle.load(open(dir_raster / "cosia_landcover.pkl", "rb"))
+    cosia_influence = pickle.load(open(dir_raster / "cosia_influence.pkl", "rb"))
+
+    cosia = _expand_static(cosia, len(dates))
+    cosia_landcover = _expand_static(cosia_landcover, len(dates))
+    cosia_influence = _expand_static(cosia_influence, len(dates))
+
+    lat = np.arange(cosia.shape[1])
+    lon = np.arange(cosia.shape[2])
+    band = np.arange(cosia.shape[0])
+
+    data_vars = {
+        "cosia": (("band", "latitude", "longitude", "date"), cosia),
+        "cosia_landcover": (("latitude", "longitude", "date"), cosia_landcover),
+        "cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
+    }
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_corine(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load CORINE rasters into an xarray structure."""
+    corine = pickle.load(open(dir_raster / "corine.pkl", "rb"))
+    corine_land = pickle.load(open(dir_raster / "corine_landcover.pkl", "rb"))
+    corine_inf = pickle.load(open(dir_raster / "corine_influence.pkl", "rb"))
+
+    corine = _expand_static(corine, len(dates))
+    corine_land = _expand_static(corine_land, len(dates))
+    corine_inf = _expand_static(corine_inf, len(dates))
+
+    lat = np.arange(corine.shape[1])
+    lon = np.arange(corine.shape[2])
+    band = np.arange(corine.shape[0])
+
+    data_vars = {
+        "corine": (("band", "latitude", "longitude", "date"), corine),
+        "corine_landcover": (("latitude", "longitude", "date"), corine_land),
+        "corine_influence": (("band", "latitude", "longitude", "date"), corine_inf),
+    }
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_elevation(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load elevation raster and expand it across dates."""
+    elevation = pickle.load(open(dir_raster / "elevation.pkl", "rb"))
+    elevation = _expand_static(elevation, len(dates))
+
+    lat = np.arange(elevation.shape[0])
+    lon = np.arange(elevation.shape[1])
+
+    data_vars = {
+        "elevation": (("latitude", "longitude", "date"), elevation),
+    }
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_population(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load population raster and expand it across dates."""
+    population = pickle.load(open(dir_raster / "population.pkl", "rb"))
+    population = _expand_static(population, len(dates))
+
+    lat = np.arange(population.shape[0])
+    lon = np.arange(population.shape[1])
+
+    data_vars = {"population": (("latitude", "longitude", "date"), population)}
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_vigicrues(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load vigicrues rasters (12h and 16h) into an xarray."""
+    data_vars = {}
+    lat, lon = None, None
+    for file in sorted(dir_raster.glob("vigicrues*.pkl")):
+        values = pickle.load(open(file, "rb"))
+        if lat is None:
+            lat = np.arange(values.shape[0])
+            lon = np.arange(values.shape[1])
+        data_vars[file.stem] = ("latitude", "longitude", "date"), values
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_air_quality(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load air quality rasters produced by ``rasterise_air_qualite``."""
+    data_vars = {}
+    lat, lon = None, None
+    for file in sorted(dir_raster.glob("*raw.pkl")):
+        if any(file.stem.startswith(prefix) for prefix in [
+            "NO2", "O3", "PM10", "PM25", "NO216", "O316", "PM1016", "PM2516"]):
+            values = pickle.load(open(file, "rb"))
+            if lat is None:
+                lat = np.arange(values.shape[0])
+                lon = np.arange(values.shape[1])
+            data_vars[file.stem.replace("raw", "")] = (
+                "latitude",
+                "longitude",
+                "date",
+            ), values
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_sat(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load Sentinel satellite rasters."""
+    sentinel = pickle.load(open(dir_raster / "sentinel.pkl", "rb"))
+
+    lat = np.arange(sentinel.shape[1])
+    lon = np.arange(sentinel.shape[2])
+    band = np.arange(sentinel.shape[0])
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    data_vars = {"sentinel": (("band", "latitude", "longitude", "date"), sentinel)}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_argile(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load argile raster and expand across dates."""
+    argile = pickle.load(open(dir_raster / "argile.pkl", "rb"))
+    argile = _expand_static(argile, len(dates))
+
+    lat = np.arange(argile.shape[0])
+    lon = np.arange(argile.shape[1])
+
+    data_vars = {"argile": (("latitude", "longitude", "date"), argile)}
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_foret(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load forest rasters and broadcast them on the date dimension."""
+    foret = pickle.load(open(dir_raster / "foret.pkl", "rb"))
+    foret_land = pickle.load(open(dir_raster / "foret_landcover.pkl", "rb"))
+    foret_inf = pickle.load(open(dir_raster / "foret_influence.pkl", "rb"))
+
+    foret = _expand_static(foret, len(dates))
+    foret_land = _expand_static(foret_land, len(dates))
+    foret_inf = _expand_static(foret_inf, len(dates))
+
+    lat = np.arange(foret.shape[1])
+    lon = np.arange(foret.shape[2])
+    band = np.arange(foret.shape[0])
+
+    data_vars = {
+        "foret": (("band", "latitude", "longitude", "date"), foret),
+        "foret_landcover": (("latitude", "longitude", "date"), foret_land),
+        "foret_influence": (("band", "latitude", "longitude", "date"), foret_inf),
+    }
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_nappes(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load groundwater level rasters into an xarray."""
+    data_vars = {}
+    lat, lon = None, None
+    for var in ["niveau_nappe_eau", "profondeur_nappe"]:
+        file = dir_raster / f"{var}.pkl"
+        if not file.is_file():
+            continue
+        values = pickle.load(open(file, "rb"))
+        if lat is None:
+            lat = np.arange(values.shape[0])
+            lon = np.arange(values.shape[1])
+        data_vars[var] = (("latitude", "longitude", "date"), values)
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)

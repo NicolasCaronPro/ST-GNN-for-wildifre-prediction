@@ -8,6 +8,10 @@ from bs4 import BeautifulSoup
 import io
 import argparse
 import pytz
+from pathlib import Path
+import pickle
+import numpy as np
+import xarray as xr
 
 ############################### Logger #####################################
 
@@ -23,6 +27,7 @@ streamHandler = logging.StreamHandler(stream=sys.stdout)
 streamHandler.setFormatter(logFormatter)
 logger.addHandler(streamHandler)
 ################################ Database ####################################
+
 
 class GenerateDatabase():
     def __init__(self, departement,
