@@ -40,6 +40,7 @@ from arborescence import *
 from array_fet import *
 import geopandas as gpd
 import pandas as pd
+import xarray as xr
 from dtaidistance import dtw
 from sklearn.cluster import DBSCAN
 from sklearn.neighbors import NearestNeighbors
@@ -1044,7 +1045,9 @@ def compare_experiment(departements, scales, nb_attempts, n_reduce_classes, base
             exp_name.append(f'{base}/s{scale}_a{nb_attempt}_r{n_reduce_class}')
 
     if len(corr_exp) > 0:
-        df = pd.DataFrame(index=np.arange(len(corr_exp)))
-        df['name'] = exp_name
-        df[all_features_name] = corr_exp
-        save_object(df, f'{name_output}_{method}.pkl', path)
+        data_vars = {'name': ('experiment', exp_name)}
+        for i, fet in enumerate(all_features_name):
+            data_vars[fet] = ('experiment', [c[i] for c in corr_exp])
+
+        ds = xr.Dataset(data_vars)
+        save_object(ds, f'{name_output}_{method}.pkl', path)
