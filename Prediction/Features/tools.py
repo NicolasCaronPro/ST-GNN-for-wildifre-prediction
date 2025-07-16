@@ -38,6 +38,7 @@ from sklearn.preprocessing import MinMaxScaler, normalize
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
 from shapely.geometry import box
+import xarray as xr
 from skimage import morphology
 from skimage.segmentation import watershed
 from scipy.interpolate import interp1d
@@ -2058,3 +2059,79 @@ def read_object(filename: str, path : Path):
         print(f'{path / filename} not found')
         return None
     return pickle.load(open(path / filename, 'rb'))
+
+
+############################### Raster loaders #################################
+
+def _expand_static(data: np.ndarray, n_dates: int) -> np.ndarray:
+    """Expand a static raster to have a date dimension."""
+    if data.ndim == 2:
+        return np.repeat(data[..., np.newaxis], n_dates, axis=2)
+    if data.ndim == 3:
+        return np.repeat(data[..., np.newaxis], n_dates, axis=3)
+    return data
+
+
+def load_rasterise_meteo(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load meteo rasters produced by ``rasterise_meteo_data`` into an xarray."""
+    data_vars = {}
+    lat, lon = None, None
+    for file in sorted(dir_raster.glob("*raw.pkl")):
+        with open(file, "rb") as f:
+            values = pickle.load(f)
+        var = file.stem.replace("raw", "")
+        if lat is None:
+            lat = np.arange(values.shape[0])
+            lon = np.arange(values.shape[1])
+        data_vars[var] = (("latitude", "longitude", "date"), values)
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_cosia(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load COSIA rasters and broadcast them on the date dimension."""
+    cosia = pickle.load(open(dir_raster / "cosia.pkl", "rb"))
+    cosia_landcover = pickle.load(open(dir_raster / "cosia_landcover.pkl", "rb"))
+    cosia_influence = pickle.load(open(dir_raster / "cosia_influence.pkl", "rb"))
+
+    cosia = _expand_static(cosia, len(dates))
+    cosia_landcover = _expand_static(cosia_landcover, len(dates))
+    cosia_influence = _expand_static(cosia_influence, len(dates))
+
+    lat = np.arange(cosia.shape[1])
+    lon = np.arange(cosia.shape[2])
+    band = np.arange(cosia.shape[0])
+
+    data_vars = {
+        "cosia": ("band", "latitude", "longitude", "date"), cosia,
+        "cosia_landcover": ("latitude", "longitude", "date"), cosia_landcover,
+        "cosia_influence": ("band", "latitude", "longitude", "date"), cosia_influence,
+    }
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+
+def load_raster_corine(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Load CORINE rasters into an xarray structure."""
+    corine = pickle.load(open(dir_raster / "corine.pkl", "rb"))
+    corine_land = pickle.load(open(dir_raster / "corine_landcover.pkl", "rb"))
+    corine_inf = pickle.load(open(dir_raster / "corine_influence.pkl", "rb"))
+
+    corine = _expand_static(corine, len(dates))
+    corine_land = _expand_static(corine_land, len(dates))
+    corine_inf = _expand_static(corine_inf, len(dates))
+
+    lat = np.arange(corine.shape[1])
+    lon = np.arange(corine.shape[2])
+    band = np.arange(corine.shape[0])
+
+    data_vars = {
+        "corine": ("band", "latitude", "longitude", "date"), corine,
+        "corine_landcover": ("latitude", "longitude", "date"), corine_land,
+        "corine_influence": ("band", "latitude", "longitude", "date"), corine_inf,
+    }
+
+    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
