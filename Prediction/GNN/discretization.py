@@ -1,5 +1,6 @@
 from GNN.statistical_model import *
 from scipy.ndimage import gaussian_filter1d
+import xarray as xr
 
 
 class KMeansRisk:
@@ -969,6 +970,13 @@ def class_window_max(dataset, group_col, column, shifts):
     return dataset
 
 def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph):
+    """Post process datasets using xarray inputs."""
+    if not isinstance(train_dataset, xr.Dataset):
+        train_dataset = xr.Dataset.from_dataframe(train_dataset)
+    if not isinstance(val_dataset, xr.Dataset):
+        val_dataset = xr.Dataset.from_dataframe(val_dataset)
+    if not isinstance(test_dataset, xr.Dataset):
+        test_dataset = xr.Dataset.from_dataframe(test_dataset)
 
     graph_method = graph.graph_method
 
@@ -979,9 +987,11 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         val_dataset_ = val_dataset.copy(deep=True)
         test_dataset_ = test_dataset.copy(deep=True)
     else:
-        def keep_one_per_pair(dataset):
-            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
-            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+        def keep_one_per_pair(ds):
+            """Drop duplicate (graph_id, date) combinations in an xarray Dataset."""
+            df = ds.to_dataframe().reset_index()
+            df = df.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+            return xr.Dataset.from_dataframe(df)
 
         train_dataset_ = keep_one_per_pair(train_dataset)
         val_dataset_ = keep_one_per_pair(val_dataset)
@@ -1516,17 +1526,35 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     col_raw = 'nbsinister-kmeans-5-Class-Dept'
     col_derived = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
 
-    train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
-    train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0
-    train_dataset_['potential_risk'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+    train_union = xr.apply_ufunc(np.maximum,
+                                 train_dataset_[col_derived],
+                                 train_dataset_[col_raw])
+    mask_train = (train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)
+    train_union = train_union.where(~mask_train, 0)
+    train_dataset_['union'] = train_union
+    train_dataset_['potential_risk'] = xr.apply_ufunc(np.maximum,
+                                                     train_dataset_[col_derived],
+                                                     train_dataset_[col_raw])
 
-    test_dataset_['union'] = np.maximum(test_dataset_[col_derived].values, test_dataset_[col_raw].values)
-    test_dataset_.loc[test_dataset_[(test_dataset_[col_derived] > 0) & (test_dataset_[col_raw] == 0)].index, 'union'] = 0
-    test_dataset_['potential_risk'] = np.maximum(test_dataset_[col_derived].values, test_dataset_[col_raw].values)
+    test_union = xr.apply_ufunc(np.maximum,
+                                test_dataset_[col_derived],
+                                test_dataset_[col_raw])
+    mask_test = (test_dataset_[col_derived] > 0) & (test_dataset_[col_raw] == 0)
+    test_union = test_union.where(~mask_test, 0)
+    test_dataset_['union'] = test_union
+    test_dataset_['potential_risk'] = xr.apply_ufunc(np.maximum,
+                                                    test_dataset_[col_derived],
+                                                    test_dataset_[col_raw])
 
-    val_dataset_['union'] = np.maximum(val_dataset_[col_derived].values, val_dataset_[col_raw].values)
-    val_dataset_.loc[val_dataset_[(val_dataset_[col_derived] > 0) & (val_dataset_[col_raw] == 0)].index, 'union'] = 0
-    val_dataset_['potential_risk'] = np.maximum(val_dataset_[col_derived].values, val_dataset_[col_raw].values)
+    val_union = xr.apply_ufunc(np.maximum,
+                               val_dataset_[col_derived],
+                               val_dataset_[col_raw])
+    mask_val = (val_dataset_[col_derived] > 0) & (val_dataset_[col_raw] == 0)
+    val_union = val_union.where(~mask_val, 0)
+    val_dataset_['union'] = val_union
+    val_dataset_['potential_risk'] = xr.apply_ufunc(np.maximum,
+                                                   val_dataset_[col_derived],
+                                                   val_dataset_[col_raw])
 
     new_cols.append('union')
     new_cols.append('potential_risk')
@@ -1541,30 +1569,27 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         test_dataset = test_dataset_
     else:
         def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
-            """
-            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
-            :param original_dataset: DataFrame original
-            :param updated_dataset: DataFrame avec les index et colonnes à joindre
-            :param new_cols: Liste des colonnes à ajouter
-            :return: DataFrame mis à jour avec les nouvelles colonnes
-            """
-            # Joindre les deux DataFrames sur leurs index
-            original_dataset.reset_index(drop=True, inplace=True)
-            updated_dataset.reset_index(drop=True, inplace=True)
+            """Join two xarray datasets on graph_id/date and append new columns."""
+            orig_df = original_dataset.to_dataframe().reset_index()
+            upd_df = updated_dataset.to_dataframe().reset_index()
 
-            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
-                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
+            joined = orig_df.set_index(['graph_id', 'date']).join(
+                upd_df.set_index(['graph_id', 'date'])[new_cols],
                 on=['graph_id', 'date'],
                 how='left'
             ).reset_index()
-            return joined_dataset
+            return xr.Dataset.from_dataframe(joined)
 
         # Mise à jour des datasets
         train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
         val_dataset = join_on_index_with_new_cols(val_dataset, val_dataset_, new_cols)
         test_dataset = join_on_index_with_new_cols(test_dataset, test_dataset_, new_cols)
 
-    return res, train_dataset, val_dataset, test_dataset, new_cols
+    train_ds = train_dataset
+    val_ds = val_dataset
+    test_ds = test_dataset
+
+    return res, train_ds, val_ds, test_ds, new_cols
 
 class KSGraphDiscretizer(BaseEstimator):
     def __init__(self, thresholds_ks, score_col='ks_stat', thresh_col='optimal_score', dir_output=Path('./')):
@@ -1802,6 +1827,11 @@ def discretization(method, test_window, y_pred, pred_max, pred_min, col, target_
         raise ValueError(f'{method} unknow')
 
 def post_process_model_inference(train_dataset, test_dataset, dir_post_process, graph):
+    """Post process inference datasets with xarray inputs."""
+    if not isinstance(train_dataset, xr.Dataset):
+        train_dataset = xr.Dataset.from_dataframe(train_dataset)
+    if not isinstance(test_dataset, xr.Dataset):
+        test_dataset = xr.Dataset.from_dataframe(test_dataset)
 
     graph_method = graph.graph_method
 
@@ -1811,9 +1841,10 @@ def post_process_model_inference(train_dataset, test_dataset, dir_post_process, 
         train_dataset_ = train_dataset.copy(deep=True)
         test_dataset_ = test_dataset.copy(deep=True)
     else:
-        def keep_one_per_pair(dataset):
-            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
-            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+        def keep_one_per_pair(ds):
+            df = ds.to_dataframe().reset_index()
+            df = df.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+            return xr.Dataset.from_dataframe(df)
 
         train_dataset_ = keep_one_per_pair(train_dataset)
         test_dataset_ = keep_one_per_pair(test_dataset)
@@ -1944,9 +1975,15 @@ def post_process_model_inference(train_dataset, test_dataset, dir_post_process, 
     col_raw = 'nbsinister-kmeans-5-Class-Dept'
     col_derived = 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized'
 
-    train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
-    train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0
-    train_dataset_['potential_risk'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
+    train_union = xr.apply_ufunc(np.maximum,
+                                 train_dataset_[col_derived],
+                                 train_dataset_[col_raw])
+    mask_train = (train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)
+    train_union = train_union.where(~mask_train, 0)
+    train_dataset_['union'] = train_union
+    train_dataset_['potential_risk'] = xr.apply_ufunc(np.maximum,
+                                                     train_dataset_[col_derived],
+                                                     train_dataset_[col_raw])
 
     new_cols.append('union')
     new_cols.append('potential_risk')
@@ -1959,26 +1996,21 @@ def post_process_model_inference(train_dataset, test_dataset, dir_post_process, 
         test_dataset = test_dataset_
     else:
         def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
-            """
-            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
-            :param original_dataset: DataFrame original
-            :param updated_dataset: DataFrame avec les index et colonnes à joindre
-            :param new_cols: Liste des colonnes à ajouter
-            :return: DataFrame mis à jour avec les nouvelles colonnes
-            """
-            # Joindre les deux DataFrames sur leurs index
-            original_dataset.reset_index(drop=True, inplace=True)
-            updated_dataset.reset_index(drop=True, inplace=True)
+            """Join two xarray datasets on graph_id/date and append new columns."""
+            orig_df = original_dataset.to_dataframe().reset_index()
+            upd_df = updated_dataset.to_dataframe().reset_index()
 
-            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
-                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
+            joined = orig_df.set_index(['graph_id', 'date']).join(
+                upd_df.set_index(['graph_id', 'date'])[new_cols],
                 on=['graph_id', 'date'],
                 how='left'
             ).reset_index()
-            return joined_dataset
+            return xr.Dataset.from_dataframe(joined)
 
         # Mise à jour des datasets
         train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
         test_dataset = join_on_index_with_new_cols(test_dataset, test_dataset_, new_cols)
 
-    return res, train_dataset, test_dataset, new_cols
+    train_ds = train_dataset
+    test_ds = test_dataset
+    return res, train_ds, test_ds, new_cols

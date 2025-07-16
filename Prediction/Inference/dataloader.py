@@ -2,6 +2,7 @@ from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
 from tools_inference import *
+import xarray as xr
 
 #########################################################################################################
 #                                                                                                       #
@@ -155,6 +156,8 @@ class ReadGraphDataset_2D(Dataset):
 
 #################################### NUMPY #############################################################
 def get_train_val_test_set(graphScale, df, train_features, train_departements, prefix, dir_output, args):
+    if isinstance(df, xr.Dataset):
+        df = df.to_dataframe().reset_index()
     # Input config
     maxDate = args.maxDate
     trainDate = args.trainDate
@@ -222,7 +225,11 @@ def get_train_val_test_set(graphScale, df, train_features, train_departements, p
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
 
-    return train_dataset, val_dataset, test_dataset, test_dataset_unscale, prefix, features_selected
+    train_ds = xr.Dataset.from_dataframe(train_dataset)
+    val_ds = xr.Dataset.from_dataframe(val_dataset)
+    test_ds = xr.Dataset.from_dataframe(test_dataset)
+
+    return train_ds, val_ds, test_ds, test_dataset_unscale, prefix, features_selected
 
 #########################################################################################################
 #                                                                                                       #

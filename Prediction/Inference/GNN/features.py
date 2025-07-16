@@ -6,6 +6,8 @@ from weigh_predictor import Predictor
 import itertools
 from GNN.tools import *
 import convertdate
+import xarray as xr
+import pandas as pd
 
 def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
     # mean max min and std for scale > 0 else value
@@ -1548,14 +1550,17 @@ def add_fire_zone_or_not(df, scale):
     return df
 
 def add_past_risk(df, col_pas):
-    ids_graph = df['graph_id'].unique()
-    df['Past_risk'] = 0
-    for id in ids_graph:
-        index = df[df['graph_id'] == id].index
-        df.loc[index, 'Past_risk'] = df.loc[index, col_pas].shift(1)
+    """Add a shifted risk column computed on xarray objects."""
+    if isinstance(df, pd.DataFrame):
+        ds = xr.Dataset.from_dataframe(df)
+    else:
+        ds = df
 
-    df.dropna(subset='Past_risk', inplace=True)
-    return df
+    ds = ds.sortby(['graph_id', 'date'])
+    shifted = ds[col_pas].groupby('graph_id').shift(sample=1, fill_value=0)
+    ds['Past_risk'] = shifted
+    ds = ds.dropna(dim='sample', subset='Past_risk')
+    return ds
 
 def raster_past_risk(df, raster_name, dir_raster, dir_output):
     udepts = np.unique(df['departement'].values)
