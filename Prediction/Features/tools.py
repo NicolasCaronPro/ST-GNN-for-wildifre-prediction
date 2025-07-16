@@ -2104,9 +2104,9 @@ def load_raster_cosia(dir_raster: Path, dates: list) -> xr.Dataset:
     band = np.arange(cosia.shape[0])
 
     data_vars = {
-        "cosia": (("band", "latitude", "longitude", "date"), cosia),
-        "cosia_landcover": (("latitude", "longitude", "date"), cosia_landcover),
-        "cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
+        "cosia": ("band", "latitude", "longitude", "date"), cosia,
+        "cosia_landcover": ("latitude", "longitude", "date"), cosia_landcover,
+        "cosia_influence": ("band", "latitude", "longitude", "date"), cosia_influence,
     }
 
     coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
@@ -2128,9 +2128,9 @@ def load_raster_corine(dir_raster: Path, dates: list) -> xr.Dataset:
     band = np.arange(corine.shape[0])
 
     data_vars = {
-        "corine": (("band", "latitude", "longitude", "date"), corine),
-        "corine_landcover": (("latitude", "longitude", "date"), corine_land),
-        "corine_influence": (("band", "latitude", "longitude", "date"), corine_inf),
+        "corine": ("band", "latitude", "longitude", "date"), corine,
+        "corine_landcover": ("latitude", "longitude", "date"), corine_land,
+        "corine_influence": ("band", "latitude", "longitude", "date"), corine_inf,
     }
 
     coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
