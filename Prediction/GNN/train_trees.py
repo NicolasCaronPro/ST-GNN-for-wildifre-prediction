@@ -1,4 +1,3 @@
-from operator import index
 import sys
 import os
 
@@ -10,65 +9,90 @@ parent_dir = os.path.dirname(current_dir)
 
 # Insert the parent directory into sys.path
 sys.path.insert(0, parent_dir)
-
 from GNN.construct import *
 import geopandas as gpd
-from GNN.config_parser import ConfigParser
 import argparse
+
+########################### Input Arg ######################################
+
 parser = argparse.ArgumentParser(
-    prog="Train",
-    description="Create graph and database according to config file",
+    prog='Train',
+    description='Create graph and database according to config.py and tained model',
 )
-parser.add_argument("-c", "--config", default="config/config.json", help="Path to config file")
+parser.add_argument('-n', '--name', type=str, help='Name of the experiment')
+parser.add_argument('-e', '--encoder', type=str, help='Create encoder model')
+parser.add_argument('-s', '--sinister', type=str, help='Sinister type')
+parser.add_argument('-p', '--point', type=str, help='Construct points')
+parser.add_argument('-np', '--nbpoint', type=str, help='Number of points')
+parser.add_argument('-d', '--database', type=str, help='Do database')
+parser.add_argument('-g', '--graph', type=str, help='Construct graph')
+parser.add_argument('-mxd', '--maxDate', type=str, help='Limit train and validation date')
+parser.add_argument('-mxdv', '--trainDate', type=str, help='Limit training date')
+parser.add_argument('-f', '--featuresSelection', type=str, help='Do features selection')
+parser.add_argument('-dd', '--database2D', type=str, help='Do 2D database')
+parser.add_argument('-sc', '--scale', type=str, help='Scale')
+parser.add_argument('-dataset', '--dataset', type=str, help='Dataset to use')
+parser.add_argument('-nf', '--NbFeatures', type=str, help='Number de Features')
+parser.add_argument('-of', '--optimizeFeature', type=str, help='Launch test')
+parser.add_argument('-gs', '--GridSearch', type=str, help='GridSearch')
+parser.add_argument('-bs', '--BayesSearch', type=str, help='BayesSearch')
+parser.add_argument('-test', '--doTest', type=str, help='Launch test')
+parser.add_argument('-train', '--doTrain', type=str, help='Launch train')
+parser.add_argument('-r', '--resolution', type=str, help='Resolution of image')
+parser.add_argument('-pca', '--pca', type=str, help='Apply PCA')
+parser.add_argument('-kmeans', '--KMEANS', type=str, help='Apply kmeans preprocessing')
+parser.add_argument('-ncluster', '--ncluster', type=str, help='Number of cluster for kmeans')
+parser.add_argument('-shift', '--shift', type=str, help='Shift of kmeans', default='0')
+parser.add_argument('-thresh_kmeans', '--thresh_kmeans', type=str, help='Thresh of fr to remove sinister', default='0')
+parser.add_argument('-k_days', '--k_days', type=str, help='k_days')
+parser.add_argument('-days_in_futur', '--days_in_futur', type=str, help='days_in_futur')
+parser.add_argument('-scaling', '--scaling', type=str, help='scaling methods')
+parser.add_argument('-graphConstruct', '--graphConstruct', type=str, help='')
+parser.add_argument('-sinisterEncoding', '--sinisterEncoding', type=str, help='')
+parser.add_argument('-weights', '--weights', type=str, help='Type of weights')
+parser.add_argument('-top_cluster', '--top_cluster', type=str, help='Top x cluster (on 5)')
+parser.add_argument('-graph_method', '--graph_method', type=str, help='Top x cluster (on 5)', default='node')
+parser.add_argument('-training_mode', '--training_mode', type=str, help='training_mode', default='normal')
+parser.add_argument('-quick', '--quick', type=str, help='isquick', default='False')
 
 args = parser.parse_args()
-config = ConfigParser(args.config)
 
-QUICK = bool(config.get("quick", False))
+QUICK = args.quick == 'True'
 
 # Input config
-dataset_name = config.dataset
-name_exp = config.name
-maxDate = config.maxDate
-trainDate = config.trainDate
-doEncoder = bool(config.get("encoder", False))
-doPoint = bool(config.get("point", False))
-doGraph = bool(config.get("graph", False))
-doDatabase = bool(config.get("database", False))
-do2D = bool(config.get("database2D", False))
-doFet = bool(config.featuresSelection)
-training_mode = bool(config.optimizeFeature)
-doTest = bool(config.doTest)
-doTrain = bool(config.doTrain)
-nbfeatures = config.NbFeatures
-sinister = config.sinister
-values_per_class = config.nbpoint
-
-# Hyperparameters
-if config.epochs is not None:
-    epochs = config.epochs
-if config.batch_size is not None:
-    batch_size = config.batch_size
-if config.lr is not None:
-    lr = config.lr
-scale = int(config.scale) if config.scale != 'departement' else config.scale
-resolution = config.resolution
-doPCA = bool(config.get("pca", False))
-doKMEANS = bool(config.KMEANS)
-ncluster = int(config.get("ncluster", 0))
-do_grid_search = bool(config.GridSearch)
-do_bayes_search = bool(config.BayesSearch)
-k_days = int(config.k_days) # Size of the time series sequence use by DL models
-days_in_futur = int(config.days_in_futur) # The target time validation
-scaling = config.scaling
-graph_construct = config.graphConstruct
-sinister_encoding = config.sinisterEncoding
-weights_version = config.get("weights")
-top_cluster = config.top_cluster
-graph_method = config.graph_method
-shift = config.shift
-thresh_kmeans = config.thresh_kmeans
-training_mode = config.training_mode
+dataset_name = args.dataset
+name_exp = args.name
+maxDate = args.maxDate
+trainDate = args.trainDate
+doEncoder = args.encoder == "True"
+doPoint = args.point == "True"
+doGraph = args.graph == "True"
+doDatabase = args.database == "True"
+do2D = args.database2D == "True"
+doFet = args.featuresSelection == "True"
+optimize_feature = args.optimizeFeature == "True"
+doTest = args.doTest == "True"
+doTrain = args.doTrain == "True"
+nbfeatures = args.NbFeatures
+sinister = args.sinister
+values_per_class = args.nbpoint
+scale = int(args.scale) if args.scale != 'departement' else args.scale
+resolution = args.resolution
+doPCA = args.pca == 'True'
+doKMEANS = args.KMEANS == 'True'
+ncluster = int(args.ncluster)
+do_grid_search = args.GridSearch ==  'True'
+do_bayes_search = args.BayesSearch == 'True'
+days_in_futur = int(args.days_in_futur) # The target time validation
+scaling = args.scaling
+graph_construct = args.graphConstruct
+sinister_encoding = args.sinisterEncoding
+weights_version = args.weights
+top_cluster = args.top_cluster
+graph_method = args.graph_method
+shift = args.shift
+thresh_kmeans = args.thresh_kmeans
+training_mode = args.training_mode
 
 assert values_per_class == 'full'
 assert graph_method == 'node'
@@ -143,7 +167,7 @@ if not QUICK:
                                                                                         features_selected, train_departements,
                                                                                         prefix,
                                                                                         dir_output,
-                                                                                        config)
+                                                                                        args)
     if MLFLOW:
         train_dataset_ml_flow = mlflow.data.from_pandas(train_dataset)
         val_dataset_ml_flow = mlflow.data.from_pandas(val_dataset)
@@ -163,10 +187,6 @@ if not QUICK:
 
     ###################### Defined ClassRisk model ######################
 
-    dir_post_process = dir_output / 'post_process'
-
-    post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-    
     features_selected.append('Past_risk')
     features_selected.append('Past_burnedarea')
 
@@ -206,11 +226,9 @@ else:
     #val_dataset_unscale = read_object(f'df_unscaled_val_{prefix}.pkl', dir_output)
     #test_dataset_unscale = read_object(f'df_unscaled_test_{prefix}.pkl', dir_output)
 
-    features_selected = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_{k_days}_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
+    features_selected = read_object('features_importance.pkl', dir_output / 'features_importance' / f'{values_per_class}_0_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}')
     features_importance = np.asarray(features_selected)
     features_selected = list(features_importance[:,0])
-    features_selected.append('Past_risk')
-    features_selected.append(f'Past_burnedarea')
 
     if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns) or 'burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in np.unique(train_dataset.columns):
         dir_post_process = dir_output / 'post_process'
@@ -347,8 +365,8 @@ elif name_exp.find('voting') != -1:
             #('catboost_search_smote-6_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None, 1),
         ##
             #('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2', None, None, None, 1),
-            #('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None,None, 1),
-            #('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax', None, None, None, 1),
+            ('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', None, None,None, 1),
+            #('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', None, None, None, 1),
         ]
 else:
     #models = define_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico)
@@ -620,6 +638,10 @@ if doTest:
 
         ('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
         ('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
+
+        ('xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        ('catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+
         ('lg_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_l2'),
 
         ('xgboost_search_smote-2_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'),
@@ -782,7 +804,7 @@ if doTest:
     aggregated_prediction = []
     aggregated_prediction_dept = []
 
-    for dept in departements:
+    """for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:
@@ -851,7 +873,7 @@ if doTest:
 
         aggregated_prediction.append(res)
 
-        #aggregated_prediction_dept.append(res_dept)
+        #aggregated_prediction_dept.append(res_dept)"""
 
     df_metrics.rename({'index': 'Run'}, inplace=True, axis=1)
     df_metrics.reset_index(drop=True, inplace=True)

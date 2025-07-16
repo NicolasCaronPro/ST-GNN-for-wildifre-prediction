@@ -6,7 +6,6 @@ from copy import copy
 from weigh_predictor import Predictor
 from GNN.graph_structure import *
 from feature_engine.selection import SmartCorrelatedSelection
-import xarray as xr
 
 def look_for_information(graph, dataset_name : str,
                          maxDate : str,
@@ -220,7 +219,7 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
     dataset_name = args.dataset
     maxDate = args.maxDate
     trainDate = args.trainDate
-    do2D = args.database2D == "True"
+    do2D = args.database2D
     sinister = args.sinister
     scale = int(args.scale) if args.scale != 'departement' else args.scale
     resolution = args.resolution
@@ -735,25 +734,9 @@ def construct_database(
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
-
-    data_vars = {
-        'features': (('sample', 'feature'), X[:, len(ids_columns)-1:]) if X is not None else None,
-        'target': (('sample', 'target'), Y[:, len(ids_columns):])
-    }
-    coords = {
-        'sample': np.arange(Y.shape[0]),
-        'graph_id': ('sample', Y[:, graph_id_index]),
-        'id': ('sample', Y[:, id_index]),
-        'longitude': ('sample', Y[:, longitude_index]),
-        'latitude': ('sample', Y[:, latitude_index]),
-        'departement': ('sample', Y[:, departement_index]),
-        'date': ('sample', Y[:, date_index]),
-        'weight': ('sample', Y[:, weight_index])
-    }
-
-    ds = xr.Dataset(data_vars, coords=coords)
-
-    return ds, features_name
+    # Extract the training samples from Y
+    
+    return X, Y, features_name
 
 def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     nfps = []
@@ -809,58 +792,45 @@ def init(args, dir_output, script):
     ######################### Input config #############################
     dataset_name = args.dataset
     name_exp = args.name
-    maxDate = args.maxDate
-    trainDate = args.trainDate
-    doEncoder = args.encoder == "True"
-    doPoint = args.point == "True"
-    doGraph = args.graph == "True"
-    doDatabase = args.database == "True"
+    doEncoder = args.encoder
+    doPoint = args.point
+    doGraph = args.graph
+    doDatabase = args.database
     print(f'Do databse -> {args.database}')
-    do2D = args.database2D == "True"
-    doFet = args.featuresSelection == "True"
-    optimize_feature = args.optimizeFeature == "True"
-    doTest = args.doTest == "True"
-    doTrain = args.doTrain == "True"
+    do2D = args.database2D
     sinister = args.sinister
     values_per_class = args.nbpoint
     scale = int(args.scale) if args.scale != 'departement' else args.scale
     resolution = args.resolution
-    doPCA = args.pca == 'True'
-    doKMEANS = args.KMEANS == 'True'
     ncluster = int(args.ncluster)
-    nbfeatures = args.NbFeatures
-    shift = int(args.shift) 
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
-    days_in_futur = int(args.days_in_futur) # The target time validation
     dir_output = dir_output
-    scaling = args.scaling
     graph_construct = args.graphConstruct
     dataset_name = args.dataset
     sinister_encoding = args.sinisterEncoding
-    weights_version = args.weights
-    top_cluster = args.top_cluster
     graph_method = args.graph_method
-    thresh_kmeans = float(args.thresh_kmeans)
     
-    voting2normal = False
-
-    if name_exp == 'voting':
-        voting2normal = True
+    if args.likenormal:
         name_exp = 'normal'
 
-    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(name_exp)
+    all_train_dates, all_val_dates, all_test_dates = defines_train_dates(args)
+    maxDate = all_test_dates[0]
+    trainDate = all_train_dates[-1]
     ######################## Get features and train features list ######################
 
     isInference = name_exp == 'inference'
 
-    features, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
+    #features, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
+    features = args.features
+    train_features = args.train_features
+    kmeans_features = args.kmeans_features
 
     ######################## Get departments and train departments #######################
 
     departements, train_departements = select_departments(dataset_name, sinister)
 
     ######################## CONFIG ################################
-
+    
     if dataset_name == 'firemen2':
         two = True
         dataset_name = 'firemen'
@@ -970,7 +940,6 @@ def init(args, dir_output, script):
 
     ######################### Top database ##################################
     if 'select' in name_exp:
-        # Utiliser findall pour capturer toutes les balises présentes
         matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
         for group in matches:
             stg, edg = group[1], group[3]
@@ -1101,7 +1070,6 @@ def init(args, dir_output, script):
 
     X = X[:, len(ids_columns)-1:]
 
-    print(Y.shape, len(targets_columns + ids_columns))
     ############################## Dataframe creation ###################################
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
 
@@ -1124,14 +1092,13 @@ def init(args, dir_output, script):
     else:
         df['scale'] = scale
 
-    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
-
     ############################## Generate 2D database #######################
     
     if do2D:
         features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
                                                                     sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding, name_exp, newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
+                                                                    resolution, graph_construct, sinister_encoding, name_exp,
+                                                                    newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
     else:
         features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
 
@@ -1146,6 +1113,13 @@ def init(args, dir_output, script):
     df['risk_0_0'] = df['nbsinister'].values
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
+
+    if args.likenormal:
+        name_exp = args.name
+
+    ###################################################################################
+
+    prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
     
     trainCode = [name2int[d] for d in train_departements]
     train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
@@ -1178,6 +1152,14 @@ def init(args, dir_output, script):
             features_name, _ = get_features_name_list(scale, train_features, METHODS_SPATIAL_TRAIN)
 
         old_shape = df.shape
+
+        if 'Past_risk' in features_name:
+            features_name = [fn for fn in features_name if fn != 'Past_risk']
+            readdPastRisk = True
+        if 'Past_burnedarea' in features_name:
+            features_name = [fn for fn in features_name if fn != 'Past_burnedarea']
+            readdPastBurned = True
+
         df = remove_nan_nodes(df, features_name)
         logger.info(f'Removing nan Features DataFrame shape : {old_shape} -> {df.shape}')
 
@@ -1244,6 +1226,12 @@ def init(args, dir_output, script):
 
         check_and_create_path(dir_output / 'features_correlation')
 
+        if 'readdPastRisk' in locals():
+            features_name.append('Past_risk')
+        
+        if 'readdPastBurned' in locals():
+            features_name.append('Past_burnedarea')
+
         save_object(features_name, f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated_{name_exp}.pkl', dir_output / 'features_correlation')
         save_object(tr.correlated_feature_dict_, f'{scale}_{graphScale.base}_{graphScale.graph_method}_correlated_group_{name_exp}.pkl', dir_output  / 'features_correlation')
 
@@ -1271,7 +1259,10 @@ def init(args, dir_output, script):
 
     ############################## Round Values #####################################
 
-    df[features_name] = df[features_name].round(3)
+    for fet in features_name:
+        if fet not in list(df.columns):
+            continue
+        df[fet] = df[fet].round(3)
 
     ############################## Save dataframe and features ###################################
 
@@ -1280,19 +1271,15 @@ def init(args, dir_output, script):
 
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
-    test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
+    #test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
 
-    plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['fwi_mean'])
-    plt.savefig('test_fwi.png')
-    plt.close('all')
+    #plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['fwi_mean'])
+    #plt.savefig('test_fwi.png')
+    #plt.close('all')
 
-    plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['NDVI_mean'])
-    plt.savefig('test_NDIV.png')
-    plt.close('all')
+    #plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['NDVI_mean'])
+    #plt.savefig('test_NDIV.png')
+    #plt.close('all')
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
-
-    # Convert the final dataframe to an xarray Dataset before returning
-    ds = xr.Dataset.from_dataframe(df)
-
-    return ds, graphScale, prefix, fp, features_name
+    return df, graphScale, prefix, fp, features_name

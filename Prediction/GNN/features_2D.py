@@ -230,7 +230,7 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 assert arrayARLand is not None
                 #X[features_name.index('argile_encoder'), :, :] = encoder_argile.transform(arrayARLand.reshape(-1,1)).values.reshape(arrayARLand.shape)
                 X[features_name.index('argile_encoder'), :, :] = arrayARLand
-
+                
             if 'id_encoder' in features:
                 #logger.info('OSMNX landcover')
                 assert encoder_ids is not None

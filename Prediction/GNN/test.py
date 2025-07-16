@@ -125,24 +125,14 @@ def process_test(testname, testDate, pss, geo, testd_departement, dir_output, fe
         ps['date'] = [allDates.index(date) - 1 for date in ps.date]
         ps = ps.sort_values(by='date')
 
-        ds, features_name = construct_database(graphScale, ps, scale, k_days, departements,
+        X, Y, features_name = construct_database(graphScale, ps, scale, k_days, departements,
                                                features, sinister, dir_output, dir_train, prefix, 'test')
-
-        save_object(ds, 'dataset_'+prefix+'.pkl', dir_output)
+        
+        save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
+        save_object(X, 'X_'+prefix+'.pkl', dir_output)
     else:
-        ds = read_object('dataset_'+prefix+'.pkl', dir_output)
-        X = ds['features'].values if 'features' in ds else None
-        targets = ds['target'].values
-        id_part = np.column_stack([
-            ds['graph_id'].values,
-            ds['id'].values,
-            ds['longitude'].values,
-            ds['latitude'].values,
-            ds['departement'].values,
-            ds['date'].values,
-            ds['weight'].values
-        ])
-        Y = np.concatenate([id_part, targets], axis=1)
+        X = read_object('X_'+prefix+'.pkl', dir_output)
+        Y = read_object('Y_'+prefix+'.pkl', dir_output)
 
         graphScale._info_on_graph(X, dir_output)
 

@@ -8,6 +8,8 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
     trainDate = np.asarray([allDates.index(date) for date in trainDates])
     foret = []
     cosia = []
+    corine = []
+    route = []
     gt = []
     landcover = []
     argile_value = []
@@ -72,25 +74,45 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
         if cosia_image is not None:
             cosia_image = resize_no_dim(cosia_image, tar.shape[0], tar.shape[1])
             cosia += list(cosia_image[~np.isnan(tar[:, :, 0])])
+
+        corine_image = read_object('corine_landcover.pkl', dir_data)
+        if corine_image is not None:
+            corine_image = resize_no_dim(corine_image, tar.shape[0], tar.shape[1])
+            #plt.figure(figsize=(15,5))
+            #plt.imshow(corine_image)
+            #plt.savefig(f'{dep}_test_corine.png')
+            corine += list(corine_image[~np.isnan(tar[:, :, 0])])
+        
+        route_image = read_object('route_landcover.pkl', dir_data)
+        if route_image is not None:
+            route_image = resize_no_dim(route_image, tar.shape[0], tar.shape[1])
+            route += list(route_image[~np.isnan(tar[:, :, 0])])
         
         calendar = np.empty((tar.shape[2], stop_calendar))
         for i, date in enumerate(allDates):
-            if date not in trainDate:
+            
+            if i not in trainDate:
                 break
+            
             ddate = dt.datetime.strptime(date, '%Y-%m-%d')
             calendar[i, 0] = int(date.split('-')[1]) # month
             calendar[i, 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
             calendar[i, 2] = ddate.weekday() # dayofweek
             calendar[i, 3] = ddate.weekday() >= 5 # isweekend
             calendar[i, 4] = pendant_couvrefeux(ddate) # couvrefeux
-            calendar[i, 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+            
+            calendar[i, 5] = 1 if (
+                dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
+                or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
+            ) else 0
+            
             calendar[i, 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
             calendar[i, 7] = 1 if ddate in jours_feries else 0 # bankHolidays
             calendar[i, 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
             calendar[i, 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 # holidays
             calendar[i, 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 ) \
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0) # holidaysBorder
-            
+                
         for j in range(stop_calendar):
             calendar_array[j] += list(calendar[:, j])
 
@@ -108,6 +130,8 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
     landcover = np.asarray(landcover)
     argile_value = np.asarray(argile_value)
     cosia = np.asarray(cosia)
+    corine = np.asarray(corine)
+    route = np.asarray(route)
     calendar_array = np.asarray(calendar_array)
     geo_array = np.asarray(geo_array)
 
@@ -124,6 +148,8 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
     cluster_value = cluster_value.reshape(-1,1)
     temporalValues = temporalValues.reshape(-1,1)
     cosia = cosia.reshape(-1,1)
+    corine = corine.reshape(-1,1)
+    route = route.reshape(-1,1)
 
     logger.info(f'{spatialValues.shape, temporalValues.shape, foret.shape, landcover.shape, calendar_array.shape, geo_array.shape}')
 
@@ -170,6 +196,16 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
         encoder = CatBoostEncoder(cols=np.arange(0, 1))
         encoder.fit(cosia, spatialValues)
         save_object(encoder, f'encoder_cosia_{expe}.pkl', dir_output)
+
+    if corine.shape == spatialValues.shape:
+        encoder = CatBoostEncoder(cols=np.arange(0, 1))
+        encoder.fit(corine, spatialValues)
+        save_object(encoder, f'encoder_corine_{expe}.pkl', dir_output)
+
+    if route.shape == spatialValues.shape:
+        encoder = CatBoostEncoder(cols=np.arange(0, 1))
+        encoder.fit(route, spatialValues)
+        save_object(encoder, f'encoder_route_{expe}.pkl', dir_output)
     
     # Geo
     encoder = CatBoostEncoder(cols=np.arange(0, 1))

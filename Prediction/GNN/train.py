@@ -2301,6 +2301,10 @@ def get_loss_function(loss_name, **loss_params):
             raise ValueError(f'{id} not implemented')
         criterion = get_loss_function(loss_name, **loss_params)
         return LossPerId(criterion=criterion, id=id)
+    
+    if 'area' in loss_name or 'area-global' in loss_name:
+        vec = loss_name.split('-')
+        loss_name = vec[0]
 
     loss_dict = {
         "poisson": PoissonLoss(),
@@ -2319,6 +2323,7 @@ def get_loss_function(loss_name, **loss_params):
         'cdw' : CDWCELoss(**loss_params),
         'mcewk' : MCEAndWKLoss(**loss_params),
         'kldivloss' : KLDivLoss(reduction='batchmean'),
+        'bceloss': BCELoss(**loss_params)
     }
     loss_name = loss_name.lower()
     if loss_name in loss_dict:
@@ -2604,27 +2609,27 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        model = create_model_config('xgboost', m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'mcewk', 'classification')
         models.append(model)
 
     # Modèles m3
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        model = create_model_config('xgboost', m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'mcewk', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
     for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for kernel in ['1', '3', '5', 'Specialized']:
-            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            model = create_model_config('xgboost', m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'mcewk', 'classification')
             models.append(model)
 
-    mlast = f'xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'xgboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filter-xgboost_search_0_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-xgboost_search_0_full_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'
     
-    #res.append((m, models, None, None, None))
+    res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2638,27 +2643,27 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
 
     # Modèles m2
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config(model_type, m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'softmax', 'classification')
+        model = create_model_config(model_type, m2_undersampling, 'one', 'kmeans', 'sum', '5', kernel, 'mcewk', 'classification')
         models.append(model)
 
     # Modèles m3
     for kernel in ['1', '3', '5', 'Specialized']:
-        model = create_model_config(model_type, m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'softmax', 'classification')
+        model = create_model_config(model_type, m3_undersampling, 'one', 'kmeans', 'max', '5', kernel, 'mcewk', 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
     for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for kernel in ['1', '3', '5', 'Specialized']:
-            model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'softmax', 'classification')
+            model = create_model_config(model_type, m4_undersampling, 'one', 'kmeans', aggregation, '5', kernel, 'mcewk', 'classification')
             models.append(model)
 
-    mlast = f'{model_type}_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    mlast = f'{model_type}_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'
     models.append(mlast)
     
     # Nom du modèle principal
-    m = f'filter-catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_softmax'
+    m = f'filter-catboost_search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'
 
-    res.append((m, models, None, None, None))
+    #res.append((m, models, None, None, None))
 
     ##############################################
 
@@ -2696,7 +2701,7 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     
     return res
 
-def define_voting_dl_models(mt, kdays):
+def define_voting_dl_models(mt, kdays, out_channels, run, loss='weightedcrossentropy'):
     ##############################################
     models = []  # Liste pour contenir tous les modèles
 
@@ -2708,29 +2713,29 @@ def define_voting_dl_models(mt, kdays):
 
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config(mt, m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config(mt, m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, loss, 'classification')
         models.append(model)
 
     # Modèles m3
     for nb_clusters in ['1', '3', '5', 'Specialized']:
-        model = create_model_config(mt, m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, 'weightedcrossentropy', 'classification')
+        model = create_model_config(mt, m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, loss, 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
     for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
-            model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, 'weightedcrossentropy', 'classification')
+            model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, loss, 'classification')
             models.append(model)
 
-    mlast = f'{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    mlast = f'{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filter-{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
+    m = f'filter-{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
     #m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
 
     # Retourner la structure finale
-    return [(m, models, 5, 1)]
+    return [(m, models, out_channels, run)]
 
 def define_staking_trees_model(training_mode, dataset_name, scale, graph_construct, post_process_model_dico):
     ##############################################

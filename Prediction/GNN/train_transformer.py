@@ -195,8 +195,6 @@ if not QUICK:
 
     post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
-    features_selected_str.append('Past_risk')
-    features_selected_str.append('Past_burnedarea')
     features_selected = np.arange(0, len(features_selected_str))
 
     train_dataset = add_past_risk(train_dataset, 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past', 'risk')
@@ -260,8 +258,6 @@ else:
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
     save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
 
-    features_selected_str.append('Past_risk')
-    features_selected_str.append('Past_burnedarea')
     features_selected = np.arange(0, len(features_selected_str))
     
 ######################### Tourisme ###########################
@@ -322,7 +318,7 @@ elif days_in_futur == 31:
     kdays = 31
 
 if name_exp.find('voting') != -1:
-    voting_models = define_voting_dl_models('TransformerNet', kdays)
+    voting_models = define_voting_dl_models('TransformerNet', kdays, 5, 1)
     #voting_models = []
     models = [
                 ('TransformerNet', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
@@ -565,27 +561,27 @@ if doTest:
 
                 #(f'federated-TransformerNet-saison_encoder-median_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-                (f'filter-TransformerNet-soft-None-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-                (f'filter-TransformerNet-soft-None-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+                (f'filter-TransformerNet-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
                 (f'TransformerNet_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
         ]
@@ -604,7 +600,7 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(cfg=args, graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name='all',
                             features_name=features_selected_str,
@@ -629,7 +625,7 @@ if doTest:
 
     ####################################################### Test by departmenent ###################################################
 
-    for dept in departements:
+    """for dept in departements:
         if MLFLOW:
             dn = dataset_name
             if two:

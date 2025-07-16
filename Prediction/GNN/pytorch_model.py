@@ -5402,6 +5402,25 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         #aggregated_proba = np.max(probas_array * weight2use[:, None, None], axis=0)
         return aggregated_proba
 
+    def score(self, X, y, sample_weight=None):
+        """
+        Evaluate the model's performance for each ID.
+
+        Parameters:
+        - X_val: Validation data.
+        - y_val: True labels.
+        - id_val: List of IDs corresponding to validation data.
+
+        Returns:
+        - Mean score across all IDs.
+        """
+        predictions = self.predict(X)
+        return self.score_with_prediction(predictions, y, sample_weight)
+    
+    def score_with_prediction(self, y_pred, y, sample_weight=None):
+        
+        return iou_score(y, y_pred)
+
     def predict_with_tasks(
         self,
         X,
@@ -5431,6 +5450,26 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         if model_per_task is None:
             model_per_task = {}
+        
+        if model_per_task == 'default':
+            model_per_task={'normal_predictions' : 4,
+                                'generalized_prediction' : 12,
+                                'class_value_2_predictions' : 12,
+                                'class_value_3_predictions' : 20,
+                                'class_value_4_predictions' : 20
+                                }
+            
+            generalized_departement = [
+                1.,  2.,  3.,  4.,  5.,  8.,  9., 10., 12., 14.,
+                15., 16., 17., 18., 19., 21., 22., 23., 24., 25.,
+                26., 27., 28., 29., 31., 32., 35., 36., 37., 38.,
+                39., 41., 42., 43., 44., 45., 46., 47., 48., 49.,
+                50., 51., 52., 53., 54., 55., 56., 57., 58., 59.,
+                60., 61., 62., 63., 64., 65., 67., 68., 69., 70.,
+                71., 72., 73., 74., 75., 76., 77., 78., 79., 80.,
+                81., 82., 85., 86., 87., 88., 89., 90., 91., 92.,
+                93., 94., 95.
+            ]
 
         # Normal prediction for all samples
         top_model = model_per_task.get("normal_predictions", "all")
@@ -5459,44 +5498,26 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                     weights2use=self.weights_for_model,
                     top_model=model_per_task["generalized_prediction"],
                 )
+                mask = np.isin(y[:, departement_index], generalized_departement)
                 predictions[mask] = preds_gen
 
         # Class-specific refinements
         for val in [2, 3, 4]:
             task_name = f"class_value_{val}_predictions"
             if task_name in model_per_task:
-                mask = predictions == val
+                preds_cls, _ = self.predict_with_weight(
+                    X,
+                    hard_or_soft=hard_or_soft,
+                    weights_average=weights_average,
+                    weights2use=self.weights_for_model,
+                    top_model=model_per_task[task_name],
+                )
+                mask = (preds_cls >= val) | (predictions >= val)
                 if mask.any():
-                    preds_cls, _ = self.predict_with_weight(
-                        X[mask],
-                        hard_or_soft=hard_or_soft,
-                        weights_average=weights_average,
-                        weights2use=self.weights_for_model,
-                        top_model=model_per_task[task_name],
-                    )
-                    predictions[mask] = preds_cls
+                    predictions[mask] = preds_cls[mask]
 
         return predictions, y
-
-    def score(self, X, y, sample_weight=None):
-        """
-        Evaluate the model's performance for each ID.
-
-        Parameters:
-        - X_val: Validation data.
-        - y_val: True labels.
-        - id_val: List of IDs corresponding to validation data.
-
-        Returns:
-        - Mean score across all IDs.
-        """
-        predictions = self.predict(X)
-        return self.score_with_prediction(predictions, y, sample_weight)
-    
-    def score_with_prediction(self, y_pred, y, sample_weight=None):
         
-        return iou_score(y, y_pred)
-     
 class ModelPerID(RegressorMixin, ClassifierMixin):
     def __init__(self, model, dir_log, cluster="departement"):
         self.base_model = model

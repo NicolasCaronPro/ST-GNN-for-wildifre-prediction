@@ -6,8 +6,6 @@ from weigh_predictor import Predictor
 import itertools
 from GNN.tools import *
 import convertdate
-import xarray as xr
-import pandas as pd
 
 def get_features_for_sinister_prediction(dataset_name, sinister, isInference):
     # mean max min and std for scale > 0 else value
@@ -262,7 +260,7 @@ def get_sub_nodes_ground_truth(graph, subNode: np.array,
                 maskgraph = mask == node[graph_id_index]
                 masknode = mask_node == node[id_index]
                     
-                if node[4] >= array.shape[-1]:
+                if node[date_index] >= array.shape[-1]:
                     continue
                 try:
                     # Influence
@@ -407,6 +405,8 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
     encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
     encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
+    encoder_corine = read_object(f'encoder_cotine_{name_expe}.pkl', dir_encoder)
+    encoder_bdroute = read_object(f'encoder_bdroute_{name_expe}.pkl', dir_encoder)
     encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
     
     if 'Calendar' in features:
@@ -447,7 +447,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             except Exception as e:
                 logger.info(f'{e}')
                 pass
-
+            
         logger.info(nodeDepartement.shape)
         if nodeDepartement.shape[0] == 0:
             continue
@@ -464,7 +464,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 X[index, features_name.index(band) + 2] = ddate.weekday() # dayofweek
                 X[index, features_name.index(band) + 3] = ddate.weekday() >= 5 # isweekend
                 X[index, features_name.index(band) + 4] = pendant_couvrefeux(ddate) # couvrefeux
-                X[index, features_name.index(band) + 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+                
+                X[index, features_name.index(band) + 5] = 1 if (
+                    dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
+                    or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
+                ) else 0
                 X[index, features_name.index(band) + 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
                 X[index, features_name.index(band) + 7] = 1 if ddate in jours_feries else 0 # bankHolidays
                 X[index, features_name.index(band) + 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
@@ -566,6 +570,16 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             name = 'cosia.pkl'
             arrayCosia = read_object(name, dir_data)
 
+        if 'corine' in features:
+            logger.info('Foret')
+            name = 'corine.pkl'
+            arrayCorine = read_object(name, dir_data)
+
+        if 'bdroute' in features:
+            logger.info('Foret')
+            name = 'route.pkl'
+            arraybdroute = read_object(name, dir_data)
+
         if 'foret_encoder' in features:
             logger.info('Foret landcover')
             name = 'foret_landcover.pkl'
@@ -593,6 +607,16 @@ def get_sub_nodes_feature(graph, subNode: np.array,
             logger.info('COSIA')
             name = "cosia_landcover.pkl"
             arrayCOSIALandcover = read_object(name, dir_data)
+        
+        if 'corine_encoder' in features:
+            logger.info('Corine')
+            name = "corine_landcover.pkl"
+            arrayCORINELandcover = read_object(name, dir_data)
+
+        if 'bdroute_encoder' in features:
+            logger.info('Route')
+            name = "route_landcover.pkl"
+            arrayBDROUTELancover = read_object(name, dir_data)
 
         if arrayPop is not None or arrayEl is not None or arrayOS is not None or arrayForet is not None:
             unode = np.unique(nodeDepartement[:,id_index])
@@ -622,7 +646,17 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                     if arrayCosia is not None:
                         for i, var in enumerate(cosia_variables):
                             save_values(arrayCosia[i, :, :], var, index, maskNode)
+                
+                if 'corine' in features:
+                    if arrayCorine is not None:
+                        for i, var in enumerate(corine_variable):
+                            save_values(arrayCosia[i, :, :], var, index, maskNode)
 
+                if 'bdroute' in features:
+                    if arraybdroute is not None:
+                        for i, var in enumerate(bdroute_variables):
+                            save_values(arraybdroute[i, :, :], var, index, maskNode)
+                            
                 if 'foret_encoder' in features:
                     if arrayForetLandcover is not None:
                         try:
@@ -641,6 +675,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                 if 'cosia_encoder' in features:
                     if arrayCOSIALandcover is not None:
                         save_values_with_encoding(arrayCOSIALandcover, 'cosia_encoder', index, maskNode, encoder_cosia)
+
+                if 'corine_encoder' in features:
+                    if arrayCORINELandcover is not None:
+                        save_values_with_encoding(arrayCORINELandcover, 'corine_encoder', index, maskNode, encoder_corine)
+
+                if 'bdroute_encoder' in features:
+                    if arrayBDROUTELancover is not None:
+                        save_values_with_encoding(arrayBDROUTELancover, 'bdroute_encoder', index, maskNode, encoder_bdroute)
 
                 if 'id_encoder' in features:
                     save_value_with_encoding(mask, 'id_encoder', index, maskNode, encoder_id)
@@ -904,7 +946,7 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
 
             stop_calendar = 11
-
+            
             X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = \
                     np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
 
@@ -935,8 +977,8 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
         logger.info(var)
         name = var +'raw.pkl'
         for node in subNode:
-            maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
-            index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+            maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+            index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
             save_values(geo[var].values, var, index, maskNode)
 
     del array
@@ -947,8 +989,8 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
             logger.info(var)
             name = var +'raw.pkl'
             for node in subNode:
-                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
-                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
                 save_value(geo[var].values, var, index, maskNode)
 
     logger.info('Population elevation Highway Sentinel Foret')
@@ -995,9 +1037,9 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
 
     logger.info('Sentinel Dynamic World')
     for node in subNode:
-        maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
+        maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
 
-        index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+        index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
 
         if 'sentinel' in features:
             for band, var in enumerate(sentinel_variables):
@@ -1054,15 +1096,15 @@ def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
         for var in vigicrues_variables:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
-                save_values(geo[var].values, var, index, maskNode)
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+                save_values(geo[var].values, var, index, maskNode)[4]
 
     logger.info('nappes')
     if 'nappes' in features:
         for var in nappes_variables:
             for node in subNode:
                 index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
-                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4])].index
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
                 save_values(geo[var].values, var, index, maskNode)
 
     logger.info('Cluster encoder')
@@ -1582,21 +1624,14 @@ def add_fire_zone_or_not(df, scale):
     return df
 
 def add_past_risk(df, col_pas, col_type=''):
-    """Add a shifted risk column computed directly on xarray objects."""
-    if isinstance(df, pd.DataFrame):
-        ds = xr.Dataset.from_dataframe(df)
-    else:
-        ds = df
+    ids_graph = df['graph_id'].unique()
+    df[f'Past_{col_type}'] = 0
+    for id in ids_graph:
+        index = df[df['graph_id'] == id].index
+        df.loc[index, f'Past_{col_type}'] = df.loc[index, col_pas].shift(1, fill_value=0)
 
-    # ensure ordering by graph id and date for the shift
-    ds = ds.sortby(['graph_id', 'date'])
-
-    shifted = ds[col_pas].groupby('graph_id').shift(sample=1, fill_value=0)
-    ds[f'Past_{col_type}'] = shifted
-
-    ds = ds.dropna(dim='sample', subset=f'Past_{col_type}')
-
-    return ds
+    df.dropna(subset=f'Past_{col_type}', inplace=True)
+    return df
 
 def raster_past_risk(df, raster_name, dir_raster, dir_output):
     udepts = np.unique(df['departement'].values)

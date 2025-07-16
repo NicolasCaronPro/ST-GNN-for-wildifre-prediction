@@ -396,11 +396,11 @@ Rewrite = True
 encoding='Catboost' # How we encode the categorical variable
 # Methods for reducing features
 
-epochs = 10000
 lr = 0.00005
 PATIENCE_CNT = 25
 CHECKPOINT = 25
 batch_size = 64
+epochs = 3000
 
 METHODS_TEMPORAL = ['mean', 'min', 'max',
         # 'std',

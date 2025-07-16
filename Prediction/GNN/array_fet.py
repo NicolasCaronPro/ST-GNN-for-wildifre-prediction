@@ -16,7 +16,9 @@ sentinel_variables = ['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']
 landcover_variables = [
                       'foret_encoder',
                       'argile_encoder',
-                      'cosia_encoder'
+                      'cosia_encoder',
+                      #'corine_encoder',
+                      #'bdroute_encoder'
                         ]
 
 cluster_encoder = ['cluster_encoder', 'id_encoder']
@@ -41,6 +43,22 @@ cosia_variables = [
     'Lawn',
     'Crop'
 ]
+
+corine_variable = [
+    'Other',
+    'urban',
+    'transport',
+    'agricultural',
+    'grass',
+    'forest',
+    'vegetation',
+    'moisture',
+    'water',
+    'littoral',
+    'rock'
+]
+
+bdroute_variables = ['NoRoad', 'Road']
 
 osmnx_variables = ['0', '1', '2', '3', '4', '5']
 dynamic_world_variables = ['water', 'tree', 'grass', 'crops', 'shrub', 'flooded', 'built', 'bare', 'snow']

@@ -12,14 +12,18 @@
                     "sentinel",
                     "foret_encoder",
                     "argile_encoder",
+                    "id_encoder",
+                    "cluster_encoder",
                     "cosia_encoder",
                     "foret",
                     "highway",
                     "cosia",
                     "Calendar",
+                    "Geo",
                     "Past_risk",
                     "Past_burnedarea"
-                  ],
+                    ],
+                    
   "kmeans_features": [],
   "train_years": [2017, 2018, 2019, 2020, 2021],
   "val_years": [2022],
@@ -152,7 +156,6 @@
   "doKMEANS" : false,
   "point" : false,
   "graph" : false,
-  "pca" : false,
   "quick" : true,
   "shift" : 5,
   "ncluster" : 5,
@@ -170,7 +173,7 @@
   "sinisterEncoding": "occurence",
   "sinister" : "firepoint",
   "graph_method": "node",
-  "training_mode": "normal",
+  "training_mode": "unique",
   "train_script": "train_any_model.py",
   "models": [
     {
@@ -183,13 +186,16 @@
       "nbfeatures": "all",
       "target": "nbsinister-kmeans-5-Class-Dept",
       "task": "classification",
-      "loss": "weightedcrossentropy",
+      "loss": "mcewk",
       "out_channels": 5,
-      "use_log" : false,
       "n_run": 1,
+      "aggregation_method" : "median",
+      "federated_cluster" : "departement",
+      "sub_training_mode" : "federated",
+      "cluster" : "cluster-encoder",
       "params": {}
     },
-     {
+    {
       "type": "TransformerNet",
       "use_temporal_as_edges": false,
       "mesh_file": null,
@@ -199,15 +205,16 @@
       "nbfeatures": "all",
       "target": "nbsinister-kmeans-5-Class-Dept",
       "task": "classification",
-      "loss": "mcewk",
-      "use_log" : false,
+      "loss": "weightedcrossentropy",
       "out_channels": 5,
       "n_run": 1,
+      "aggregation_method" : "median",
+      "federated_cluster" : "cluster-encoder",
       "params": {}
     }
   ],
   "hyperparameters": {
-     "epochs": 3000,
+    "epochs": 3000,
     "batch_size": 64,
     "lr": 0.00005,
     "PATIENCE_CNT":25,

@@ -252,8 +252,6 @@ else:
     save_object(val_dataset, 'df_val_'+prefix+'.pkl', dir_output)
     save_object(test_dataset, 'df_test_'+prefix+'.pkl', dir_output)
 
-    features_selected_str.append('Past_risk')
-    features_selected_str.append('Past_burnedarea')
     features_selected = np.arange(0, len(features_selected_str))
 
 ######################### Tourisme ###########################
@@ -317,10 +315,10 @@ elif days_in_futur == 31:
     kdays = 10
 
 if name_exp.find('voting') != -1:
-    voting_models = define_voting_dl_models('LSTM', kdays)
+    voting_models = define_voting_dl_models('LSTM', kdays, 5, 1, 'mcewk')
 
     models = [
-            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5, 1),
             ]
     
     staking_models = []
@@ -332,7 +330,7 @@ if name_exp.find('voting') != -1:
                 ]
 else:
     models = [
-            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5, 1),
+            ('LSTM', f'search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk', 5, 1),
             ]
     
     gnn_models = [
@@ -536,29 +534,119 @@ if doTest:
     if graph_method == 'node':
 
         models = [
-        (f'filter-LSTM-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
-        (f'filter-LSTM-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
 
-        (f'LSTM_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'),
+        (f'filter-LSTM-hard-None-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-None-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+
+        (f'filter-LSTM-hard-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-hard-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+
+        (f'filter-LSTM-None-None-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-None-None-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+#
+        (f'filter-LSTM-soft-weight-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-weight-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+#
+        (f'filter-LSTM-soft-None-1_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-2_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-3_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-4_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-5_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-6_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-7_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-8_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-9_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-10_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-11_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-12_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-13_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-14_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-15_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-16_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-17_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-18_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-19_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-20_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+        (f'filter-LSTM-soft-None-all_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+#
+        (f'LSTM_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
+
+        (f'filter-LSTM-soft-weight-task_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_mcewk'),
 
         ]
 
@@ -576,7 +664,7 @@ if doTest:
     aggregated_prediction_dept = []
 
     ####################################################### Test on all Dataset ####################################################
-    metrics, metrics_dept, res, res_dept = test_dl_model(args=vars(args), graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
+    metrics, metrics_dept, res, res_dept = test_dl_model(cfg=args, graphScale=graphScale, test_dataset_dept=test_dataset, train_dataset=train_dataset_unscale,
                             test_dataset_unscale_dept=test_dataset_unscale,
                             test_name='all',
                             features_name=features_selected_str,
@@ -695,6 +783,9 @@ if doTest:
     df_metrics.reset_index(drop=True, inplace=True)
     
     check_and_create_path(dir_output / prefix)
+    #if (dir_output / prefix / f'df_metrics_LSTM_{graph_method}.csv').is_file():
+    #        temp = pd.read_csv(dir_output / prefix / f'df_metrics_LSTM_{graph_method}.csv')
+    #        df_metrics = pd.concat((df_metrics, temp))
     df_metrics.to_csv(dir_output / prefix / f'df_metrics_LSTM_{graph_method}.csv')
  
     #wrapped_compare(df_metrics,  dir_output / prefix, 'Model')

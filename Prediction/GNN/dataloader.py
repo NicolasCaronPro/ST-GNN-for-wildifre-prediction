@@ -4,9 +4,6 @@ from zmq import device
 from GNN.pytorch_model import *
 from sklearn.metrics import cohen_kappa_score
 import re
-import xarray as xr
-import pandas as pd
-import numpy as np
 
 #########################################################################################################
 #                                                                                                       #
@@ -126,16 +123,7 @@ class AugmentedInplaceGraphDataset(Dataset):
 
 #################################### NUMPY #############################################################
 def get_train_val_test_set(graphScale, df, features_name, train_departements, prefix, dir_output, args, cfg=None):
-    """Split dataset and return train/val/test xarray objects."""
-    # Accept either DataFrame or xarray input
-    if isinstance(df, pd.DataFrame):
-        ds = xr.Dataset.from_dataframe(df)
-    else:
-        ds = df
-
     # Input config
-    maxDate = args.maxDate
-    trainDate = args.trainDate
     doFet = args.featuresSelection == "True"
     nbfeatures = args.NbFeatures
     values_per_class = args.nbpoint
@@ -156,12 +144,11 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     ######################## Get departments and train departments #######################
 
-    if 'scale' not in ds.data_vars:
-        new_scale = 10 if scale == 'departement' else scale
-        ds = ds.assign(scale=('sample', np.full(ds.dims['sample'], new_scale)))
-
-    # Convert to DataFrame for processing steps that rely on pandas
-    df = ds.to_dataframe().reset_index()
+    if 'scale' not in np.unique(df.columns):
+        if scale == 'departement':
+            df['scale'] = 10
+        else:
+            df['scale'] = scale
 
     departements = cfg.train_departments + cfg.test_departments
     train_departements = cfg.train_departments
@@ -260,6 +247,9 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     df['risk'] = df[target_name_risk]
     df['class_risk'] = df[target_name_class]
 
+    df['Past_risk'] = 0
+    df['Past_burnedarea'] = 0
+
     logger.info(f'Unique sinister -> {df["nbsinister"].unique()}')
 
     features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily']
@@ -269,8 +259,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     
     # Preprocess
     train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(
-                                                    df=df, scaling=scaling, maxDate=maxDate,
-                                                    trainDate=trainDate, train_departements=train_departements,
+                                                    df=df, scaling=scaling, train_departements=train_departements,
                                                     departements=departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
@@ -327,11 +316,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         logger.info(f'Nb sinister in val set : {val_dataset_["nbsinister"].sum()}')
         logger.info(f'Nb sinister in test set : {test_dataset_["nbsinister"].sum()}')
 
-    train_ds = xr.Dataset.from_dataframe(train_dataset)
-    val_ds = xr.Dataset.from_dataframe(val_dataset)
-    test_ds = xr.Dataset.from_dataframe(test_dataset)
-
-    return train_ds, val_ds, test_ds, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, list(features_name)
+    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, list(features_name)
 
 #########################################################################################################
 #                                                                                                       #
@@ -339,7 +324,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 #                                                                                                       #
 #########################################################################################################
 
-def preprocess(df: pd.DataFrame, scaling: str, maxDate: str, trainDate: str, train_departements: list, departements: list, ks: int,
+def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departements: list, ks: int,
                dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
                args: dict, cfg=None,
                save=True):
@@ -1200,7 +1185,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     for key, value in iou_dict.items():
         metric_key = f'{key}_class_hard' # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques
-        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected' or key == 'iou_area':
+        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected' or key == 'iou_area' or key == 'iou_elt_sup_2' or key == 'iou_elt_sup_3' or key == 'iou_elt_sup_4':
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
     iou_dict = calculate_signal_scores(y_pred, df_test[col_class_2].values, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
@@ -1532,8 +1517,8 @@ def test_sklearn_api_model(cfg,
         samples_name = [
         f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
         ]
-        #if model_name in ['xgboost', 'catboost']:
-        #    model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
+        if model_name in ['xgboost', 'catboost']:
+            model.shapley_additive_explanation(test_dataset_dept[features_selected], 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
 
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
@@ -1571,13 +1556,12 @@ def test_sklearn_api_model(cfg,
 def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg):
 
     name_exp = cfg.name
-    
+
     test_dataset_list = []
     for scale in np.unique(y[:, scale_index]):
         print(scale)
         if scale == 10:
             test_dataset_scale = read_object(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
-            print(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / 'occurence_voting')
         else:
             test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{cfg.days_in_futur}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
         
@@ -1645,6 +1629,7 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     ind = np.lexsort((y[:, scale_index], y[:,0], y[:,4]))
     y = y[ind]
     predTensor = predTensor[ind]
+    print(y.shape)
     
     sel_indices = np.argwhere(y[:, weight_index] > 0)[:, 0]
     predTensor = predTensor[sel_indices]
@@ -1729,6 +1714,20 @@ def test_dl_model(cfg,
         graphScale._set_model(model)
 
         if isinstance(model, ModelVotingPytorchAndSklearn):
+            if top_model == 'task':
+                model_per_task={'normal_predictions' : 4,
+                                'generalized_prediction' : 10,
+                                'class_value_2_predictions' : 12,
+                                'class_value_3_predictions' : 15,
+                                'class_value_4_predictions' : 20
+                                }
+                generalized_departement = test_dataset_dept.groupby('departement')['nbsinisterDaily'].sum().reset_index()
+                generalized_departement = generalized_departement[generalized_departement['nbsinisterDaily'] < 100]
+                generalized_departement = generalized_departement.departement.unique()
+                print(generalized_departement)
+            else:
+                model_per_task = None
+                generalized_departement = None
             predTensor, y = graphScale.predict_model_voting_pytorch(
                 test_dataset_dept,
                 model.feature_names,
@@ -1737,8 +1736,8 @@ def test_dl_model(cfg,
                 hard_or_soft=hard_or_soft,
                 weights_average=weights_average,
                 top_model=top_model,
-                model_per_task=None,
-                generalized_departement=None,
+                model_per_task=model_per_task,
+                generalized_departement=generalized_departement,
             )
         else:
             test_loader = model.create_test_loader(graphScale, test_dataset_dept)
@@ -2120,18 +2119,14 @@ def wrapped_train_deep_learning_1D(params):
         train_dataset['class'] = train_dataset[target_name]
     
     logger.info(f'Train set shape : -> {train_dataset.shape}')
-    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+    #df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
-    if 'weight' in list(train_dataset.columns):
-        train_dataset.drop('weight', inplace=True, axis=1)
-
-    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
-    train_dataset = train_dataset[~train_dataset['weight'].isna()]
-    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
-    logger.info(f'Train set shape : -> {train_dataset.shape}')
-
-    val_dataset['weight'] = 1 * val_dataset['weight']
-    test_dataset['weight'] = 1 * test_dataset['weight']
+    #if 'weight' in list(train_dataset.columns):
+    #    train_dataset.drop('weight', inplace=True, axis=1)
+    
+    train_dataset['weight'] = 1
+    val_dataset['weight'] = 1
+    test_dataset['weight'] = 1
 
     custom_model_params = params.get('custom_model_params')
 
@@ -2144,7 +2139,7 @@ def wrapped_train_deep_learning_1D(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -2174,7 +2169,7 @@ def wrapped_train_deep_learning_1D(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -2186,7 +2181,11 @@ def wrapped_train_deep_learning_1D(params):
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
-    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset, custom_model_params=custom_model_params, features_importance=False)
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,
+                                               params['epochs'], params['PATIENCE_CNT'],  params['CHECKPOINT'],
+                                               custom_model_params=custom_model_params, features_importance=False,
+                                               use_log=params.get('use_log', True))
+    
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'], custom_model_params=custom_model_params)
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
@@ -2228,6 +2227,8 @@ def wrapped_train_deep_learning_1D_federated(params):
     train_dataset = train_dataset[~train_dataset['weight'].isna()]
     logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
 
+    print(features)
+
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
                                     batch_size=batch_size,
@@ -2237,7 +2238,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'temp',
                                     task_type=task_type,
                                     loss=loss,
@@ -2262,7 +2263,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     out_channels=params['out_channels'],
                                     features_name=features,
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'temp',
                                     task_type=task_type,
                                     loss=loss,
@@ -2277,7 +2278,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     name = f'federated-{model}-{federated_cluster}-{aggregation_method}_{infos}'
     model = FederatedLearningModel(wrapped_model, features=features, federated_cluster=federated_cluster,
                                    loss=loss, name=name,
-                                   dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
+                                   dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
                                    under_sampling=under_sampling,
                                    over_sampling=over_sampling,
                                    target_name=target_name,
@@ -2287,9 +2288,9 @@ def wrapped_train_deep_learning_1D_federated(params):
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures)
     
-    params['global_epochs'] = 30
+    params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
-    params['patience_count_global'] = 5
+    params['patience_count_global'] = params['patience_count_global']
     params['patience_count_local'] = params['PATIENCE_CNT']
     
     model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
@@ -2297,6 +2298,597 @@ def wrapped_train_deep_learning_1D_federated(params):
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+def wrapped_train_deep_learning_1D_alafederated(params):
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    federated_cluster = params['federated_cluster']
+    aggregation_method = params['aggregation_method']
+    eta = params['eta']
+    layer_idx = params['layer_idx']
+    n_run = params['n_run']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset']
+    test_dataset = params['test_dataset']
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
+    print(features)
+
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    n_run=n_run,
+                                    over_sampling=over_sampling,
+                                    )
+    elif torch_structure == 'Model_gnn':
+        mesh_file = 'icospheres/icospheres_0_1.json.gz'
+        if model in ['graphCast']:
+            mesh = True
+        else:
+            mesh = False
+        wrapped_model = ModelGNN(mesh=mesh,
+                                 mesh_file=mesh_file,
+                                 model_name=model,
+                                    nbfeatures=nbfeatures,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    graph_method = graph_method)
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+    
+    name = f'alafederated-{model}-{federated_cluster}-{aggregation_method}_{infos}'
+    model = FederatedALA(wrapped_model, features=features, federated_cluster=federated_cluster,
+                                   loss=loss, name=name,
+                                   dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
+                                   under_sampling=under_sampling,
+                                   over_sampling=over_sampling,
+                                   target_name=target_name,
+                                   post_process=None,
+                                    n_run=n_run,
+                                   task_type=task_type,
+                                   aggregation_method=aggregation_method,
+                                   nbfeatures=nbfeatures,
+                                   eta=eta,
+                                   layer_idx=layer_idx)
+    
+    params['global_epochs'] = params['global_epochs']
+    params['local_epochs'] = params['epochs']
+    params['patience_count_global'] = params['patience_count_global']
+    params['patience_count_local'] = params['PATIENCE_CNT']
+    
+    model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
+    
+    #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
+    save_object(model, f'{model.name}.pkl', model.dir_log)
+
+def wrapped_train_deep_learning_1D_moonfederated(params):
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    federated_cluster = params['federated_cluster']
+    aggregation_method = params['aggregation_method']
+    n_run = params['n_run']
+    temperature = params['temperature']
+    smooth = params['smooth']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset']
+    test_dataset = params['test_dataset']
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    n_run=n_run,
+                                    over_sampling=over_sampling,
+                                    )
+    elif torch_structure == 'Model_gnn':
+        mesh_file = 'icospheres/icospheres_0_1.json.gz'
+        if model in ['graphCast']:
+            mesh = True
+        else:
+            mesh = False
+        wrapped_model = ModelGNN(mesh=mesh,
+                                 mesh_file=mesh_file,
+                                 model_name=model,
+                                    nbfeatures=nbfeatures,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    graph_method = graph_method)
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+    
+    name = f'moonfederated-{model}-{federated_cluster}-{aggregation_method}_{infos}'
+    model = MOONFederatedLearning(wrapped_model, features=features, federated_cluster=federated_cluster,
+                                   loss=loss, name=name,
+                                   dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
+                                   under_sampling=under_sampling,
+                                   over_sampling=over_sampling,
+                                   target_name=target_name,
+                                   post_process=None,
+                                    n_run=n_run,
+                                   task_type=task_type,
+                                   aggregation_method=aggregation_method,
+                                   nbfeatures=nbfeatures,
+                                   temperature=temperature,
+                                   smooth=smooth)
+    
+    params['global_epochs'] = params['global_epochs']
+    params['local_epochs'] = params['epochs']
+    params['patience_count_global'] = params['patience_count_global']
+    params['patience_count_local'] = params['PATIENCE_CNT']
+    
+    model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
+    
+    #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
+    save_object(model, f'{model.name}.pkl', model.dir_log)
+
+def wrapped_train_deep_learning_1D_protofederated(params):
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    federated_cluster = params['federated_cluster']
+    n_run = params['n_run']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset']
+    test_dataset = params['test_dataset']
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    n_run=n_run,
+                                    over_sampling=over_sampling,
+                                    )
+    elif torch_structure == 'Model_gnn':
+        mesh_file = 'icospheres/icospheres_0_1.json.gz'
+        if model in ['graphCast']:
+            mesh = True
+        else:
+            mesh = False
+        wrapped_model = ModelGNN(mesh=mesh,
+                                 mesh_file=mesh_file,
+                                 model_name=model,
+                                    nbfeatures=nbfeatures,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'temp',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=device,
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    graph_method = graph_method)
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+    
+    name = f'Protofederated-{model}-{federated_cluster}_{infos}'
+    model = ProtoFederatedLearning(wrapped_model, features=features, federated_cluster=federated_cluster,
+                                   loss=loss, name=name,
+                                   dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}'),
+                                   under_sampling=under_sampling,
+                                   over_sampling=over_sampling,
+                                   target_name=target_name,
+                                   post_process=None,
+                                   n_run=n_run,
+                                   task_type=task_type,
+                                   nbfeatures=nbfeatures)
+    
+    params['global_epochs'] = params['global_epochs']
+    params['local_epochs'] = params['epochs']
+    params['patience_count_global'] = params['patience_count_global']
+    params['patience_count_local'] = params['PATIENCE_CNT']
+    
+    model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
+    
+    #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
+    #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
+    save_object(model, f'{model.name}.pkl', model.dir_log)
+
+def wrapped_train_deep_learning_1D_splittraining(params):
+    torch.cuda.empty_cache()
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    n_run = params['n_run']
+    federated_cluster = params['federated_cluster']
+    cut_layer_name = params['cut_layer_name']
+    input_server_model = params['input_server_model']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    logger.info(f'Train set shape : -> {train_dataset.shape}')
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+    logger.info(f'Train set shape : -> {train_dataset.shape}')
+
+    val_dataset['weight'] = 1 * val_dataset['weight']
+    test_dataset['weight'] = 1 * test_dataset['weight']
+
+    custom_model_params = params.get('custom_model_params')
+
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/SplitTraining-{federated_cluster}-{model}_{infos}'),
+                                    name=f'SplitTraining-{federated_cluster}-{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=torch.device("cpu"),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    training_mode='splittraining',
+                                    federated_cluster=federated_cluster,
+                                    cut_layer_name=cut_layer_name,
+                                    input_server_model=input_server_model
+                                    )
+    elif torch_structure == 'Model_gnn':
+        mesh_file = params['mesh_file']
+        if isinstance(mesh_file, list):
+            if custom_model_params is None:
+                custom_model_params = {}
+            custom_model_params['num_output_scale'] = len(mesh_file)
+            mesh = 'mygraph'
+        elif mesh_file is not None and 'icospheres' in mesh_file:
+            mesh = 'mesh'
+        else:
+            mesh = False
+        wrapped_model = ModelGNN(mesh=mesh,
+                                 mesh_file=mesh_file,
+                                 model_name=model,
+                                    nbfeatures=nbfeatures,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/SplitTraining-{federated_cluster}-{model}_{infos}'),
+                                    name=f'SplitTraining-{federated_cluster}-{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=torch.device('cpu'),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    graph_method = graph_method,
+                                    training_mode='splittraining',
+                                    federated_cluster=federated_cluster,
+                                    cut_layer_name=cut_layer_name,
+                                    input_server_model=input_server_model)
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+    
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,
+                                               params['epochs'], params['PATIENCE_CNT'],  params['CHECKPOINT'],
+                                               custom_model_params=custom_model_params, features_importance=False)
+    
+    wrapped_model.train_split(df_train=wrapped_model.df_train, df_val=val_dataset,
+                              df_test=test_dataset, graph=params['graph'],
+                              epochs=params['epochs'], PATIENCE_CNT=params['PATIENCE_CNT'], CHECKPOINT=params['CHECKPOINT'],
+                              custom_model_params=custom_model_params)
+    
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+def wrapped_train_deep_learning_1D_unique(params):
+    torch.cuda.empty_cache()
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    n_run = params['n_run']
+    cluster = params['cluster']
+    sub_training_mode = params['sub_training_mode']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
+    
+    ###############################################  Feature importance  ###########################################################
+    #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
+    #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
+
+    logger.info(f'Fitting model {model}_{infos}')
+    logger.info('Try loading loader')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+    
+    logger.info(f'Train set shape : -> {train_dataset.shape}')
+    df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
+
+    if 'weight' in list(train_dataset.columns):
+        train_dataset.drop('weight', inplace=True, axis=1)
+
+    train_dataset = train_dataset.set_index(['graph_id', 'date']).join(df_with_weith.set_index(['graph_id', 'date'])[f'weight'], on=['graph_id', 'date']).reset_index()
+    train_dataset = train_dataset[~train_dataset['weight'].isna()]
+    logger.info(f'Unique training weight -> {np.unique(train_dataset["weight"].values)}')
+    logger.info(f'Train set shape : -> {train_dataset.shape}')
+
+    val_dataset['weight'] = 1 * val_dataset['weight']
+    test_dataset['weight'] = 1 * test_dataset['weight']
+
+    custom_model_params = params.get('custom_model_params')
+
+    if torch_structure == 'Model_Torch':
+        wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=batch_size,
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}'),
+                                    name=f'unique-{cluster}-{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=torch.device("cpu"),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    training_mode=sub_training_mode,
+                                    )
+    elif torch_structure == 'Model_gnn':
+        mesh_file = params['mesh_file']
+        if isinstance(mesh_file, list):
+            if custom_model_params is None:
+                custom_model_params = {}
+            custom_model_params['num_output_scale'] = len(mesh_file)
+            mesh = 'mygraph'
+        elif mesh_file is not None and 'icospheres' in mesh_file:
+            mesh = 'mesh'
+        else:
+            mesh = False
+        wrapped_model = ModelGNN(mesh=mesh,
+                                mesh_file=mesh_file,
+                                model_name=model,
+                                    nbfeatures=nbfeatures,
+                                    batch_size=batch_size,
+                                    lr=params['lr'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=torch.device('cpu'),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    graph_method = graph_method,
+                                    training_mode=sub_training_mode
+                                    )
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+
+    if sub_training_mode == 'normal' or sub_training_mode == 'splittraining':
+        pass
+    elif sub_training_mode == 'federated':
+        name = f'federated-{model}-{params["federated_cluster"]}-{params["aggregation_method"]}_{infos}'
+        wrapped_model = FederatedLearningModel(wrapped_model, features=features, federated_cluster=params['federated_cluster'],
+                                    loss=loss, name=name,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}'),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    target_name=target_name,
+                                    post_process=None,
+                                        n_run=n_run,
+                                    task_type=task_type,
+                                    aggregation_method=params['aggregation_method'],
+                                    nbfeatures=nbfeatures
+                                    )
+
+    elif sub_training_mode == 'moonfederated':
+        name = f'moonfederated-{model}-{params["federated_cluster"]}-{params["aggregation_method"]}_{infos}'
+        wrapped_model = MOONFederatedLearning(wrapped_model, features=features, federated_cluster=params['federated_cluster'],
+                                    loss=loss, name=name,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}'),
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    target_name=target_name,
+                                    post_process=None,
+                                        n_run=n_run,
+                                    task_type=task_type,
+                                    aggregation_method=params['aggregation_method'],
+                                    nbfeatures=nbfeatures,
+                                    temperature=params['temperature'],
+                                    smooth=params['smooth'])
+    else:
+        raise ValueError(f'{sub_training_mode} not implemented')
+
+    model = ModelPerID(wrapped_model, cluster)
+
+    model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'],
+              custom_model_params=custom_model_params, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
+    
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_2D(params):
     model = params['model']
@@ -2346,7 +2938,7 @@ def wrapped_train_deep_learning_2D(params):
                                     features_1D=params['features_name_1D'],
                                     path=Path(params['name_dir']),
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -2411,7 +3003,7 @@ def wrapped_train_deep_learning_2D_federated(params):
                                     features=params['features'],
                                     path=Path(params['name_dir']),
                                     ks=kdays,
-                                    dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
@@ -2426,7 +3018,7 @@ def wrapped_train_deep_learning_2D_federated(params):
     name = f'federated-{model}-{federated_cluster}_{infos}'
     model = FederatedLearningModel(wrapped_model, features=features, federated_cluster=federated_cluster,
                                    loss=loss, name=name,
-                                   dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}_{infos}'),
+                                   dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{name}_{infos}'),
                                    under_sampling=under_sampling,
                                    over_sampling=over_sampling,
                                    target_name=target_name,
@@ -2497,7 +3089,7 @@ def wrapped_train_deep_learning_distallation(params):
                                 out_channels=params['out_channels'],
                                 features_name=features,
                                 ks=kdays,
-                                dir_log=params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{student_name}'),
+                                dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{student_name}'),
                                 name=f'{model}_{infos}',
                                 loss=loss,
                                 device=device,
