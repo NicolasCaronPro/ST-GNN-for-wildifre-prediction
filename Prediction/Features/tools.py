@@ -2282,3 +2282,47 @@ def load_raster_nappes(dir_raster: Path, dates: list) -> xr.Dataset:
 
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
+
+
+def concat_xarrays(dir_raster: Path, dates: list) -> xr.Dataset:
+    """Concatenate all available rasters into a single xarray dataset.
+
+    Parameters
+    ----------
+    dir_raster : Path
+        Directory containing the pickled rasters.
+    dates : list
+        Dates associated with the rasters.
+
+    Returns
+    -------
+    xr.Dataset
+        A merged dataset containing every raster that could be loaded.
+    """
+
+    loaders = [
+        (load_rasterise_meteo, list(dir_raster.glob("*raw.pkl"))),
+        (load_raster_cosia, [dir_raster / "cosia.pkl"]),
+        (load_raster_corine, [dir_raster / "corine.pkl"]),
+        (load_raster_elevation, [dir_raster / "elevation.pkl"]),
+        (load_raster_population, [dir_raster / "population.pkl"]),
+        (load_raster_vigicrues, list(dir_raster.glob("vigicrues*.pkl"))),
+        (load_raster_air_quality, list(dir_raster.glob("*raw.pkl"))),
+        (load_raster_sat, [dir_raster / "sentinel.pkl"]),
+        (load_raster_argile, [dir_raster / "argile.pkl"]),
+        (load_raster_foret, [dir_raster / "foret.pkl"]),
+        (load_raster_nappes, [dir_raster / "niveau_nappe_eau.pkl", dir_raster / "profondeur_nappe.pkl"]),
+    ]
+
+    datasets = []
+    for loader, files in loaders:
+        if any(Path(f).is_file() for f in files):
+            try:
+                datasets.append(loader(dir_raster, dates))
+            except Exception as e:  # pragma: no cover - defensive programming
+                warnings.warn(f"Could not load raster with {loader.__name__}: {e}")
+
+    if not datasets:
+        raise ValueError("No raster data found in the provided directory")
+
+    return xr.merge(datasets)
