@@ -1826,7 +1826,7 @@ def raster_corine(geo, dir_output, file_subpaths, tifFile, tifFile_high, years, 
                     dst_width=width, dst_height=height,
                     #resolution=(reslon, reslat)  # ICI en degrés
                 )
-
+                
                 # Destination reprojetée (1 bande attendue)
                 dst_array = np.empty((1, height, width), dtype=np.float32)
 
@@ -2101,7 +2101,7 @@ def load_raster_cosia(dir_raster: Path, dates: list) -> xr.Dataset:
 
     lat = np.arange(cosia.shape[1])
     lon = np.arange(cosia.shape[2])
-    band = np.arange(cosia.shape[0])
+    band = valeurs_cosia_couverture.keys()
 
     data_vars = {
         "cosia": ("band", "latitude", "longitude", "date"), cosia,
@@ -2125,8 +2125,20 @@ def load_raster_corine(dir_raster: Path, dates: list) -> xr.Dataset:
 
     lat = np.arange(corine.shape[1])
     lon = np.arange(corine.shape[2])
-    band = np.arange(corine.shape[0])
-
+    band = [
+    'Other',
+    'urban',
+    'transport',
+    'agricultural',
+    'grass',
+    'forest',
+    'vegetation',
+    'moisture',
+    'water',
+    'littoral',
+    'rock'
+    ]
+    
     data_vars = {
         "corine": ("band", "latitude", "longitude", "date"), corine,
         "corine_landcover": ("latitude", "longitude", "date"), corine_land,
