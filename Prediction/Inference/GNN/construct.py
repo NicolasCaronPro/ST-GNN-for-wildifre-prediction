@@ -1129,4 +1129,7 @@ def init(args, dir_output, script):
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
 
-    return df, graphScale, prefix, fp, features_name
+    # Convert the final dataframe to an xarray Dataset before returning
+    ds = xr.Dataset.from_dataframe(df)
+
+    return ds, graphScale, prefix, fp, features_name

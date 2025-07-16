@@ -3,6 +3,9 @@ import torch_geometric
 from zmq import device
 from GNN.pytorch_model import *
 from sklearn.metrics import cohen_kappa_score
+import xarray as xr
+import pandas as pd
+import numpy as np
 
 #########################################################################################################
 #                                                                                                       #
@@ -122,6 +125,12 @@ class AugmentedInplaceGraphDataset(Dataset):
 
 #################################### NUMPY #############################################################
 def get_train_val_test_set(graphScale, df, features_name, train_departements, prefix, dir_output, args):
+    """Return xarray splits from a dataframe or xarray input."""
+    if isinstance(df, pd.DataFrame):
+        ds = xr.Dataset.from_dataframe(df)
+    else:
+        ds = df
+
     # Input config
     maxDate = args.maxDate
     trainDate = args.trainDate
@@ -144,6 +153,12 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     thresh_kmeans = args.thresh_kmeans
 
     ######################## Get departments and train departments #######################
+
+    if 'scale' not in ds.data_vars:
+        new_scale = 10 if scale == 'departement' else scale
+        ds = ds.assign(scale=('sample', np.full(ds.dims['sample'], new_scale)))
+
+    df = ds.to_dataframe().reset_index()
 
     departements, train_departements = select_departments(dataset_name, sinister)
 
@@ -269,7 +284,11 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         logger.info(f'Nb sinister in val set : {val_dataset_["nbsinister"].sum()}')
         logger.info(f'Nb sinister in test set : {test_dataset_["nbsinister"].sum()}')
 
-    return train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, list(features_name)
+    train_ds = xr.Dataset.from_dataframe(train_dataset)
+    val_ds = xr.Dataset.from_dataframe(val_dataset)
+    test_ds = xr.Dataset.from_dataframe(test_dataset)
+
+    return train_ds, val_ds, test_ds, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale, prefix, list(features_name)
 
 #########################################################################################################
 #                                                                                                       #

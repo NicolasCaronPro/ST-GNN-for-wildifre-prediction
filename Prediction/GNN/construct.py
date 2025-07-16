@@ -1291,4 +1291,8 @@ def init(args, dir_output, script):
     plt.close('all')
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
-    return df, graphScale, prefix, fp, features_name
+
+    # Convert the final dataframe to an xarray Dataset before returning
+    ds = xr.Dataset.from_dataframe(df)
+
+    return ds, graphScale, prefix, fp, features_name
