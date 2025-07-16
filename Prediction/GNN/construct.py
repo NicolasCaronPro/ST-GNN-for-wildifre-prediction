@@ -6,6 +6,7 @@ from copy import copy
 from weigh_predictor import Predictor
 from GNN.graph_structure import *
 from feature_engine.selection import SmartCorrelatedSelection
+import xarray as xr
 
 def look_for_information(graph, dataset_name : str,
                          maxDate : str,
@@ -734,9 +735,25 @@ def construct_database(
         X = X[ind]
 
     logger.info(f'{X.shape, Y.shape}')
-    # Extract the training samples from Y
-    
-    return X, Y, features_name
+
+    data_vars = {
+        'features': (('sample', 'feature'), X[:, len(ids_columns)-1:]) if X is not None else None,
+        'target': (('sample', 'target'), Y[:, len(ids_columns):])
+    }
+    coords = {
+        'sample': np.arange(Y.shape[0]),
+        'graph_id': ('sample', Y[:, graph_id_index]),
+        'id': ('sample', Y[:, id_index]),
+        'longitude': ('sample', Y[:, longitude_index]),
+        'latitude': ('sample', Y[:, latitude_index]),
+        'departement': ('sample', Y[:, departement_index]),
+        'date': ('sample', Y[:, date_index]),
+        'weight': ('sample', Y[:, weight_index])
+    }
+
+    ds = xr.Dataset(data_vars, coords=coords)
+
+    return ds, features_name
 
 def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     nfps = []

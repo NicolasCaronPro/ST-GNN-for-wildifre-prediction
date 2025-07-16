@@ -4,6 +4,7 @@ from nbconvert import export
 from sklearn.cluster import KMeans
 from copy import copy
 from weigh_predictor import Predictor
+import xarray as xr
 from GNN.graph_structure import *
 
 def look_for_information(graph, dataset_name : str,
@@ -701,8 +702,25 @@ def construct_database(
             f'{c} : , {np.argwhere((y_train[:, -3] == c) & (y_train[:,weight_index] > 0)).shape}'
         )
 
-    # Return the features, ground truth, and feature names
-    return X, Y, features_name
+    # Create xarray Dataset for analysis
+    data_vars = {
+        'features': (('sample', 'feature'), X[:, len(ids_columns)-1:]) if X is not None else None,
+        'target': (('sample', 'target'), Y[:, len(ids_columns):])
+    }
+    coords = {
+        'sample': np.arange(Y.shape[0]),
+        'graph_id': ('sample', Y[:, graph_id_index]),
+        'id': ('sample', Y[:, id_index]),
+        'longitude': ('sample', Y[:, longitude_index]),
+        'latitude': ('sample', Y[:, latitude_index]),
+        'departement': ('sample', Y[:, departement_index]),
+        'date': ('sample', Y[:, date_index]),
+        'weight': ('sample', Y[:, weight_index])
+    }
+
+    ds = xr.Dataset(data_vars, coords=coords)
+
+    return ds, features_name
 
 def construct_non_point(firepoints, regions, maxDate, sinister, dir):
     nfps = []
