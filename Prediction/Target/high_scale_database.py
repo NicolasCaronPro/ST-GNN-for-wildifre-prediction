@@ -193,18 +193,30 @@ def add_hour(x, h):
             return x.strftime('%Y-%m-%d')
 
 def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
-
+    # Lists to store the processed data and incident points for each department
     sinisterPoints = []
     input = []
 
+    # Process each department in the list
     for dept in departements:
-        code = int2strMaj[int(dept.split('-')[1])]
 
+        # If data should be freshly computed (not read from disk)
         if not read:
-            #print(regions[regions['departement'] == dept], dept)
             print(dept)
-            sat0, _, _ = rasterization(regions[regions['departement'] == dept], n_pixel_y, n_pixel_x, 'scale0', dir_output, dept+'_scale0')
+
+            # Rasterize the 'scale0' field for the current department. 
+            sat0, _, _ = rasterization(
+                regions[regions['departement'] == dept], 
+                n_pixel_y, n_pixel_x, 
+                'scale0', 
+                dir_output,
+                dept + '_scale0'
+            )
+
+            # Find unique IDs in the raster (i.e., unique spatial zones)
             uniques_ids = np.unique(sat0[~np.isnan(sat0)])
+
+            # Remove all but one pixel per unique ID to avoid duplication
             additionnal_pixel_x = []
             additionnal_pixel_y = []
             for ui in uniques_ids:
@@ -212,91 +224,114 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
                 if mask.shape[0] > 1:
                     additionnal_pixel_x += list(mask[1:, 0])
                     additionnal_pixel_y += list(mask[1:, 1])
+
+            # Convert lists to NumPy arrays
             additionnal_pixel_x = np.asarray(additionnal_pixel_x)
             additionnal_pixel_y = np.asarray(additionnal_pixel_y)
+
+            # Set duplicated pixels to NaN
             sat0[0, additionnal_pixel_x, additionnal_pixel_y] = np.nan
-            save_object(sat0, dept+'rasterScale0.pkl', dir_output / 'raster' / resolution)
+
+            # Save the cleaned raster to disk
+            save_object(sat0, dept + 'rasterScale0.pkl', dir_output / 'raster' / resolution)
+
         else:
-            sat0 = read_object(dept+'rasterScale0.pkl', dir_output / 'raster' / resolution)
+            # Load previously saved raster from disk
+            sat0 = read_object(dept + 'rasterScale0.pkl', dir_output / 'raster' / resolution)
+
+        # Try loading incident data for the department
         try:
             if dataset_name == 'firemen':
+                # Select the correct CSV file depending on the sinister type
                 if sinister == 'firepoint':
                     name = 'NATURELSfire.csv'
                 else:
                     name = 'inondation.csv'
                 fp = pd.read_csv(root / dept / sinister / name)
         except:
-                print('Return a full zero image')
-                inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
-                inputDep[np.isnan(sat0[0])] = np.nan
-                input.append(inputDep)
-                save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
-                continue
-        
-        if dataset_name == 'bdiff' or dataset_name == 'vigicrues' or dataset_name == 'georisques' or dataset_name == 'bdiff_small':
-            fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv', dtype={'Département': str})
-            code_dept_str = name2int[dept]
-            if code_dept_str < 10:
-                code_dept_str = f'0{code_dept_str}'
-            else:
-                code_dept_str = f'{code_dept_str}'
-            fp = fp[fp['Département'] == code_dept_str]
-
-        else:
-            # Convertir les colonnes en format datetime
-            # Fonction pour convertir en datetime en gérant les erreurs
-            def safe_to_datetime(column):
-                return pd.to_datetime(column, errors='coerce')
-
-            # Convertir les colonnes en format datetime
-            fp['date_debut'] = safe_to_datetime(fp['date_debut'])
-            fp['date_fin'] = safe_to_datetime(fp['date_fin'])
-
-            # Calculer la différence en heures pour les lignes valides
-            fp['hours_difference'] = (fp['date_fin'] - fp['date_debut']).dt.total_seconds() / 3600
-
-            # Calculer la moyenne des valeurs valides
-            mean_hours = fp['hours_difference'].mean(skipna=True)
-
-            # Remplacer les valeurs NaN par la moyenne
-            fp['hours_difference'] = fp['hours_difference'].fillna(mean_hours)
-
-        fp = fp[fp['date'] > sdate]
-        #print(fp.hours_difference.mean(), fp.hours_difference.max(), fp.hours_difference.min())
-        print(len(fp))
-        if len(fp) == 0:
+            # If loading fails, create a zero image for the whole period
             print('Return a full zero image')
             inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
             inputDep[np.isnan(sat0[0])] = np.nan
             input.append(inputDep)
-            save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
+            save_object(inputDep, dept + 'binScale0.pkl', dir_output / 'bin' / resolution)
             continue
-        
+
+        # Load data from national datasets and filter by department
+        if dataset_name in ['bdiff', 'vigicrues', 'georisques', 'bdiff_small']:
+            fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv', dtype={'Département': str})
+            code_dept_str = name2int[dept]
+            code_dept_str = f'{code_dept_str:02}'  # Format with leading zero if needed
+            fp = fp[fp['Département'] == code_dept_str]
+
+        else:
+            # Convert date columns to datetime safely
+            def safe_to_datetime(column):
+                return pd.to_datetime(column, errors='coerce')
+
+            fp['date_debut'] = safe_to_datetime(fp['date_debut'])
+            fp['date_fin'] = safe_to_datetime(fp['date_fin'])
+
+            # Compute intervention time in hours
+            fp['hours_difference'] = (fp['date_fin'] - fp['date_debut']).dt.total_seconds() / 3600
+
+            # Fill missing durations with the mean
+            mean_hours = fp['hours_difference'].mean(skipna=True)
+            fp['hours_difference'] = fp['hours_difference'].fillna(mean_hours)
+
+        # Filter records to keep only those after the start date
+        fp = fp[fp['date'] > sdate]
+
+        print(len(fp))
+        if len(fp) == 0:
+            # No data: return a zero-filled image
+            print('Return a full zero image')
+            inputDep = np.zeros((*sat0[0].shape, len(creneaux)), dtype=float)
+            inputDep[np.isnan(sat0[0])] = np.nan
+            input.append(inputDep)
+            save_object(inputDep, dept + 'binScale0.pkl', dir_output / 'bin' / resolution)
+            continue
+
+        # Filter incidents that are within the processing period
         sp = fp[(fp['date'] >= sdate) & (fp['date'] < edate)]
         sp['departement'] = dept
-        
-        #print(sp.h3.unique())
+
+        # Replace H3 hexagons with internal scale0 IDs
         sp['scale0'] = sp['h3'].replace(dico)
-        #print(sp.scale0.unique())
 
-        sat0 = sat0[0]
+        sat0 = sat0[0]  # Take the raster array from wrapper list
+
+        # If not reading precomputed files, compute the raster
         if not read:
-            inputDep = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
-                                                             creneaux, sat0, sinister, sinister_encoding, n_pixel_y, n_pixel_x, dir_output, dept, dir_output / 'bin' / resolution / 'log.txt')
-            
+            inputDep = create_spatio_temporal_sinister_image(
+                sp,
+                regions[regions['departement'] == dept],
+                creneaux,
+                sat0,
+                sinister,
+                sinister_encoding,
+                n_pixel_y,
+                n_pixel_x,
+                dir_output,
+                dept
+            )
+
+            # Set extra pixels to zero (those removed earlier)
             inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
-            save_object(inputDep, dept+'binScale0.pkl', dir_output / 'bin' / resolution)
 
-            #inputDep_time = create_spatio_temporal_sinister_image(sp, regions[regions['departement'] == dept],
-            #                                                 creneaux, sat0, sinister, 'hours_difference', n_pixel_y, n_pixel_x, dir_output, dept, dir_output / 'time_intervention' / resolution / 'log.txt')
-            
-            #inputDep_time[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
-            #save_object(inputDep_time, dept+'timeScale0.pkl', dir_output / 'time_intervention' / resolution)
+            # Save to disk
+            save_object(inputDep, dept + 'binScale0.pkl', dir_output / 'bin' / resolution)
+
         else:
-            inputDep = read_object(dept+'binScale0.pkl', dir_output / 'bin' / resolution)
+            # Load previously processed raster
+            inputDep = read_object(dept + 'binScale0.pkl', dir_output / 'bin' / resolution)
 
+        # Append results for this department
         input.append(inputDep)
         sinisterPoints.append(sp)
+
+    # Merge all departmental rasters into a single xarray
+    concat_xarrays(dir_output / 'bin' / resolution, allDates, dept)
 
     return sinisterPoints, input
 
@@ -330,48 +365,12 @@ if __name__ == "__main__":
         output_dataset = dataset_name
 
     ###################################### Data loading ###################################
-    #root = Path('/home/caron/Bureau/csv')
-    root = Path('/media/caron/X9 Pro/travaille/Thèse/csv')
+    root = Path('/media/caron/X9 Pro1/travaille/Thèse/csv')
     dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+output_dataset + '/' + sinister_encoding)
-
-    """if dataset_name == 'firemen':
-        spa = 3
-        if sinister == "firepoint":
-            departements = ['departement-01-ain',
-                            'departement-25-doubs',
-                            'departement-69-rhone', 
-                            'departement-78-yvelines',
-                            ]
-            pass
-        elif sinister == "inondation":
-            #departements = ['departement-25-doubs']
-            pass
-    elif dataset_name == 'vigicrues':
-        spa = 3
-        if sinister == 'firepoint':
-            exit(1)
-        elif sinister == 'inondation':
-            departements = ['departement-01-ain']
-    elif dataset_name == 'bdiff':
-        if sinister != 'firepoint':
-            exit(1)
-        spa = 3
-        departements = [f'departement-{dept}' for dept in departements]
-    elif dataset_name == 'georisques':
-        spa = 3
-        departements = [f'departement-{dept}' for dept in departements]
-    else:
-        print(f'Unknow dataset name {dataset_name}')
-        exit(1)"""
 
     departements = [f'departement-{dept}' for dept in departements]
     spa = 3
-    #regions = gpd.read_file('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/regions.geojson')
     regions = []
-
-    #departements = ['departement-04-alpes-de-haute-provence']
-    #departements = ['departement-13-bouches-du-rhone']
-    #departements = ['departement-01-ain']
 
     for i, dept in enumerate(departements):
         if not (root / dept / 'data' / 'spatial/hexagones.geojson').is_file():
@@ -383,14 +382,18 @@ if __name__ == "__main__":
         h3['departement'] = dept
         regions.append(h3)
     
-    #regions = gpd.read_file(root / 'france' / 'data' / 'geo/hexagones_france.gpkg')
     regions = pd.concat(regions).reset_index(drop=True)
+    
     regions['scale0'] = regions.index
+    
     regions.index = regions['hex_id']
+    
     dico = regions['scale0'].to_dict()
+    
     regions.reset_index(drop=True, inplace=True)
+    
     check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}'))
-    print(regions.departement.unique())
+    
     regions.to_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/regions.geojson', driver='GeoJSON')
 
     ################################### Create output directory ###########################
@@ -446,6 +449,3 @@ if __name__ == "__main__":
 
     model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
     model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements, False)
-
-    #if not doPast:
-    #    remove_0_risk_pixel(dir_output, resolution, departements)

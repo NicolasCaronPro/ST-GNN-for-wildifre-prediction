@@ -229,7 +229,7 @@ class GenerateDatabase():
                 #except:
                 #        logger.info(f"Error with - polluant : {polluant}")
                 #        return
-        
+
         if True:
             polluants_csv = []
             for polluant in polluants:
@@ -501,7 +501,6 @@ class GenerateDatabase():
         rasterise_nappes(self.clusterSum, self.h3tif, df, self.h3tif.shape, self.dates, self.dir_raster, 'profondeur_nappe')
 
     def process(self, start, stop, resolution):
-        logger.info(self.departement)
         
         if self.compute_meteostat_features:
             self.compute_meteo_stat()
@@ -533,8 +532,13 @@ class GenerateDatabase():
         
         self.resLon = n_pixel_x
         self.resLat = n_pixel_y
-        self.h3tif = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low')
+        self.h3tif, lat, lon = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low', return_lat_lon=True)
         logger.info(f'Low scale {self.h3tif.shape}')
+        
+        f = open(self.dir_raster / f'latitude.pkl',"wb")
+        pickle.dump(lat, f)
+        f = open(self.dir_raster / f'longitude.pkl',"wb")
+        pickle.dump(lon, f)
 
         n_pixel_x = resolutions['0.03x0.03']['x']
         n_pixel_y = resolutions['0.03x0.03']['y']
@@ -562,11 +566,13 @@ class GenerateDatabase():
 def launch(departement, resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, 
            compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop):
     
+    logger.info(departement)
+    
     #dir_data = Path('/home/caron/Bureau/csv') / departement / 'data'
-    dir_data_disk = Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / departement / 'data'
+    dir_data_disk = Path('/media/caron/X9 Pro1/travaille/Thèse') / 'csv' / departement / 'data'
     dir_data = dir_data_disk 
     #dir_raster = Path('/home/caron/Bureau/csv') / departement / 'raster'
-    dir_raster =  Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / departement / 'raster' / resolution
+    dir_raster =  Path('/media/caron/X9 Pro1/travaille/Thèse') / 'csv' / departement / 'raster' / resolution
     
     dir_meteostat = dir_data / 'meteostat'
     check_and_create_path(dir_raster)
@@ -606,7 +612,7 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
     region = gpd.read_file(region_path)
     
     if not (dir_data / 'spatial/hexagones.geojson').is_file():
-        download_hexagones(Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data/geo'), region, dir_data / 'spatial', departement)
+        download_hexagones(Path('/media/caron/X9 Pro1/travaille/Thèse/csv/france/data/geo'), region, dir_data / 'spatial', departement)
 
     h3 = gpd.read_file(dir_data / 'spatial/hexagones.geojson')
 
@@ -622,6 +628,7 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
                     dir_raster)
 
     database.process(start, stop, resolution)
+    concat_xarrays(dir_raster, find_dates_between(start, stop))
 
 if __name__ == '__main__':
     RASTER = True
@@ -886,9 +893,9 @@ if __name__ == '__main__':
 
     ################## Haute-Savoie ######################
     launch('departement-74-haute-savoie', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    
     ################## Paris ######################
-    """launch('departement-75-paris', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-75-paris', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Seine-Maritime ######################
     launch('departement-76-seine-maritime', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)

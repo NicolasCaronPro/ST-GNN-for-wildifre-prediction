@@ -26,7 +26,6 @@ def encode(path_to_target, trainDates, expe, train_departements, dir_output, res
             continue
 
         dir_data = rootDisk / 'csv' / dep /  'raster' / resolution
-        #dir_data = root / 'csv' / dep /  'raster' / resolution
 
         tar = read_object(dep+'binScale0.pkl', path_to_target)
         if tar is None:

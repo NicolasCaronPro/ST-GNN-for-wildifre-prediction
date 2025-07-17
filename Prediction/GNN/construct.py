@@ -315,30 +315,6 @@ def construct_database(
     graph_construct = graphScale.base
     graph_method = graphScale.graph_method
     
-    ######################## Get departments and train departments #######################
-    # Select the departments and training departments based on the dataset and sinister type
-    departements, train_departements = select_departments(dataset_name, sinister)
-    trainCode = [name2int[d] for d in train_departements]
-
-    if 'select' in name_exp:
-        # Utiliser findall pour capturer toutes les balises présentes
-        matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
-        for group in matches:
-            stg, edg = group[1], group[3]
-            if stg:
-                st = int(stg)
-            if edg:
-                ed = int(edg) 
-
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path('sinister') / dataset_name / name)
-        fp['coef'] = 1
-        fp_gp = fp.groupby('departement')['coef'].sum().reset_index()
-        fp_gp = fp_gp.sort_values('coef', ascending=False)
-        train_departements = list(fp_gp['departement'][st:ed].values)
-        departements = list(fp_gp['departement'][st:ed].values)
-        print(train_departements)
-
     #######################################################################################
     # Convert department names to their corresponding codes for training departments
     # Prepare data for node prediction by extracting longitude and latitude
@@ -361,7 +337,7 @@ def construct_database(
     # Save the dataset to a CSV file
     ps.to_csv(dir_output / name, index=False)
     logger.info(f'{len(ps)} point in the dataset. Constructing database')
-
+    
     # Initialize an array for original nodes with default values
     orinode = np.full((len(ps), len(ids_columns) - 1), -1.0, dtype=float)
     orinode[:, graph_id_index] = ps[f'graph_{scale}'].values  # Assign node IDs
@@ -369,7 +345,7 @@ def construct_database(
     orinode[:, departement_index] = ps['departement']
     orinode[:, date_index] = ps['date']  # Assign dates
     #orinode = generate_subgraph(graphScale, 0, 0, orinode)
-
+    
     # Add temporal nodes based on the specified number of days (k_days)
     subNode = add_k_temporal_node(k_days=k_days, nodes=orinode)
     # Assign latitude and longitude to the sub-nodes
@@ -412,267 +388,6 @@ def construct_database(
     else:
         X = None  # If the file doesn't exist, set X to None
 
-    ##################################### Not Using all nodes at all dates #########################
-    # If we're not using all nodes at all dates, proceed with sampling
-    # Split Y into training and testing sets based on the maxDate and trainCode
-    """y_train = Y[(Y[:, date_index] < allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))]
-    y_test = Y[
-        ((Y[:, date_index] >= allDates.index(maxDate)) & (np.isin(Y[:, departement_index], trainCode))) |
-        (~np.isin(Y[:, departement_index], trainCode))
-    ]
-
-    ################################# Class selection sample (specify maximum number of samples per class per node) #######################
-    # Get the unique node IDs
-    unode = np.unique(Y[:, id_index])
-    udetp = np.unique(Y[:, departement_index])
-    if est_un_entier_chaine(values_per_class):
-        # Initialize lists to store new Y and X samples
-        new_Y = []
-        sumi = 0  # Counter for total samples
-        for node in udetp:
-            # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
-            for year in years:
-                if sinister == 'firepoint':
-                    # Define the fire season start and end dates for firepoints
-                    fd = f'{year}-{SAISON_FEUX[dept]["mois_debut"]}-{SAISON_FEUX[dept]["jour_debut"]}'
-                    ed = f'{year}-{SAISON_FEUX[dept]["mois_fin"]}-{SAISON_FEUX[dept]["jour_fin"]}'
-                else:
-                    # Use the full year for other sinister types
-                    fd = f'{year}-01-01'
-                    ed = f'{year}-12-31'
-                # Ensure the dates exist in the date list
-                if fd not in allDates:
-                    fd = allDates[0]
-                if ed not in allDates:
-                    ed = allDates[-1]
-
-                # Get the indices of the start and end dates
-                ifd = allDates.index(fd)
-                ied = allDates.index(ed)
-                if len(PERIODES_A_IGNORER[dept]['interventions']) > 0:
-                    # Exclude certain periods from consideration
-                    date_to_ignore = []
-                    for per in PERIODES_A_IGNORER[dept]['interventions']:
-                        start = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        stop = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        date_to_ignore.append(np.arange(start, stop))
-                    date_to_ignore =  np.asanyarray(date_to_ignore)
-                    # Create a mask for the node within the date range and not in ignored dates
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied) &
-                        ~np.isin(y_train[:, date_index], date_to_ignore)
-                    )
-                else:
-                    # Create a mask for the node within the date range
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied)
-                    )
-                if masknode.shape[0] == 0:
-                    continue  # Skip if no samples are found
-                # Get the unique classes for the current node
-                classs = np.unique(y_train[masknode, -3])
-                new_Y_index = []
-                for cls in classs:
-                    # Find indices where the class matches and there is a sinister event
-                    mask_sinister = np.argwhere(
-                        (y_train[masknode, -3] == cls) & (y_train[masknode, -2] > 0)
-                    )[:, 0]
-                    sumi += mask_sinister.shape[0]
-                    Y_class_index = mask_sinister
-                    if Y_class_index.shape[0] < int(values_per_class):
-                        # If fewer samples than desired, include all and sample additional non-sinister events
-                        number_non_sinister = abs(Y_class_index.shape[0] - int(values_per_class))
-                        new_Y_index += list(Y_class_index)
-                        Y_class_index = np.argwhere(
-                            (y_train[masknode, -3] == cls) & (y_train[masknode, -2] == 0)
-                        )[:, 0]
-                        choices = np.random.choice(
-                            Y_class_index,
-                            min(Y_class_index.shape[0], int(number_non_sinister)),
-                            replace=False
-                        )
-                        new_Y_index += list(choices)
-                    else:
-                        # Randomly select the desired number of samples
-                        choices = np.random.choice(
-                            Y_class_index,
-                            min(Y_class_index.shape[0], int(values_per_class)),
-                            replace=False
-                        )
-                        new_Y_index += list(choices)
-                # Add the selected samples to the new lists
-                new_Y += list(y_train[masknode][new_Y_index])
-
-    ####################### Using a binary selection (same number of non-fire as fire) per node ########################
-    elif values_per_class.find('binary') != -1:
-        # Attempt to extract the factor from the values_per_class string
-        try:
-            factor = int(values_per_class.split('-')[-1])
-        except:
-            logger.info('Factor undefined, select with factor 1')
-            factor = 1  # Default factor is 1
-        new_Y = []
-        sumi = 0  # Counter for total samples
-        for node in udetp:
-            # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
-            for year in years:
-                if sinister == 'firepoint':
-                    # Define the fire season start and end dates for firepoints
-                    fd = f'{year}-{SAISON_FEUX[dept]["mois_debut"]}-{SAISON_FEUX[dept]["jour_debut"]}'
-                    ed = f'{year}-{SAISON_FEUX[dept]["mois_fin"]}-{SAISON_FEUX[dept]["jour_fin"]}'
-                else:
-                    # Use the full year for other sinister types
-                    fd = f'{year}-01-01'
-                    ed = f'{year}-12-31'
-                # Ensure the dates exist in the date list
-                if fd not in allDates:
-                    fd = allDates[0]
-                if ed not in allDates:
-                    ed = allDates[-1]
-
-                # Get the indices of the start and end dates
-                ifd = allDates.index(fd)
-                ied = allDates.index(ed)
-                if len(PERIODES_A_IGNORER[dept]['interventions']) > 0:
-                    # Exclude certain periods from consideration
-                    date_to_ignore = []
-                    for per in PERIODES_A_IGNORER[dept]['interventions']:
-                        start = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        stop = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        date_to_ignore.append(np.arange(start, stop))
-                    date_to_ignore = np.asanyarray(date_to_ignore)
-                    # Create a mask for the node within the date range and not in ignored dates
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied) &
-                        (~np.isnan(y_train[:, -1])) &
-                        ~np.isin(y_train[:, date_index], date_to_ignore)
-                    )
-                else:
-                    # Create a mask for the node within the date range
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied) &
-                        (~np.isnan(y_train[:, -1]))
-                    )
-                if masknode.shape[0] == 0:
-                    continue  # Skip if no samples are found
-                # Find indices for non-sinister and sinister events
-                fire_dates = np.unique(y_train[masknode][y_train[masknode, -2] > 0][:, date_index])
-                td = 3
-                for udates in fire_dates:
-                    urange = np.arange(udates-td, udates+td)
-                    fire_dates = np.concatenate((fire_dates, urange))
-                fire_dates = np.unique(fire_dates)
-                #mask_non_sinister = np.argwhere((y_train[masknode, -2] == 0) & ~(np.isin(y_train[masknode, 4], fire_dates)))[:, 0]
-                mask_non_sinister = np.argwhere((y_train[masknode, -2] == 0))[:, 0]
-                mask_sinister = np.argwhere(y_train[masknode, -2] > 0)[:, 0]
-                number_of_samples = mask_sinister.shape[0]
-                new_Y_index = []
-                if number_of_samples != 0:
-                    # Sample non-sinister events proportionally to the number of sinister events
-                    choices = np.random.choice(
-                        mask_non_sinister,
-                        min(mask_non_sinister.shape[0], number_of_samples * factor),
-                        replace=False
-                    )
-                else:
-                    # If no sinister events, sample a fixed number of non-sinister events
-                    choices = np.random.choice(
-                        mask_non_sinister,
-                        min(mask_non_sinister.shape[0], factor),
-                        replace=False
-                    )
-                sumi += mask_sinister.shape[0]
-                new_Y_index += list(choices)
-                new_Y_index += list(mask_sinister)
-                print(choices.shape, mask_sinister.shape, mask_non_sinister.shape, y_train[masknode, -2].shape)
-                # Add the selected samples to the new lists
-                new_Y += list(y_train[masknode][new_Y_index])
-                
-    elif values_per_class == 'full':
-        new_Y = []
-        new_Y_index = []
-        for node in udetp:
-            # Get the department code for the current node
-            dept = int(np.unique(Y[Y[:, departement_index] == node, departement_index])[0])
-            for year in years:
-                if sinister == 'firepoint':
-                    # Define the fire season start and end dates for firepoints
-                    fd = f'{year}-{SAISON_FEUX[dept]["mois_debut"]}-{SAISON_FEUX[dept]["jour_debut"]}'
-                    ed = f'{year}-{SAISON_FEUX[dept]["mois_fin"]}-{SAISON_FEUX[dept]["jour_fin"]}'
-                else:
-                    # Use the full year for other sinister types
-                    fd = f'{year}-01-01'
-                    ed = f'{year}-12-31'
-                # Ensure the dates exist in the date list
-                if fd not in allDates:
-                    fd = allDates[0]
-                if ed not in allDates:
-                    ed = allDates[-1]
-
-                # Get the indices of the start and end dates
-                ifd = allDates.index(fd)
-                ied = allDates.index(ed)
-                if len(PERIODES_A_IGNORER[dept]['interventions']) > 0:
-                    # Exclude certain periods from consideration
-                    date_to_ignore = []
-                    for per in PERIODES_A_IGNORER[dept]['interventions']:
-                        start = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        stop = allDates.index(per[0].strftime('%Y-%m-%d'))
-                        date_to_ignore.append(np.arange(start, stop))
-                    date_to_ignore = np.asanyarray(date_to_ignore)
-                    # Create a mask for the node within the date range and not in ignored dates
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied) &
-                        ~np.isin(y_train[:, date_index], date_to_ignore)
-                    )
-                else:
-                    # Create a mask for the node within the date range
-                    masknode = np.argwhere(
-                        (y_train[:, departement_index] == node) &
-                        (y_train[:, date_index] >= ifd) &
-                        (y_train[:, date_index] <= ied)
-                    )
-                new_Y += list(y_train[masknode])"""
-
-    """# Convert the lists to numpy arrays
-    new_Y = np.asarray(new_Y).reshape(-1, y_train.shape[-1])
-    # Create a mask to include neighboring days within k_days
-    mask_days = np.zeros(y_train.shape[0], dtype=bool)
-    for k in range(1, k_days + 2):
-        mask_days = mask_days | np.isin(y_train[:, date_index], new_Y[:, date_index] - k)
-
-    # Get the neighboring samples
-    new_Y_neighboor = y_train[mask_days]
-
-    set1 = set(tuple(sub_arr) for sub_arr in new_Y_neighboor)
-    set2 = set(tuple(sub_arr) for sub_arr in new_Y)
-    
-    # Find intersection
-    intersection = set1.intersection(set2)
-
-    # Remove intersection elements from both arrays
-    new_Y_neighboor = np.asarray([sub_arr for sub_arr in new_Y_neighboor if tuple(sub_arr) not in intersection])
-    new_Y_neighboor[:, weight_index] = 0  # Reset weight column in the data
- 
-    # Concatenate the new and neighboring Y samples with the test set
-    #Y = np.concatenate((new_Y, y_test), casting='no')
-    Y = np.concatenate((new_Y, new_Y_neighboor, y_test), casting='safe')
-    
-    # Remove duplicate rows from Y
-    Y = np.unique(Y, axis=0)"""
-
     if X is None:
         # If X is not loaded, generate the features
         X, features_name = get_sub_nodes_feature(
@@ -689,17 +404,6 @@ def construct_database(
             resolution,
         )
     else:
-        """ # Align X with Y based on node IDs and dates
-        X_ = np.empty((Y.shape[0], X.shape[1]))
-        for i, instance in enumerate(Y):
-            instance_index = np.argwhere(
-                (Y[:, id_index] == instance[id_index]) & (Y[:, date_index] == instance[date_index])
-            )[:, 0]
-            if instance_index.shape[0] >= 2:
-                instance_index = instance_index[0]
-            X_[i] = X[instance_index]
-
-        X = X_"""
 
         # Boucle sur chaque noeud unique dans la première colonne de X
         for node in np.unique(X[:, id_index]):
@@ -827,7 +531,8 @@ def init(args, dir_output, script):
 
     ######################## Get departments and train departments #######################
 
-    departements, train_departements = select_departments(dataset_name, sinister)
+    departements = args.train_departments + args.test_departments
+    train_departements = args.train_departments
 
     ######################## CONFIG ################################
     
@@ -921,41 +626,12 @@ def init(args, dir_output, script):
                          sinister,
                          Path(dataset_name))
         
-    if not dummy:
-            name = 'points.csv'
-            ps = pd.read_csv(Path(dataset_name) / sinister / name)
-            depts = [name2int[dept] for dept in departements]
-            logger.info(ps.departement.unique())
-            ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-            logger.info(ps.departement.unique())
-    else:
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path(dataset_name) / sinister / name)
-        name = 'non'+sinister+'csv'
-        nfp = pd.read_csv(Path(name_exp) / sinister / name)
-        ps = pd.concat((fp, nfp)).reset_index(drop=True)
-        ps = ps.copy(deep=True)
-        ps = ps[(ps['date'].isin(allDates)) & (ps['date'] >= '2017-06-12')]
-        ps['date'] = [allDates.index(date) for date in ps.date if date in allDates]
-
-    ######################### Top database ##################################
-    if 'select' in name_exp:
-        matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
-        for group in matches:
-            stg, edg = group[1], group[3]
-            if stg:
-                st = int(stg)
-            if edg:
-                ed = int(edg) 
-
-        name = sinister+'.csv'
-        fp = pd.read_csv(Path('sinister') / dataset_name / name)
-        fp['coef'] = 1
-        fp_gp = fp.groupby('departement')['coef'].sum().reset_index()
-        fp_gp = fp_gp.sort_values('coef', ascending=False)
-        train_departements = list(fp_gp['departement'][st:ed].values)
-        departements = list(fp_gp['departement'][st:ed].values)
-        print(train_departements)
+        name = 'points.csv'
+        ps = pd.read_csv(Path(dataset_name) / sinister / name)
+        depts = [name2int[dept] for dept in departements]
+        logger.info(ps.departement.unique())
+        ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
+        logger.info(ps.departement.unique())
 
     ######################### Encoding ######################################
 
@@ -1052,9 +728,6 @@ def init(args, dir_output, script):
         )
 
         X2 = X2[:, len(ids_columns)-1:]
-
-        print(np.unique(X2[features_name_2.index('NDVI_mean')]))
-        print(np.unique(X[len(ids_columns)-1 + features_name.index('NDVI_mean')]))
 
         new_X = np.empty((X.shape[0], X.shape[1]))
 

@@ -74,6 +74,7 @@ import logging
 import cv2
 import geopandas as gpd
 import pandas as pd
+import xarray as xr
 
 def haversine(p1, p2, unit = 'kilometer'):
     import math
@@ -469,97 +470,105 @@ def myRasterization(geo, tif, maskNan, sh, column, maskCol, val=np.nan):
             res[mask] = 1
     return res
 
-def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
-                                          regions : gpd.GeoDataFrame,
-                                          dates : list,
-                                          mask : np.array,
-                                          sinisterType : str,
-                                          sinister_encoding : str,
-                                          n_pixel_y : float, 
-                                          n_pixel_x : float,
-                                          dir_output : Path,
-                                          dept : str,
-                                          log_file):
+def create_spatio_temporal_sinister_image(firepoints: pd.DataFrame,
+                                          regions: gpd.GeoDataFrame,
+                                          dates: list,
+                                          mask: np.array,
+                                          sinisterType: str,
+                                          sinister_encoding: str,
+                                          n_pixel_y: float, 
+                                          n_pixel_x: float,
+                                          dir_output: Path,
+                                          dept: str):
+    # Create a deep copy of firepoints to avoid modifying the original DataFrame
     firepoints = firepoints.copy(deep=True)
-    
+
+    # Get coordinates of valid (non-NaN) positions in the spatial mask
     nonNanMask = np.argwhere(~np.isnan(mask))
+
+    # Unique dates where incidents are reported
     fdate = firepoints['date'].unique()
+
+    # Number of total dates for temporal axis
     lenDates = len(dates)
+
+    # Initialize a 3D raster to store spatio-temporal values: (rows, cols, time)
     spatioTemporalRaster = np.full((mask.shape[0], mask.shape[1], lenDates), np.nan)
+
+    # Iterate over each date in the full list of time steps
     for i, date in enumerate(dates):
 
+        # Optional progress print every 200 iterations
         if i % 200 == 0:
-            print(date)           
+            print(date)
 
+        # Check if the date has incident data; if not, fill with 0
         if date in fdate:
-            fdataset = firepoints[(firepoints['date'] == date)]
+            fdataset = firepoints[firepoints['date'] == date]
         else:
-            spatioTemporalRaster[nonNanMask[:,0], nonNanMask[:,1], i] = 0
+            spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = 0
             continue
 
+        # Create a deep copy of the spatial region data
         hexaFire = regions.copy(deep=True)
+
+        # ---------- ENCODING: INCIDENT OCCURRENCE ----------
         if sinister_encoding == 'occurence':
-            hexaFire['is'+sinisterType] = 0
-            hexaFire['nb'+sinisterType] = 0
-            
-            #if date == '2023-03-11':
-            #    print(fdataset)
+            # Initialize columns to track presence and count of incidents
+            hexaFire['is' + sinisterType] = 0
+            hexaFire['nb' + sinisterType] = 0
 
+            # For each incident, update matching spatial region
             for _, row in fdataset.iterrows():
-                """print(row['scale0'])
-                print(hexaFire.scale0.unique())
-                print(hexaFire[hexaFire['scale0'] == row['scale0']])"""
+                matched_idx = hexaFire[hexaFire['scale0'] == row['scale0']].index
+                hexaFire.loc[matched_idx, 'is' + sinisterType] = 1
+                hexaFire.loc[matched_idx, 'nb' + sinisterType] += 1
 
-                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'is'+sinisterType] = 1
-                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'nb'+sinisterType] += 1
+            # Rasterize the variable to 2D spatial image
+            rasterVar, lat, lon = rasterization(
+                hexaFire, n_pixel_y, n_pixel_x, 'nb' + sinisterType, dir_output, dept + '_bin0'
+            )
 
-            #if date == '2023-03-11':
-            
-            #print(hexaFire['nb'+sinisterType].unique())
-            
-            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'nb'+sinisterType, dir_output, dept+'_bin0')
+            # Save spatial reference (lat/lon) if not already saved
+            if not (dir_output / 'latitude' / f'{dept}_latitude.pkl').is_file():
+                save_object(lat, f'{dept}_latitude.pkl', dir_output / 'latitude' / '2x2')
+                save_object(lon, f'{dept}_longitude.pkl', dir_output / 'longitude' / '2x2')
+
+            # Handle edge case: raster is empty (only zeros or NaNs)
             if np.all(rasterVar[~np.isnan(rasterVar)] == 0):
-                rasterVar2, _, _ = rasterization(hexaFire, 0.0002694945852326214, 0.0002694945852352859, 'nb'+sinisterType, dir_output, dept+'_bin0')
+                # Try again with higher resolution to find small features
+                rasterVar2, _, _ = rasterization(
+                    hexaFire, 0.0002694945852326214, 0.0002694945852352859, 'nb' + sinisterType, dir_output, dept + '_bin0'
+                )
                 rasterVar2 = rasterVar2[0]
                 rasterVar2[np.isnan(rasterVar2)] = 0
 
+                # Resize to match original raster dimensions
                 val_res = resize_no_dim(rasterVar2, rasterVar.shape[1], rasterVar.shape[2])
-                
-                val_res = np.pad(val_res, [1,1])
 
-                #if date == '2017-10-11':
-                #    plt.imshow(rasterVar2)
-                #    plt.show()
-                #    plt.imshow(val_res)
-                #    plt.show()
+                # Pad array to help detect local maxima
+                val_res = np.pad(val_res, [1, 1])
 
+                # Detect peaks (potential hotspots)
                 coordinates = peak_local_max(val_res, min_distance=1)
 
+                # Prepare to update raster with enhanced peak values
                 val_res_2 = np.copy(val_res)
                 val_res = np.zeros_like(val_res).astype(int)
 
-                #if date == '2017-10-11':
-                #    print(coordinates)
-                    
+                # Copy peak values to final raster
                 for coord in coordinates:
-                    #print(math.ceil(val_res_2[coord[0], coord[1]]))
-                    #print(val_res_2[coord[0], coord[1]])
                     val_res[coord[0], coord[1]] = math.ceil(val_res_2[coord[0], coord[1]])
 
-                #if date == '2017-10-11':
-                #    plt.imshow(val_res)
-                #    plt.show()
-
+                # Insert peak-enhanced raster values
                 mask_nan = np.isnan(rasterVar)
-                rasterVar[0] = val_res[1:rasterVar[0].shape[0]+1, 1:rasterVar[0].shape[1]+1]
+                rasterVar[0] = val_res[1:rasterVar[0].shape[0] + 1, 1:rasterVar[0].shape[1] + 1]
+
+                # Restore NaNs where appropriate
                 mask_nan = mask_nan & (rasterVar[0] == 0)
                 rasterVar[mask_nan] = np.nan
 
-                #if date == '2017-10-11':
-                #    print(np.unique(rasterVar))
-                #    plt.imshow(rasterVar[0])
-                #    plt.show()
-
+                # Log issue if raster is still entirely 0
                 if np.all(rasterVar[~np.isnan(rasterVar)] == 0):
                     print(f'Unique values of scale0 {fdataset.scale0.unique()}')
                     if "Département" in np.unique(fdataset.columns):
@@ -568,36 +577,41 @@ def create_spatio_temporal_sinister_image(firepoints : pd.DataFrame,
                         log_message = f'{date} Unique values of scale0 {len(fdataset)} {fdataset["departement"].unique()} {fdataset.scale0.unique()}\n'
                     else:
                         log_message = f'{date} Unique values of scale0 {len(fdataset)} {fdataset.scale0.unique()}\n'
+                    print(log_message.strip())
 
-                    print(log_message.strip())  # Affiche dans la console
-
-                    # Enregistrement dans le fichier log (concatène si existe)
-                    #with open(log_file, "a") as f:
-                    #    f.write(log_message)
-
-            #if date == '2023-03-11':
-            #    plt.imshow(rasterVar[0])
-            #    plt.show()
-
+        # ---------- ENCODING: BURNED AREA ----------
         elif sinister_encoding == 'burned_area':
+            # Initialize area field
             hexaFire['Surface parcourue (m2)'] = 0
 
+            # Sum surface area by region
             for _, row in fdataset.iterrows():
-                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'Surface parcourue (m2)'] += row['Surface parcourue (m2)']
-            
-            hexaFire['Surface parcourue (h)'] = hexaFire['Surface parcourue (m2)'] * 0.0001
-            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x,  'Surface parcourue (m2)', dir_output, dept+'_bin0')
+                matched_idx = hexaFire[hexaFire['scale0'] == row['scale0']].index
+                hexaFire.loc[matched_idx, 'Surface parcourue (m2)'] += row['Surface parcourue (m2)']
 
+            # Convert to hectares
+            hexaFire['Surface parcourue (h)'] = hexaFire['Surface parcourue (m2)'] * 0.0001
+
+            # Rasterize burned area
+            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'Surface parcourue (m2)', dir_output, dept + '_bin0')
+
+        # ---------- ENCODING: TIME TO INTERVENTION ----------
         elif sinister_encoding == 'time_intervention':
+            # Initialize time difference field
             hexaFire['time_intervention'] = 0.0
 
+            # Sum intervention time by region
             for _, row in fdataset.iterrows():
-                hexaFire.loc[hexaFire[hexaFire['scale0'] == row['scale0']].index, 'time_intervention'] += row['hours_difference']
-            
-            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'time_intervention', dir_output, dept+'_bin0')
+                matched_idx = hexaFire[hexaFire['scale0'] == row['scale0']].index
+                hexaFire.loc[matched_idx, 'time_intervention'] += row['hours_difference']
 
+            # Rasterize intervention time
+            rasterVar, _, _ = rasterization(hexaFire, n_pixel_y, n_pixel_x, 'time_intervention', dir_output, dept + '_bin0')
+
+        # Store raster values at non-NaN mask locations for this date
         spatioTemporalRaster[nonNanMask[:, 0], nonNanMask[:, 1], i] = rasterVar[0][nonNanMask[:, 0], nonNanMask[:, 1]]
 
+    # Return the full 3D spatio-temporal raster
     return spatioTemporalRaster
 
 def myRasterization3D(geo, indss, maskNan, dicoSat, column):
@@ -1346,3 +1360,43 @@ def relabel_clusters(cluster_labels, started):
     for ncl, cl in enumerate(unique_labels):
         relabeled_image[cluster_labels == cl] = ncl + started
     return relabeled_image
+
+def load_raster_targets(dir_raster: Path, dates: list, lat, lon, dept) -> xr.Dataset:
+    """Load groundwater level rasters into an xarray."""
+    data_vars = {}
+    for var in ["occurrence", "burned_area", "time_intervention"]:
+        file = dir_raster / var / f"{dept}binScale0.pkl"
+        if not file.is_file():
+            continue
+        values = pickle.load(open(file, "rb"))
+        data_vars[var] = (("latitude", "longitude", "date"), values)
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+def concat_xarrays(dir_raster: Path, dates: list, dept) -> xr.Dataset:
+    """Concatenate all available rasters into a single xarray dataset.
+    
+    Parameters
+    ----------
+    dir_raster : Path
+        Directory containing the pickled rasters.
+    dates : list
+        Dates associated with the rasters.
+
+    Returns
+    -------
+    xr.Dataset
+        A merged dataset containing every raster that could be loaded.
+    """
+
+    latitude = read_object(f'{dept}_latitude.pkl', dir_raster)
+    longitude = read_object(f'{dept}_longitude.pkl', dir_raster)
+
+    datasets = load_raster_targets(dir_raster, dates, latitude, longitude, dept)
+
+    if not datasets:
+        raise ValueError("No raster data found in the provided directory")
+    
+    f = open(dir_raster / f'datacube.pkl',"wb")
+    pickle.dump(datasets,f)
