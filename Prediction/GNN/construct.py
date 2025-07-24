@@ -75,11 +75,10 @@ def parse_string(s):
     return result
 
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
-                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_date, val_date, graph_method):
+                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method):
     
-    print(graph_construct)
+    train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
-    print(dico_config)
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=graph_construct, sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
                                 attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
@@ -92,24 +91,13 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                        'params' : None}
     
     variables_for_susecptibilty_and_clustering = ['population', 'foret', 'osmnx', 'elevation',
-                                                  #'vigicrues',
-                                                  #'nappes',
-                                                  'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
-                                            'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
-                                            'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
-                                            'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
-                                            'days_since_rain', 'sum_consecutive_rainfall',
-                                            'sum_rain_last_7_days',
-                                            'sum_snow_last_7_days', 'snow24h', 'snow24h16']
-    """if dataset_name == 'bdiff':
-        graphScale.train_susecptibility_map(model_config=sucseptibility_map_model_config,
-                                                departements=departements,
-                                                variables=variables_for_susecptibilty_and_clustering, target='risk', train_date=train_date, val_date=val_date,
-                                                root_data=rootDisk / 'csv',
-                                                root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                                dir_output=dir_output)"""
-    #else:
-    #pass
+                                                'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
+                                        'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
+                                        'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
+                                        'temp16', 'dwpt16', 'rhum16', 'prcp16', 'wdir16', 'wspd16', 'prec24h16',
+                                        'days_since_rain', 'sum_consecutive_rainfall',
+                                        'sum_rain_last_7_days',
+                                        'sum_snow_last_7_days', 'snow24h', 'snow24h16']
         
     graphScale._create_sinister_region(base=graph_construct,
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
@@ -121,16 +109,9 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     graphScale._create_temporal_edges_list(allDates, k_days=k_days)
     graphScale.nodes = graphScale._assign_department(graphScale.nodes)
 
-    """graphScale._clusterize_node_with_target(departements=train_departements,
-                                            variables=variables_for_susecptibilty_and_clustering,
-                                            target='nbsinister', train_date=train_date,
-                                            path=dir_output,
-                                            root_data=rootDisk / 'csv',
-                                            root_target=root_target / sinister / dataset_name / sinister_encoding)"""
-    
     graphScale._clusterize_node_with_time_series(departements=train_departements,
                                             variables=variables_for_susecptibilty_and_clustering,
-                                            target='nbsinister', train_date=train_date,
+                                            target='nbsinister', train_dates=train_dates,
                                             path=dir_output,
                                             root_data=rootDisk / 'csv',
                                             root_target=root_target / sinister / dataset_name / sinister_encoding)
@@ -333,7 +314,7 @@ def construct_database(
 
     # Expand the dataset to include all dates
     ps = export_to_all_date(ps, dataset_name, sinister, departements, maxDate)
-
+    
     # Save the dataset to a CSV file
     ps.to_csv(dir_output / name, index=False)
     logger.info(f'{len(ps)} point in the dataset. Constructing database')
@@ -583,7 +564,7 @@ def init(args, dir_output, script):
                                     doEdgesFeatures=False,
                                     resolution=resolution,
                                     graph_construct=graph_construct,
-                                    train_date=trainDate,
+                                    train_dates=all_train_dates,
                                     val_date=maxDate,
                                     graph_method=graph_method
                                     )
@@ -620,7 +601,6 @@ def init(args, dir_output, script):
         
         check_and_create_path(dir_output)
 
-        #construct_non_point(fp, geo, maxDate, sinister, Path(dataset_name))
         look_for_information(graphScale, dataset_name,
                          maxDate,
                          sinister,
@@ -640,8 +620,6 @@ def init(args, dir_output, script):
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
         encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
-
-    #graphScale._plot_risk(mode='time_series_class', dir_output=dir_output)
 
     ########################## Do Database ####################################
     if doDatabase:
@@ -944,15 +922,6 @@ def init(args, dir_output, script):
 
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
-    #test_dataset = df[df['date'].isin(allDates.index(d) for d in all_test_dates)]
-
-    #plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['fwi_mean'])
-    #plt.savefig('test_fwi.png')
-    #plt.close('all')
-
-    #plt.plot(df[(df['departement'] == 13) & (df['date'] >= allDates.index('2020-01-01')) & (df['date'] <= allDates.index('2020-12-31'))]['NDVI_mean'])
-    #plt.savefig('test_NDIV.png')
-    #plt.close('all')
 
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
     return df, graphScale, prefix, fp, features_name

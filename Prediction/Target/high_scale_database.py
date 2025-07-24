@@ -199,7 +199,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
 
     # Process each department in the list
     for dept in departements:
-
+        
         # If data should be freshly computed (not read from disk)
         if not read:
             print(dept)
@@ -282,7 +282,6 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         # Filter records to keep only those after the start date
         fp = fp[fp['date'] > sdate]
 
-        print(len(fp))
         if len(fp) == 0:
             # No data: return a zero-filled image
             print('Return a full zero image')
@@ -315,7 +314,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
                 dir_output,
                 dept
             )
-
+            
             # Set extra pixels to zero (those removed earlier)
             inputDep[additionnal_pixel_x, additionnal_pixel_y, :] = 0.0
 
@@ -329,9 +328,6 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         # Append results for this department
         input.append(inputDep)
         sinisterPoints.append(sp)
-
-    # Merge all departmental rasters into a single xarray
-    concat_xarrays(dir_output / 'bin' / resolution, allDates, dept)
 
     return sinisterPoints, input
 
@@ -366,7 +362,7 @@ if __name__ == "__main__":
 
     ###################################### Data loading ###################################
     root = Path('/media/caron/X9 Pro1/travaille/Thèse/csv')
-    dir_output = Path('/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+output_dataset + '/' + sinister_encoding)
+    dir_output = Path('/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+output_dataset + '/' + sinister_encoding)
 
     departements = [f'departement-{dept}' for dept in departements]
     spa = 3
@@ -392,9 +388,9 @@ if __name__ == "__main__":
     
     regions.reset_index(drop=True, inplace=True)
     
-    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}'))
+    check_and_create_path(Path(f'/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}'))
     
-    regions.to_file(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/regions.geojson', driver='GeoJSON')
+    regions.to_file(f'/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/regions.geojson', driver='GeoJSON')
 
     ################################### Create output directory ###########################
     check_and_create_path(dir_output / 'mask' / 'geo' / resolution)
@@ -414,14 +410,9 @@ if __name__ == "__main__":
     n_pixel_y = resolutions[resolution]['y']
 
     sdate = '2017-06-12'
-    #edate = datetime.datetime.now().date().strftime('%Y-%m-%d')
     edate = '2024-06-29'
     creneaux = find_dates_between(sdate, edate)
 
-    isotonic = IsotonicRegression(y_min=0, y_max=1.0, out_of_bounds='clip')
-    logistic = LogisticRegression(random_state=42, solver='liblinear', penalty='l2', C=0.5,
-                                intercept_scaling=0.5, fit_intercept=True, class_weight={0: 1, 1 : 1})
-    
     dims = {}
     months = []
     months = [[2, 3, 4, 5], [6, 7, 8, 9], [10, 11, 12, 1]]
@@ -436,16 +427,21 @@ if __name__ == "__main__":
         dims[dept] = ((spa, spa, dim_med), (spa, spa, dim_high), (spa, spa, dim_low))
         print(dept, leni, (dim_med, dim_high, dim_low))
     
-    save_object(dims, 'dimension.pkl', Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/{sinister_encoding}'))
+    save_object(dims, 'dimension.pkl', Path(f'/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/regions/{sinister}/{output_dataset}/{sinister_encoding}'))
 
     ################################## Process #################################
 
     fp, input = process_department(departements=departements, sinister=sinister,
                                     n_pixel_y=n_pixel_y, n_pixel_x=n_pixel_x, read=read)
+    
+    for dept in departements:
+        # Merge all departmental rasters into a single xarray
+        concat_xarrays(Path('/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/'+sinister+'/'+output_dataset + '/'),
+                       allDates, dept, Path('/media/caron/X9 Pro1/travaille/Thèse/csv'), resolution)
 
     fp = pd.concat(fp).reset_index(drop=True)
-    check_and_create_path(Path(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}'))
-    fp.to_csv(f'/home/caron/Bureau/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}/{sinister}.csv', index=False)
+    check_and_create_path(Path(f'/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}'))
+    fp.to_csv(f'/media/caron/X9 Pro1/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN/sinister/{output_dataset}/{sinister}.csv', index=False)
 
-    model = Probabilistic(n_pixel_x, n_pixel_y, 1, logistic, dir_output, resolution)
+    model = Probabilistic(n_pixel_x, n_pixel_y, 1, None, dir_output, resolution)
     model._process_input_raster(dims, input, len(departements), True, departements, doPast, creneaux, departements, False)

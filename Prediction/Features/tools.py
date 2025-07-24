@@ -1153,6 +1153,7 @@ def raster_elevation(tifFile, dir_output, reslon, reslat, dir_data, dept):
     pickle.dump(elevation,f)
 
 valeurs_foret_attribut = {
+    "NoForest": 0,
     "Châtaignier": 1,
     "Chênes décidus": 2,
     "Chênes sempervirents": 3,
@@ -1176,15 +1177,15 @@ valeurs_foret_attribut = {
     "Sapin, épicéa": 21
 }
 
-valeurs_cosia_couverture = { 
-    'Building': 1,
-    'Bare soil': 2,
-    'Water surface': 3,
-    'Conifer': 4,
-    'Deciduous': 5,
-    'Shrubland': 6,
-    'Lawn': 7,
-    'Crop': 8,
+valeurs_cosia_couverture = {
+    'Cosia_Building': 1,
+    'Cosia_Bare soil': 2,
+    'Cosia_Water surface': 3,
+    'Cosia_Conifer': 4,
+    'Cosia_Deciduous': 5,
+    'Cosia_Shrubland': 6,
+    'Cosia_Lawn': 7,
+    'Cosia_Crop': 8,
 }
 
 valeurs_tourbiere_couverture = {
@@ -2075,7 +2076,6 @@ def _expand_static(data: np.ndarray, n_dates: int) -> np.ndarray:
         return np.repeat(data[..., np.newaxis], n_dates, axis=3)
     return data
 
-
 def load_rasterise_meteo(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load meteo rasters produced by ``rasterise_meteo_data`` into an xarray."""
     cems_variables = [
@@ -2091,7 +2091,7 @@ def load_rasterise_meteo(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
                 'sum_snow_last_7_days',
                 ]
     data_vars = {}
-
+    
     for var in cems_variables:
         if var == 'daily_severity_rating':
             var = 'dailySeverityRating'
@@ -2111,17 +2111,19 @@ def load_raster_cosia(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
 
     cosia = _expand_static(cosia, len(dates))
     cosia_landcover = _expand_static(cosia_landcover, len(dates))
-    cosia_influence = _expand_static(cosia_influence, len(dates))
+    #cosia_influence = _expand_static(cosia_influence, len(dates))
 
-    band = valeurs_cosia_couverture.keys()
+    bands = valeurs_cosia_couverture.keys()
 
     data_vars = {
-        "cosia": (("band", "latitude", "longitude", "date"), cosia),
         "cosia_landcover": (("latitude", "longitude", "date"), cosia_landcover),
-        "cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
+        #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
     }
 
-    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    for band in bands:
+        data_vars[band] = (("latitude", "longitude", "date"), cosia[valeurs_cosia_couverture[band]])
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
 def load_raster_corine(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
@@ -2134,27 +2136,29 @@ def load_raster_corine(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     corine_land = _expand_static(corine_land, len(dates))
     corine_inf = _expand_static(corine_inf, len(dates))
     
-    band = [
-    'Other',
-    'urban',
-    'transport',
-    'agricultural',
-    'grass',
-    'forest',
-    'vegetation',
-    'moisture',
-    'water',
-    'littoral',
-    'rock'
+    bands = [
+    'Corine_Other',
+    'Corine_urban',
+    'Corine_transport',
+    'Corine_agricultural',
+    'Corine_grass',
+    'Corine_forest',
+    'Corine_vegetation',
+    'Corine_moisture',
+    'Corine_water',
+    'Corine_littoral',
+    'Corine_rock'
     ]
 
     data_vars = {
-        "corine": (("band", "latitude", "longitude", "date"), corine),
         "corine_landcover": (("latitude", "longitude", "date"), corine_land),
-        "corine_influence": (("band", "latitude", "longitude", "date"), corine_inf),
+        #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
     }
 
-    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
+    for i, band in enumerate(bands):
+        data_vars[band] = (("latitude", "longitude", "date"), corine[i])
+
+    coords = { "latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
 def load_raster_elevation(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
@@ -2190,7 +2194,6 @@ def load_raster_vigicrues(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
-
 def load_raster_air_quality(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load air quality rasters produced by ``rasterise_air_qualite``."""
     data_vars = {}
@@ -2207,17 +2210,16 @@ def load_raster_air_quality(dir_raster: Path, dates: list, lat, lon) -> xr.Datas
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
-
 def load_raster_sat(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load Sentinel satellite rasters."""
     sentinel = pickle.load(open(dir_raster / "sentinel.pkl", "rb"))
 
-    band = np.arange(sentinel.shape[0])
-
-    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
-    data_vars = {"sentinel": (("band", "latitude", "longitude", "date"), sentinel)}
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    data_vars = {}
+    for i, var in enumerate(['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']):
+        data_vars[var] = (("latitude", "longitude", "date"), sentinel[i]
+)
     return xr.Dataset(data_vars, coords=coords)
-
 
 def load_raster_argile(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load argile raster and expand across dates."""
@@ -2229,7 +2231,6 @@ def load_raster_argile(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
-
 def load_raster_foret(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load forest rasters and broadcast them on the date dimension."""
     foret = pickle.load(open(dir_raster / "foret.pkl", "rb"))
@@ -2240,17 +2241,18 @@ def load_raster_foret(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     foret_land = _expand_static(foret_land, len(dates))
     foret_inf = _expand_static(foret_inf, len(dates))
 
-    band = valeurs_foret_attribut.keys()
+    bands = valeurs_foret_attribut.keys()
 
     data_vars = {
-        "foret": (("band", "latitude", "longitude", "date"), foret),
-        "foret_landcover": (("latitude", "longitude", "date"), foret_land),
-        "foret_influence": (("band", "latitude", "longitude", "date"), foret_inf),
+        "forest_landcover": (("latitude", "longitude", "date"), foret_land),
+        #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
     }
 
-    coords = {"band": band, "latitude": lat, "longitude": lon, "date": dates}
-    return xr.Dataset(data_vars, coords=coords)
+    for band in bands:
+        data_vars[band] = (("latitude", "longitude", "date"), foret[valeurs_foret_attribut[band]])
 
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
 
 def load_raster_nappes(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     """Load groundwater level rasters into an xarray."""
@@ -2281,27 +2283,33 @@ def concat_xarrays(dir_raster: Path, dates: list) -> xr.Dataset:
         A merged dataset containing every raster that could be loaded.
     """
 
-    latitude = read_object('latitude.pkl', dir_raster)[0]
-    longitude = read_object('longitude.pkl', dir_raster)[0]
+    latitude = read_object('latitude.pkl', dir_raster)
+    longitude = read_object('longitude.pkl', dir_raster)
+
+    latitude = latitude[:, 0]
+    longitude = longitude[0]
+
+    print(np.unique(latitude))
+    print(np.unique(longitude))
 
     loaders = [
         (load_rasterise_meteo),
-        (load_raster_cosia),
+        #(load_raster_cosia),
         (load_raster_corine),
-        (load_raster_elevation,),
-        (load_raster_population,),
+        (load_raster_elevation),
+        (load_raster_population),
         #(load_raster_vigicrues, list(dir_raster.glob("vigicrues*.pkl"))),
         #(load_raster_air_quality, list(dir_raster.glob("*raw.pkl"))),
-        (load_raster_sat,),
-        (load_raster_argile,),
-        (load_raster_foret,),
+        (load_raster_sat),
+        (load_raster_argile),
+        (load_raster_foret),
         #(load_raster_nappes, [dir_raster / "niveau_nappe_eau.pkl", dir_raster / "profondeur_nappe.pkl"]),
     ]
 
     datasets = []
     for loader in loaders:
         datasets.append(loader(dir_raster, dates, latitude, longitude))
-
+        
     if not datasets:
         raise ValueError("No raster data found in the provided directory")
 

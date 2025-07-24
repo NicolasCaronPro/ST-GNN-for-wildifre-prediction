@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+from regex import P
 from shapely import unary_union
 from arborescence import *
 from weigh_predictor import Predictor
@@ -813,6 +814,335 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         check_and_create_path(path / 'log')
         save_object(X[nodeDepartementMask], f'X_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}_log.pkl', path / 'log')
+
+    return X, features_name[len(ids_columns)-1:]
+
+def get_sub_nodes_feature_from_xarray(graph, dataset: xr.DataArray,
+                        departements : list,
+                        features : list, sinister : str, dataset_name: str, sinister_encoding :str,
+                        name_expe : str,
+                        path : Path,
+                        dir_train : Path,
+                        resolution : str, use_log = True):
+    
+    assert graph.nodes is not None
+    graph_construct = graph.base
+
+    logger.info('Load nodes features')
+
+    methods = METHODS_SPATIAL
+
+    features_name, newShape = get_features_name_list(graph.scale, features, methods)
+    features_name = ids_columns[:-1] + features_name
+
+    res = []
+
+    def save_values(array, band, indexNode, mask):
+
+        indexVar = features_name.index(f'{band}_mean')
+
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+
+        values = array[mask].reshape(-1,1)
+        if isinstance(graph.scale, str) or graph.scale > 0:
+            for imet, metstr in enumerate(methods):
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
+        else:
+            X[indexNode[:, 0], indexVar] = np.nanmean(values)
+
+    def save_value(array, band, indexNode, mask):
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+
+        indexVar = features_name.index(f'{band}')
+
+        X[indexNode[:, 0], indexVar] = np.nanmean(array[mask])
+
+    def save_value_sum(array, band, indexNode, mask):
+        if False not in np.unique(np.isnan(array[mask])):
+            return
+
+        indexVar = features_name.index(f'{band}')
+        
+        X[indexNode[:, 0], indexVar] = np.nansum(array[mask])
+
+    def save_values_with_encoding(array, band, indexNode, mask, encoder):
+        values = array[mask].reshape(-1,1)
+        encode_values = encoder.transform(values).values
+        indexVar = features_name.index(f'{band}_mean')
+        if isinstance(graph.scale, str) or graph.scale > 0:
+            for imet, metstr in enumerate(methods):
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(encode_values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(encode_values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(encode_values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(encode_values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(encode_values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(encode_values), 3)
+                else:
+                    raise ValueError(f'Unknow {metstr}')
+        else:
+            X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
+
+    def save_value_with_encoding(array, band, indexNode, mask, encoder):
+        values = array[mask].reshape(-1,1)
+        encode_values = encoder.transform(values).values
+        indexVar = features_name.index(f'{band}')
+        X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
+
+    dir_encoder = dir_train / 'Encoder'
+
+    encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
+    encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
+    encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
+    encoder_corine = read_object(f'encoder_cotine_{name_expe}.pkl', dir_encoder)
+    encoder_bdroute = read_object(f'encoder_bdroute_{name_expe}.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
+    encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
+
+    dir_mask = path / 'raster'
+    logging.info(f'Shape of X {X.shape}, {np.unique(X[:,departement_index])}')
+    for departement in departements:
+        if departement in graph.drop_department:
+            continue
+        logger.info(departement)
+
+        #dir_data = root / 'csv' / departement / 'raster' / resolution
+        dir_data = rootDisk / 'csv' / departement / 'raster' / resolution
+
+        name = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}_node.pkl'
+        mask = read_object(name, dir_mask)
+
+        name_graph = f'{departement}rasterScale{graph.scale}_{graph_construct}_{graph.graph_method}.pkl'
+        mask_graph = read_object(name_graph, dir_mask)
+        
+        datacube = read_object('datacube.pkl', dir_data)
+
+        datacube_dept = dataset.sel(departement=name2int[departement])
+
+        if datacube_dept.shape[0] == 0:
+            continue
+        logger.info('Calendar')
+
+        if 'Calendar' in features:
+
+            # Supposé : datacube_dept est un Dataset avec une coordonnée 'date'
+            dates = datacube_dept['date']
+            dates = [allDates[di] for di in dates]
+            dates = pd.to_datetime(dates)  # Extraire les dates comme numpy.datetime64 -> datetime
+
+            # Colonnes temporelles simples
+            datacube_dept['month'] = (('date',), dates.month)
+            datacube_dept['dayofyear'] = (('date',), dates.dayofyear)
+            datacube_dept['dayofweek'] = (('date',), dates.dayofweek)
+            datacube_dept['isweekend'] = (('date',), dates.dayofweek >= 5)
+
+            # Couvre-feux et confinement : fonctions vectorisées
+            def pendant_couvrefeux_vec(d):
+                # Implémente ta logique ici
+                return np.array([pendant_couvrefeux(day) for day in d])
+
+            def confinement_vec(d):
+                return np.array([
+                    1 if (
+                        dt.datetime(2020, 3, 17, 12) <= day <= dt.datetime(2020, 5, 11)
+                        or dt.datetime(2020, 10, 30) <= day <= dt.datetime(2020, 12, 15)
+                    ) else 0 for day in d
+                ])
+
+            datacube_dept['couvrefeux'] = (('date',), pendant_couvrefeux_vec(dates))
+            datacube_dept['confinement'] = (('date',), confinement_vec(dates))
+
+            # Ramadan
+            datacube_dept['ramadan'] = (('date',), [
+                1 if convertdate.islamic.from_gregorian(d.year, d.month, d.day)[1] == 9 else 0
+                for d in dates
+            ])
+
+            # Jours fériés et veilles
+            datacube_dept['bankHolidays'] = (('date',), [1 if d in jours_feries else 0 for d in dates])
+            datacube_dept['bankHolidaysEve'] = (('date',), [1 if d in veille_jours_feries else 0 for d in dates])
+
+            # Vacances scolaires et bords
+            datacube_dept['holidays'] = (('date',), [
+                1 if vacances_scolaire.is_holiday_for_zone(d.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
+                else 0 for d in dates
+            ])
+
+            datacube_dept['holidaysBorder'] = (('date',), [
+                int(
+                    vacances_scolaire.is_holiday_for_zone((d + dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)) or
+                    vacances_scolaire.is_holiday_for_zone((d - dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
+                )
+                for d in dates
+            ])
+            
+            # 1. Extraire les colonnes sous forme de DataFrame (pour compatibilité avec encoder)
+            calendar_df = pd.DataFrame({f: datacube_dept[f].values for f in calendar_variables})
+
+            # 2. Appliquer l'encodeur (ex : OneHotEncoder, StandardScaler, etc.)
+            encoded_calendar = encoder_calendar.transform(calendar_df)
+
+            for var in calendar_variables:
+                
+                # 3. Convertir le résultat en DataArray et l'ajouter au Dataset
+                datacube_dept[var] = xr.DataArray(
+                    encoded_calendar,
+                    dims=("date")  # ou adapte "time" à ta dimension réelle
+                )
+
+            # 1. Extraire les valeurs des variables calendaires sous forme de tableau
+            calendar_vals = np.stack([datacube_dept[var].values for var in calendar_variables], axis=1)
+            # shape: (N, nb_vars)
+
+            # 2. Calcul des stats
+            datacube_dept['calendar_mean'] = (('date',), np.round(np.mean(calendar_vals, axis=1), 3))
+            datacube_dept['calendar_min'] = (('date',), np.round(np.min(calendar_vals, axis=1), 3))
+            datacube_dept['calendar_max'] = (('date',), np.round(np.max(calendar_vals, axis=1), 3))
+            datacube_dept['calendar_sum'] = (('date',), np.round(np.sum(calendar_vals, axis=1), 3))
+
+        ### Geo spatial
+        logger.info('Geo')
+        if 'Geo' in features:
+            pass
+
+        logger.info('Meteorological')
+        array = None
+        ### Meteo
+        for i, var in enumerate(cems_variables):
+            if var not in features:
+                continue
+            logger.info(var)
+            if 'precipitationIndex' in var:
+                array = read_object('prec24hraw.pkl', dir_data)
+                n = int(var[-1])
+                array = calculate_precipitation_index_image_full(array, A=0.1657, n=n)
+                save_object(array, f'{var}raw.pkl', dir_data)
+            else:
+                name = var +'raw.pkl'
+                array = read_object(name, dir_data)
+            
+            if array is None:
+                continue
+            for node in nodeDepartement:
+                maskNode = mask == node[id_index]
+                index = np.argwhere((subNode[:,id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+                save_values(array[:,:,int(node[date_index])], var, index, maskNode)
+
+        del array
+
+        logger.info('Air Quality')
+        if 'air' in features:
+            pass
+
+        logger.info('Population elevation Highway Sentinel Foret')
+
+        if 'population' in features:
+            pass
+
+        if 'elevation' in features:
+            pass
+
+        if 'highway' in features:
+            pass
+
+        if 'foret' in features:
+            pass
+
+        if 'cosia' in features:
+            pass
+
+        if 'corine' in features:
+            pass
+
+        if 'bdroute' in features:
+            pass
+
+        if 'foret_encoder' in features:
+            pass
+
+        if 'highway_encoder' in features:
+            pass
+
+        if 'argile_encoder' in features:
+            pass
+
+        if 'cosia_encoder' in features:
+            pass
+
+        if 'corine_encoder' in features:
+            pass
+
+        if 'bdroute_encoder' in features:
+            pass
+
+        if 'id_encoder' in features:
+            pass
+
+        logger.info('Sentinel Dynamic World')
+        ### Sentinel
+        if 'sentinel' in features:
+            pass
+
+        if 'dynamicWorld' in features:
+            pass
+        
+        if 'landcover' in features:
+            pass
+
+        logger.info('Historical')
+        if 'Historical' in features:
+            pass
+
+        logger.info('AutoRegressionReg')
+        if 'AutoRegressionReg' in features:
+            pass
+
+        logger.info('AutoRegressionBin')
+        if 'AutoRegressionBin' in features:
+            pass
+
+        logger.info('Vigicrues')
+        if 'vigicrues' in features:
+            pass
+
+        logger.info('nappes')
+        if 'nappes' in features:
+            pass
+
+        logger.info('Cluster encoder')
+        assert encoder_cluster is not None
+        if 'cluster_encoder' in features:
+            pass
+
+        check_and_create_path(path / 'log')
+
+        res.append(datacube_dept)
+
+    res = xr.merge(res)
 
     return X, features_name[len(ids_columns)-1:]
 

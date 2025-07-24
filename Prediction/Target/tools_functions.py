@@ -1,3 +1,4 @@
+from cycler import V
 import numpy as np
 import pickle
 import sys
@@ -525,14 +526,9 @@ def create_spatio_temporal_sinister_image(firepoints: pd.DataFrame,
                 hexaFire.loc[matched_idx, 'nb' + sinisterType] += 1
 
             # Rasterize the variable to 2D spatial image
-            rasterVar, lat, lon = rasterization(
+            rasterVar, lon, lat = rasterization(
                 hexaFire, n_pixel_y, n_pixel_x, 'nb' + sinisterType, dir_output, dept + '_bin0'
             )
-
-            # Save spatial reference (lat/lon) if not already saved
-            if not (dir_output / 'latitude' / f'{dept}_latitude.pkl').is_file():
-                save_object(lat, f'{dept}_latitude.pkl', dir_output / 'latitude' / '2x2')
-                save_object(lon, f'{dept}_longitude.pkl', dir_output / 'longitude' / '2x2')
 
             # Handle edge case: raster is empty (only zeros or NaNs)
             if np.all(rasterVar[~np.isnan(rasterVar)] == 0):
@@ -1048,7 +1044,6 @@ def save_object(obj, filename: str, path : Path):
 
 def read_object(filename: str, path : Path):
     if not (path / filename).is_file():
-        logger.info(f'{path / filename} not found')
         return None
     return pickle.load(open(path / filename, 'rb'))
 
@@ -1361,20 +1356,25 @@ def relabel_clusters(cluster_labels, started):
         relabeled_image[cluster_labels == cl] = ncl + started
     return relabeled_image
 
-def load_raster_targets(dir_raster: Path, dates: list, lat, lon, dept) -> xr.Dataset:
+def load_raster_targets(dir_raster: Path, dates: list, lat, lon, dept, resolution) -> xr.Dataset:
     """Load groundwater level rasters into an xarray."""
     data_vars = {}
-    for var in ["occurrence", "burned_area", "time_intervention"]:
-        file = dir_raster / var / f"{dept}binScale0.pkl"
+    for var in ["occurence", "burned_area", "time_intervention", "influence"]:
+        if var == 'influence':
+            file = dir_raster / 'occurence' / 'log' / resolution / f"{dept}InfluenceScale0.pkl"
+        else:
+            file = dir_raster / var / 'bin' / resolution / f"{dept}binScale0.pkl"
         if not file.is_file():
-            continue
-        values = pickle.load(open(file, "rb"))
+            values = np.zeros(shape)
+        else:
+            values = pickle.load(open(file, "rb"))
+            shape = values.shape
         data_vars[var] = (("latitude", "longitude", "date"), values)
 
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
 
-def concat_xarrays(dir_raster: Path, dates: list, dept) -> xr.Dataset:
+def concat_xarrays(dir_raster: Path, dates: list, dept, path_to_latitude, resolution) -> xr.Dataset:
     """Concatenate all available rasters into a single xarray dataset.
     
     Parameters
@@ -1390,13 +1390,20 @@ def concat_xarrays(dir_raster: Path, dates: list, dept) -> xr.Dataset:
         A merged dataset containing every raster that could be loaded.
     """
 
-    latitude = read_object(f'{dept}_latitude.pkl', dir_raster)
-    longitude = read_object(f'{dept}_longitude.pkl', dir_raster)
+    print(f'Save into a datacube')
 
-    datasets = load_raster_targets(dir_raster, dates, latitude, longitude, dept)
+    check_and_create_path(dir_raster / 'datacube' / dept / resolution)
+
+    latitude = read_object(f'latitude.pkl', path_to_latitude / dept / 'raster' / resolution)
+    longitude = read_object(f'longitude.pkl', path_to_latitude  / dept / 'raster' / resolution)
+
+    latitude = latitude[:, 0]
+    longitude = longitude[0]
+
+    datasets = load_raster_targets(dir_raster, dates, latitude, longitude, dept, resolution)
 
     if not datasets:
         raise ValueError("No raster data found in the provided directory")
     
-    f = open(dir_raster / f'datacube.pkl',"wb")
+    f = open(dir_raster / 'datacube' / dept / resolution / f'datacube.pkl',"wb")
     pickle.dump(datasets,f)

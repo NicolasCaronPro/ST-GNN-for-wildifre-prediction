@@ -672,40 +672,33 @@ class GraphStructure():
 
         return data, GT
     
-    def _raster2(self, path, n_pixel_y, n_pixel_x, resStr, doBin, base, sinister, dataset_name):
-
-        dir_bin = root_target / sinister / dataset_name / 'occurence' / 'bin' / resStr
-        dir_time = root_target / sinister / dataset_name / 'time_intervention' / 'bin' / resStr
-        dir_burned = root_target / sinister / dataset_name / 'burned_area' / 'bin' / resStr
-
-        dir_bin_bdiff = root_target / sinister / 'bdiff' / 'occurence' / 'bin' / resStr
-        #dir_time_bdiff = root_target / sinister / dataset_name / sinister_encoding / 'time_intervention' / resStr
-
-        dir_target = root_target / sinister / dataset_name /  'occurence' / 'log' / resStr
-        dir_target_bdiff = root_target / sinister / 'bdiff' / 'occurence' / 'log' / resStr
+    def _raster2(self, path, resStr, sinister, dataset_name):
 
         dir_raster = root_target / sinister / dataset_name / 'occurence' / 'raster' / resStr
+
+        dir_datacube = root_target / sinister / dataset_name / 'datacube'
 
         if len(self.drop_department) == self.departements.unique().shape[0]:
             logger.info('All department were droped, try with a smaller minimum scale. If it still does work, try with department == scale')
             exit(1)
 
+        res = []
+
         for dept in np.unique(self.departements):
 
             if dept in self.drop_department:
                 continue
+            
+            dir_datacube_dept = dir_datacube / dept / resStr
 
-            #if (path / 'raster' / f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl').is_file():
-            #    if self.graph_method == 'node':
-            #        self.ids = np.copy(self.graph_ids)
-            #    continue
+            datacube = read_object('datacube.pkl', dir_datacube_dept)
+            assert datacube is not None
 
             maskDept = np.argwhere(self.departements == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
-            """geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
-            mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
-            mask = mask[0]"""
+
             outputName = f'{dept}rasterScale0.pkl'
+
             raster = read_object(outputName, dir_raster)
             assert raster is not None
             raster = raster[0]
@@ -735,29 +728,6 @@ class GraphStructure():
                     
                     raster_node = np.where((raster_node == -1), np.nan, raster_node)
 
-                    # Exemple de tableau raster avec des valeurs -1 remplacées par NaN
-                    """raster_node_with_nan = np.where((raster_node == -1) & (mask_id), np.nan, raster_node)
-
-                    # Calculer une carte de distance pour chaque NaN vers le point le plus proche non-NaN
-                    # Cette méthode remplit les NaN par les valeurs les plus proches
-
-                    nan_mask = np.isnan(raster_node_with_nan)  # Masque des NaN
-                    filled_raster = raster_node_with_nan.copy()  # Copie du tableau original
-
-                    nearest_indices = ndimage.distance_transform_edt(
-                        nan_mask,
-                        return_distances=False,
-                        return_indices=True
-                    )
-
-                    # Utiliser les indices pour remplir les NaN avec les valeurs les plus proches
-                    filled_raster = raster_node_with_nan.copy()
-                    filled_raster[nan_mask] = raster_node_with_nan[tuple(nearest_indices[:, nan_mask])]
-
-                    # Remettre à jour raster_node
-                    raster_node[mask_id] = filled_raster[mask_id]
-                    """
-                    
                     raster_node[mask_id] = raster_node[mask_id] + num_cluster
                     num_cluster += np.unique(raster_node[mask_id & ~np.isnan(raster_node)]).shape[0]
 
@@ -780,23 +750,18 @@ class GraphStructure():
                         major_id = np.bincount(graph_values).argmax()
                         self.graph_ids[self.ids == id] = major_id
 
-                """geo[f'scale{self.scale}'] = self.graph_ids[maskDept]
-                mask, _, _ = rasterization(geo, n_pixel_y, n_pixel_x, f'scale{self.scale}', Path('log'), 'ori')
-                mask = mask[0]
-                mask[np.isnan(raster)] = np.nan"""
-
                 raster_node = binary_closing_id(raster_node, disk(1))
-                save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
+                #save_object(raster_node, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
                 
                 mask = binary_closing_id(mask, disk(1))
-                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
+                #save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
             else:
                 self.ids = np.copy(self.graph_ids)
                 mask = binary_closing_id(mask, disk(1))
                 raster_node = np.copy(mask)
 
-                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
-                save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
+                #save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
+                #save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
            
             unique_ids = np.unique(mask)
             unique_ids = unique_ids[~np.isnan(unique_ids)]
@@ -826,45 +791,27 @@ class GraphStructure():
                 plt.savefig(path / 'raster' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}_node.png')
                 plt.close('all')
 
-            if doBin:
-                outputName = f'{dept}binScale0.pkl'
-                if dept not in ['departement-01-ain', 'departement-25-doubs', 'departement-78-yvelines', 'departement-69-rhone'] and dataset_name == 'firemen':
-                    logger.info(f'Load {dept} from bdiff')
-                    bin = read_object(outputName, dir_bin_bdiff)
-                    outputName = f'{dept}Influence.pkl'
-                    influence = read_object(outputName, dir_target_bdiff)
-                    time = np.zeros(influence.shape)
-                else:
-                    bin = read_object(outputName, dir_bin)
-                    outputName = f'{dept}Influence.pkl'
-                    influence = read_object(outputName, dir_target)
+            bin = datacube['occurence'].values
+            influence = datacube['influence'].values
+            time = datacube['time_intervention'].values
+            burned = datacube['burned_area'].values
 
-                    outputName = f'{dept}binScale0.pkl'
-                    time = read_object(outputName, dir_time)
+            binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned)
 
-                if time is None:
-                    time = np.zeros(influence.shape)
+            # Ajouter chaque image comme DataArray dans le Dataset
+            datacube['occurence_scale'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
+            datacube['influence_scale'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
+            datacube['time_intervention_scale'] = xr.DataArray(timeScale, dims=('latitude', 'longitude', 'date'))
+            datacube['burned_area_scale'] = xr.DataArray(burnedScale, dims=('latitude', 'longitude', 'date'))
 
-                if dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
-                    outputName = f'{dept}binScale0.pkl'
-                    burned = read_object(outputName, dir_burned)
-                else:
-                    burned = np.zeros(influence.shape)
+            datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
-                binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned, raster)
-                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'bin')
-                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'influence')
-                save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'time_intervention')
-                save_object(burnedScale, f'{dept}burnedScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'burned')
-                
-                binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(raster_node, bin, influence, time, burned, raster)
-                save_object(binImageScale, f'{dept}binScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'bin')
-                save_object(influenceImageScale, f'{dept}InfluenceScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'influence')
-                save_object(timeScale, f'{dept}timeScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'time_intervention')
-                save_object(burnedScale, f'{dept}burnedScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'burned')
+            datacube = datacube.expand_dims(dim={'departement': [dept]})
 
             self.numCluster = np.shape(np.unique(self.ids))[0]
-            
+
+            save_object(datacube, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'datacube')
+
     def _raster(self, path : Path,
                 sinister : str, 
                 dataset_name: str,
@@ -878,8 +825,7 @@ class GraphStructure():
         check_and_create_path(path / 'bin')
         check_and_create_path(path / 'proba')
 
-        self._raster2(path, resolutions[resolution]['y'], resolutions[resolution]['x'], resolution, True,
-                      base, sinister, dataset_name=dataset_name)
+        self._raster2(path, resolution, sinister, dataset_name=dataset_name)
 
     def _save_feature_image(self, path, dept, vb, image, raster, mini=None, maxi=None):
         data = np.copy(image)
@@ -1973,80 +1919,87 @@ class GraphStructure():
 
         logger.info(f'Time series clustering {self.node_cluster}')
 
-    def _clusterize_node_with_time_series(self, departements, variables, target, train_date, path, root_data, root_target):
+    def _clusterize_node_with_time_series(self, departements, variables, target, train_dates, path, root_data, root_target):
         self.variables_for_cluster = variables
 
-        dir_target = root_target / 'log' / self.resolution
-        dir_target_bin = root_target / 'bin' / self.resolution
-        dir_raster = path / 'raster'
+        dir_datacube = path / 'datacube'
         vec_target = []
         vec = []
         
         self.values_per_node = {}
         self.node_cluster = {}
         target_per_node = {}
+
         for dept in departements:
             if dept in self.drop_department:
                 continue
 
-            if target == 'risk':
-                target_value = read_object(f'{dept}Influence.pkl', dir_target)
-            elif target == 'nbsinister':
-                target_value = read_object(f'{dept}binScale0.pkl', dir_target_bin)
-
-            assert target_value is not None
-            target_value = target_value[:, :, allDates.index('2018-01-01'):allDates.index(train_date)]
-
             dir_data = root_data / dept / 'raster' / self.resolution
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', dir_raster)
-            assert raster is not None
-            nodes = np.sort(np.unique(raster[~np.isnan(raster)]))
+            
+            datacube_target = read_object(f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', dir_datacube)
+            assert datacube_target is not None
+            
+            datacube_feature = read_object(f'datacube.pkl', dir_data)
+            assert datacube_feature is not None
+
+            datacube_target = datacube_target.sel(date=train_dates)
+
+            target_values = datacube_target['occurence_scale'].values
+            
+            raster = datacube_target['area'].values
+            nodes = np.unique(raster)
+            nodes = nodes[~np.isnan(nodes)]
 
             for node in nodes:
                 vec_node = []
+                mask_node = (raster == node)  # mask 2D
+
                 for var in variables:
                     if var in cems_variables:
-                        values = read_object(f'{var}raw.pkl', dir_data)
-                        assert values is not None
-                        values = values[:, :, :allDates.index(train_date)]
-                        vec_node.append(np.nanmean(values[raster == node]))
+                        # Variable dynamique avec 'time'
+                        data = datacube_feature[var].sel(time=train_dates)  # (time, x, y)
+                        values = data.values[:, mask_node]  # (time, n_pixels)
+                        vec_node.append(np.nanmean(values))
+
                     elif var in ['population', 'elevation']:
-                        values = read_object(f'{var}.pkl', dir_data)
-                        assert values is not None
-                        values = values.reshape((values.shape[0], values.shape[1]))
-                        vec_node.append(np.nanmean(values[raster == node]))
+                        # Variable statique 2D
+                        values = datacube_feature[var].values  # (x, y)
+                        vec_node.append(np.nanmean(values[mask_node]))
+
                     elif var == 'sentinel':
-                        values = read_object(f'{var}.pkl', dir_data)
-                        assert values is not None
-                        for i, var2 in enumerate([sentinel_variables]):
-                            vec_node.append(np.nanmean(values[i, raster == node, :allDates.index(train_date)]))
+                        for i, var2 in enumerate(sentinel_variables):
+                            data = datacube_feature[var2].sel(time=train_dates)  # (time, x, y)
+                            values = data.values[:, mask_node]
+                            vec_node.append(np.nanmean(values))
+
                     elif var == 'vigicrues':
                         for i, var2 in enumerate(vigicrues_variables):
-                            values = read_object(f'vigicrues{var2}.pkl', dir_data)
-                            assert values is not None
-                            vec_node.append(np.nanmean(values[raster == node, :allDates.index(train_date)]))
-                    elif var == 'dynamic_world':
-                        values = read_object(f'{var}.pkl', dir_data)
-                        assert values is not None
-                        for i, var2 in enumerate([dynamic_world_variables]):
-                            vec_node.append(np.nanmean(values[i, raster == node, :allDates.index(train_date)]))
-                    elif var == 'foret':
-                        values = read_object(f'{var}.pkl', dir_data)
-                        assert values is not None
-                        for i, var2 in enumerate([foret_variables]):
-                            vec_node.append(np.nanmean(values[i, raster == node]))
-                    elif var == 'air':
-                        for i, var2 in enumerate([air_variables]):
-                            values = read_object(f'{var2}raw.pkl', dir_data)
-                            assert values is not None
-                            vec_node.append(np.nanmean(values[raster == node]))
-                    elif var == 'osmnx':
-                        values = read_object(f'{var}.pkl', dir_data)
-                        assert values is not None
-                        for i, var2 in enumerate(osmnx_variables):
-                            vec_node.append(np.nanmean(values[i][raster == node]))
+                            data = datacube_feature[var2].sel(time=train_dates)
+                            values = data.values[mask_node, :]
+                            vec_node.append(np.nanmean(values))
 
-                target_node = np.nansum(target_value[raster == node], axis=0)
+                    elif var == 'dynamic_world':
+                        for i, var2 in enumerate(dynamic_world_variables):
+                            data = datacube_feature[var2].sel(time=train_dates)
+                            values = data.values[:, mask_node]
+                            vec_node.append(np.nanmean(values))
+
+                    elif var == 'foret':
+                        for i, var2 in enumerate(foret_variables):
+                            values = datacube_feature[var2].values
+                            vec_node.append(np.nanmean(values[mask_node]))
+
+                    elif var == 'air':
+                        for i, var2 in enumerate(air_variables):
+                            values = datacube_feature[var2].values
+                            vec_node.append(np.nanmean(values[mask_node]))
+
+                    elif var == 'osmnx':
+                        for i, var2 in enumerate(osmnx_variables):
+                            values = datacube_feature[var2].values
+                            vec_node.append(np.nanmean(values[mask_node]))
+
+                target_node = np.nansum(target_values[raster == node], axis=0)
                
                 target_per_node[node] = target_node
                 vec_target.append(target_node)

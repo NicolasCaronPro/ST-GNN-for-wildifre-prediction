@@ -6,6 +6,7 @@ from GNN.array_fet import *
 from sklearn.metrics import silhouette_score, silhouette_samples
 from astropy.convolution import convolve_fft
 from scipy.ndimage import generic_filter
+import xarray as xr
 
 if is_pc:
     import datetime as dt
@@ -150,7 +151,7 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return binImageScale, influenceImageScale"""
 
-def create_larger_scale_bin(input, bin, influence, time, burned, raster):
+def create_larger_scale_bin(input, bin, influence, time, burned):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)

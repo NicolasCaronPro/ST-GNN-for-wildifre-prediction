@@ -532,7 +532,7 @@ class GenerateDatabase():
         
         self.resLon = n_pixel_x
         self.resLat = n_pixel_y
-        self.h3tif, lat, lon = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low', return_lat_lon=True)
+        self.h3tif, lon, lat = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low', return_lat_lon=True)
         logger.info(f'Low scale {self.h3tif.shape}')
         
         f = open(self.dir_raster / f'latitude.pkl',"wb")
@@ -626,7 +626,7 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
                     compute_nappes_features, nappesParams,
                     region, h3,
                     dir_raster)
-
+    
     database.process(start, stop, resolution)
     concat_xarrays(dir_raster, find_dates_between(start, stop))
 
