@@ -202,7 +202,6 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
         
         # If data should be freshly computed (not read from disk)
         if not read:
-            print(dept)
 
             # Rasterize the 'scale0' field for the current department. 
             sat0, _, _ = rasterization(

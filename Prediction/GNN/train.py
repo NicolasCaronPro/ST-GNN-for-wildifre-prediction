@@ -1822,10 +1822,10 @@ def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clus
     else:
         res_cluster = {}
     features_selected_2 = []
-
+    
     # Aggregate data by 'graph_id' and 'date'
     df_agg = df.groupby(['graph_id', 'date'], as_index=False).mean()
-
+    
     FF_t = np.sum(df_agg['nbsinister'])
     Area_t = len(df_agg)
 
@@ -1834,7 +1834,7 @@ def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clus
         logger.info(f"Applying shift: {shift}")
         shifted_df = df_agg.copy()
         shifted_df['nbsinister'] = shifted_df.groupby(['graph_id'])['nbsinister'].shift(-shift)
-
+        
         # Remove rows with NaN introduced by the shift
         shifted_df = shifted_df.dropna(subset=['nbsinister'])
 
@@ -1850,6 +1850,7 @@ def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clus
             X_fet = shifted_df[fet].values  # Select the feature
             dates = shifted_df['date'].values
             depts = shifted_df['departement'].values
+            #print(X_fet, shifted_df[X_fet])
             val_sinister = shifted_df['nbsinister'].values[~np.isnan(X_fet)]
             date_fet = dates[~np.isnan(X_fet)]
             dept_fet = depts[~np.isnan(X_fet)]

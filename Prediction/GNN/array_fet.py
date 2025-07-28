@@ -18,12 +18,12 @@ landcover_variables = [
                       'argile_encoder',
                       'cosia_encoder',
                       #'corine_encoder',
-                      #'bdroute_encoder'
+                      'bdroute_encoder'
                         ]
 
 cluster_encoder = ['cluster_encoder', 'id_encoder']
 
-calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend', 'couvrefeux', 'confinemenent',
+calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend', 'couvrefeux', 'confinement',
                     'ramadan', 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder',
                     'calendar_mean', 'calendar_min', 'calendar_max', 'calendar_sum']
 
@@ -45,17 +45,17 @@ cosia_variables = [
 ]
 
 corine_variable = [
-    'Other',
-    'urban',
-    'transport',
-    'agricultural',
-    'grass',
-    'forest',
-    'vegetation',
-    'moisture',
-    'water',
-    'littoral',
-    'rock'
+    'Corine_Other',
+    'Corine_urban',
+    'Corine_transport',
+    'Corine_agricultural',
+    'Corine_grass',
+    'Corine_forest',
+    'Corine_vegetation',
+    'Corine_moisture',
+    'Corine_water',
+    'Corine_littoral',
+    'Corine_rock'
 ]
 
 bdroute_variables = ['NoRoad', 'Road']

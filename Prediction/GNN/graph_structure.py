@@ -86,8 +86,9 @@ class GraphStructure():
             assert self.tol is not None
             assert self.reduce is not None
 
-    def _create_sinister_region(self, base: str, path: Path, sinister: str, dataset_name:str, sinister_encoding : str, resolution, train_date) -> None:
+    def _create_sinister_region(self, path: Path, sinister: str, dataset_name:str, sinister_encoding : str, resolution, train_date) -> None:
         udept = np.unique(self.departements)
+        base = self.base
         if '-' in base:
             vec_base = base.split('-')
             self.base = base
@@ -797,12 +798,11 @@ class GraphStructure():
             burned = datacube['burned_area'].values
 
             binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned)
-
             # Ajouter chaque image comme DataArray dans le Dataset
-            datacube['occurence_scale'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
-            datacube['influence_scale'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
-            datacube['time_intervention_scale'] = xr.DataArray(timeScale, dims=('latitude', 'longitude', 'date'))
-            datacube['burned_area_scale'] = xr.DataArray(burnedScale, dims=('latitude', 'longitude', 'date'))
+            datacube['nbsinister'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
+            datacube['risk'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
+            datacube['time_intervention'] = xr.DataArray(timeScale, dims=('latitude', 'longitude', 'date'))
+            datacube['burned_area'] = xr.DataArray(burnedScale, dims=('latitude', 'longitude', 'date'))
 
             datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
@@ -1944,9 +1944,10 @@ class GraphStructure():
 
             datacube_target = datacube_target.sel(date=train_dates)
 
-            target_values = datacube_target['occurence_scale'].values
+            target_values = datacube_target['nbsinister'].values[0]
             
-            raster = datacube_target['area'].values
+            raster = datacube_target['area'].values[0]
+
             nodes = np.unique(raster)
             nodes = nodes[~np.isnan(nodes)]
 
@@ -1957,50 +1958,61 @@ class GraphStructure():
                 for var in variables:
                     if var in cems_variables:
                         # Variable dynamique avec 'time'
-                        data = datacube_feature[var].sel(time=train_dates)  # (time, x, y)
-                        values = data.values[:, mask_node]  # (time, n_pixels)
+                        data = datacube_feature[var].sel(date=train_dates)
+                        values = data.values[mask_node, :]
                         vec_node.append(np.nanmean(values))
 
                     elif var in ['population', 'elevation']:
                         # Variable statique 2D
-                        values = datacube_feature[var].values  # (x, y)
+                        values = datacube_feature[var].values[:, :, 0]
                         vec_node.append(np.nanmean(values[mask_node]))
-
+                        
                     elif var == 'sentinel':
                         for i, var2 in enumerate(sentinel_variables):
-                            data = datacube_feature[var2].sel(time=train_dates)  # (time, x, y)
-                            values = data.values[:, mask_node]
+                            data = datacube_feature[var2].sel(date=train_dates)
+                            values = data.values[mask_node, :]
                             vec_node.append(np.nanmean(values))
 
                     elif var == 'vigicrues':
                         for i, var2 in enumerate(vigicrues_variables):
-                            data = datacube_feature[var2].sel(time=train_dates)
+                            data = datacube_feature[var2].sel(date=train_dates)
                             values = data.values[mask_node, :]
                             vec_node.append(np.nanmean(values))
 
                     elif var == 'dynamic_world':
                         for i, var2 in enumerate(dynamic_world_variables):
-                            data = datacube_feature[var2].sel(time=train_dates)
-                            values = data.values[:, mask_node]
+                            data = datacube_feature[var2].sel(date=train_dates)
+                            values = data.values[mask_node, :]
                             vec_node.append(np.nanmean(values))
 
                     elif var == 'foret':
                         for i, var2 in enumerate(foret_variables):
-                            values = datacube_feature[var2].values
+                            values = datacube_feature[foretint2str[var2]].values[:, :, 0]
                             vec_node.append(np.nanmean(values[mask_node]))
 
                     elif var == 'air':
                         for i, var2 in enumerate(air_variables):
                             values = datacube_feature[var2].values
-                            vec_node.append(np.nanmean(values[mask_node]))
+                            vec_node.append(np.nanmean(values[mask_node, :]))
 
                     elif var == 'osmnx':
                         for i, var2 in enumerate(osmnx_variables):
-                            values = datacube_feature[var2].values
+                            values = datacube_feature[var2].values[:, :, 0]
+                            vec_node.append(np.nanmean(values[mask_node]))
+                    
+                    elif var == 'bdroute':
+                        for i, var2 in enumerate(bdroute_variables):
+                            values = datacube_feature[var2].values[:, :, 0]
                             vec_node.append(np.nanmean(values[mask_node]))
 
-                target_node = np.nansum(target_values[raster == node], axis=0)
-               
+                    elif var == 'corine':
+                        for i, var2 in enumerate(corine_variable):
+                            values = datacube_feature[var2].values[:, :, 0]
+                            vec_node.append(np.nanmean(values[mask_node]))
+                
+                target_node = np.nansum(target_values[mask_node], axis=0)
+                
+                print(target_node.shape)
                 target_per_node[node] = target_node
                 vec_target.append(target_node)
 
@@ -2024,23 +2036,22 @@ class GraphStructure():
         check_and_create_path(path / 'time_series_clustering')
         for dept in departements:
 
-            if dept in self.drop_department:
-                continue
+            dir_data = root_data / dept / 'raster' / self.resolution
+            
+            datacube_target = read_object(f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', dir_datacube)
+            assert datacube_target is not None
 
+            raster = datacube_target['area'].values[0]
             plt.figure(figsize=(15,5))
-            raster = read_object(f'{dept}rasterScale{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'raster')
-            assert raster is not None
 
             time_series_image = np.full(raster.shape, fill_value=np.nan)
             nodes = np.unique(raster[~np.isnan(raster)])
             for node in nodes:
                 time_series_image[raster == node] = self.node_cluster[node]
-                
-            img = plt.imshow(time_series_image, vmin=0, vmax=2, cmap='jet')
-            plt.savefig(path / 'time_series_clustering' / f'{dept}_{self.scale}_{self.base}_{self.graph_method}.png')
-            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
-            plt.close('all')
-            save_object(time_series_image, f'{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'time_series_clustering')
+            
+            datacube_target['time_series_clustering'] = xr.DataArray(time_series_image, dims=('latitude', 'longitude'))
+            
+            save_object(datacube_target, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', dir_datacube)
 
         logger.info(f'Time series clustering {self.node_cluster}')
 
@@ -2111,7 +2122,7 @@ class GraphStructure():
 
                 nn = self.knearestKneighbours.kneighbors(np.asarray(vec_node).reshape(1,-1), return_distance=False)
                 self.node_cluster[node] = self.all_clusters[nn[0][0]]
-                
+
         check_and_create_path(path / 'time_series_clustering')
         for dept in departements:
 

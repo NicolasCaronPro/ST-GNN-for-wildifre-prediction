@@ -1,5 +1,6 @@
 import pickle
 from re import subn
+
 from nbconvert import export
 from sklearn.cluster import KMeans
 from copy import copy
@@ -50,6 +51,9 @@ def look_for_information(graph, dataset_name : str,
     points.to_csv(dir / sinister / name, index=False)
 
 def parse_string(s):
+
+    if s is None:
+        return {"base" : "None", "attempt" : 0, "reduce" : 0, "tol" : 0}
     if 'degree' in s:
         s = s.split('degree')[1]
     elif 'hexa' in s:
@@ -79,7 +83,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     
     train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
-    graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=graph_construct, sinister=sinister,
+    graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
                                 attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
 
@@ -90,7 +94,9 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                        'name': 'mapper',
                                        'params' : None}
     
-    variables_for_susecptibilty_and_clustering = ['population', 'foret', 'osmnx', 'elevation',
+    variables_for_susecptibilty_and_clustering = ['population', 'foret',
+                                                  #'bdroute',
+                                                  'corine', 'elevation',
                                                 'temp', 'dwpt', 'rhum', 'prcp', 'wdir', 'wspd', 'prec24h',
                                         'dc', 'ffmc', 'dmc', 'nesterov', 'munger', 'kbdi',
                                         'isi', 'angstroem', 'bui', 'fwi', 'dailySeverityRating',
@@ -99,7 +105,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                         'sum_rain_last_7_days',
                                         'sum_snow_last_7_days', 'snow24h', 'snow24h16']
         
-    graphScale._create_sinister_region(base=graph_construct,
+    graphScale._create_sinister_region(
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
                                  sinister_encoding=sinister_encoding,
                                  resolution=resolution, train_date=train_date)
@@ -116,7 +122,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             root_data=rootDisk / 'csv',
                                             root_target=root_target / sinister / dataset_name / sinister_encoding)
     
-    graphScale.find_closest_cluster(graphScale.departements.unique(), train_date, dir_output, rootDisk / 'csv')
+    #graphScale.find_closest_cluster(graphScale.departements.unique(), train_date, dir_output, rootDisk / 'csv')
 
     if doEdgesFeatures:
         graphScale.edges = edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
@@ -273,6 +279,102 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
 
     return df
 
+def construct_database_from_xarray(
+    graphScale: GraphStructure,
+    k_days: int,
+    departements: list,
+    features: list,
+    sinister: str,
+    dataset_name: str,
+    sinister_encoding: str,
+    dir_output: Path,
+    dir_train: Path,
+    prefix: str,
+    values_per_class: int,
+    mode: str,
+    resolution: str,
+    maxDate: str,
+    name_exp,
+):
+    
+    scale = graphScale.scale
+    graph_construct = graphScale.base
+    graph_method = graphScale.graph_method
+    
+    """#######################################################################################
+    # Convert department names to their corresponding codes for training departments
+    # Prepare data for node prediction by extracting longitude and latitude
+    ps.drop_duplicates(subset=['longitude', 'latitude'], inplace=True, keep='first')
+    X_kmeans = list(zip(ps.longitude, ps.latitude))
+    
+    # Predict nodes based on position and assign them to the DataFrame
+    
+    ps[f'graph_{scale}'], ps[f'scale{scale}'] = graphScale._predict_node_graph_with_position(X_kmeans, ps.departement)
+    ps = ps[~ps[f'scale{scale}'].isna()] 
+
+    # Define the output file name
+    name = f'{prefix}.csv'
+    # Remove duplicate nodes based on the scale
+    ps.drop_duplicates(subset='scale' + str(scale), inplace=True, keep='first')
+
+    # Expand the dataset to include all dates
+    ps = export_to_all_date(ps, dataset_name, sinister, departements, maxDate)
+    
+    # Save the dataset to a CSV file
+    ps.to_csv(dir_output / name, index=False)
+    logger.info(f'{len(ps)} point in the dataset. Constructing database')
+    
+    # Initialize an array for original nodes with default values
+    orinode = np.full((len(ps), len(ids_columns) - 1), -1.0, dtype=float)
+    orinode[:, graph_id_index] = ps[f'graph_{scale}'].values  # Assign node IDs
+    orinode[:, id_index] = ps[f'scale{scale}'].values  # Assign node IDs
+    orinode[:, departement_index] = ps['departement']
+    orinode[:, date_index] = ps['date']  # Assign dates
+    #orinode = generate_subgraph(graphScale, 0, 0, orinode)
+    
+    # Add temporal nodes based on the specified number of days (k_days)
+    subNode = add_k_temporal_node(k_days=k_days, nodes=orinode)
+    # Assign latitude and longitude to the sub-nodes
+    subNode = graphScale._assign_latitude_longitude(subNode)
+    # Assign departments to the sub-nodes
+    #subNode = graphScale._assign_department(subNode)
+
+    # Log information about the graph
+    graphScale._info_on_graph(subNode, Path('log'))"""
+
+    ################################## Try loading Y database #############################
+    # Define the filename for the ground truth data
+    n = f'datacube_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
+
+    #if not (dir_output / n).is_file():
+    if True:
+        Y = get_sub_nodes_ground_truth_from_xarray(
+            graphScale,
+            departements,
+            dir_train,
+            dir_train,
+            dataset_name
+        )
+        # Save the generated ground truth data
+        save_object(Y, n, dir_output)
+
+        # If X is not loaded, generate the features
+        Y, features_name = get_sub_nodes_features_from_xarray(
+            graphScale,
+            Y,
+            departements,
+            features,
+            sinister,
+            dataset_name,
+            sinister_encoding,
+            name_exp,
+            dir_output,
+            dir_train,
+            resolution,
+        )
+
+    return Y, features_name
+
 def construct_database(
     graphScale: GraphStructure,
     ps: pd.DataFrame,
@@ -291,7 +393,7 @@ def construct_database(
     maxDate: str,
     name_exp,
 ):
-    
+      
     scale = graphScale.scale
     graph_construct = graphScale.base
     graph_method = graphScale.graph_method
@@ -512,7 +614,9 @@ def init(args, dir_output, script):
 
     ######################## Get departments and train departments #######################
 
-    departements = args.train_departments + args.test_departments
+    departements = args.train_departments
+    departements += [dept for dept in args.test_departments if dept not in departements]
+    departements = sorted(departements)
     train_departements = args.train_departments
 
     ######################## CONFIG ################################
@@ -592,7 +696,7 @@ def init(args, dir_output, script):
 
     ########################### Create points ################################
     fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
-    if doPoint:
+    """if doPoint:
         
         logger.info('#####################################')
         logger.info('#      Get hexagones point          #')
@@ -611,7 +715,7 @@ def init(args, dir_output, script):
         depts = [name2int[dept] for dept in departements]
         logger.info(ps.departement.unique())
         ps = ps[ps['departement'].isin(depts)].reset_index(drop=True)
-        logger.info(ps.departement.unique())
+        logger.info(ps.departement.unique())"""
 
     ######################### Encoding ######################################
 
@@ -619,7 +723,8 @@ def init(args, dir_output, script):
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
-        encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        #encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     ########################## Do Database ####################################
     if doDatabase:
@@ -627,8 +732,7 @@ def init(args, dir_output, script):
         logger.info('#      Construct   Database         #')
         logger.info('#####################################')
 
-        X, Y, features_name = construct_database(graphScale,
-                                            ps, k_days,
+        datacube, features_name = construct_database_from_xarray(graphScale, k_days,
                                             departements,
                                             features,
                                             sinister,
@@ -643,16 +747,16 @@ def init(args, dir_output, script):
                                             trainDate,
                                             name_exp)
         
-        save_object(X, 'X_'+prefix+'.pkl', dir_output)
-        save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
+        save_object(datacube, 'datacube_'+prefix+'.pkl', dir_output)
+        #save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
     else:
-        X = read_object('X_'+prefix+'.pkl', dir_output)
-        Y = read_object('Y_'+prefix+'.pkl', dir_output)
+        datacube = read_object('datacube_'+prefix+'.pkl', dir_output)
+        #Y = read_object('Y_'+prefix+'.pkl', dir_output)
         features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
-    for i, col in enumerate(ids_columns):
+    """for i, col in enumerate(ids_columns):
         print('X', col, np.unique(X[:, i]))
-        print('Y', col, np.unique(Y[:, i]))
+        print('Y', col, np.unique(Y[:, i]))"""
     ################################################ Add a new feature ####################################
     newFeatures = []
     if newFeatures != []:
@@ -718,8 +822,11 @@ def init(args, dir_output, script):
         X = new_X
         
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
-
-    X = X[:, len(ids_columns)-1:]
+    
+    df = datacube.to_dataframe().reset_index()
+    df['date'] = df['date'].apply(lambda x : allDates.index(x))
+    df['departement'] = df['departement'].apply(lambda x : name2int[x])
+    """X = X[:, len(ids_columns)-1:]
 
     ############################## Dataframe creation ###################################
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
@@ -736,7 +843,7 @@ def init(args, dir_output, script):
         df = pd.DataFrame(columns=ids_columns + targets_columns + features_name, index=np.arange(0, X.shape[0]))
         df[features_name] = X 
         df[ids_columns + targets_columns] = Y
-        find_df = False
+        find_df = False"""
 
     if scale == 'departement':
         df['scale'] = 10
@@ -773,13 +880,14 @@ def init(args, dir_output, script):
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}_{name_exp}'
     
     trainCode = [name2int[d] for d in train_departements]
-    train_mask = (df['date'].isin(allDates.index(d) for d in all_train_dates)) & (df['departement'].isin(trainCode))
+
+    train_mask = (df['date'].isin([allDates.index(d) for d in all_train_dates])) & (df['departement'].isin(trainCode))
     shift_list = np.arange(0, 1)
     train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
 
     if dataset_name.find('bdiff') !=-1:
         df = df[df['date'] <= allDates.index('2023-12-31')]
-
+        
     ################################ Process Target ###############################################
 
     #if dataset_name == 'bdiff' and not find_df:

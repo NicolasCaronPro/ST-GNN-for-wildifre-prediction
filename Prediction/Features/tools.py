@@ -2218,7 +2218,7 @@ def load_raster_sat(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     data_vars = {}
     for i, var in enumerate(['NDVI', 'NDMI', 'NDBI', 'NDSI', 'NDWI']):
         data_vars[var] = (("latitude", "longitude", "date"), sentinel[i]
-)
+    )
     return xr.Dataset(data_vars, coords=coords)
 
 def load_raster_argile(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
@@ -2250,6 +2250,31 @@ def load_raster_foret(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
 
     for band in bands:
         data_vars[band] = (("latitude", "longitude", "date"), foret[valeurs_foret_attribut[band]])
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+def load_raster_bdroute(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
+    """Load forest rasters and broadcast them on the date dimension."""
+    route = pickle.load(open(dir_raster / "route.pkl", "rb"))
+    route_land = pickle.load(open(dir_raster / "route_landcover.pkl", "rb"))
+    route_inf = pickle.load(open(dir_raster / "route_influence.pkl", "rb"))
+
+    route = _expand_static(route, len(dates))
+    route_land = _expand_static(route_land, len(dates))
+    route_inf = _expand_static(route_inf, len(dates))
+
+    print(route.shape)
+
+    bands = ['NoRoad', 'Road']
+
+    data_vars = {
+        "route_landcover": (("latitude", "longitude", "date"), route_land),
+        #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
+    }
+
+    for i, band in enumerate(bands):
+        data_vars[band] = (("latitude", "longitude", "date"), route[i])
 
     coords = {"latitude": lat, "longitude": lon, "date": dates}
     return xr.Dataset(data_vars, coords=coords)
@@ -2289,9 +2314,6 @@ def concat_xarrays(dir_raster: Path, dates: list) -> xr.Dataset:
     latitude = latitude[:, 0]
     longitude = longitude[0]
 
-    print(np.unique(latitude))
-    print(np.unique(longitude))
-
     loaders = [
         (load_rasterise_meteo),
         #(load_raster_cosia),
@@ -2303,6 +2325,7 @@ def concat_xarrays(dir_raster: Path, dates: list) -> xr.Dataset:
         (load_raster_sat),
         (load_raster_argile),
         (load_raster_foret),
+        (load_raster_bdroute),
         #(load_raster_nappes, [dir_raster / "niveau_nappe_eau.pkl", dir_raster / "profondeur_nappe.pkl"]),
     ]
 

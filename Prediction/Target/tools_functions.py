@@ -1361,7 +1361,7 @@ def load_raster_targets(dir_raster: Path, dates: list, lat, lon, dept, resolutio
     data_vars = {}
     for var in ["occurence", "burned_area", "time_intervention", "influence"]:
         if var == 'influence':
-            file = dir_raster / 'occurence' / 'log' / resolution / f"{dept}InfluenceScale0.pkl"
+            file = dir_raster / 'occurence' / 'log' / resolution / f"{dept}Influence.pkl"
         else:
             file = dir_raster / var / 'bin' / resolution / f"{dept}binScale0.pkl"
         if not file.is_file():

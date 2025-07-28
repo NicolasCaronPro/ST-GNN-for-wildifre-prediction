@@ -180,7 +180,7 @@ foret = {
 }
 
 foretint2str = {
-    '0': 'PasDeforet',
+    '0': 'NoForest',
     '1': 'Châtaignier',
     '2': 'Chênes décidus',
     '3': 'Chênes sempervirents',
@@ -189,7 +189,7 @@ foretint2str = {
     '6': 'Feuillus',
     '7': 'Hêtre',
     '8': 'Mélèze',
-    '9': 'Mixtes',
+    '9': 'Mixte',
     '10': 'NC',
     '11': 'NR',
     '12': 'Pin à crochets, pin cembro',
@@ -269,7 +269,7 @@ ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date',
 
 targets_columns = ['time_intervention',
                     'burned_area',
-                   'nbsinister_id', 'class_risk', 'nbsinister', 'risk']
+                   'nbsinister_id', 'nbsinister', 'risk']
 
 weights_columns = ['proportion_on_zero_class',
                    'class',
@@ -308,7 +308,7 @@ weight_index = ids_columns.index('weight')
 days_until_next_event_index = ids_columns.index('days_until_next_event')
 scale_index = ids_columns.index('scale')
 
-class_index = targets_columns.index('class_risk')
+#class_index = targets_columns.index('class_risk')
 nbsinister_index = targets_columns.index('nbsinister')
 burned_index = targets_columns.index('burned_area')
 risk_index = targets_columns.index('risk')

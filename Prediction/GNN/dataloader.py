@@ -195,23 +195,23 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         target_name_nbsinister = f'nbsinister_sum_'
         target_name_bunredarea = f'burnedarea_sum_'
         target_name_risk = 'risk_max_'
-        target_name_class = 'class_risk_max_'
+        #target_name_class = 'class_risk_max_'
 
         if doKMEANS:
             target_name_nbsinister += f'{shift}_{thresh_kmeans}'
             target_name_risk += f'{shift}_{thresh_kmeans}'
-            target_name_class += f'{shift}_{thresh_kmeans}'
+            #target_name_class += f'{shift}_{thresh_kmeans}'
         else:
             target_name_nbsinister += f'0'
             target_name_bunredarea += f'0'
             target_name_risk += f'0'
-            target_name_class += f'0'
+            #target_name_class += f'0'
             weights_name_columns = [f'{wc}_0' for wc in weights_columns]
 
         target_name_nbsinister += f'_+{days_in_futur}'
         target_name_bunredarea += f'_+{days_in_futur}'
         target_name_risk += f'_+{days_in_futur}'
-        target_name_class += f'_+{days_in_futur}'
+        #target_name_class += f'_+{days_in_futur}'
 
         #df = set_weight_every_n_days(df, days_in_futur)
         df['weight'] = 1
@@ -220,12 +220,12 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         if doKMEANS:
             target_name_nbsinister = f'nbsinister_{shift}_{thresh_kmeans}'
             target_name_risk = f'risk_{shift}_{thresh_kmeans}'
-            target_name_class = f'class_risk_{shift}_{thresh_kmeans}'
+            #target_name_class = f'class_risk_{shift}_{thresh_kmeans}'
         else:
             target_name_nbsinister = f'nbsinister_0_0'
             target_name_bunredarea = f'burnedarea_0_0'
             target_name_risk = f'risk_0_0'
-            target_name_class = f'class_risk_0_0'
+            #target_name_class = f'class_risk_0_0'
         
         df['weight'] = 1
     
@@ -245,7 +245,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     df['nbsinister'] = df[target_name_nbsinister]
     df['burned_area'] = df[target_name_bunredarea]
     df['risk'] = df[target_name_risk]
-    df['class_risk'] = df[target_name_class]
+    #df['class_risk'] = df[target_name_class]
 
     df['Past_risk'] = 0
     df['Past_burnedarea'] = 0
@@ -253,7 +253,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     logger.info(f'Unique sinister -> {df["nbsinister"].unique()}')
 
     features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily']
-    columns = np.unique(ids_columns + weights_name_columns + list(np.unique(list(features_selected_kmeans) + list(features_name))) + features_obligatory + targets_columns + [col for col in df.columns if col.startswith('class_window')])
+    columns = np.unique(ids_columns + weights_name_columns + list(np.unique(list(features_selected_kmeans) + list(features_name))) + features_obligatory + targets_columns)
     
     df = df[columns]
     

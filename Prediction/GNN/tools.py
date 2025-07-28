@@ -156,8 +156,9 @@ def create_larger_scale_bin(input, bin, influence, time, burned):
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)
     burnedScale = np.full(influence.shape, np.nan)
-
+    
     clusterID = np.unique(input)
+
     for di in range(bin.shape[-1]):
         for id in clusterID:
             mask = (input == id)
@@ -172,7 +173,7 @@ def create_larger_scale_bin(input, bin, influence, time, burned):
                 timeScale[mask, di] = 0
                 burnedScale[mask, di] = 0
 
-    return binImageScale, influenceImageScale, timeScale, burned
+    return binImageScale, influenceImageScale, timeScale, burnedScale
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -4479,7 +4480,7 @@ def target_by_day(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.Data
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'nbsinister', days_range, sum, col_name=f'nbsinister_sum_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'burned_area', days_range, sum, col_name=f'burnedarea_sum_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, max, col_name=f'risk_max_{target_spe}_+')
-    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
+    #df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
     df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, mean, col_name=f'risk_mean_{target_spe}_+')
 
     return df_res
