@@ -160,8 +160,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
             if stg:
                 st = int(stg)
             if edg:
-                ed = int(edg) 
-
+                ed = int(edg)
+                
         name = sinister+'.csv'
         fp = pd.read_csv(Path('sinister') / dataset_name / name)
         fp['coef'] = 1
@@ -282,7 +282,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         
     ############################################### FEATURES SELECTION/ORDER #########################################
 
-    features_importance_order = features_selection(doFet, train_dataset, dir_output / 'features_importance' / f'{values_per_class}_0_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}', features_name, len(features_name), 'nbsinister')
+    features_importance_order = features_selection(True, train_dataset, dir_output / 'features_importance' / f'{values_per_class}_0_{scale}_{days_in_futur}_{graphScale.base}_{graphScale.graph_method}', features_name, len(features_name), 'nbsinister')
     features_name = features_importance_order
 
     ############################################### PLOTTING ####################################################

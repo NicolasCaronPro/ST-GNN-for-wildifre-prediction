@@ -94,9 +94,8 @@ class GenerateDatabase():
         else:
             code_dept = f'{code_dept}'
 
-        file_subpaths = [
-                    '197475/Results/U2018_CLC2012_V2020_20u1_raster100m/U2018_CLC2012_V2020_20u1_raster100m/',
-                ]
+        file_subpaths = ['197475/Results/U2018_CLC2012_V2020_20u1_raster100m/U2018_CLC2012_V2020_20u1_raster100m/']
+        
         years = ['2018']
         raster_corine(self.h3, self.dir_raster, file_subpaths, self.h3tif, self.h3tif_high, src_bounds_path, years, self.dates)
 
@@ -662,7 +661,7 @@ if __name__ == '__main__':
     stop = '2024-06-29'
     
     ################## Ain ######################
-    launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    """launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Aisne ######################
     launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -717,14 +716,13 @@ if __name__ == '__main__':
     
     ################## Correze ######################
     launch('departement-19-correze', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    
     ################## Corse du sud ######################
-    launch('departement-100-corse-du-sud', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    #launch('departement-100-corse-du-sud', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Haute Corse ######################
-    launch('departement-101-haute-corse', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    #launch('departement-101-haute-corse', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
-    """
     ################## Cote-d-Or ######################
     launch('departement-21-cote-d-or', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
@@ -766,7 +764,7 @@ if __name__ == '__main__':
 
     ################## Gers ######################
     launch('departement-32-gers', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    
+    """
     ################## Gironde ######################
     launch('departement-33-gironde', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
@@ -799,7 +797,7 @@ if __name__ == '__main__':
 
     ################## Haute-Loire ######################
     launch('departement-43-haute-loire', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-
+    
     ################## Loire-Atlantique ######################
     launch('departement-44-loire-atlantique', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 

@@ -318,7 +318,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
 
         dir_mask = path / 'datacube'
 
-        res = []
+        results_by_departement = {}
 
         for departement in departements:
 
@@ -371,6 +371,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             datacube_dept = datacube_dept.sel(date=slice(start_date, end_date))
 
             ids_uniques = np.unique(datacube_dept['area'].values)
+            logger.info(f'{departement}, ids : {ids_uniques}')
             ids_uniques = ids_uniques[~np.isnan(ids_uniques)]
             dates_uniques = datacube_dept['date'].values  # coordonnée
 
@@ -379,7 +380,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             for id_ in ids_uniques:
                 # Masque spatial : pixels où area == id_
                 spatial_mask = datacube_dept['area'] == id_
-                
+
                 for date_ in dates_uniques:
                     try:
                         # Extraction rapide via sel (date est une coordonnée)
@@ -427,16 +428,17 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             })
                         
             ds_avg = ds_avg.expand_dims({'departement': [departement]})
+
+            ds_avg = ds_avg.assign_coords({
+                'id': ('id', ds_avg.coords['id'].values)
+            })
             
             ds_avg['nbsinister_id'] = ds_avg['nbsinister']
-            #ds_avg.rename({'occurence_scale' : 'nbsinister', 'burned_area_scale' : 'burned_area', 'influence_scale' : 'risk', 'time_intervention_sclae'})
+            ds_avg['weight'] = 1
             
-            # Ajouter au résultat global
-            res.append(ds_avg)
+            results_by_departement[departement] = ds_avg
 
-        res = xr.merge(res)
-        res['weight'] = 1
-        return res
+        return results_by_departement
 
 def get_sub_nodes_feature(graph, subNode: np.array,
                         departements : list,
@@ -951,7 +953,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
     return X, features_name[len(ids_columns)-1:]
 
-def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
+def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
                         departements : list,
                         features : list, sinister : str, dataset_name: str, sinister_encoding :str,
                         name_expe : str,
@@ -977,17 +979,11 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
         if len(values) == 0 or np.all(np.isnan(values)):
             return  # Rien à faire
 
-        # Trouver l’index correspondant à l’id
-        try:
-            id_index = int(np.where(datacube_dept['id'].values == id_)[0][0])
-        except IndexError:
-            return  # id absent du Dataset
-        
         for metstr in methods:
             var_name = f"{band}_{metstr}"
-            if var_name not in datacube_dept.data_vars:
-                datacube_dept[var_name] = (('id', 'date'), np.full((datacube_dept.sizes['id'], datacube_dept.sizes['date']), np.nan))
-
+            if var_name not in datacube.data_vars:
+                datacube[var_name] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), np.nan))
+                
         # Calculs statistiques
         for metstr in methods:
             if metstr == 'mean':
@@ -1007,23 +1003,23 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
                 raise ValueError(f"Unknown method {metstr}")
             
             # Écriture dans le Dataset
-            datacube_dept[f"{band}_{metstr}"].loc[dict(id=id_)] = xr.DataArray(
+            datacube[f"{band}_{metstr}"].loc[dict(id=id_)] = xr.DataArray(
             np.round(val, 3),
             dims=["date"],
-            coords={"date": datacube_dept.coords["date"]}
+            coords={"date": datacube.coords["date"]}
         )
 
     """def save_value(array, band, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
 
-        datacube_dept[f'{band}'] = round(np.nanmean(encode_values), 3)
+        datacube[f'{band}'] = round(np.nanmean(encode_values), 3)
 
     def save_value_sum(array, band, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
 
-        datacube_dept[f'{band}'] = round(np.nansum(encode_values), 3)"""
+        datacube[f'{band}'] = round(np.nansum(encode_values), 3)"""
 
     def save_values_with_encoding(array, band, id_, mask, encoder):
         values = array[mask].reshape(-1, 1)
@@ -1032,17 +1028,11 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
 
         encoded_values = encoder.transform(values).values.squeeze()
 
-        # Trouver l'index dans le Dataset où id == id_
-        try:
-            id_index = int(np.where(datacube_dept['id'].values == id_)[0][0])
-        except IndexError:
-            return  # id absent du Dataset
-
         # Initialiser les variables dans le Dataset si elles n'existent pas
         for metstr in methods:
             var_name = f"{band}_{metstr}"
-            if var_name not in datacube_dept.data_vars:
-                datacube_dept[var_name] = (('id', 'date'), np.full((datacube_dept.sizes['id'], datacube_dept.sizes['date']), np.nan))
+            if var_name not in datacube.data_vars:
+                datacube[var_name] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), np.nan))
 
         # Calcul des statistiques et insertion dans le Dataset
         for metstr in methods:
@@ -1061,18 +1051,18 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
                 val = np.nanmean(grad)
             else:
                 raise ValueError(f"Unknown method {metstr}")
-            
+
             # Écriture dans le Dataset
-            datacube_dept[f"{band}_{metstr}"].loc[dict(id=id_)] = xr.DataArray(
+            datacube[f"{band}_{metstr}"].loc[dict(id=id_)] = xr.DataArray(
             np.round(val, 3),
             dims=["date"],
-            coords={"date": datacube_dept.coords["date"]}
+            coords={"date": datacube.coords["date"]}
         )
 
     def save_value_with_encoding(array, band, indexNode, mask, encoder):
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
-        datacube_dept[f'{band}'] = round(np.nanmean(encode_values), 3)
+        datacube[f'{band}'] = round(np.nanmean(encode_values), 3)
 
     dir_encoder = dir_train / 'Encoder'
 
@@ -1088,6 +1078,8 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
     encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
     encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
 
+    res = []
+
     for departement in departements:
         if departement in graph.drop_department:
             continue
@@ -1101,84 +1093,85 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
 
         datacube_feature = read_object('datacube.pkl', dir_datacube)
 
-        datacube_dept = datacube.sel(departement=departement)
-
-        datacube_feature = datacube_feature.sel(date=datacube_dept['date'].values)
-
         datacube_mask = read_object(f'datacube_target_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_datacube_mask)
-
-        uniques_ids = np.unique(datacube_dept['id'].values)
-
-        if len(datacube_dept) == 0:
+        
+        areas = datacube_mask['area'].values[0]
+        uniques_ids = np.unique(areas[~np.isnan(areas)])
+        
+        datacube = datacubes[departement]
+        datacube_feature = datacube_feature.sel(date=datacube.sel(departement=departement)['date'].values)
+        
+        if len(datacube) == 0:
             continue
 
         logger.info('Calendar')
 
         def expand_to_2d(arr_1d):
-                """Étend un tableau 1D (par date) en 2D (id x date)"""
-                return np.tile(arr_1d, (n_id, 1))  # shape (n_id, n_date)
-
-        areas = datacube_mask['area'].values[0]
+            """Étend un tableau 1D (par date) en 2D (id x date)"""
+            return np.tile(arr_1d, (n_id, 1))  # shape (n_id, n_date)
 
         if 'Calendar' in features:
-            dates = pd.to_datetime(datacube_dept['date'].values)
-            ids = datacube_dept['id'].values
+            dates = pd.to_datetime(datacube.loc[dict(departement=departement)]['date'].values)
+            ids = datacube.loc[dict(departement=departement)]['id'].values
             n_id = len(ids)
             n_date = len(dates)
 
-            datacube_dept['month'] = (('id', 'date'), expand_to_2d(dates.month))
-            datacube_dept['dayofyear'] = (('id', 'date'), expand_to_2d(dates.dayofyear))
-            datacube_dept['dayofweek'] = (('id', 'date'), expand_to_2d(dates.dayofweek))
-            datacube_dept['isweekend'] = (('id', 'date'), expand_to_2d(dates.dayofweek >= 5))
+            # --- Étape 1 : Construction des variables calendaires dans un tableau numpy
+            calendar_data = {
+                'month': dates.month,
+                'dayofyear': dates.dayofyear,
+                'dayofweek': dates.dayofweek,
+                'isweekend': (dates.dayofweek >= 5).astype(int),
+                'couvrefeux': np.array([pendant_couvrefeux(d) for d in dates], dtype=int),
+                'confinement': np.array([
+                    1 if (
+                        dt.datetime(2020, 3, 17, 12) <= d <= dt.datetime(2020, 5, 11)
+                        or dt.datetime(2020, 10, 30) <= d <= dt.datetime(2020, 12, 15)
+                    ) else 0 for d in dates
+                ], dtype=int),
+                'ramadan': np.array([
+                    1 if convertdate.islamic.from_gregorian(d.year, d.month, d.day)[1] == 9 else 0 for d in dates
+                ], dtype=int),
+                'bankHolidays': np.array([1 if d in jours_feries else 0 for d in dates], dtype=int),
+                'bankHolidaysEve': np.array([1 if d in veille_jours_feries else 0 for d in dates], dtype=int),
+                'holidays': np.array([
+                    1 if vacances_scolaire.is_holiday_for_zone(
+                        d.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)
+                    ) else 0 for d in dates
+                ], dtype=int),
+                'holidaysBorder': np.array([
+                    int(
+                        vacances_scolaire.is_holiday_for_zone((d + dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)) or
+                        vacances_scolaire.is_holiday_for_zone((d - dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
+                    )
+                    for d in dates
+                ], dtype=int),
+            }
 
-            datacube_dept['couvrefeux'] = (('id', 'date'), expand_to_2d([pendant_couvrefeux(d) for d in dates]))
-            datacube_dept['confinement'] = (('id', 'date'), expand_to_2d([
-                1 if (
-                    dt.datetime(2020, 3, 17, 12) <= d <= dt.datetime(2020, 5, 11)
-                    or dt.datetime(2020, 10, 30) <= d <= dt.datetime(2020, 12, 15)
-                ) else 0 for d in dates
-            ]))
-            datacube_dept['ramadan'] = (('id', 'date'), expand_to_2d([
-                1 if convertdate.islamic.from_gregorian(d.year, d.month, d.day)[1] == 9 else 0 for d in dates
-            ]))
-            datacube_dept['bankHolidays'] = (('id', 'date'), expand_to_2d([1 if d in jours_feries else 0 for d in dates]))
-            datacube_dept['bankHolidaysEve'] = (('id', 'date'), expand_to_2d([1 if d in veille_jours_feries else 0 for d in dates]))
+            # --- Étape 2 : Expand 1D → 2D (id, date), puis stack
+            calendar_vars_raw = list(calendar_data.keys())
+            calendar_array = np.stack([calendar_data[var] for var in calendar_vars_raw], axis=-1)  # shape (date, nb_vars)
 
-            datacube_dept['holidays'] = (('id', 'date'), expand_to_2d([
-                1 if vacances_scolaire.is_holiday_for_zone(d.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
-                else 0 for d in dates
-            ]))
-            datacube_dept['holidaysBorder'] = (('id', 'date'), expand_to_2d([
-                int(
-                    vacances_scolaire.is_holiday_for_zone((d + dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)) or
-                    vacances_scolaire.is_holiday_for_zone((d - dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
-                )
-                for d in dates
-            ]))
+            # --- Étape 3 : Encodage
+            calendar_flat = calendar_array.reshape(-1, len(calendar_vars_raw))  # shape (id*date, nb_vars)
+            calendar_encoded = encoder_calendar.transform(calendar_flat).values.reshape(n_date, -1)
 
-            # --- Encodage
-            calendar_vars_raw = [v for v in calendar_variables if v not in ['calendar_mean', 'calendar_min', 'calendar_max', 'calendar_sum']]
-            calendar_stack = np.stack([datacube_dept[v].values for v in calendar_vars_raw], axis=-1)  # (id, date, nb_vars)
-            calendar_flat = calendar_stack.reshape(-1, len(calendar_vars_raw))  # (id*date, nb_vars)
-            calendar_encoded = encoder_calendar.transform(calendar_flat).values.reshape(n_id, n_date, -1)
-
+            # --- Étape 4 : Injection dans le datacube
             for i, var in enumerate(calendar_vars_raw):
-                datacube_dept[var] = (('id', 'date'), calendar_encoded[:, :, i])
+                datacube[var] = (('id', 'date'), expand_to_2d(calendar_encoded[:, i]))
 
-            # --- Stats sur les features encodées
-            datacube_dept['calendar_mean'] = (('id', 'date'), np.round(np.mean(calendar_encoded, axis=2), 3))
-            datacube_dept['calendar_min'] = (('id', 'date'), np.round(np.min(calendar_encoded, axis=2), 3))
-            datacube_dept['calendar_max'] = (('id', 'date'), np.round(np.max(calendar_encoded, axis=2), 3))
-            datacube_dept['calendar_sum'] = (('id', 'date'), np.round(np.sum(calendar_encoded, axis=2), 3))
-
+            datacube['calendar_mean'] = (('id', 'date'), expand_to_2d(np.round(np.mean(calendar_encoded, axis=1), 3)))
+            datacube['calendar_min'] = (('id', 'date'), expand_to_2d(np.round(np.min(calendar_encoded, axis=1), 3)))
+            datacube['calendar_max'] = (('id', 'date'), expand_to_2d(np.round(np.max(calendar_encoded, axis=1), 3)))
+            datacube['calendar_sum'] = (('id', 'date'), expand_to_2d(np.round(np.sum(calendar_encoded, axis=1), 3)))
+        
         ### Geo spatial
-        logger.info('Geo')
         if 'Geo' in features:
+            logger.info('Geo')
             value = encoder_geo.transform([name2int[departement]]).values[0][0]
-            shape = (datacube_dept.sizes['id'], datacube_dept.sizes['date'])
-            values = np.full(shape, value)
-            datacube_dept['Geo_encoder'] = (('id', 'date'), values)
-
+            shape = (datacube.sizes['id'], datacube.sizes['date'])
+            datacube['departement_encoder'] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), value))
+            
         logger.info('Meteorological')
         array = None
         ### Meteo
@@ -1253,11 +1246,22 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
             if 'id_encoder' in features:
                 save_value_with_encoding(areas, 'id_encoder', id, areas == id, encoder_id)
 
-            if 'cluster_encoder' in features:
-                value = encoder_geo.transform([id]).values[0][0]
-                shape = (datacube_dept.sizes['id'], datacube_dept.sizes['date'])
+            if 'id_encoder' in features:
+                value = encoder_id.transform([id]).values[0][0]
+                shape = (datacube.loc[dict(departement=departement)].sizes['id'], datacube.loc[dict(departement=departement)].sizes['date'])
                 values = np.full(shape, value)
-                datacube_dept['cluster_encoder'] = (('id', 'date'), values)
+                datacube.loc[dict(departement=departement)]['id_encoder'] = (('id', 'date'), values)
+                
+            if 'cluster_encoder' in features:
+                if 'cluster_encoder' not in datacube.data_vars:
+                    #datacube['cluster_encoder'] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), np.nan))
+                    values = datacube['time_series_clustering'].values
+                    datacube['cluster_encoder'] = (('departement', 'id', 'date'), encoder_cluster.transform(values.reshape(-1,1)).values.reshape(values.shape))
+                #cluster = datacube.sel(id=id)['time_series_clustering'].values[0]
+                #value = encoder_cluster.transform([cluster]).values[0][0]
+                #shape = (datacube.loc[dict(departement=departement)].sizes['id'], datacube.loc[dict(departement=departement)].sizes['date'])
+                #values = np.full(shape, value)
+                #datacube.loc[dict(departement=departement)]['cluster_encoder'] = (('id', 'date'), values)
 
             if 'sentinel' in features:
                 for var in sentinel_variables:
@@ -1275,21 +1279,25 @@ def get_sub_nodes_features_from_xarray(graph, datacube: xr.DataArray,
 
             if 'AutoRegressionBin' in features:
                 pass
-
+            
             if 'vigicrues' in features:
                 for var in vigicrues_variables:
-                    save_values(datacube_dept[var].values, var, index, areas == id)
+                    save_values(datacube[var].values, var, id, areas == id)
 
             if 'nappes' in features:
                 for var in sentinel_variables:
-                    save_values(datacube_dept[var].values, var, index, areas == id)
+                    save_values(datacube[var].values, var, id, areas == id)
 
         check_and_create_path(path / 'log')
         # Ajouter dimensions contextuelles
-       
-        res.append(datacube_dept)
+        res.append(datacube.to_dataframe().reset_index())
+        
+    res = pd.concat(res)
+    print(res.shape)
+    
+    #df = res.to_dataframe().reset_index()
 
-    res = xr.merge(res)
+    logger.info(f'{res.shape}')    
     
     return res, features_name
 

@@ -26,7 +26,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             continue
 
         dir_data = rootDisk / 'csv' / dep /  'raster' / resolution
-        
+
         datacube_target = read_object(f'datacube_target_{dep}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output / '..' / 'datacube')
         datacube_feature = read_object(f'datacube.pkl', dir_data)
 
@@ -55,10 +55,10 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             except:
                 pass"""
         
-        argile = datacube_feature['argile'].values[:, :, 0]
-        if argile is not None:
-            argile = resize_no_dim(argile, tar.shape[0], tar.shape[1])
-            argile_value += list(argile[~np.isnan(tar[:, :, 0])])
+        #argile = datacube_feature['argile'].values[:, :, 0]
+        #if argile is not None:
+        #    argile = resize_no_dim(argile, tar.shape[0], tar.shape[1])
+        #    argile_value += list(argile[~np.isnan(tar[:, :, 0])])
 
         id_mask = datacube_target['area'].values[0]
         if id_mask is not None:
@@ -73,7 +73,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
         if cosia_image is not None:
             cosia_image = resize_no_dim(cosia_image, tar.shape[0], tar.shape[1])
             cosia += list(cosia_image[~np.isnan(tar[:, :, 0])])"""
-
+        
         corine_image = datacube_feature['corine_landcover'].values[:, :, 0]
         if corine_image is not None:
             corine_image = resize_no_dim(corine_image, tar.shape[0], tar.shape[1])
@@ -88,10 +88,11 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             route += list(route_image[~np.isnan(tar[:, :, 0])])
         
         calendar = np.empty((tar.shape[2], stop_calendar))
-        for i, date in enumerate(allDates):
+        i = 0
+        for idate, date in enumerate(allDates):
             
-            if i not in trainDate:
-                break
+            if idate not in trainDate:
+                continue
             
             ddate = dt.datetime.strptime(date, '%Y-%m-%d')
             calendar[i, 0] = int(date.split('-')[1]) # month
@@ -99,7 +100,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             calendar[i, 2] = ddate.weekday() # dayofweek
             calendar[i, 3] = ddate.weekday() >= 5 # isweekend
             calendar[i, 4] = pendant_couvrefeux(ddate) # couvrefeux
-            
+
             calendar[i, 5] = 1 if (
                 dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
                 or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
@@ -111,14 +112,16 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             calendar[i, 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 # holidays
             calendar[i, 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 ) \
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0) # holidaysBorder
-                
+            
+            i += 1
+
         for j in range(stop_calendar):
             calendar_array[j] += list(calendar[:, j])
 
         geo = np.empty((tar.shape[2], len(geo_variables)))
         geo[:, :] = name2int[dep]
         geo_array += list(geo)
-
+        
     gt = np.asarray(gt)
     temporalValues = np.asarray(temporalValues)
     spatialValues = np.asarray(spatialValues)

@@ -2264,12 +2264,39 @@ def load_raster_bdroute(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
     route_land = _expand_static(route_land, len(dates))
     route_inf = _expand_static(route_inf, len(dates))
 
-    print(route.shape)
-
     bands = ['NoRoad', 'Road']
 
     data_vars = {
         "route_landcover": (("latitude", "longitude", "date"), route_land),
+        #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
+    }
+
+    for i, band in enumerate(bands):
+        data_vars[band] = (("latitude", "longitude", "date"), route[i])
+
+    coords = {"latitude": lat, "longitude": lon, "date": dates}
+    return xr.Dataset(data_vars, coords=coords)
+
+def load_raster_osmnx(dir_raster: Path, dates: list, lat, lon) -> xr.Dataset:
+    """Load forest rasters and broadcast them on the date dimension."""
+    route = pickle.load(open(dir_raster / "osmnx.pkl", "rb"))
+    route_land = pickle.load(open(dir_raster / "osmnx_landcover.pkl", "rb"))
+    route_inf = pickle.load(open(dir_raster / "osmnx_influence.pkl", "rb"))
+
+    route = _expand_static(route, len(dates))
+    route_land = _expand_static(route_land, len(dates))
+    route_inf = _expand_static(route_inf, len(dates))
+
+    bands = [
+        'PasDeRoute',
+        'motorway',
+        'primary',
+        'secondary',
+        'tertiary', 
+        'path']
+
+    data_vars = {
+        "osmnx_landcover": (("latitude", "longitude", "date"), route_land),
         #"cosia_influence": (("band", "latitude", "longitude", "date"), cosia_influence),
     }
 
@@ -2316,10 +2343,11 @@ def concat_xarrays(dir_raster: Path, dates: list) -> xr.Dataset:
 
     loaders = [
         (load_rasterise_meteo),
-        #(load_raster_cosia),
+        (load_raster_cosia),
         (load_raster_corine),
         (load_raster_elevation),
         (load_raster_population),
+        (load_raster_osmnx),
         #(load_raster_vigicrues, list(dir_raster.glob("vigicrues*.pkl"))),
         #(load_raster_air_quality, list(dir_raster.glob("*raw.pkl"))),
         (load_raster_sat),

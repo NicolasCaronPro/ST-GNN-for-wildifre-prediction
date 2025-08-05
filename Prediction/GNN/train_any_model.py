@@ -43,6 +43,9 @@ from GNN.dico_departements import *
 import numpy as np
 import pandas as pd
 
+from tools import get_saison
+from features import is_mediterranean_dept
+
 TREE_MODELS = {
     "xgboost",
     "lightgbm",
@@ -99,9 +102,6 @@ def main():
 
         dir_post_process = dir_output / 'post_process'
         post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
-        save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
-        save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
-        save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
 
         features_selected = np.arange(len(features_selected_str))
 
@@ -136,6 +136,12 @@ def main():
             "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
             "burnedarea",
         )
+
+        save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
+        save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
+        save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+
+    
     else:
 
         prefix = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
@@ -209,6 +215,17 @@ def main():
             "burnedarea",
         )
 
+        save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
+        save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
+        save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+        
+    train_dataset['saison'] = train_dataset['date'].apply(get_saison)
+    val_dataset['saison'] = val_dataset['date'].apply(get_saison)
+    test_dataset['saison'] = test_dataset['date'].apply(get_saison)
+
+    train_dataset['mediterranean'] = train_dataset['departement'].apply(is_mediterranean_dept)
+    val_dataset['mediterranean'] = val_dataset['departement'].apply(is_mediterranean_dept)
+    test_dataset['mediterranean'] = test_dataset['departement'].apply(is_mediterranean_dept)
 
     train_dataset['cluster-encoder'] = train_dataset['cluster_encoder']
     val_dataset['cluster-encoder'] = val_dataset['cluster_encoder']

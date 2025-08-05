@@ -470,6 +470,7 @@ class PreprocessorConv:
                     month_idx = self.id_col.index('month_non_encoder')
                     month = unique_id[month_idx]
                     season_name = self._get_season_name(month)
+                    #print(self.graph.sequences_month)
                     kernel_size = int(self.graph.sequences_month[season_name][unique_id[1]]['mean_size'])
                 else:
                     raise ValueError(
@@ -1240,8 +1241,10 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     ###############################################################################
 
-    if graph.sequences_month is None:
-        graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
+    graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
+    print(train_dataset.id.unique())
+    print(train_dataset.departement.unique())
+    print(graph.compute_sequence_month)
 
     conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
     #conv_types = ['cubic']

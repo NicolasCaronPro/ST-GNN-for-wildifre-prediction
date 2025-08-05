@@ -400,3 +400,221 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
                 save_object(X, f'X_{unDate}.pkl', dir_output / departement)
 
     return X, features_name
+
+################################################################################################################################################
+
+def get_sub_nodes_feature_2D_from_xarray(graph, datacubes: xr.DataArray,
+                        departements : list,
+                        features : list, sinister : str, dataset_name : str,
+                        path : Path,
+                        dir_train : Path,
+                        resolution : str, 
+                        graph_construct : str,
+                        sinister_encoding : str,
+                        name_expe: str,
+                        newFeatures: list=[],
+                        changeFeature: list=[],
+                        save : bool = True,
+                        use_log=True) -> tuple:
+    
+    # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
+
+    dir_output = dir_train / f'2D_database'
+
+    assert graph.nodes is not None
+
+    if use_log:
+        logger.info('Load 2D nodes features')
+
+    features_name, newShape = get_features_name_lists_2D(graph.scale, features)
+
+    dir_encoder = dir_train / 'Encoder'
+
+    if dataset_name != 'bdiff':
+        encoder_landcover = read_object(f'encoder_landcover_{name_exp}.pkl', dir_encoder)
+    
+    encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
+    encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
+    encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
+    encoder_corine = read_object(f'encoder_corine_{name_expe}.pkl', dir_encoder)
+    encoder_bdroute = read_object(f'encoder_route_{name_expe}.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
+    encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
+    
+    dir_mask = path / 'raster'
+
+    for departement in departements:
+        check_and_create_path(dir_output / departement)
+        check_and_create_path(dir_output / departement / str(graph.scale))
+        if use_log:
+            logger.info(departement)
+        
+        dir_datacube = rootDisk / 'csv' / departement / 'raster' / '2x2'
+
+        dir_datacube_mask = path / 'datacube'
+
+        datacube_feature = read_object('datacube.pkl', dir_datacube)
+
+        datacube_mask = read_object(f'datacube_target_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_datacube_mask)
+        
+        areas = datacube_mask['area'].values[0]
+        uniques_ids = np.unique(areas[~np.isnan(areas)])
+        
+        datacube = datacubes[departement]
+        datacube_feature = datacube_feature.sel(date=datacube.sel(departement=departement)['date'].values)
+
+        areas = datacube_mask['area'].values[0]
+        nodeDepartement = np.unique(areas[~np.isnan(areas)])
+        
+        if nodeDepartement.shape[0] == 0:
+            continue
+
+        unDates = np.unique(nodeDepartement[:,date_index]).astype(int)
+
+        if 'ids_encoder' in features:
+            logger.info('IDS')
+    
+        for unDate in unDates:
+            if unDate % 100 == 0 and use_log:
+                logger.info(f'{allDates[unDate]}')
+
+            if (dir_output / departement / f'X_{unDate}.pkl').is_file() and use_log:
+                X = read_object(f'X_{unDate}.pkl', dir_output / departement)
+                if newFeatures != []:
+                    if X.shape[0] != len(features_name):
+                        X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], newFeatures,
+                                                                        sinister, dataset_name, dir_train, dir_train,
+                                                                        resolution, graph_construct, sinister_encoding, newFeatures=[], chanegFeatures=[], save=False, use_log=False)
+                        
+                        features_name_ori, newShape = get_features_name_lists_2D(graph.scale, [fet for fet in features if fet not in newFeatures])
+
+                        new_X = np.empty((X.shape[0] + X2.shape[0], X.shape[1], X.shape[2]))
+
+                        for fet in features_name:
+                            if fet in features_name_2:
+                                new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
+                            else:
+                                new_X[features_name.index(fet)] = X[features_name_ori.index(fet)]
+                        
+                        X = new_X
+                        if save:
+                            save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+                                
+                if changeFeature != []:
+                    X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], changeFeature,
+                                                                    sinister, dataset_name, dir_train, dir_train,
+                                                                    resolution, graph_construct, sinister_encoding, newFeatures=[], changeFeature=[], save=False, use_log=False)
+                    plt.imshow(X2[3])
+                    plt.colorbar()
+                    plt.savefig(f'NDSI.png')
+                    plt.close('all')
+                    new_X = np.empty((X.shape[0], X.shape[1], X.shape[2]))
+
+                    for fet in features_name:
+                        if fet in features_name_2:
+                            new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
+                        else:
+                            new_X[features_name.index(fet)] = X[features_name.index(fet)]
+
+                    plt.imshow(new_X[features_name.index('NDSI')] )
+                    plt.colorbar()
+                    plt.savefig(f'NDSI_2.png')
+                    plt.close('all')
+                    
+                    X = new_X
+                    if save:
+                        save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+
+                continue
+
+            if 'population' in features:
+                pass
+            
+            if 'elevation' in features:
+                pass
+
+            if 'highway' in features:
+                pass
+
+            if 'foret' in features:
+                pass
+
+            if 'cosia' in features:
+                pass
+
+            if 'foret_encoder' in features:
+                pass
+
+            if 'landcover_encoder' in features:
+                pass
+
+            if 'highway_encoder' in features:
+                pass
+
+            if 'argile_encoder' in features:
+                pass
+
+            if 'id_encoder' in features:
+                pass
+
+            if 'cosia_encoder' in features:
+                pass
+
+            #logger.info('Calendar')
+            if 'Calendar' in features:
+                pass
+
+            ### Geo spatial
+            #logger.info('Geo')
+            if 'Geo' in features:
+                pass
+
+            logger.info('Meteorological')
+            ### Meteo
+            for i, var in enumerate(cems_variables):
+                if var not in features:
+                    continue
+                pass
+
+            #logger.info('Air Quality')
+            if 'air' in features:
+                pass
+
+            ### Sentinel
+            if 'sentinel' in features:
+                pass
+
+            if 'dynamicWorld' in features:
+                pass
+
+            #logger.info('Historical')
+            if 'Historical' in features:
+                pass
+
+            if 'AutoRegressionReg' in features:
+                pass
+
+            #logger.info('AutoRegressionBin')
+            if 'AutoRegressionBin' in features:
+                pass
+
+            #logger.info('Vigicrues')
+            if 'vigicrues' in features:
+                pass
+
+            #logger.info('nappes')
+            if 'nappes' in features:
+                pass
+
+            #logger.info('region_class')
+            if 'cluster_encoder' in features:
+                pass
+
+            if save:
+                save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+
+    return X, features_name

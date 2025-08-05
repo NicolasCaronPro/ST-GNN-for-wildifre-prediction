@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 import os
 import sys
+import itertools
 
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -31,9 +32,27 @@ def main():
     script = cfg.get("train_script")
     if not script:
         print(f"No script provided")
-
+    
     script_path = Path(__file__).parent / script
-    cmd = [sys.executable, str(script_path), "-c", args.config]
+
+    if cfg.scale == 'search':
+        scales = [2, 3, 4, 'departement']
+        for scale in scales:
+            cfg.scale = scale
+            if cfg.graphConstruct == 'search':
+                if scale == 'departement':
+                    cfg.graphConstruct = "None"
+                    cmd = [sys.executable, str(script_path), "-c", args.config]
+                else:
+                    nb_attemps = [2, 3, 4, 5]
+                    n_reduce_class = [3, 4 , 5, 6]
+                    test = itertools.product([nb_attemps, n_reduce_class])
+                    for a, r in test:
+                        cfg.graphConstruct = f'risk-size-watershed-degree-a{a}-r{r}-t0.3'
+                        print(f'{cfg.graphConstruct}')
+                        cmd = [sys.executable, str(script_path), "-c", args.config]
+            else:
+                cmd = [sys.executable, str(script_path), "-c", args.config]
 
     print("Executing", " ".join(cmd))
     try:

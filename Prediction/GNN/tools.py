@@ -5128,11 +5128,15 @@ def get_static_temporal_idx(features):
         if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet or fet in calendar_variables or 'AutoRegression' in fet or fet in air_variables:
             temporal_idx.append(i)
             continue
-
+        
+        if 'Corine' in fet:
+            static_idx.append(i)
+            continue
+        
         fet_name, _ = fet.split('_')
         if fet_name in landcover_variables or fet_name in foret_variables_name or \
               fet_name in cosia_variables or fet_name in osmnx_variables_name or fet_name in dynamic_world_variables or \
-                fet in elevation_variables or fet_name in population_variabes:
+                fet in elevation_variables or fet_name in population_variabes or fet_name in bdroute_variables:
             static_idx.append(i)
         else:
             temporal_idx.append(i)

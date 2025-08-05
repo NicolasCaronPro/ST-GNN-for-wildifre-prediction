@@ -244,8 +244,10 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
                 # Select the correct CSV file depending on the sinister type
                 if sinister == 'firepoint':
                     name = 'NATURELSfire.csv'
-                else:
+                elif sinister == 'inondantion':
                     name = 'inondation.csv'
+                elif sinister == 'FXAgricoles':
+                    name = 'FXAgricoles.csv'
                 fp = pd.read_csv(root / dept / sinister / name)
         except:
             # If loading fails, create a zero image for the whole period
@@ -255,7 +257,7 @@ def process_department(departements, sinister, n_pixel_y, n_pixel_x, read):
             input.append(inputDep)
             save_object(inputDep, dept + 'binScale0.pkl', dir_output / 'bin' / resolution)
             continue
-
+        
         # Load data from national datasets and filter by department
         if dataset_name in ['bdiff', 'vigicrues', 'georisques', 'bdiff_small']:
             fp = pd.read_csv(root / 'france' / sinister / f'{sinister}.csv', dtype={'Département': str})

@@ -26,14 +26,16 @@ class ConfigParser:
         "population",
         "sentinel",
         "foret_encoder",
-        "argile_encoder",
+        #"argile_encoder",
         "corine_encoder",
         "cluster_encoder",
         "bdroute_encoder",
+        "id_encoder",
+        "Geo",
         "foret",
         "bdroute",
         "corine",
-        "Calendar",
+        "Calendar"
       ]
 
         # commonly used fields

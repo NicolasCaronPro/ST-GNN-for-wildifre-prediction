@@ -1939,9 +1939,12 @@ class GraphStructure():
             datacube_target = read_object(f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', dir_datacube)
             assert datacube_target is not None
             
-            datacube_feature = read_object(f'datacube.pkl', dir_data)
-            assert datacube_feature is not None
-
+            try:
+                datacube_feature = read_object(f'datacube.pkl', dir_data)
+                assert datacube_feature is not None
+            except:
+                print(f'{dept}')
+                continue
             datacube_target = datacube_target.sel(date=train_dates)
 
             target_values = datacube_target['nbsinister'].values[0]

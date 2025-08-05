@@ -344,7 +344,7 @@ def construct_database_from_xarray(
 
     ################################## Try loading Y database #############################
     # Define the filename for the ground truth data
-    n = f'datacube_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
+    n = f'Y_datacube_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
 
     #if not (dir_output / n).is_file():
     if True:
@@ -357,21 +357,23 @@ def construct_database_from_xarray(
         )
         # Save the generated ground truth data
         save_object(Y, n, dir_output)
+    else:
+        Y = read_object(n, dir_output)
 
-        # If X is not loaded, generate the features
-        Y, features_name = get_sub_nodes_features_from_xarray(
-            graphScale,
-            Y,
-            departements,
-            features,
-            sinister,
-            dataset_name,
-            sinister_encoding,
-            name_exp,
-            dir_output,
-            dir_train,
-            resolution,
-        )
+    # If X is not loaded, generate the features
+    Y, features_name = get_sub_nodes_features_from_xarray(
+        graphScale,
+        Y,
+        departements,
+        features,
+        sinister,
+        dataset_name,
+        sinister_encoding,
+        name_exp,
+        dir_output,
+        dir_train,
+        resolution,
+    )
 
     return Y, features_name
 
@@ -606,7 +608,7 @@ def init(args, dir_output, script):
     ######################## Get features and train features list ######################
 
     isInference = name_exp == 'inference'
-
+    
     #features, train_features, kmeans_features = get_features_for_sinister_prediction(dataset_name, sinister, isInference)
     features = args.features
     train_features = args.train_features
@@ -732,7 +734,7 @@ def init(args, dir_output, script):
         logger.info('#      Construct   Database         #')
         logger.info('#####################################')
 
-        datacube, features_name = construct_database_from_xarray(graphScale, k_days,
+        df, features_name = construct_database_from_xarray(graphScale, k_days,
                                             departements,
                                             features,
                                             sinister,
@@ -747,10 +749,10 @@ def init(args, dir_output, script):
                                             trainDate,
                                             name_exp)
         
-        save_object(datacube, 'datacube_'+prefix+'.pkl', dir_output)
+        save_object(df, 'df_feat_'+prefix+'.pkl', dir_output)
         #save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
     else:
-        datacube = read_object('datacube_'+prefix+'.pkl', dir_output)
+        df = read_object('df_feat_'+prefix+'.pkl', dir_output)
         #Y = read_object('Y_'+prefix+'.pkl', dir_output)
         features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
@@ -822,8 +824,15 @@ def init(args, dir_output, script):
         X = new_X
         
         save_object(X, 'X_'+prefix+'.pkl', dir_output)
-    
-    df = datacube.to_dataframe().reset_index()
+
+    logger.info(f'{df.shape}')
+    logger.info(f'{df}')
+    df.drop_duplicates(subset=['id', 'date'], inplace=True)
+    print(df['departement'].unique())
+    print(df['id'].unique())
+    print(df['date'].unique())
+    logger.info(f'{df.shape}')
+    #df = datacube.to_dataframe().reset_index()
     df['date'] = df['date'].apply(lambda x : allDates.index(x))
     df['departement'] = df['departement'].apply(lambda x : name2int[x])
     """X = X[:, len(ids_columns)-1:]
