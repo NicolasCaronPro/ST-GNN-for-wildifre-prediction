@@ -1056,8 +1056,6 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_true = df_test[col_nbsinister].values
     y_pred = df_test[f'prediction_{target_name}'].values
     
-    #apr = round(average_precision_score(y_true > 0, y_pred > 0), 2)
-
     """ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsinister, dir_output / name)
 
     r2 = r2_score(y_true, y_pred)
@@ -1077,21 +1075,57 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     #metrics[f'apr'] = apr
     #logger.info(f'apr = {apr}')
 
-    f1 = round(f1_score(y_true > 0, y_pred > 0), 3)
-    metrics[f'f1'] = f1
-    logger.info(f'f1 = {f1}')
+    if name.find('binary') != -1:
+        apr = round(average_precision_score(y_true > 0, y_pred), 2)
+        logger.info(f'apr = {apr}')
+        metrics[f'apr'] = apr
+        best_f1 = 0
+        best_thresh = 0.5
 
-    prec = round(precision_score(y_true > 0, y_pred > 0), 3)
-    metrics[f'prec'] = prec
-    logger.info(f'prec = {prec}')
+        # Balayage des seuils entre 0.01 et 0.99
+        for thresh in np.linspace(0.01, 0.99, 99):
+            y_pred_bin = (y_pred >= thresh).astype(int)
+            y_true_bin = (y_true >= thresh).astype(int)  # facultatif, selon ton format
 
-    rec = round(recall_score(y_true > 0, y_pred > 0), 3)
-    metrics[f'rec'] = rec
-    logger.info(f'rec = {rec}')
+            score = f1_score(y_true_bin, y_pred_bin)
+            if score > best_f1:
+                best_f1 = score
+                best_thresh = thresh
 
-    bca = round(balanced_accuracy_score(y_true, y_pred), 3)
-    metrics[f'bca'] = bca
-    logger.info(f'bca = {bca}')
+        # Application du meilleur seuil
+        y_pred_bin = (y_pred >= best_thresh).astype(int)
+        y_true_bin = (y_true >= best_thresh).astype(int)  # facultatif
+
+        f1 = round(f1_score(y_true_bin, y_pred_bin), 3)
+        prec = round(precision_score(y_true_bin, y_pred_bin), 3)
+        rec = round(recall_score(y_true_bin, y_pred_bin), 3)
+        bca = round(balanced_accuracy_score(y_true_bin, y_pred_bin), 3)
+
+        metrics['f1'] = f1
+        metrics['prec'] = prec
+        metrics['rec'] = rec
+        metrics['bca'] = bca
+        metrics['threshold'] = round(best_thresh, 3)
+
+        logger.info(f'[Binary mode] Best threshold: {best_thresh:.3f}')
+        logger.info(f'f1 = {f1} | prec = {prec} | rec = {rec} | bca = {bca}')
+        
+    elif name.find('classification'):
+        f1 = round(f1_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'f1'] = f1
+        logger.info(f'f1 = {f1}')
+
+        prec = round(precision_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'prec'] = prec
+        logger.info(f'prec = {prec}')
+
+        rec = round(recall_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'rec'] = rec
+        logger.info(f'rec = {rec}')
+
+        bca = round(balanced_accuracy_score(y_true, y_pred), 3)
+        metrics[f'bca'] = bca
+        logger.info(f'bca = {bca}')
 
     # Calcul des scores pour les signaux
     #iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
@@ -1169,7 +1203,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         accuracy = round(accuracy_score(y_true, y_pred), 2)
         metrics[f'accuracy'] = accuracy
         logger.info(f'accuracy = {accuracy}')
-
+        
         auoc = round(cohen_kappa_score(y_true.astype(int), y_pred.astype(int), weights='linear'), 3)
         metrics['auoc'] = auoc
         logger.info(f'auoc = {auoc}')
@@ -1668,9 +1702,6 @@ def test_dl_model(cfg,
     metrics = {}
     metrics_dept = {}
 
-    #save_object(test_dataset_unscale_dept, f'test_dataset_unscale_{test_name}.pkl', dir_output)
-    #save_object(test_dataset_dept, f'test_dataset_{test_name}.pkl', dir_output)
-
     test_dataset_dept.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
     print(allDates[int(test_dataset_dept.date.min())])
@@ -1678,6 +1709,12 @@ def test_dl_model(cfg,
 
     #################################### GNN ###################################################
     for name in models:
+
+        test_dataset_dept['saison'] = test_dataset_dept['date'].apply(get_saison)
+
+        test_dataset_dept['mediterranean'] = test_dataset_dept['departement'].apply(is_mediterranean_dept)
+
+        test_dataset_dept['cluster-encoder'] = test_dataset_dept['cluster_encoder']
 
         model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
@@ -1710,13 +1747,12 @@ def test_dl_model(cfg,
         if model is None:
             logger.info(f'{model_dir}/{read_name}.pkl not found')
             continue
-
+        
         graphScale._set_model(model)
 
         if isinstance(model, ModelVotingPytorchAndSklearn):
             if top_model == 'task':
                 model_per_task={'normal_predictions' : 4,
-                                'generalized_prediction' : 10,
                                 'class_value_2_predictions' : 12,
                                 'class_value_3_predictions' : 15,
                                 'class_value_4_predictions' : 20
@@ -1724,7 +1760,6 @@ def test_dl_model(cfg,
                 generalized_departement = test_dataset_dept.groupby('departement')['nbsinisterDaily'].sum().reset_index()
                 generalized_departement = generalized_departement[generalized_departement['nbsinisterDaily'] < 100]
                 generalized_departement = generalized_departement.departement.unique()
-                print(generalized_departement)
             else:
                 model_per_task = None
                 generalized_departement = None
@@ -1740,15 +1775,20 @@ def test_dl_model(cfg,
                 generalized_departement=generalized_departement,
             )
         else:
-            test_loader = model.create_test_loader(graphScale, test_dataset_dept)
 
-            predTensor, YTensor = graphScale._predict_test_loader(test_loader)
+            if not isinstance(model, ProtoFederatedLearning):
+                test_loader = model.create_test_loader(graphScale, test_dataset_dept)
+
+                predTensor, YTensor = model._predict_test_loader(test_loader)
+            else:
+                logger.info(test_dataset_dept.columns)
+                predTensor, YTensor = model.predict(test_dataset_dept, graphScale, True)
 
             y = YTensor.detach().cpu().numpy()
             predTensor = predTensor.detach().cpu().numpy()
 
         predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg)
-        print(test_dataset_deptAll.shape)
+
         scale_unique = np.unique(y[:, scale_index])
         for scale in scale_unique:
             scale = int(scale)
@@ -2899,6 +2939,7 @@ def wrapped_train_deep_learning_2D(params):
     graph_method = params['graph_method']
     n_run = params['n_run']
     name_exp = params['name_exp']
+    dir_output = params['dir_output']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
@@ -2950,8 +2991,11 @@ def wrapped_train_deep_learning_2D(params):
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
-    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,  varying_time_variables=params['varying_time_variables'],
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,
+                                               params['epochs'], params['PATIENCE_CNT'], params['CHECKPOINT'],
+                                               varying_time_variables=[],
                                                train_features=params['train_features'], features_importance=True, name_exp=name_exp)
+    
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
@@ -3166,7 +3210,8 @@ def wrapped_train_deep_learning_hybrid(params):
 
     train(train_params)
 
-def wrapped_train_sklearn_api_and_pytorch_voting_model(train_dataset, val_dataset, test_dataset,
+def wrapped_train_sklearn_api_and_pytorch_voting_model(
+                                            train_dataset, val_dataset, test_dataset,
                                             model, graph_method,
                                             dir_output: Path,
                                             autoRegression: bool,

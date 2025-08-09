@@ -54,13 +54,16 @@ def parse_string(s):
 
     if s is None:
         return {"base" : "None", "attempt" : 0, "reduce" : 0, "tol" : 0}
+    
+    base = s
+    
     if 'degree' in s:
         s = s.split('degree')[1]
     elif 'hexa' in s:
         s = s.split('hexa')[1]
-
+    
     # Initialiser le dictionnaire avec None
-    result = {"base": None, "attempt": None, "reduce": None, "tol": None}
+    result = {"base": base, "attempt": None, "reduce": None, "tol": None}
 
     # Utiliser findall pour capturer toutes les balises présentes
     matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
@@ -83,6 +86,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     
     train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
+
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
                                 attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
@@ -721,7 +725,7 @@ def init(args, dir_output, script):
 
     ######################### Encoding ######################################
 
-    if True:
+    if args.encoder:
         logger.info('#####################################')
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
@@ -862,12 +866,14 @@ def init(args, dir_output, script):
     ############################## Generate 2D database #######################
     
     if do2D:
-        features_name_2D, newShape2D = get_sub_nodes_feature_2D(graphScale, df, departements, features,
-                                                                    sinister, dataset_name, dir_output, dir_output,
-                                                                    resolution, graph_construct, sinister_encoding, name_exp,
-                                                                    newFeatures=newFeatures, changeFeature=[], save=True, use_log=True)
-    else:
-        features_name_2D, newShape2D = get_features_name_lists_2D(df.shape[1], features)
+        get_sub_nodes_feature_2D_from_xarray(
+                        graphScale,
+                        departements,
+                        features,
+                        dir_output,
+                        dir_output,
+                        name_exp,
+                        True)
 
     if 'id_encoder_mean' in np.unique(df.columns):
         df['id_encoder'] = df['id_encoder_mean']

@@ -91,10 +91,8 @@ class GraphStructure():
         base = self.base
         if '-' in base:
             vec_base = base.split('-')
-            self.base = base
         else:
             vec_base = [base]
-            self.base = base
 
         self.train_kmeans = True
         node_already_predicted = 0
@@ -798,6 +796,8 @@ class GraphStructure():
             burned = datacube['burned_area'].values
 
             binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned)
+            print(np.unique(binImageScale), np.unique(bin), np.unique(influence))
+
             # Ajouter chaque image comme DataArray dans le Dataset
             datacube['nbsinister'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
             datacube['risk'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
@@ -813,7 +813,7 @@ class GraphStructure():
             save_object(datacube, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'datacube')
 
     def _raster(self, path : Path,
-                sinister : str, 
+                sinister : str,
                 dataset_name: str,
                 resolution : str,
                 base: str) -> None:
@@ -3236,7 +3236,7 @@ class GraphStructure():
             - autoRegression: Boolean indicating whether to use autoregression.
             - features_name: List mapping feature names to indices.
             - dataset: Pandas DataFrame containing 'node_id', 'date_id', and 'nbsinister' columns.
-
+            
             Returns:
             - pred: Tensor containing the model's predictions.
             - y: Tensor containing the true labels.
@@ -3256,7 +3256,7 @@ class GraphStructure():
                                   autoRegression : bool, quantile=False, hard_or_soft='soft', weights_average=True,
                                   top_model='all') -> np.array:
         
-        isBin = target_name == 'binary'
+        isBin = 'binary' in target_name
         assert self.model is not None
         X.reset_index(inplace=True, drop=True)
 
@@ -3304,7 +3304,8 @@ class GraphStructure():
                 
                 res[:, 1] = res[:, 0]
             else:
-                raise ValueError(f'Binary model are not available yet')
+                res[:, 0] = self.model.predict_proba(X[features])[:, 1].reshape(-1)
+                res[:, 1] = res[:, 0]
         else:
             ValueError('Not implemented')
 

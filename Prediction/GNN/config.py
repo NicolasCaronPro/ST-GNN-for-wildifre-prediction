@@ -377,12 +377,14 @@ resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
 
 shape2D = {10: (24, 24),
            30 : (30, 30),
+          2  : (16,16),
+          3  : (16,16),
           4  : (16,16),
           5  : (32,32),
           6  : (32,32),
           7  : (64,64),
-            8 : (30,30),
-            'departement' : (32,32)}
+          8 : (30,30),
+          'departement' : (32,32)}
 
 jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \

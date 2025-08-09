@@ -85,6 +85,187 @@ class ReadGraphDataset_2D(Dataset):
     def get(self):
         pass
 
+class ReadGraphDataset_2D_from_xarray(Dataset):
+    def __init__(self, X : list,
+                 Y : list,
+                 edges : list,
+                 leni : int,
+                 device : torch.device,
+                 path : Path,
+                 features,
+                 features_1D,
+                 kdays,
+                 scale,
+                 graph_method,
+                 base,
+                 target_path
+                 ):
+                
+        self.X = X
+        self.Y = np.asarray(Y)
+        self.device = device
+        self.edges = edges
+        self.leni = leni
+        self.path = path
+        self.features = features
+        self.features_1D = features_1D
+        self.kdays = kdays
+        self.scale = scale
+        self.graph_method = graph_method
+        self.base = base
+        self.target_path = target_path
+
+        self.datacubes = {}
+        self.areas = {}
+
+        depts = np.unique(self.Y[:, departement_index, -1])
+        
+        for dept in depts:
+            mask = self.Y[:, departement_index, -1] == dept
+            dates = np.unique(self.Y[mask, date_index, :])
+            
+            datacube = read_object(
+                f'datacube.pkl',
+                self.path / int2name[dept] / 'raster' / '2x2'
+            )
+
+            datacube_mask = read_object(f'datacube_target_{int2name[dept]}_{self.scale}_{self.base}_{self.graph_method}.pkl', self.target_path)
+
+            dates_str = [allDates[int(date)] for date in dates]
+
+            datacube = datacube.sel(date=dates_str)
+
+            for var in ['precipitationIndexN5', 'precipitationIndexN3', 'precipitationIndexN9']:
+                n = int(var[-1])
+                array = calculate_precipitation_index_image_full(datacube['prec24h'].values, A=0.1657, n=n)
+                datacube[var] = (('latitude', 'longitude', 'date'), array)
+
+            self.datacubes[dept] = datacube
+            self.areas[dept] = datacube_mask['area']
+
+    def get_area_coords(self, area_dataarray, area_id):
+        mask = (area_dataarray == area_id)
+        lat_coords = area_dataarray.latitude.values
+        lon_coords = area_dataarray.longitude.values
+        positions = mask.values.nonzero()
+        
+        if len(positions[0]) == 0:
+            raise ValueError(f"Aucune position trouvée pour area_id={area_id}")
+
+        lat_indices = positions[1]
+        lon_indices = positions[2]
+
+        #print(area_dataarray.values.shape)
+        #print(positions)
+
+        lat_start_idx = lat_indices.min()
+        lat_end_idx = lat_indices.max() + 1
+
+        lon_start_idx = lon_indices.min()
+        lon_end_idx = lon_indices.max() + 1
+
+        lat_start = lat_coords[lat_start_idx]
+        lat_end = lat_coords[lat_end_idx - 1]
+        lon_start = lon_coords[lon_start_idx]
+        lon_end = lon_coords[lon_end_idx - 1]
+
+        return lat_start, lat_end, lon_start, lon_end
+
+    def __getitem__(self, index) -> tuple:
+        y = self.Y[index]
+
+        dept = y[departement_index][-1]
+        area_id = y[graph_id_index][-1]
+        dates = y[date_index][-1]
+
+        dates = dates.astype(int)
+
+        datacube = self.datacubes[dept]
+
+        lat_start, lat_end, lon_start, lon_end = self.get_area_coords(
+            self.areas[dept], area_id
+        )
+
+        feature_cubes = []
+
+        for feat_idx, feat in enumerate(self.features):
+            # Si la feature est une variable externe
+            if feat in calendar_variables or feat == "id_encoder" or feat == "cluster_encoder" or feat == 'Past_burnedarea' or feat == 'Past_risk':
+                # On récupère depuis self.X
+                feat_idx = self.features_1D.index(feat)
+                values = self.X[index][feat_idx]  # shape attendue : (kdays,)
+                values = np.array(values).reshape(1, 1, self.kdays + 1)
+                values = np.tile(values, (shape2D[self.scale][0], shape2D[self.scale][1], 1))  # (16, 16, kdays)
+            else:
+                if feat == 'foret_encoder':
+                    feat = 'forest_landcover'
+                elif feat == 'corine_encoder':
+                    feat = 'corine_landcover'
+                elif feat == 'bdroute_encoder':
+                    feat = 'route_landcover'
+                    
+                da = datacube[feat]
+                if "date" in da.dims:
+                    if self.kdays > 0:
+                        selected = da.sel(
+                            latitude=slice(lat_start, lat_end),
+                            longitude=slice(lon_start, lon_end),
+                            date=slice(allDates[dates - self.kdays], allDates[dates])
+                        ).values
+                    else:
+                        selected = da.sel(
+                            latitude=slice(lat_start, lat_end),
+                            longitude=slice(lon_start, lon_end),
+                            date=allDates[dates]
+                        ).values
+                        selected = selected[:, :, None]
+
+                    #selected = selected.transpose(1, 2, 0)
+                else:
+                    selected = da.sel(
+                        latitude=slice(lat_start, lat_end),
+                        longitude=slice(lon_start, lon_end)
+                    ).values  # shape: (h, w)
+                    selected = selected[:, :, None].repeat(self.kdays + 1, axis=2)
+
+                nan_mask = np.isnan(selected)
+                if np.any(nan_mask):
+                    mean_val = np.nanmean(selected)
+                    selected[nan_mask] = mean_val
+
+                H, W, T = selected.shape
+                resized = np.zeros((shape2D[self.scale][0], shape2D[self.scale][1], T), dtype=selected.dtype)
+
+                for t in range(T):
+                    resized[:, :, t] = cv2.resize(selected[:, :, t], (shape2D[self.scale][0], shape2D[self.scale][1]), interpolation=cv2.INTER_LINEAR)
+
+                selected = resized
+                values = selected
+
+            feature_cubes.append(values)
+
+        feature_tensor = torch.tensor(
+            np.stack(feature_cubes, axis=2), dtype=torch.float32, device=self.device
+        )
+
+        if len(self.edges) > 0:
+            edges = self.edges[index]
+        else:
+            edges = []
+
+        return feature_tensor, \
+            torch.tensor(y, dtype=torch.float32, device=self.device), \
+            torch.tensor(edges, dtype=torch.long, device=self.device)
+
+    def __len__(self) -> int:
+        return self.leni
+    
+    def len(self):
+        pass
+
+    def get(self):
+        pass
+
 class InplaceGraphDataset(Dataset):
     def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device) -> None:
         self.X = X
@@ -753,7 +934,7 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
 
         if x.shape[0] == 0:
             continue
-
+        
         Xs.append(x)
         Ys.append(y)
         Es.append(e)
@@ -1092,7 +1273,7 @@ def load_x_from_pickle(date : int,
                     new_x_2D[i, mask] = 0
                 else:
                     new_x_2D[i, mask] = x_1d[m1, features_1D.index(fet_2D)]
-        
+
         elif fet_2D == 'foret_encoder' in features:
             #logger.info('Foret landcover')
             assert encoder_foret is not None
@@ -1255,9 +1436,7 @@ def process_dept_y(Y, y_date, raster_dept, ks):
     return Y
 
 def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
-                        features_name_2D, features, features_1D, path,
-                        use_temporal_as_edges, image_per_node,
-                        context, name_exp):
+                        features_name_2D, use_temporal_as_edges):
     """Main function to create the dataset."""
     Xst, Yst, Est = [], [], []
     leni = len(features_name_2D)
@@ -1272,7 +1451,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
         if x is None:
             continue
         
-        depts = np.unique(y[:, departement_index].astype(int))
+        """depts = np.unique(y[:, departement_index].astype(int))
         for dept in depts:
             y_dept = y[y[:, departement_index, 0] == dept]
             x_dept = x[y[:, departement_index, 0] == dept]
@@ -1281,7 +1460,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
 
             sub_dir = f'image_per_node_{leni}' if image_per_node else f'image_per_departement_{leni}'
 
-            """for i in range(x_dept.shape[0]):
+            for i in range(x_dept.shape[0]):
                 cluster_id = y_dept[i, graph_id_index, -1]
                 if use_temporal_as_edges is None and image_per_node:
                     is_file = (path / f'2D_database_{graph.scale}_{graph.base}_{graph.graph_method}' / sub_dir / context / f'X_{int(id)}_{dept}_{cluster_id}.pkl').is_file()
@@ -1292,7 +1471,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                         new_y.append(y_dept[i])
                 else:
                     Xst.append(f'X_{int(id)}_{dept}_{cluster_id}.pkl')
-                    Yst.append(y_dept[i])"""
+                    Yst.append(y_dept[i])
             
             #if len(new_y) == 0:
             #    continue
@@ -1328,7 +1507,7 @@ def create_dataset_2D_2(graph, X_np, Y_np, ks, dates,
                 else:
                     Xst.append(X)
                 Y[np.isnan(Y)] = 0
-                Yst.append(Y)
+                Yst.append(Y)"""
 
         if 'e' in locals():
             Est.append(e)
@@ -1363,22 +1542,19 @@ def create_dataset_2D(graph,
     XsTe = []
     YsTe = []
     EsTe = []
-
+    
     logger.info(f'Model configuration : image_per_node {image_per_node}, use_temporal_as_edges {use_temporal_as_edges}')
 
     logger.info('Creating train dataset')
-    Xst, Yst, Est = create_dataset_2D_2(graph, x_train, y_train, ks, dateTrain,
-                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='train', name_exp=name_exp) 
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, True) 
     
     logger.info('Creating val dataset')
     # Val
-    XsV, YsV, EsV = create_dataset_2D_2(graph, x_val, y_val, ks, dateVal,
-                        features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='val', name_exp=name_exp)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, True)
 
     logger.info('Creating Test dataset')
     # Test
-    XsTe, YsTe, EsTe = create_dataset_2D_2(graph, x_test, y_test, ks, dateTest,
-                    features_name_2D, features, features_1D, path, use_temporal_as_edges, image_per_node, context='test', name_exp=name_exp)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, True)
 
     assert len(Xst) > 0
     assert len(XsV) > 0
@@ -1388,9 +1564,22 @@ def create_dataset_2D(graph,
 
     sub_dir = f'image_per_node_{len(features_name_2D)}' if image_per_node else f'image_per_departement_{len(features_name_2D)}'
     if True:
-        train_dataset = ReadGraphDataset_2D(Xst, Yst, Est, len(Xst), device, path / f'2D_database' / sub_dir / 'train')
-        val_dataset = ReadGraphDataset_2D(XsV, YsV, EsV, len(XsV), device, path / f'2D_database' / sub_dir / 'val')
-        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, path / f'2D_database' / sub_dir / 'test')
+        train_dataset = ReadGraphDataset_2D_from_xarray(Xst, Yst, Est, len(Xst), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
+                                                        graph.scale,
+                                                        graph.graph_method,
+                                                        graph.base,
+                                                        path / 'datacube')
+        
+        val_dataset = ReadGraphDataset_2D_from_xarray(XsV, YsV, EsV, len(XsV), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
+                                                       graph.scale,
+                                                        graph.graph_method,
+                                                        graph.base,
+                                                        path / 'datacube')
+        test_dataset = ReadGraphDataset_2D_from_xarray(XsTe, YsTe, EsTe, len(XsTe), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
+                                                        graph.scale,
+                                                        graph.graph_method,
+                                                        graph.base,
+                                                        path / 'datacube')
     else:
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
@@ -1689,7 +1878,6 @@ class Training():
             
             proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
             loss = loss + self.prototype_weight * proto_loss
-            print(loss)
 
         if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
             loss += self.model.kl_loss()
@@ -1699,12 +1887,21 @@ class Training():
     def launch_train_loader(self, loader, criterion, optimizer):
 
         self.model.train()
+        
         for i, data in enumerate(loader, 0):
 
             loss = self.launch_batch(data, criterion)
+            
+            if isinstance(loss, int):
+                continue
 
             optimizer.zero_grad()
             loss.backward()
+            
+            if 'res_loss' in locals():
+                res_loss += loss.item()
+            else:
+                res_loss = loss.item()
             
             if self.ALATraining: # Fed ALA training
                 self.params_p = list(self.model.parameters())[-self.layer_idx:]
@@ -1727,7 +1924,7 @@ class Training():
 
                 #self.update_weight()
 
-        return loss
+        return res_loss
 
     def launch_val_test_loader(self, loader, criterion, teacher=None):
         
@@ -1824,7 +2021,7 @@ class Training():
         else:
             for epoch in tqdm(range(epochs), disable=not verbose):
                 val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
-                train_loss = train_loss.item()
+
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
                 epochs_list.append(epoch)
@@ -3238,14 +3435,15 @@ class ModelCNN(SplitTraining):
         self.image_per_node = image_per_node
         self.nbfeatures = nbfeatures
         
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
-        assert name_exp is not None
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs,
+                                     PATIENCE_CNT, CHECKPOINT, features_importance=True,
+                                     varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
         
         if features_importance:
-            importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
+            #importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features], df_train[self.target_name], self.features, self.dir_log / '../importance', self.target_name)
-            features95, self.features_1D = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
-            
+            #features95, self.features_1D = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+
             if self.nbfeatures != 'all':
                 self.nbfeatures = int(self.nbfeatures)
                 varying_time_variables_2 = get_time_columns(varying_time_variables, self.ks, df_train.copy(deep=True), train_features)
@@ -3347,10 +3545,14 @@ class ModelCNN(SplitTraining):
         dateTest = np.sort(np.unique(y_test[np.argwhere(y_test[:, weight_index] > 0), date_index]))
         
         XsTe, YsTe, EsTe = create_dataset_2D_2(graph, x_test, y_test, self.ks, dateTest,
-                    self.features_name, self.features, self.features_1D, self.path, None, self.image_per_node, context='test')
+                    self.features_name, self.features, self.features_1D, False)
         
         sub_dir = f'image_per_node_{len(self.features_name)}' if self.image_per_node else f'image_per_departement_{len(self.features_name)}'
-        test_dataset = ReadGraphDataset_2D(XsTe, YsTe, EsTe, len(XsTe), device, self.path / f'2D_database' / sub_dir / 'test')
+        test_dataset = ReadGraphDataset_2D_from_xarray(XsTe, YsTe, EsTe, len(XsTe), device, rootDisk / 'csv', self.features_name, self.features_1D, self.ks,
+                                                graph.scale,
+                                                graph.graph_method,
+                                                graph.base,
+                                                self.path / 'datacube')
 
         loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
@@ -3420,6 +3622,7 @@ class ModelGNN(SplitTraining):
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
                 self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
 
+
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
             old_shape = df_train.shape
@@ -3470,7 +3673,7 @@ class ModelGNN(SplitTraining):
                         # Mettre à jour df_train pour l'entraînement
                         df_train.loc[df_combined.index, 'weight'] = 1
                         logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
-            
+
         if False:
             self.train_loader = read_object('train_loader.pkl', self.dir_log)
             self.val_loader = read_object('val_loader.pkl', self.dir_log)
@@ -3494,7 +3697,7 @@ class ModelGNN(SplitTraining):
                                                     self.device, self.ks,
                                                     self.mesh,
                                                     self.mesh_file)
-            
+
             if not self.mesh or self.mesh == False:            
                 self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
             
@@ -3507,7 +3710,7 @@ class ModelGNN(SplitTraining):
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
         #save_object_torch(self.test_loader, 'test_loader.pkl', self.dir_log)
-
+        
     def create_test_loader(self, graph, df):
         loader = create_test_loader(graph, df,
                        self.features_name,
@@ -4553,7 +4756,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
             df = df.copy()
             df[self.target_name] = 0
 
-        if self.federated_cluster not in df.columns:
+        if self.federated_cluster not in np.unique(df.columns):
             logger.info(f'{self.federated_cluster} must be in dataframe for inference')
             exit(1)
 
@@ -4561,7 +4764,6 @@ class ProtoFederatedLearning(FederatedLearningModel):
         ys = []
         clusters_values = df[self.federated_cluster].values
         for cluster in np.unique(clusters_values):
-            mask = clusters_values == cluster
 
             loader = self.create_test_loader(graph, df[df[self.federated_cluster] == cluster])
 
@@ -4572,7 +4774,6 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
         final_pred = torch.concatenate(final_pred, dim=0)
         ys = torch.concatenate(ys, dim=0)
-        print(ys.shape)
 
         return (final_pred, ys) if return_y else pred
 

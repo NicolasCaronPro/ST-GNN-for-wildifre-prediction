@@ -403,25 +403,19 @@ def get_sub_nodes_feature_2D(graph, df: pd.DataFrame,
 
 ################################################################################################################################################
 
-def get_sub_nodes_feature_2D_from_xarray(graph, datacubes: xr.DataArray,
+def get_sub_nodes_feature_2D_from_xarray(graph,
                         departements : list,
-                        features : list, sinister : str, dataset_name : str,
+                        features : list,
                         path : Path,
                         dir_train : Path,
-                        resolution : str, 
-                        graph_construct : str,
-                        sinister_encoding : str,
                         name_expe: str,
-                        newFeatures: list=[],
-                        changeFeature: list=[],
-                        save : bool = True,
                         use_log=True) -> tuple:
     
-    # Assert that graph structure is build (not really important for that part BUT it is preferable to follow the api)
-
     dir_output = dir_train / f'2D_database'
 
     assert graph.nodes is not None
+
+    res = {}
 
     if use_log:
         logger.info('Load 2D nodes features')
@@ -430,9 +424,6 @@ def get_sub_nodes_feature_2D_from_xarray(graph, datacubes: xr.DataArray,
 
     dir_encoder = dir_train / 'Encoder'
 
-    if dataset_name != 'bdiff':
-        encoder_landcover = read_object(f'encoder_landcover_{name_exp}.pkl', dir_encoder)
-    
     encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
     encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
     encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
@@ -461,160 +452,181 @@ def get_sub_nodes_feature_2D_from_xarray(graph, datacubes: xr.DataArray,
 
         datacube_mask = read_object(f'datacube_target_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_datacube_mask)
         
-        areas = datacube_mask['area'].values[0]
-        uniques_ids = np.unique(areas[~np.isnan(areas)])
-        
-        datacube = datacubes[departement]
-        datacube_feature = datacube_feature.sel(date=datacube.sel(departement=departement)['date'].values)
-
-        areas = datacube_mask['area'].values[0]
-        nodeDepartement = np.unique(areas[~np.isnan(areas)])
-        
-        if nodeDepartement.shape[0] == 0:
-            continue
-
-        unDates = np.unique(nodeDepartement[:,date_index]).astype(int)
+        #datacube_feature = datacube_feature.sel(date=datacube.sel(departement=departement)['date'].values)
 
         if 'ids_encoder' in features:
             logger.info('IDS')
     
-        for unDate in unDates:
-            if unDate % 100 == 0 and use_log:
-                logger.info(f'{allDates[unDate]}')
+        if 'population' in features:
+            datacube_mask['population'] = (('latitude', 'longitude'), datacube_feature['population'].values[:, :, -1])
+        
+        if 'elevation' in features:
+            datacube_mask['elevation'] = (('latitude', 'longitude'), datacube_feature['elevation'].values[:, :, -1])
 
-            if (dir_output / departement / f'X_{unDate}.pkl').is_file() and use_log:
-                X = read_object(f'X_{unDate}.pkl', dir_output / departement)
-                if newFeatures != []:
-                    if X.shape[0] != len(features_name):
-                        X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], newFeatures,
-                                                                        sinister, dataset_name, dir_train, dir_train,
-                                                                        resolution, graph_construct, sinister_encoding, newFeatures=[], chanegFeatures=[], save=False, use_log=False)
-                        
-                        features_name_ori, newShape = get_features_name_lists_2D(graph.scale, [fet for fet in features if fet not in newFeatures])
+        #if 'highway' in features:
+        #    datacube_mask['highway_encoder'] = encoder_p
 
-                        new_X = np.empty((X.shape[0] + X2.shape[0], X.shape[1], X.shape[2]))
+        if 'foret' in features:
+            for var in foret_variables:
+                datacube_mask[foretint2str[var]] = datacube_feature[foretint2str[var]]
 
-                        for fet in features_name:
-                            if fet in features_name_2:
-                                new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
-                            else:
-                                new_X[features_name.index(fet)] = X[features_name_ori.index(fet)]
-                        
-                        X = new_X
-                        if save:
-                            save_object(X, f'X_{unDate}.pkl', dir_output / departement)
-                                
-                if changeFeature != []:
-                    X2, features_name_2 = get_sub_nodes_feature_2D(graph, df[(df['departement'] == name2int[departement]) & (df['date'] == unDate)], [departement], changeFeature,
-                                                                    sinister, dataset_name, dir_train, dir_train,
-                                                                    resolution, graph_construct, sinister_encoding, newFeatures=[], changeFeature=[], save=False, use_log=False)
-                    plt.imshow(X2[3])
-                    plt.colorbar()
-                    plt.savefig(f'NDSI.png')
-                    plt.close('all')
-                    new_X = np.empty((X.shape[0], X.shape[1], X.shape[2]))
+        if 'cosia' in features:
+            for var in corine_variable:
+                datacube_mask[var] = datacube_feature[var]
 
-                    for fet in features_name:
-                        if fet in features_name_2:
-                            new_X[features_name.index(fet)] = X2[features_name_2.index(fet)]
-                        else:
-                            new_X[features_name.index(fet)] = X[features_name.index(fet)]
+        if 'foret_encoder' in features:
+            shape = datacube_feature['forest_landcover'].values[:, :, -1].shape
+            datacube_mask['foret_encoder'] = (('latitude', 'longitude'), encoder_foret.transform(datacube_feature['forest_landcover'].values[:, :, -1].reshape(-1,1)).values.reshape(shape))
 
-                    plt.imshow(new_X[features_name.index('NDSI')] )
-                    plt.colorbar()
-                    plt.savefig(f'NDSI_2.png')
-                    plt.close('all')
-                    
-                    X = new_X
-                    if save:
-                        save_object(X, f'X_{unDate}.pkl', dir_output / departement)
+        #if 'landcover_encoder' in features:
+        #    datacube_mask['foret_encoder'] = encoder_foret.transform(datacube_feature['foret_landcover'].reshape(-1,1)).values.reshape(shape)
+        #    pass
 
-                continue
+        if 'highway_encoder' in features:
+            pass
 
-            if 'population' in features:
-                pass
+        if 'argile_encoder' in features:
+            pass
+
+        if 'id_encoder' in features:
+            shape = datacube_mask['area'].values[0].shape
+            datacube_mask['id_encoder'] = (('latitude', 'longitude'), encoder_id.transform(datacube_mask['area'].values[0].reshape(-1,1)).values.reshape(shape))
+
+        if 'corine_encoder' in features:
+            shape = datacube_feature['corine_landcover'].values[:, :, -1].shape
+            datacube_mask['corine_encoder'] = (('latitude', 'longitude'), encoder_corine.transform(datacube_feature['corine_landcover'].values[:, :, -1].reshape(-1,1)).values.reshape(shape))
+
+        #logger.info('Calendar')
+        if 'Calendar' in features:
+
+            def expand_to_3d(arr_1d):
+                """
+                Étend un tableau 1D (par date) en 3D (lat x lon x date)
+                
+                Paramètres :
+                    arr_1d : np.ndarray de forme (n_date,)
+                    n_lat : int, nombre de latitudes
+                    n_lon : int, nombre de longitudes
+                
+                Retour :
+                    np.ndarray de forme (n_lat, n_lon, n_date)
+                """
+                return np.tile(arr_1d, (n_lat, n_longs, 1)).transpose(0, 1, 2)
+
             
-            if 'elevation' in features:
-                pass
+            dates = pd.to_datetime(datacube_mask.loc[dict(departement=departement)]['date'].values)
+            lats = datacube_mask.loc[dict(departement=departement)]['latitude'].values
+            longs = datacube_mask.loc[dict(departement=departement)]['longitude'].values
+            n_lat = len(lats)
+            n_longs = len(longs)
+            n_date = len(dates)
 
-            if 'highway' in features:
-                pass
+            # --- Étape 1 : Construction des variables calendaires dans un tableau numpy
+            calendar_data = {
+                'month': dates.month,
+                'dayofyear': dates.dayofyear,
+                'dayofweek': dates.dayofweek,
+                'isweekend': (dates.dayofweek >= 5).astype(int),
+                'couvrefeux': np.array([pendant_couvrefeux(d) for d in dates], dtype=int),
+                'confinement': np.array([
+                    1 if (
+                        dt.datetime(2020, 3, 17, 12) <= d <= dt.datetime(2020, 5, 11)
+                        or dt.datetime(2020, 10, 30) <= d <= dt.datetime(2020, 12, 15)
+                    ) else 0 for d in dates
+                ], dtype=int),
+                'ramadan': np.array([
+                    1 if convertdate.islamic.from_gregorian(d.year, d.month, d.day)[1] == 9 else 0 for d in dates
+                ], dtype=int),
+                'bankHolidays': np.array([1 if d in jours_feries else 0 for d in dates], dtype=int),
+                'bankHolidaysEve': np.array([1 if d in veille_jours_feries else 0 for d in dates], dtype=int),
+                'holidays': np.array([
+                    1 if vacances_scolaire.is_holiday_for_zone(
+                        d.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)
+                    ) else 0 for d in dates
+                ], dtype=int),
+                'holidaysBorder': np.array([
+                    int(
+                        vacances_scolaire.is_holiday_for_zone((d + dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d)) or
+                        vacances_scolaire.is_holiday_for_zone((d - dt.timedelta(days=1)).date(), get_academic_zone(ACADEMIES[str(name2int[departement])], d))
+                    )
+                    for d in dates
+                ], dtype=int),
+            }
 
-            if 'foret' in features:
-                pass
+            # --- Étape 2 : Expand 1D → 2D (id, date), puis stack
+            calendar_vars_raw = list(calendar_data.keys())
+            calendar_array = np.stack([calendar_data[var] for var in calendar_vars_raw], axis=-1)  # shape (date, nb_vars)
 
-            if 'cosia' in features:
-                pass
+            # --- Étape 3 : Encodage
+            calendar_flat = calendar_array.reshape(-1, len(calendar_vars_raw))  # shape (id*date, nb_vars)
+            calendar_encoded = encoder_calendar.transform(calendar_flat).values.reshape(n_date, -1)
 
-            if 'foret_encoder' in features:
-                pass
+            # --- Étape 4 : Injection dans le datacube
+            for i, var in enumerate(calendar_vars_raw):
+                datacube_mask[var] = (('latitude', 'longitude', 'date'), expand_to_3d(calendar_encoded[:, i]))
 
-            if 'landcover_encoder' in features:
-                pass
+            datacube_mask['calendar_mean'] = (('latitude', 'longitude', 'date'), expand_to_3d(np.round(np.mean(calendar_encoded, axis=1), 3)))
+            datacube_mask['calendar_min'] = (('latitude', 'longitude', 'date'), expand_to_3d(np.round(np.min(calendar_encoded, axis=1), 3)))
+            datacube_mask['calendar_max'] = (('latitude', 'longitude', 'date'), expand_to_3d(np.round(np.max(calendar_encoded, axis=1), 3)))
+            datacube_mask['calendar_sum'] = (('latitude', 'longitude', 'date'), expand_to_3d(np.round(np.sum(calendar_encoded, axis=1), 3)))
 
-            if 'highway_encoder' in features:
-                pass
+        ### Geo spatial
+        #logger.info('Geo')
+        if 'Geo' in features:
+            datacube_mask['Geo'] = encoder_geo.transform([name2int[departement]]).values[0]
 
-            if 'argile_encoder' in features:
-                pass
+        logger.info('Meteorological')
+        ### Meteo
+        for i, var in enumerate(cems_variables):
+            if var not in features:
+                continue
+            if 'precipitationIndex' in var:
+                n = int(var[-1])
+                array = calculate_precipitation_index_image_full(datacube_feature['prec24h'].values, A=0.1657, n=n)
+                datacube_mask[var] = (('latitude', 'longitude', 'date'), array)
+            else:    
+                datacube_mask[var] = datacube_feature[var]
 
-            if 'id_encoder' in features:
-                pass
+        #logger.info('Air Quality')
+        if 'air' in features:
+            pass
 
-            if 'cosia_encoder' in features:
-                pass
+        ### Sentinel
+        if 'sentinel' in features:
+            for var in sentinel_variables:
+                datacube_mask[var] = datacube_feature[var]
 
-            #logger.info('Calendar')
-            if 'Calendar' in features:
-                pass
+        if 'dynamicWorld' in features:
+            pass
 
-            ### Geo spatial
-            #logger.info('Geo')
-            if 'Geo' in features:
-                pass
+        #logger.info('Historical')
+        if 'Historical' in features:
+            pass
 
-            logger.info('Meteorological')
-            ### Meteo
-            for i, var in enumerate(cems_variables):
-                if var not in features:
-                    continue
-                pass
+        if 'AutoRegressionReg' in features:
+            pass
 
-            #logger.info('Air Quality')
-            if 'air' in features:
-                pass
+        #logger.info('AutoRegressionBin')
+        if 'AutoRegressionBin' in features:
+            pass
 
-            ### Sentinel
-            if 'sentinel' in features:
-                pass
+        #logger.info('Vigicrues')
+        if 'vigicrues' in features:
+            pass
 
-            if 'dynamicWorld' in features:
-                pass
+        #logger.info('nappes')
+        if 'nappes' in features:
+            pass
 
-            #logger.info('Historical')
-            if 'Historical' in features:
-                pass
+        #logger.info('region_class')
+        if 'cluster_encoder' in features:
+            shape = datacube_mask['time_series_clustering'].values.shape
+            datacube_mask['cluster_encoder'] = (('latitude', 'longitude'), encoder_cluster.transform(datacube_mask['time_series_clustering'].values.reshape(-1,1)).values.reshape(shape))
 
-            if 'AutoRegressionReg' in features:
-                pass
+        save_object(datacube_mask, f'datacube_target_{departement}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_datacube_mask)
+        
+        #if save:
+        #    save_object(X, f'X_{unDate}.pkl', dir_output / departement)
 
-            #logger.info('AutoRegressionBin')
-            if 'AutoRegressionBin' in features:
-                pass
-
-            #logger.info('Vigicrues')
-            if 'vigicrues' in features:
-                pass
-
-            #logger.info('nappes')
-            if 'nappes' in features:
-                pass
-
-            #logger.info('region_class')
-            if 'cluster_encoder' in features:
-                pass
-
-            if save:
-                save_object(X, f'X_{unDate}.pkl', dir_output / departement)
-
-    return X, features_name
+    #save_object(dir_output / 'database.pkl')
+    return res

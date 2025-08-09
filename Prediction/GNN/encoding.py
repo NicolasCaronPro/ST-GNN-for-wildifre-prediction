@@ -2,7 +2,7 @@ from ast import arg
 from GNN.features_2D import *
 
 def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir_output, resolution, graph):
-
+    check_and_create_path(dir_output)
     print(f'Create encoder for categorical features using {train_departements}, at expe {expe}')
     stop_calendar = 11
     trainDate = np.asarray([allDates.index(date) for date in trainDates])

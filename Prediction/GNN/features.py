@@ -377,6 +377,9 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
 
             results = []
 
+            logger.info(f"nbsinister {np.unique(datacube_dept['nbsinister'].values)}")
+            logger.info(f"occurence {np.unique(datacube_dept['occurence'].values)}")
+
             for id_ in ids_uniques:
                 # Masque spatial : pixels où area == id_
                 spatial_mask = datacube_dept['area'] == id_

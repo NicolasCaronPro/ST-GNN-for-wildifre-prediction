@@ -162,7 +162,7 @@ def create_larger_scale_bin(input, bin, influence, time, burned):
     for di in range(bin.shape[-1]):
         for id in clusterID:
             mask = (input == id)
-            if np.any(influence[mask, di] > 0):
+            if np.any(bin[mask, di] > 0):
                 binImageScale[mask, di] = np.nansum(bin[mask, di])
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
                 timeScale[mask, di] = np.nansum(time[mask, di])

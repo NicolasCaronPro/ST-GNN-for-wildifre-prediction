@@ -24,7 +24,8 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_splittraining,
     wrapped_train_deep_learning_1D_protofederated,
     wrapped_train_deep_learning_1D_unique,
-    wrapped_train_deep_learning_1D_alafederated
+    wrapped_train_deep_learning_1D_alafederated,
+    wrapped_train_deep_learning_2D
 )
 from GNN.train import wrapped_train_sklearn_api_model, wrapped_train_sklearn_api_voting_model, define_voting_dl_models
 from GNN.config_parser import ConfigParser
@@ -36,7 +37,7 @@ from GNN.config import (
     encoding,
     METHODS_SPATIAL_TRAIN,
 )
-from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object
+from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object, get_features_selected_for_time_series_for_2D, get_features_name_lists_2D
 from GNN.discretization import post_process_model
 from GNN.features import add_past_risk
 from GNN.dico_departements import *
@@ -218,7 +219,11 @@ def main():
         save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
         save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
         save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
-        
+    
+    train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
+    val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
+    test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
+
     train_dataset['saison'] = train_dataset['date'].apply(get_saison)
     val_dataset['saison'] = val_dataset['date'].apply(get_saison)
     test_dataset['saison'] = test_dataset['date'].apply(get_saison)
@@ -261,8 +266,6 @@ def main():
     tree_model_names = []
     dl_model_names = []
 
-    print(features_selected_str)
-
     for i, m in enumerate(cfg.get("models", [])):
         info = (
             f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
@@ -270,7 +273,7 @@ def main():
         )
 
         if cfg.training_mode == 'voting':
-            voting_model = define_voting_dl_models(m['type'], m['kdays'], m['out_channels'], m['run'])[0]
+            voting_model = define_voting_dl_models(m['type'], m['kdays'], m['out_channels'], m['n_run'], m['loss'])[0]
 
         model_name = f"{m['type']}_{info}"
         is_tree = m["type"].lower() in TREE_MODELS
@@ -312,7 +315,7 @@ def main():
                     )
             if cfg.training_mode == 'normal':
                 tree_model_names.append(model_name)
-            elif cfg.trainin_mode == 'voting':
+            elif cfg.training_mode == 'voting':
                 config_weight = m.get('config_weight', 'soft-weight')
                 num_test = m.get('num_test', [1,5,10,15,20, 'all'])
                 for nt in num_test:
@@ -459,7 +462,17 @@ def main():
 
                     }
                     )
-                    wrapped_train_sklearn_api_and_pytorch_voting_model(params)
+                    wrapped_train_sklearn_api_and_pytorch_voting_model(
+                                            train_dataset, val_dataset, test_dataset,
+                                            voting_model, cfg.graph_method,
+                                            dir_output,
+                                            False,
+                                            'normal',
+                                            False,
+                                            False,
+                                            cfg.scale,
+                                            params)
+                    
                 elif cfg.training_mode == 'unique':
                     params.update(
                     {
@@ -508,20 +521,33 @@ def main():
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "dir_output" : dir_output,
-                        "use_log" : m.get("use_log", True)
+                        "use_log" : m.get("use_log", True),
+                        "image_per_node" : m.get('image_per_node', None),
+                        "name_exp" : name_exp
                     }
                     )
-                    print(params['dir_output'])
-                    wrapped_train_deep_learning_1D(params)                
+                    if m.get('type') in ['ResNet']:
+                        params['torch_structure'] = 'Model_CNN'
+                        features_name_2D, newShape2D = get_features_name_lists_2D(6, cfg.train_features)
+                        features_selected_str_2D = get_features_selected_for_time_series_for_2D(features_selected_str, features_name_2D, [], 'all')
+                        params['features_name_2D'] = features_selected_str_2D
+                        params['features_name_1D'] = features_selected_str
+                        params['features'] = cfg.features
+                        params['train_features'] = cfg.train_features
+                        wrapped_train_deep_learning_2D(params)
+                    else:
+                        wrapped_train_deep_learning_1D(params)                
 
             if cfg.training_mode == 'normal':
                 dl_model_names.append(model_name)
             elif cfg.training_mode == 'voting':
                 config_weight = m.get('config_weight', 'soft-weight')
-                num_test = m.get('num_test', [1,5,10,15,20, 'all'])
+                num_test = m.get('num_test', [1,5,10,15,20, 'all', 'task'])
+            
                 for nt in num_test:
                     test_name = f'filter-{m["type"]}-{config_weight}-{nt}_{info}'
                     dl_model_names.append(test_name)
+                    
             elif cfg.training_mode == 'federated':
                 test_name = f'federated-{m["type"]}-{m.get("federated_cluster", "department")}-{m.get("aggregation_method", "median")}_{info}'
                 dl_model_names.append(test_name)

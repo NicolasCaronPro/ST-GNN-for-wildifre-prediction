@@ -435,6 +435,7 @@ def fit(params):
 
     if isinstance(model, ModelVoting) or isinstance(model, ModelStacking):
         logger.info(f'Fitting model {name}')
+
         model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + target],
                   X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + target],
                   X_test=df_test[features], y_test=df_test[ids_columns + target],
@@ -1515,7 +1516,9 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
         target_list.append(final_target)
     
     estimator = ModelVoting(models_list, features=features, loss=loss, task_type=task_type, name=f'{model_name}', \
-                            target_name=final_target, dir_log=dir_output / model_name, under_sampling=under_sampling, over_sampling=over_sampling, post_process = model[-1])
+                            target_name=final_target,
+                            dir_log=dir_output / model_name,
+                            under_sampling=under_sampling, over_sampling=over_sampling, post_process = model[-1])
 
     fit_params_dict = {
         'df_train': train_dataset, 
