@@ -2937,8 +2937,197 @@ def wrapped_train_deep_learning_1D_unique(params):
 
     model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'],
               custom_model_params=custom_model_params, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
-    
+
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+
+def wrapped_train_deep_learning_1D_dualtraining(params):
+    """Train two models jointly for dual tasks.
+
+    The same architecture is instantiated twice: one model predicts the
+    binarised occurence while the second predicts the numeric target on
+    the subset of positive samples.  Both models share the same
+    hyper-parameters and are wrapped in :class:`DualTraining` for
+    inference.
+    """
+
+    torch.cuda.empty_cache()
+
+    model = params['model']
+    use_temporal_as_edges = params['use_temporal_as_edges']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    graph_method = params['graph_method']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    n_run = params['n_run']
+
+    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
+
+    # ------------------------------------------------------------------
+    # Prepare datasets for both tasks
+    # ------------------------------------------------------------------
+    for df in [train_dataset, val_dataset, test_dataset]:
+        df['binary'] = (df[target_name] > 0).astype(int)
+
+    train_pos = train_dataset[train_dataset[target_name] > 0].reset_index(drop=True)
+    val_pos = val_dataset[val_dataset[target_name] > 0].reset_index(drop=True)
+    test_pos = test_dataset[test_dataset[target_name] > 0].reset_index(drop=True)
+
+    for df in [train_dataset, val_dataset, test_dataset, train_pos, val_pos, test_pos]:
+        df['weight'] = 1
+
+    custom_model_params = params.get('custom_model_params')
+
+    dir_log = dir_output / Path(
+        f'check_{params["scaling"]}/{params["prefix"]}/DualTraining-{model}_{infos}'
+    )
+
+    batch_size = params['batch_size']
+
+    if torch_structure == 'Model_Torch':
+        occ_model = Model_Torch(
+            model_name=model,
+            batch_size=batch_size,
+            nbfeatures=nbfeatures,
+            lr=params['lr'],
+            target_name='binary',
+            out_channels=2,
+            features_name=features,
+            ks=kdays,
+            dir_log=dir_log,
+            name=f'DualTraining-occ-{model}_{infos}',
+            task_type='binary',
+            loss=loss,
+            device=torch.device('cpu'),
+            under_sampling=under_sampling,
+            over_sampling=over_sampling,
+            n_run=n_run,
+        )
+
+        num_model = Model_Torch(
+            model_name=model,
+            batch_size=batch_size,
+            nbfeatures=nbfeatures,
+            lr=params['lr'],
+            target_name=target_name,
+            out_channels=params['out_channels'],
+            features_name=features,
+            ks=kdays,
+            dir_log=dir_log,
+            name=f'DualTraining-num-{model}_{infos}',
+            task_type=task_type,
+            loss=loss,
+            device=torch.device('cpu'),
+            under_sampling=under_sampling,
+            over_sampling=over_sampling,
+            n_run=n_run,
+        )
+
+    elif torch_structure == 'Model_gnn':
+        mesh_file = params['mesh_file']
+        if isinstance(mesh_file, list):
+            if custom_model_params is None:
+                custom_model_params = {}
+            custom_model_params['num_output_scale'] = len(mesh_file)
+            mesh = 'mygraph'
+        elif mesh_file is not None and 'icospheres' in mesh_file:
+            mesh = 'mesh'
+        else:
+            mesh = False
+
+        occ_model = ModelGNN(
+            mesh=mesh,
+            mesh_file=mesh_file,
+            model_name=model,
+            nbfeatures=nbfeatures,
+            batch_size=batch_size,
+            lr=params['lr'],
+            target_name='binary',
+            out_channels=2,
+            features_name=features,
+            ks=kdays,
+            dir_log=dir_log,
+            name=f'DualTraining-occ-{model}_{infos}',
+            task_type='binary',
+            loss=loss,
+            device=torch.device('cpu'),
+            under_sampling=under_sampling,
+            over_sampling=over_sampling,
+            n_run=n_run,
+            graph_method=graph_method,
+        )
+
+        num_model = ModelGNN(
+            mesh=mesh,
+            mesh_file=mesh_file,
+            model_name=model,
+            nbfeatures=nbfeatures,
+            batch_size=batch_size,
+            lr=params['lr'],
+            target_name=target_name,
+            out_channels=params['out_channels'],
+            features_name=features,
+            ks=kdays,
+            dir_log=dir_log,
+            name=f'DualTraining-num-{model}_{infos}',
+            task_type=task_type,
+            loss=loss,
+            device=torch.device('cpu'),
+            under_sampling=under_sampling,
+            over_sampling=over_sampling,
+            n_run=n_run,
+            graph_method=graph_method,
+        )
+
+    else:
+        raise ValueError(f'{torch_structure} not implemented')
+
+    occ_model.create_train_val_test_loader(
+        params['graph'],
+        train_dataset,
+        val_dataset,
+        test_dataset,
+        params['epochs'],
+        params['PATIENCE_CNT'],
+        params['CHECKPOINT'],
+        custom_model_params=custom_model_params,
+        features_importance=False,
+        use_log=params.get('use_log', True),
+    )
+
+    num_model.create_train_val_test_loader(
+        params['graph'],
+        train_pos,
+        val_pos,
+        test_pos,
+        params['epochs'],
+        params['PATIENCE_CNT'],
+        params['CHECKPOINT'],
+        custom_model_params=custom_model_params,
+        features_importance=False,
+        use_log=params.get('use_log', True),
+    )
+
+    dual_model = DualTraining(
+        occ_model,
+        num_model,
+        name=f'DualTraining-{model}_{infos}',
+    )
+
+    dual_model.train(
+        params['graph'],
+        params['PATIENCE_CNT'],
+        params['CHECKPOINT'],
+        params['epochs'],
+        custom_model_params=custom_model_params,
+    )
+
+    save_object(dual_model, f'{dual_model.name}.pkl', dir_log)
 
 def wrapped_train_deep_learning_2D(params):
     model = params['model']
