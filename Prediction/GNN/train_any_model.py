@@ -25,6 +25,7 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_protofederated,
     wrapped_train_deep_learning_1D_unique,
     wrapped_train_deep_learning_1D_alafederated,
+    wrapped_train_deep_learning_1D_dualtraining,
     wrapped_train_deep_learning_2D,
     wrapped_train_deep_learning_distallation
 )
@@ -449,6 +450,22 @@ def main():
                     assert params["cut_layer_name"] is not None
                     wrapped_train_deep_learning_1D_splittraining(params)
 
+                elif cfg.training_mode == "dualtraining":
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "dir_output" : dir_output,
+                        "use_log" : m.get('use_log', True)
+
+                    }
+                    )
+                    wrapped_train_deep_learning_1D_dualtraining(params)
+
                 elif cfg.training_mode == 'voting':
                     params.update(
                     {
@@ -590,6 +607,9 @@ def main():
                 dl_model_names.append(test_name)
             elif cfg.training_mode == 'splittraining':
                 test_name = f'SplitTraining-{m["type"]}-{m.get("federated_cluster", "department")}_{info}'
+                dl_model_names.append(test_name)
+            elif cfg.training_mode == 'dualtraining':
+                test_name = f'DualTraining-{m["type"]}_{info}'
                 dl_model_names.append(test_name)
             
 
