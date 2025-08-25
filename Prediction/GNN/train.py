@@ -2327,7 +2327,8 @@ def get_loss_function(loss_name, **loss_params):
         'cdw' : CDWCELoss(**loss_params),
         'mcewk' : MCEAndWKLoss(**loss_params),
         'kldivloss' : KLDivLoss(reduction='batchmean'),
-        'bceloss': BCELoss(**loss_params)
+        'bceloss': BCELoss(**loss_params),
+        'eGPD' : EGPDNLLLoss(**loss_params),
     }
     loss_name = loss_name.lower()
     if loss_name in loss_dict:

@@ -1762,8 +1762,7 @@ class WrapperModel(torch.nn.Module):
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
-                 loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
-                 constrastive=False):
+                 loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1):
         
         self.model_name = model_name
         self.name = name
@@ -1791,7 +1790,7 @@ class Training():
         self.train_loader = None
         self.test_loader = None
         self.val_loader = None
-        self.constrastive = constrastive
+        self.constrastive = False
         self.use_prototypes = False
         self.prototype_weight = 1.0
         self.prototypes = None
@@ -2060,33 +2059,42 @@ class Training():
             
             if isinstance(loss, int):
                 continue
-
-            optimizer.zero_grad()
-            loss.backward()
+            
+            if optimizer is not None:
+                optimizer.zero_grad()
+                loss.backward()
             
             if 'res_loss' in locals():
                 res_loss += loss.item()
             else:
                 res_loss = loss.item()
             
-            if self.ALATraining: # Fed ALA training
+            if self.ALATraining:  # Fed ALA training
+                # Dernières couches (attention : fragile si l’ordonnancement change)
                 self.params_p = list(self.model.parameters())[-self.layer_idx:]
                 self.params_gp = self.params_gp
                 self.params_tp = self.params_tp
-                
-                for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
-                                                        self.params_gp, self.weights):
-                    weight.data = torch.clamp(
-                        weight - self.eta * (param.grad * (param_g - param)), 0, 1)
-                    
-                for param_t, param, param_g, weight in zip(self.params_tp, self.params_p,
-                                                        self.params_gp, self.weights):
-                    param_t.data = param + (param_g - param) * weight
 
-                for param, param_t in zip(self.params_p, self.params_tp):
-                    param.data = param_t.data.clone()
-            
-            optimizer.step()
+                # Mises à jour SANS autograd
+                with torch.no_grad():
+                    # 1) update des weights
+                    for param_t, param, param_g, weight in zip(
+                            self.params_tp, self.params_p, self.params_gp, self.weights):
+                        # weight := clamp(weight - eta * (param.grad * (param_g - param)), 0, 1)
+                        upd = weight - self.eta * (param.grad * (param_g - param))
+                        weight.copy_(torch.clamp(upd, 0.0, 1.0))
+
+                    # 2) calcul des params interpolés
+                    for param_t, param, param_g, weight in zip(
+                            self.params_tp, self.params_p, self.params_gp, self.weights):
+                        param_t.copy_(param + (param_g - param) * weight)
+
+                    # 3) écrasement des params du modèle
+                    for param, param_t in zip(self.params_p, self.params_tp):
+                        param.copy_(param_t)
+
+            if optimizer is not None:
+                optimizer.step()
 
                 #self.update_weight()
 
@@ -2162,15 +2170,7 @@ class Training():
         if new_model or self.model is None:
             self.model, _ = self.make_model(graph, custom_model_params)
         
-        parameters = self.model.parameters()
-        if has_method(criterion, 'get_learnable_parameters'):
-            logger.info(f'Adding {self.loss} parameter')
-            loss_parameters = criterion.get_learnable_parameters().values()
-            parameters = list(parameters) + list(loss_parameters)
-        else:
-            optimizer_loss = None
-
-        optimizer = optim.Adam(parameters, lr=self.lr)
+        optimizer = self.get_optimizer(criterion)
 
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
@@ -2423,7 +2423,6 @@ class Training():
                 data_log = None
                 pass
 
-            #test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores = data_log[0], data_log[1], data_log[2], data_log[3]
         doSearch = True
         if data_log is not None: #and self.n_run == data_log['n_run']:
             for i in range(0, len(iou_scores) - 1):
@@ -2438,7 +2437,6 @@ class Training():
 
             if doSearch:
                 start_test = np.argmax(iou_scores)
-                #start_test = len(under_prediction_score_scores) - 1
         else:
             start_test = 0
         
@@ -2452,7 +2450,6 @@ class Training():
                 else:
                     change_value = False
                     
-                #if tp not in self.metrics.keys():
                 if True:
                     self.metrics[tp] = {}
                     self.metrics[tp]['f1'] = []
@@ -2551,10 +2548,6 @@ class Training():
                     self.metrics[tp]['prec'].append(metrics_run['prec'])
                     self.metrics[tp]['normalized_iou'].append(metrics_run['normalized_iou'])
                     self.metrics[tp]['normalized_f1'].append(metrics_run['normalized_f1'])
-
-                    #under_prediction_score_value = under_prediction_score(y_val, prediction)
-                    #over_prediction_score_value = over_prediction_score(y_val, prediction)
-                    #iou = iou_score(y_val, prediction)
                     
                 if self.n_run == 1:
                     self.metrics[tp]['var_f1'] = 0
@@ -2598,7 +2591,6 @@ class Training():
                     under_prediction_score_scores[i] = under_prediction_score_value
                     over_prediction_score_scores[i] = over_prediction_score_value
 
-                #save_object([test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'test_percentage_scores.pkl', self.dir_log)
                 save_object(self.metrics, 'metrics.pkl', self.dir_log)
                 
                 print(f'Metrics achieved : {self.metrics[tp]}')
@@ -2609,9 +2601,6 @@ class Training():
                     print(f'Last score {last_score} current score {iou}')
                     break
             
-        #score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
-
-        #index_max = np.argmin(np.abs(score_differences))
         index_max = np.argmax(iou_scores)
         best_tp = test_percentage[index_max]
         self.metrics['iou_score'] = iou_scores
@@ -2961,6 +2950,21 @@ class Training():
         loss_params = {'num_classes' : 5}
         return get_loss_function(loss_name, **loss_params)
 
+    def get_learnable_parameters(self, criterion):
+        parameters = self.model.parameters()
+        
+        if has_method(criterion, 'get_learnable_parameters'):
+            logger.info(f'Adding {self.loss} parameter')
+            loss_parameters = criterion.get_learnable_parameters().values()
+            parameters = list(parameters) + list(loss_parameters)
+        
+        return parameters
+
+    def get_optimizer(self, criterion,):
+        parameters = self.get_learnable_parameters(criterion)
+        optimizer = optim.Adam(parameters, lr=self.lr)
+        return optimizer
+
     def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None):
         """
         Visualisation des valeurs SHAP pour expliquer les prédictions.
@@ -3214,9 +3218,6 @@ class SplitTraining(Training):
             out.backward(grad)
             optimizer.step()
 
-    #def fit(self, **args):
-    #    return self.train_split(**args)
-    
     def train_split(self, df_train, df_val, df_test, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None):
         
         import torch
@@ -3321,7 +3322,7 @@ class SplitTraining(Training):
 
         under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
         over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
-        
+
         iou = iou_score(y[:, -1], test_output)
         f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
         iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
@@ -3584,6 +3585,108 @@ class SplitTraining(Training):
         save_object(self.metrics, 'metrics_cluster.pkl', self.dir_log)
 
         return best_combination
+
+###################################################################### DUAL TRAINING ####################################################################################
+
+class DualTraining:
+    """Manage joint optimisation of two ``Training`` instances.
+
+    The class orchestrates two sub-models: ``occ_model`` operates on the
+    binarised dataset while ``num_model`` is restricted to samples with a
+    positive label. Losses and parameters of both sub-models are combined so
+    that a single optimisation step updates them simultaneously."""
+
+    def __init__(self, occ_model: Training, num_model: Training, name: str = 'DualTraining'):
+        self.occ_model = occ_model
+        self.num_model = num_model
+        self.name = name
+
+    def train(
+        self,
+        graph,
+        PATIENCE_CNT,
+        CHECKPOINT,
+        epochs,
+        verbose: bool = True,
+        custom_model_params=None,
+        new_model: bool = True,
+    ):
+        self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
+        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
+
+    # ------------------------------------------------------------------
+    # Inference utilities
+    # ------------------------------------------------------------------
+    def create_test_loader(self, graph, df):
+        """Create test loaders for both sub-models.
+
+        The occurence model consumes the full dataframe while the numeric
+        model will later be applied only on samples predicted positive. We
+        therefore keep a reference to ``graph`` and ``df`` so that the
+        numeric loader can be rebuilt after filtering.
+        """
+
+        # store for later use in ``_predict_test_loader``
+        self._test_graph = graph
+        self._test_df = df.reset_index(drop=True)
+
+        # loader for the occurence model (covers all samples)
+        self.test_loader = self.occ_model.create_test_loader(graph, df)
+        self.occ_model.test_loader = self.test_loader
+        return self.test_loader
+
+    def _predict_test_loader(self, loader=None):
+        """Run predictions combining the two sub-models.
+
+        Parameters
+        ----------
+        loader : DataLoader, optional
+            Loader used for the occurence model. If ``None``, the loader
+            created by :func:`create_test_loader` is used.
+
+        Returns
+        -------
+        Tuple[Tensor, Tensor]
+            Final numeric predictions and associated ground truth.
+        """
+
+        if loader is None:
+            loader = self.occ_model.test_loader
+
+        # 1) predict occurence on the full dataset
+        occ_pred, _ = self.occ_model._predict_test_loader(loader)
+        occ_mask = occ_pred.reshape(-1) > 0
+
+        # 2) build a loader for the numeric model restricted to positives
+        df_pos = self._test_df.iloc[occ_mask.cpu().numpy()]
+        if len(df_pos) > 0:
+            num_loader = self.num_model.create_test_loader(self._test_graph, df_pos)
+            num_pred, _ = self.num_model._predict_test_loader(num_loader)
+            num_pred = num_pred.reshape(-1)
+        else:
+            num_pred = torch.tensor([], device=occ_pred.device)
+
+        # 3) assemble final predictions over all samples
+        final_pred = torch.zeros(len(self._test_df), device=occ_pred.device, dtype=num_pred.dtype if num_pred.numel() > 0 else torch.float32)
+        if num_pred.numel() > 0:
+            final_pred[occ_mask] = num_pred
+
+        # ground truth of numeric target over all samples
+        target_np = self._test_df[self.num_model.target_name].to_numpy()
+        y_full = torch.as_tensor(target_np, dtype=final_pred.dtype, device=final_pred.device)
+
+        return final_pred, y_full
+
+    def search_samples_proportion(self, *args, **kwargs):
+        """Delegate proportion search to the occurence model.
+
+        This wrapper keeps the signature of :func:`Training.search_samples_proportion`
+        for compatibility while relying on the occurence model implementation.
+        """
+
+        return self.occ_model.search_samples_proportion(*args, **kwargs)
+    
+################################################################# Base Models #############################################################
     
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
@@ -3721,7 +3824,7 @@ class ModelCNN(SplitTraining):
                                                 graph.graph_method,
                                                 graph.base,
                                                 self.path / 'datacube')
-
+        
         loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
         return loader
@@ -3790,7 +3893,6 @@ class ModelGNN(SplitTraining):
             elif self.mesh == 'mygraph':
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
                 self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
-
 
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
@@ -5264,7 +5366,6 @@ class ModelKnowledgeDistillation(Training):
 
                 self.create_train_val_test_loader_teacher(graph, self.df_train, self.df_val, self.df_test, sub_teacher, features_importance=False)
 
-                #print(self.target_name)
                 super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
                 test_output, y = self._predict_test_loader(self.test_loader)
