@@ -121,6 +121,7 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
         depts = np.unique(self.Y[:, departement_index, -1])
         
         for dept in depts:
+            logger.info(f'Loading features of {dept}')
             mask = self.Y[:, departement_index, -1] == dept
             dates = np.unique(self.Y[mask, date_index, :])
             
@@ -139,6 +140,19 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
                 n = int(var[-1])
                 array = calculate_precipitation_index_image_full(datacube['prec24h'].values, A=0.1657, n=n)
                 datacube[var] = (('latitude', 'longitude', 'date'), array)
+
+            # Ne conserver que les variables 2D demandées et existantes
+            existing_vars = set(datacube.data_vars)
+            wanted_vars = [v for v in self.features if v in existing_vars]
+            #missing = [v for v in self.features if v not in existing_vars]
+            #if missing:
+            #    logger.warning(f"[{int2name[dept]}] Variables 2D absentes ignorées: {missing}")
+
+            # Sous-échantillonnage du Dataset xarray aux seules features 2D
+            if wanted_vars:
+                datacube = datacube[wanted_vars]
+            else:
+                logger.warning(f"[{int2name[dept]}] Aucune feature_2D trouvée; datacube vide en variables.")
 
             self.datacubes[dept] = datacube
             self.areas[dept] = datacube_mask['area']
@@ -190,7 +204,12 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
 
         for feat_idx, feat in enumerate(self.features):
             # Si la feature est une variable externe
-            if feat in calendar_variables or feat == "id_encoder" or feat == "cluster_encoder" or feat == 'Past_burnedarea' or feat == 'Past_risk':
+            if feat in calendar_variables or \
+                feat == "id_encoder" or \
+                feat == "cluster_encoder" or \
+                feat == 'Past_burnedarea' or \
+                feat == 'Past_risk' or \
+                'calendar' in feat:
                 # On récupère depuis self.X
                 feat_idx = self.features_1D.index(feat)
                 values = self.X[index][feat_idx]  # shape attendue : (kdays,)
@@ -247,7 +266,7 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
         feature_tensor = torch.tensor(
             np.stack(feature_cubes, axis=2), dtype=torch.float32, device=self.device
         )
-
+        #print('features_tensort', feature_tensor.shape)
         if len(self.edges) > 0:
             edges = self.edges[index]
         else:
@@ -265,6 +284,137 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
 
     def get(self):
         pass
+
+class ReadGraphDataset2DOptim(Dataset):
+    def __init__(self, X, Y, edges, leni, device, path, features, features_1D,
+                 kdays, scale, graph_method, base, target_path):
+
+        self.X = X
+        self.Y = np.asarray(Y)
+        self.device = device
+        self.edges = edges
+        self.leni = leni
+        self.path = path
+        self.features = features
+        self.features_1D = features_1D
+        self.kdays = kdays
+        self.scale = scale
+        self.graph_method = graph_method
+        self.base = base
+        self.target_path = target_path
+
+        self.datacubes = {}
+        self.areas = {}
+        self.area_coords = {}   # cache des coordonnées
+
+        # Map pour éviter .index() dans __getitem__
+        self.features_1D_map = {feat: idx for idx, feat in enumerate(self.features_1D)}
+
+        # Préparer uniquement le cache de zones (faible mémoire)
+        depts = np.unique(self.Y[:, departement_index, -1])
+        for dept in depts:
+            logger.info(f'Loading features from {dept}')
+            datacube = read_object(
+                f'datacube.pkl',
+                self.path / int2name[dept] / 'raster' / '2x2'
+            )
+
+            datacube_mask = read_object(
+                f'datacube_target_{int2name[dept]}_{self.scale}_{self.base}_{self.graph_method}.pkl',
+                self.target_path
+            )
+
+            self.datacubes[dept] = datacube  # pas converti en numpy
+            self.areas[dept] = datacube_mask['area']
+
+            self.area_coords[dept] = {}
+            unique_ids = np.unique(self.areas[dept].values)
+            for area_id in unique_ids:
+                if np.isnan(area_id):
+                    continue
+                self.area_coords[dept][area_id] = self._compute_coords(self.areas[dept], area_id)
+
+    def _compute_coords(self, area_dataarray, area_id):
+        mask = (area_dataarray == area_id).values
+        pos = np.nonzero(mask)
+        lat_coords = area_dataarray.latitude.values
+        lon_coords = area_dataarray.longitude.values
+
+        lat_start_idx, lat_end_idx = pos[1].min(), pos[1].max() + 1
+        lon_start_idx, lon_end_idx = pos[2].min(), pos[2].max() + 1
+
+        return (lat_coords[lat_start_idx], lat_coords[lat_end_idx - 1],
+                lon_coords[lon_start_idx], lon_coords[lon_end_idx - 1])
+
+    def _resize_3d(self, arr, out_h, out_w):
+        """Redimensionner un tableau (H, W, T) sans boucle Python."""
+        t = arr.shape[2]
+        resized = np.empty((out_h, out_w, t), dtype=arr.dtype)
+        for i in range(t):
+            resized[:, :, i] = cv2.resize(arr[:, :, i], (out_w, out_h), interpolation=cv2.INTER_LINEAR)
+        return resized
+
+    def __getitem__(self, index):
+        y = self.Y[index]
+
+        dept = y[departement_index][-1]
+        area_id = y[graph_id_index][-1]
+        date_int = int(y[date_index][-1])
+
+        datacube = self.datacubes[dept]
+
+        lat_start, lat_end, lon_start, lon_end = self.area_coords[dept][area_id]
+
+        feature_cubes = []
+        for feat in self.features:
+            # Variables 1D -> répétition en 2D
+            if feat in calendar_variables or feat in {"id_encoder", "cluster_encoder", "Past_burnedarea", "Past_risk"}:
+                feat_idx = self.features_1D_map[feat]
+                values = np.array(self.X[index][feat_idx]).reshape(1, 1, self.kdays + 1)
+                values = np.tile(values, (shape2D[self.scale][0], shape2D[self.scale][1], 1))
+            else:
+                mapped_feat = {
+                    'foret_encoder': 'forest_landcover',
+                    'corine_encoder': 'corine_landcover',
+                    'bdroute_encoder': 'route_landcover'
+                }.get(feat, feat)
+
+                da = datacube[mapped_feat]
+                if "date" in da.dims:
+                    if self.kdays > 0:
+                        selected = da.sel(
+                            latitude=slice(lat_start, lat_end),
+                            longitude=slice(lon_start, lon_end),
+                            date=slice(allDates[date_int - self.kdays], allDates[date_int])
+                        ).values
+                    else:
+                        selected = da.sel(
+                            latitude=slice(lat_start, lat_end),
+                            longitude=slice(lon_start, lon_end),
+                            date=allDates[date_int]
+                        ).values
+                        selected = selected[:, :, None]
+                else:
+                    selected = da.sel(
+                        latitude=slice(lat_start, lat_end),
+                        longitude=slice(lon_start, lon_end)
+                    ).values[:, :, None].repeat(self.kdays + 1, axis=2)
+
+                if np.any(np.isnan(selected)):
+                    selected = np.nan_to_num(selected, nan=np.nanmean(selected))
+
+                selected = self._resize_3d(selected, shape2D[self.scale][0], shape2D[self.scale][1])
+                values = selected
+
+            feature_cubes.append(values)
+
+        feature_tensor = torch.tensor(np.stack(feature_cubes, axis=2), dtype=torch.float32, device=self.device)
+        edges_tensor = torch.tensor(self.edges[index], dtype=torch.long, device=self.device) if len(self.edges) > 0 else []
+
+        return feature_tensor, torch.tensor(y, dtype=torch.float32, device=self.device), edges_tensor
+
+    def __len__(self):
+        return self.leni
 
 class InplaceGraphDataset(Dataset):
     def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device) -> None:
@@ -1528,16 +1678,18 @@ def create_dataset_2D(graph,
                     device,
                     ks : int,
                     name_exp):
-    
-    x_train, y_train = df_train[ids_columns + features_1D].values, df_train[ids_columns + [target_name]].values
 
-    x_val, y_val = df_val[ids_columns + features_1D].values, df_val[ids_columns + [target_name]].values
+    if df_train is not None:
+        x_train, y_train = df_train[ids_columns + features_1D].values, df_train[ids_columns + [target_name]].values
+        dateTrain = np.sort(np.unique(y_train[np.argwhere(y_train[:, weight_index] > 0), date_index]))
 
-    x_test, y_test = df_test[ids_columns + features_1D].values, df_test[ids_columns + [target_name]].values
+    if df_val is not None:
+        x_val, y_val = df_val[ids_columns + features_1D].values, df_val[ids_columns + [target_name]].values
+        dateVal = np.sort(np.unique(y_val[np.argwhere(y_val[:, weight_index] > 0), date_index]))
 
-    dateTrain = np.sort(np.unique(y_train[np.argwhere(y_train[:, weight_index] > 0), date_index]))
-    dateVal = np.sort(np.unique(y_val[np.argwhere(y_val[:, weight_index] > 0), date_index]))
-    dateTest = np.sort(np.unique(y_test[np.argwhere(y_test[:, weight_index] > 0), date_index]))
+    if df_test is not None:
+        x_test, y_test = df_test[ids_columns + features_1D].values, df_test[ids_columns + [target_name]].values
+        dateTest = np.sort(np.unique(y_test[np.argwhere(y_test[:, weight_index] > 0), date_index]))
 
     XsTe = []
     YsTe = []
@@ -1545,41 +1697,49 @@ def create_dataset_2D(graph,
     
     logger.info(f'Model configuration : image_per_node {image_per_node}, use_temporal_as_edges {use_temporal_as_edges}')
 
-    logger.info('Creating train dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, True) 
+    if df_train is not None:
+        logger.info('Creating train dataset')
+        Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, True) 
+        assert len(Xst) > 0
     
-    logger.info('Creating val dataset')
-    # Val
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, True)
+    if df_val is not None:
+        logger.info('Creating val dataset')
+        XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, True)
+        assert len(XsV) > 0
 
-    logger.info('Creating Test dataset')
-    # Test
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, True)
+    if df_test is not None:
+        logger.info('Creating Test dataset')
+        XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, True)
 
-    assert len(Xst) > 0
-    assert len(XsV) > 0
-    assert len(XsTe) > 0
+        assert len(XsTe) > 0
 
-    logger.info(f'{len(Xst)}, {len(XsV)}, {len(XsTe)}')
-
-    sub_dir = f'image_per_node_{len(features_name_2D)}' if image_per_node else f'image_per_departement_{len(features_name_2D)}'
+    #logger.info(f'{len(Xst)}, {len(XsV)}, {len(XsTe)}')
+    train_dataset = None
+    val_dataset = None
+    test_dataset = None
     if True:
-        train_dataset = ReadGraphDataset_2D_from_xarray(Xst, Yst, Est, len(Xst), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
-                                                        graph.scale,
-                                                        graph.graph_method,
-                                                        graph.base,
-                                                        path / 'datacube')
+        if df_train is not None:
+            train_dataset = ReadGraphDataset_2D_from_xarray(Xst, Yst, Est, len(Xst), device,
+                                                            rootDisk / 'csv', features_name_2D, features_1D, ks,
+                                                            graph.scale,
+                                                            graph.graph_method,
+                                                            graph.base,
+                                                            path / 'datacube')
         
-        val_dataset = ReadGraphDataset_2D_from_xarray(XsV, YsV, EsV, len(XsV), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
-                                                       graph.scale,
-                                                        graph.graph_method,
-                                                        graph.base,
-                                                        path / 'datacube')
-        test_dataset = ReadGraphDataset_2D_from_xarray(XsTe, YsTe, EsTe, len(XsTe), device, rootDisk / 'csv', features_name_2D, features_1D, ks,
+        if df_val is not None:
+            val_dataset = ReadGraphDataset_2D_from_xarray(XsV, YsV, EsV, len(XsV), device,
+                                                          rootDisk / 'csv', features_name_2D, features_1D, ks,
                                                         graph.scale,
-                                                        graph.graph_method,
-                                                        graph.base,
-                                                        path / 'datacube')
+                                                            graph.graph_method,
+                                                            graph.base,
+                                                            path / 'datacube')
+        if df_test is not None:
+            test_dataset = ReadGraphDataset_2D_from_xarray(XsTe, YsTe, EsTe, len(XsTe), device,
+                                                           rootDisk / 'csv', features_name_2D, features_1D, ks,
+                                                            graph.scale,
+                                                            graph.graph_method,
+                                                            graph.base,
+                                                            path / 'datacube')
     else:
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
@@ -1694,6 +1854,7 @@ class Training():
                 return criterion(out, tar, wei)
             else:
                 wei = wei.long()
+                #print(torch.unique(tar))
                 if not self.student_train: # works on probability
                     tar = tar.long()
 
@@ -1777,7 +1938,7 @@ class Training():
 
         # Use cross-entropy to compute: -log( exp(sim_pos) / (exp(sim_pos) + exp(sim_neg)) )
         loss = F.cross_entropy(logits, labels)
-
+        
         return loss
 
     def calculate_prototype_loss(self, hidden, target, prototypes):
@@ -1858,8 +2019,13 @@ class Training():
             criterion_teacher = self.get_loss('kldivloss')
             df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
             df_test.columns = df_test.columns.astype(str)
-            pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+            if self.top_model != 'task':
+                pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+            else:
+                pred_teacher = self.teacher.predict_with_tasks(df_test, weights_average=self.weights_average, id_col=(None, None), proba=True)
+            
             target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+
             target = target / self.temperature_value
 
             loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
@@ -1934,7 +2100,6 @@ class Training():
         with torch.no_grad():
 
             for i, data in enumerate(loader, 0):
-                
                 loss = self.launch_batch(data, criterion)
 
                 total_loss += loss.item()
@@ -2020,7 +2185,8 @@ class Training():
             self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         else:
             for epoch in tqdm(range(epochs), disable=not verbose):
-                val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader, optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
+                val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
+                                                    optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
@@ -2440,7 +2606,7 @@ class Training():
                 if iou > last_score:
                     last_score = iou
                 else:
-                    print(f'Last score {iou} current score {last_score}')
+                    print(f'Last score {last_score} current score {iou}')
                     break
             
         #score_differences = np.array(under_prediction_score_scores) - np.array(over_prediction_score_scores)
@@ -3438,25 +3604,28 @@ class ModelCNN(SplitTraining):
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs,
                                      PATIENCE_CNT, CHECKPOINT, features_importance=True,
                                      varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
-        
+
         if features_importance:
-            #importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
+            importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features], df_train[self.target_name], self.features, self.dir_log / '../importance', self.target_name)
-            #features95, self.features_1D = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+            features95, self.features_1D = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        
+        if self.nbfeatures != 'all':
+            self.nbfeatures = int(self.nbfeatures)
+            varying_time_variables_2 = get_time_columns(varying_time_variables, self.ks, df_train.copy(deep=True), train_features)
+            
+            self.features_1D = [fet for fet in self.features_1D if fet in df_train.columns]
+            
+            self.features_1D = self.features_1D[:self.nbfeatures]
 
-            if self.nbfeatures != 'all':
-                self.nbfeatures = int(self.nbfeatures)
-                varying_time_variables_2 = get_time_columns(varying_time_variables, self.ks, df_train.copy(deep=True), train_features)
-                
-                self.features_1D = [fet for fet in self.features_1D if fet in df_train.columns]
-                
-                self.features_1D = self.features_1D[:self.nbfeatures]
+            print(self.features_1D)
 
-                features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
-                self.features_name = get_features_selected_for_time_series_for_2D(self.features_1D, features_name_2D, varying_time_variables_2, self.nbfeatures)
-                
-                self.features_name = list(np.unique(self.features_name))
-
+            features_name_2D, newShape2D = get_features_name_lists_2D(6, train_features)
+            self.features_name = get_features_selected_for_time_series_for_2D(self.features_1D, features_name_2D, varying_time_variables_2, self.nbfeatures)
+            
+            self.features_name = list(np.unique(self.features_name))
+            print(self.features_name)
+        
         if self.under_sampling != 'full':
             y = df_train[self.target_name]
             old_shape = df_train.shape
@@ -3511,24 +3680,23 @@ class ModelCNN(SplitTraining):
             self.val_loader = read_object('val_loader.pkl', self.dir_log)
             self.test_loader = read_object('test_loader.pkl', self.dir_log)
         else:
-            print(self.ks)
             train_dataset, val_dataset, test_dataset = create_dataset_2D(graph=graph,
-                                                                df_train=df_train,
-                                                                df_val=df_val,
-                                                                df_test=df_test,
-                                                                features_name_2D=self.features_name,
-                                                                features=self.features,
-                                                                features_1D=self.features_1D,
-                                                                target_name=self.target_name,
-                                                                use_temporal_as_edges=None,
-                                                                image_per_node=self.image_per_node,
-                                                                device=self.device, ks=self.ks,
-                                                                path=self.path,
-                                                                name_exp=name_exp)
-        
-            train_loader = DataLoader(train_dataset, 16, True)
-            val_loader = DataLoader(val_dataset, 16, False)
-            test_loader = DataLoader(test_dataset, 16, False)
+                                            df_train=df_train,
+                                            df_val=df_val,
+                                            df_test=df_test,
+                                            features_name_2D=self.features_name,
+                                            features=self.features,
+                                            features_1D=self.features_1D,
+                                            target_name=self.target_name,
+                                            use_temporal_as_edges=None,
+                                            image_per_node=self.image_per_node,
+                                            device=self.device, ks=self.ks,
+                                            path=self.path,
+                                            name_exp=name_exp)
+
+            train_loader = DataLoader(train_dataset, 16, True, worker_init_fn=seed_worker, generator=g)
+            val_loader = DataLoader(val_dataset, 16, False, worker_init_fn=seed_worker, generator=g)
+            test_loader = DataLoader(test_dataset, 16, False, worker_init_fn=seed_worker, generator=g)
 
             #save_object_torch(train_loader, 'train_loader.pkl', self.dir_log)
             #save_object_torch(val_loader, 'val_loader.pkl', self.dir_log)
@@ -3571,7 +3739,7 @@ class ModelGNN(SplitTraining):
         self.mesh_file = mesh_file
         self.graph_method = graph_method
 
-    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None):
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
@@ -3583,10 +3751,11 @@ class ModelGNN(SplitTraining):
                 self.features_name = featuresAll[:int(self.nbfeatures)]
             else:
                 self.features_name = featuresAll
-        print(self.n_run)
-        static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
-        logger.info(f'Num temporal features {len(temporal_idx)} num spatial features {len(static_idx)}')
-        custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
+        
+        if self.model_name in ['GRUGNN']:
+            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+            logger.info(f'Num temporal features {len(temporal_idx)} num spatial features {len(static_idx)}')
+            custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
 
         if self.val_loader is None:
             if self.mesh == 'mesh':
@@ -3640,7 +3809,7 @@ class ModelGNN(SplitTraining):
                 df_train.loc[df_combined.index, 'weight'] = 1
 
                 logger.info(f'Train mask df_train shape: {old_shape} -> {df_train[df_train["weight"] > 0].shape}')
-
+                
             elif self.under_sampling == 'search' or 'percentage' in self.under_sampling:
                     if self.training_mode == 'splittraining':
                         best_combinaison = self.search_samples_proportion_per_cluster(graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT)
@@ -3655,7 +3824,7 @@ class ModelGNN(SplitTraining):
                         if self.under_sampling == 'search':
                             best_tp, find_log = self.search_samples_proportion(graph, df_train, df_val, df_test, False,
                                                                                epochs, PATIENCE_CNT, CHECKPOINT, False,
-                                                                               custom_model_params=custom_model_params)
+                                                                               custom_model_params=custom_model_params, use_log=use_log)
                             self.find_log = find_log
                         else:
                             vec = self.under_sampling.split('-')
@@ -3723,73 +3892,65 @@ class ModelGNN(SplitTraining):
 
         return loader
 
-    def launch_train_loader(self, loader, criterion, optimizer):
+    def launch_batch(self, data, criterion):
         
-        self.model.train()
-        for i, data in enumerate(loader, 0):
-            
-            if not self.mesh or self.mesh == False:
-                inputs, labels, graphs, graphs_id = data
+        if not self.mesh or self.mesh == False:
+            inputs, labels, graphs, graphs = data
+            if self.model.return_hidden:
+                output, hidden = self.model(inputs, graphs)
             else:
-                inputs, labels, DGLgraphs, graphs_id = data
-
-            if not self.mesh or self.mesh == False:
                 output = self.model(inputs, graphs)
+        else:
+            inputs, labels, DGLgraphs, graphs = data
+            if self.model.return_hidden:
+                output, hidden = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
             else:
                 output = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+        
+        if inputs.shape[0] == 1:
+            return 0
 
-            band = -1
-            if isinstance(labels, list):  # Multi-scale / multi-label case
-                total_loss = 0.0
-                for i in range(len(labels)):
-                    target, weights = self.compute_weights_and_target(labels[i], band, ids_columns, self.model.is_graph_or_node, graphs_id)
-                    loss_i = self.calculate_loss(criterion, output[i], target, weights, labels[i])
-                    total_loss += loss_i
+        band = -1
+        
+        try:
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
+        except Exception as e:
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
 
-                loss = total_loss / len(labels)  # average loss across scales
-            else:
-                target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs_id)
-                loss = self.calculate_loss(criterion, output, target, weights, labels)
+        if self.loss not in ['kldivloss']: # works on probability
+            target = target.long()
+        
+        loss = self.calculate_loss(criterion, output, target, weights, labels)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        if self.student_train: # distallation traning
+            criterion_teacher = self.get_loss('kldivloss')
+            df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
+            df_test.columns = df_test.columns.astype(str)
+            pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+            target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+            target = target / self.temperature_value
+
+            loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+
+            loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+        
+        if self.constrastive: # MOON federated training
+            _, zprev = self.prev_model(inputs, graphs)
+            _, zglob = self.global_model(inputs, graphs)
+            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
+            loss = loss + self.smooth_value * loss_constrastive
+
+        if self.use_prototypes and self.prototypes is not None:
+            if not self.model.return_hidden:
+                raise ValueError('Model must return hidden states for prototype training')
+            
+            proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
+            loss = loss + self.prototype_weight * proto_loss
+
+        if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
+            loss += self.model.kl_loss()
 
         return loss
-
-    def launch_val_test_loader(self, loader, criterion, optimizer, teacher=None):
-        self.model.eval()
-        total_loss = 0.0
-
-        with torch.no_grad():
-
-            for i, data in enumerate(loader, 0):
-                if not self.mesh:
-                    inputs, labels, graphs, graphs_id = data
-                else:
-                    inputs, labels, DGLgraphs, graphs_id = data
-
-                band = -1
-
-                if not self.mesh:
-                    output = self.model(inputs, graphs)
-                else:
-                    output = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
-
-                if isinstance(labels, list):  # Multi-scale case
-                    loss = 0.0
-                    for i in range(len(labels)):
-                        target, weights = self.compute_weights_and_target(labels[i], band, ids_columns, self.model.is_graph_or_node, graphs_id)
-                        loss_i = self.calculate_loss(criterion, output[i], target, weights, labels[i])
-                        loss += loss_i.item()
-
-                    total_loss += loss / len(labels)  # average loss per batch
-                else:
-                    target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs_id)
-                    loss = self.calculate_loss(criterion, output, target, weights, labels)
-                    total_loss += loss.item()
-
-        return total_loss
 
     def _predict_test_loader(self, X: DataLoader, proba=False) -> torch.tensor:
         """
@@ -5104,7 +5265,7 @@ class ModelKnowledgeDistillation(Training):
                 self.create_train_val_test_loader_teacher(graph, self.df_train, self.df_val, self.df_test, sub_teacher, features_importance=False)
 
                 #print(self.target_name)
-                super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
                 test_output, y = self._predict_test_loader(self.test_loader)
                 test_output = test_output.detach().cpu().numpy()
@@ -5127,7 +5288,7 @@ class ModelKnowledgeDistillation(Training):
                     self.update_weight(model_params_log)
 
         elif self.distillation_training_mode == 'normal':
-            super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, self.teacher)
+            super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
         elif 'group' in self.distillation_training_mode:
             nbgroup = int(self.distillation_training_mode.split('-')[1])
@@ -5136,7 +5297,7 @@ class ModelKnowledgeDistillation(Training):
                 for sub_teacher in self.teacher.best_estimator_:
                     
                     model_params_log = self.model.model.state_dict()
-                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
                     score = self.score(self.df_test, self.df_test[self.target_name])
                     if score > score_0:
@@ -5152,7 +5313,7 @@ class ModelKnowledgeDistillation(Training):
                 for sub_teacher in self.teacher.best_estimator_:
                     
                     model_params_log = self.model.model.state_dict()
-                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, sub_teacher)
+                    super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
                     
                     score = self.score(self.df_test, self.df_test[self.target_name])
                     if score > score_0:
@@ -5417,6 +5578,135 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         # Aggregate probabilities
         aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights2use)
         return aggregated_proba, y
+    
+    def predict_with_tasks(
+        self,
+        X,
+        hard_or_soft="soft",
+        weights_average="weight",
+        model_per_task=None,
+        generalized_departement=None,
+        id_col=(None, None),
+        proba = False
+    ):
+        """Predict with a specific ``top_model`` per task.
+
+        Parameters
+        ----------
+        X : pandas.DataFrame
+            Input dataframe.
+        hard_or_soft : str
+            Mode passed to :func:`predict_with_weight`.
+        weights_average : str
+            Weighting mode for aggregation.
+        model_per_task : dict
+            Mapping of task names to number of models to use.
+        generalized_departement : list
+            Departments for which to apply ``generalized_prediction`` task.
+        id_col : tuple
+            Id column information for weighted predictions.
+        """
+
+        if model_per_task is None:
+            model_per_task = {}
+        
+        if model_per_task == 'default':
+            model_per_task={'normal_predictions' : 4,
+                                'generalized_prediction' : 12,
+                                'class_value_2_predictions' : 12,
+                                'class_value_3_predictions' : 20,
+                                'class_value_4_predictions' : 20
+                                }
+            
+            generalized_departement = [
+                1.,  2.,  3.,  4.,  5.,  8.,  9., 10., 12., 14.,
+                15., 16., 17., 18., 19., 21., 22., 23., 24., 25.,
+                26., 27., 28., 29., 31., 32., 35., 36., 37., 38.,
+                39., 41., 42., 43., 44., 45., 46., 47., 48., 49.,
+                50., 51., 52., 53., 54., 55., 56., 57., 58., 59.,
+                60., 61., 62., 63., 64., 65., 67., 68., 69., 70.,
+                71., 72., 73., 74., 75., 76., 77., 78., 79., 80.,
+                81., 82., 85., 86., 87., 88., 89., 90., 91., 92.,
+                93., 94., 95.
+            ]
+        
+
+        # Normal prediction for all samples
+        top_model = model_per_task.get("normal_predictions", "all")
+        if not proba:
+            predictions = self.predict_with_weight(
+                X,
+                hard_or_soft=hard_or_soft,
+                weights_average=weights_average,
+                weights2use=self.weights_for_model,
+                top_model=top_model,
+            )
+        else:
+            predictions = self.predict_proba_with_weights(
+                X,
+                hard_or_soft=hard_or_soft,
+                weights_average=weights_average,
+                weights2use=self.weights_for_model,
+                top_model=top_model,
+            )
+
+        predictions = np.asarray(predictions)
+
+        # Generalized prediction
+        if (
+            model_per_task.get("generalized_prediction") is not None
+            and generalized_departement is not None
+            and "departement" in X.columns
+        ):
+            mask = X["departement"].isin(generalized_departement).values
+            if mask.any():
+                if not proba:
+                    preds_gen  = self.predict_with_weight(
+                        X[mask],
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        weights2use=self.weights_for_model,
+                        top_model=model_per_task["generalized_prediction"],
+                    )
+                else:
+                    preds_gen  = self.predict_proba_with_weights(
+                        X[mask],
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        weights2use=self.weights_for_model,
+                        top_model=model_per_task["generalized_prediction"],
+                    )
+                mask = np.isin(y[:, 4], generalized_departement)
+                predictions[mask] = preds_gen
+
+        for val in [2, 3, 4]:
+            task_name = f"class_value_{val}_predictions"
+            if task_name in model_per_task:
+                if not proba:
+                    preds_cls = self.predict_with_weight(
+                        X,
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        weights2use=self.weights_for_model,
+                        top_model=model_per_task[task_name],
+                    )
+                    mask = (preds_cls >= val) | (predictions >= val)
+                    if mask.any():
+                        predictions[mask] = preds_cls[mask]
+                else:
+                    preds_cls = self.predict_proba_with_weights(
+                        X,
+                        hard_or_soft=hard_or_soft,
+                        weights_average=weights_average,
+                        weights2use=self.weights_for_model,
+                        top_model=model_per_task[task_name],
+                    )
+                    # prendre les lignes où la classe la plus probable est >= val
+                    mask = (np.argmax(preds_cls, axis=1) >= val) | (np.argmax(predictions, axis=1) >= val)
+                    if mask.any():
+                        predictions[mask] = preds_cls[mask]
+
+        return predictions
 
     def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None)):
         """
@@ -5621,104 +5911,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
-
-    def predict_with_tasks(
-        self,
-        X,
-        hard_or_soft="soft",
-        weights_average="weight",
-        model_per_task=None,
-        generalized_departement=None,
-        id_col=(None, None),
-    ):
-        """Predict with a specific ``top_model`` per task.
-
-        Parameters
-        ----------
-        X : pandas.DataFrame
-            Input dataframe.
-        hard_or_soft : str
-            Mode passed to :func:`predict_with_weight`.
-        weights_average : str
-            Weighting mode for aggregation.
-        model_per_task : dict
-            Mapping of task names to number of models to use.
-        generalized_departement : list
-            Departments for which to apply ``generalized_prediction`` task.
-        id_col : tuple
-            Id column information for weighted predictions.
-        """
-
-        if model_per_task is None:
-            model_per_task = {}
-        
-        if model_per_task == 'default':
-            model_per_task={'normal_predictions' : 4,
-                                'generalized_prediction' : 12,
-                                'class_value_2_predictions' : 12,
-                                'class_value_3_predictions' : 20,
-                                'class_value_4_predictions' : 20
-                                }
-            
-            generalized_departement = [
-                1.,  2.,  3.,  4.,  5.,  8.,  9., 10., 12., 14.,
-                15., 16., 17., 18., 19., 21., 22., 23., 24., 25.,
-                26., 27., 28., 29., 31., 32., 35., 36., 37., 38.,
-                39., 41., 42., 43., 44., 45., 46., 47., 48., 49.,
-                50., 51., 52., 53., 54., 55., 56., 57., 58., 59.,
-                60., 61., 62., 63., 64., 65., 67., 68., 69., 70.,
-                71., 72., 73., 74., 75., 76., 77., 78., 79., 80.,
-                81., 82., 85., 86., 87., 88., 89., 90., 91., 92.,
-                93., 94., 95.
-            ]
-
-        # Normal prediction for all samples
-        top_model = model_per_task.get("normal_predictions", "all")
-        predictions, y = self.predict_with_weight(
-            X,
-            hard_or_soft=hard_or_soft,
-            weights_average=weights_average,
-            weights2use=self.weights_for_model,
-            top_model=top_model,
-        )
-
-        predictions = np.asarray(predictions)
-
-        # Generalized prediction
-        if (
-            model_per_task.get("generalized_prediction") is not None
-            and generalized_departement is not None
-            and "departement" in X.columns
-        ):
-            mask = X["departement"].isin(generalized_departement).values
-            if mask.any():
-                preds_gen, _ = self.predict_with_weight(
-                    X[mask],
-                    hard_or_soft=hard_or_soft,
-                    weights_average=weights_average,
-                    weights2use=self.weights_for_model,
-                    top_model=model_per_task["generalized_prediction"],
-                )
-                mask = np.isin(y[:, departement_index], generalized_departement)
-                predictions[mask] = preds_gen
-
-        # Class-specific refinements
-        for val in [2, 3, 4]:
-            task_name = f"class_value_{val}_predictions"
-            if task_name in model_per_task:
-                preds_cls, _ = self.predict_with_weight(
-                    X,
-                    hard_or_soft=hard_or_soft,
-                    weights_average=weights_average,
-                    weights2use=self.weights_for_model,
-                    top_model=model_per_task[task_name],
-                )
-                mask = (preds_cls >= val) | (predictions >= val)
-                if mask.any():
-                    predictions[mask] = preds_cls[mask]
-
-        return predictions, y
-        
+    
 class ModelPerID(RegressorMixin, ClassifierMixin):
     def __init__(self, model, dir_log, cluster="departement"):
         self.base_model = model

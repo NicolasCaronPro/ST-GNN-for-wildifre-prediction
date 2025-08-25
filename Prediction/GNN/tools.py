@@ -4718,7 +4718,12 @@ def get_features_selected_for_time_series_for_2D(features, features_name, time_v
     for fet in features:
         if len(features_selected_str) == nbfeatures and nbfeatures != 'all':
             break
-        if fet in features_name or fet == 'Past_risk':
+        if fet in calendar_variables or \
+                fet == "id_encoder" or \
+                fet == "cluster_encoder" or \
+                fet == 'Past_burnedarea' or \
+                fet == 'Past_risk' or \
+                'calendar' in fet:
             if fet not in features_selected_str:
                 features_selected_str.append(fet)
         elif fet in time_varying_features:
@@ -4736,10 +4741,7 @@ def get_features_selected_for_time_series_for_2D(features, features_name, time_v
         elif fet.find('frequencyratio') != -1:
             vec = fet.split('_')
             new_fet = ''
-            if vec[0] == 'calendar':
-                limit = len(vec) - 2
-            else:
-                limit = len(vec) - 3
+            limit = len(vec) - 3
             for i, v in enumerate(vec):
                 new_fet += v
                 if i < limit:
@@ -5179,3 +5181,47 @@ def select_samples(df, n_samples=1000, kdays=5):
     final_selection = pd.concat(selected_rows).drop_duplicates()
     
     return final_selection
+
+    import numpy as np
+
+def auoc_func(confusion_matrix, gamma=1):
+    """
+    Calcule l'AUOC (Average Uniform Ordinal Classification Index)
+    à partir d'une matrice de confusion.
+
+    confusion_matrix : ndarray (K, K)
+        Matrice de confusion (valeurs entières, lignes = classes réelles, colonnes = prédictions).
+    gamma : int
+        Exposant pour la distance ordinale (1 recommandé dans l'article).
+
+    Retour :
+        AUOC (float)
+    """
+    cm = np.array(confusion_matrix, dtype=float)
+    K = cm.shape[0]
+
+    # Identifier les classes observées (Nr > 0)
+    Nr = cm.sum(axis=1)
+    observed_classes = np.where(Nr > 0)[0]
+    Kp = len(observed_classes)  # K' dans l'article
+
+    # Probabilités conditionnelles p(y_hat | y) pour classes observées
+    p_cond = np.zeros_like(cm)
+    for r in observed_classes:
+        p_cond[r, :] = cm[r, :] / Nr[r]
+
+    # Distance ordinale |r - c|^gamma
+    R, C = np.indices((K, K))
+    dist_gamma = np.abs(R - C) ** gamma
+
+    # Fonction UOC_β pour un β donné
+    def uoc_beta(beta):
+        benefit = p_cond[observed_classes, :].diagonal().sum() / Kp
+        penalty1 = ( (p_cond[observed_classes, :] * dist_gamma[observed_classes, :]).sum() / Kp ) ** (1/gamma)
+        penalty2 = (p_cond[observed_classes, :] * dist_gamma[observed_classes, :]).diagonal().sum() * (beta / Kp)
+        return min(1 - benefit + penalty1 + penalty2, 1.0)
+
+    # Intégration numérique de β de 0 à 1 pour obtenir AUOC
+    betas = np.linspace(0, 1, 101)  # discrétisation
+    values = [uoc_beta(b) for b in betas]
+    return np.trapz(values, betas)  # intégrale par la règle des trapèzes

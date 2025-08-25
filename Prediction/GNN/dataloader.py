@@ -2,7 +2,7 @@ from tkinter.filedialog import test
 import torch_geometric
 from zmq import device
 from GNN.pytorch_model import *
-from sklearn.metrics import cohen_kappa_score
+from sklearn.metrics import confusion_matrix
 import re
 
 #########################################################################################################
@@ -1204,7 +1204,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         metrics[f'accuracy'] = accuracy
         logger.info(f'accuracy = {accuracy}')
         
-        auoc = round(cohen_kappa_score(y_true.astype(int), y_pred.astype(int), weights='linear'), 3)
+        #auoc = round(cohen_kappa_score(y_true.astype(int), y_pred.astype(int), weights='linear'), 3)
+        conf_matrix = confusion_matrix(y_true, y_pred, normalize=None)
+        auoc = auoc_func(conf_matrix)
         metrics['auoc'] = auoc
         logger.info(f'auoc = {auoc}')
     
@@ -1456,10 +1458,16 @@ def test_sklearn_api_model(cfg,
         read_name = name
 
         model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
-
+        model_per_task = None
         if model_name.find('filter') != -1:
             filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
             read_name = f'{filter_name}-{model_type}_{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_{task_type}_{loss}'
+            if top_model == 'task':
+                model_per_task={'normal_predictions' : 4,
+                                'class_value_2_predictions' : 12,
+                                'class_value_3_predictions' : 15,
+                                'class_value_4_predictions' : 20
+                                }
         else:
             read_name = name
             hard_or_soft='soft'
@@ -1489,7 +1497,9 @@ def test_sklearn_api_model(cfg,
 
         features_selected = read_object('features.pkl', model_dir)
 
-        pred, pred_max, pred_min = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name, autoRegression, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model)
+        pred, pred_max, pred_min = graphScale.predict_model_api_sklearn(test_dataset_dept, features_selected, target_name,
+                                                                        autoRegression, hard_or_soft=hard_or_soft,
+                                                                        weights_average=weights_average, top_model=top_model, model_per_task=model_per_task)
         
         #pred = pred[y[:, weight_index > 0]]
         #y = pred[y[:, weight_index > 0]]
@@ -3141,7 +3151,8 @@ def wrapped_train_deep_learning_distallation(params):
                                 teacher_loss=teacher_loss
                                 )
     
-    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset, use_log=False)
+    wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset, use_log=False, 
+                                               epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.student_name}.pkl', wrapped_model.dir_log)
 

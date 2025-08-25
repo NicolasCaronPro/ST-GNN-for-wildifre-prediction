@@ -25,7 +25,8 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_protofederated,
     wrapped_train_deep_learning_1D_unique,
     wrapped_train_deep_learning_1D_alafederated,
-    wrapped_train_deep_learning_2D
+    wrapped_train_deep_learning_2D,
+    wrapped_train_deep_learning_distallation
 )
 from GNN.train import wrapped_train_sklearn_api_model, wrapped_train_sklearn_api_voting_model, define_voting_dl_models
 from GNN.config_parser import ConfigParser
@@ -236,7 +237,7 @@ def main():
     val_dataset['cluster-encoder'] = val_dataset['cluster_encoder']
     test_dataset['cluster-encoder'] = test_dataset['cluster_encoder']
     
-    prefix = f"full_{cfg.NbFeatures}_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+    prefix = f"full_all_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
 
     global_params = {
         "graphScale": graphScale,
@@ -511,6 +512,29 @@ def main():
                     else:
                         raise ValueError(f'{params["sub_training_mode"]} not implemented')
                     wrapped_train_deep_learning_1D_unique(params)
+                elif cfg.training_mode == 'distillation':
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "dir_output" : dir_output,
+                        "use_log" : m.get("use_log", True),
+                        "image_per_node" : m.get('image_per_node', None),
+                        "name_exp" : name_exp
+                    })
+
+                    params['teacher_name'] = m.get('teacher', None)
+                    params['teacher_loss'] = m.get('teacher_loss', None)
+                    params['alpha'] = m.get('alpha', None)
+                    params['temperature'] = m.get('temperature', None)
+                    params['distillation_training_mode'] = m.get('distillation_training_mode', None)
+                    assert params['teacher_name'] is not None
+                    wrapped_train_deep_learning_distallation(params)
+
                 else:
                     params.update(
                     {
@@ -526,7 +550,7 @@ def main():
                         "name_exp" : name_exp
                     }
                     )
-                    if m.get('type') in ['ResNet']:
+                    if m.get('type') in ['ResNet', 'ConvLSTM']:
                         params['torch_structure'] = 'Model_CNN'
                         features_name_2D, newShape2D = get_features_name_lists_2D(6, cfg.train_features)
                         features_selected_str_2D = get_features_selected_for_time_series_for_2D(features_selected_str, features_name_2D, [], 'all')
@@ -547,7 +571,11 @@ def main():
                 for nt in num_test:
                     test_name = f'filter-{m["type"]}-{config_weight}-{nt}_{info}'
                     dl_model_names.append(test_name)
-                    
+            
+            elif cfg.training_mode == 'distillation':
+                test_name = f"{m['type']}-{m.get('distillation_training_mode', None)}-{m.get('temperature', None)}-{m.get('alpha', None)}-{m.get('teacher', None)}_{info}"
+                dl_model_names.append(test_name)
+
             elif cfg.training_mode == 'federated':
                 test_name = f'federated-{m["type"]}-{m.get("federated_cluster", "department")}-{m.get("aggregation_method", "median")}_{info}'
                 dl_model_names.append(test_name)
@@ -563,6 +591,7 @@ def main():
             elif cfg.training_mode == 'splittraining':
                 test_name = f'SplitTraining-{m["type"]}-{m.get("federated_cluster", "department")}_{info}'
                 dl_model_names.append(test_name)
+            
 
     if cfg.doTest:
         host = "pc"
@@ -622,6 +651,7 @@ def main():
                 f'{cfg.sinisterEncoding}_{name_exp}',
                 cfg.KMEANS,
                 "temp",
+                distallation=cfg.training_mode == 'distillation'
             )
             if df_metrics is None:
                 df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()

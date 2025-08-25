@@ -796,7 +796,6 @@ class GraphStructure():
             burned = datacube['burned_area'].values
 
             binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned)
-            print(np.unique(binImageScale), np.unique(bin), np.unique(influence))
 
             # Ajouter chaque image comme DataArray dans le Dataset
             datacube['nbsinister'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
@@ -807,6 +806,9 @@ class GraphStructure():
             datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
             datacube = datacube.expand_dims(dim={'departement': [dept]})
+
+            #print(bin.shape)
+            #print(datacube)
 
             self.numCluster = np.shape(np.unique(self.ids))[0]
 
@@ -1945,6 +1947,12 @@ class GraphStructure():
             except:
                 print(f'{dept}')
                 continue
+            
+            print(dept)
+            print(train_dates)
+            print(datacube_target)
+            print(datacube_feature)
+
             datacube_target = datacube_target.sel(date=train_dates)
 
             target_values = datacube_target['nbsinister'].values[0]
@@ -1967,7 +1975,7 @@ class GraphStructure():
 
                     elif var in ['population', 'elevation']:
                         # Variable statique 2D
-                        values = datacube_feature[var].values[:, :, 0]
+                        values = datacube_feature[var].values
                         vec_node.append(np.nanmean(values[mask_node]))
                         
                     elif var == 'sentinel':
@@ -1990,7 +1998,7 @@ class GraphStructure():
 
                     elif var == 'foret':
                         for i, var2 in enumerate(foret_variables):
-                            values = datacube_feature[foretint2str[var2]].values[:, :, 0]
+                            values = datacube_feature[foretint2str[var2]].values
                             vec_node.append(np.nanmean(values[mask_node]))
 
                     elif var == 'air':
@@ -2000,17 +2008,17 @@ class GraphStructure():
 
                     elif var == 'osmnx':
                         for i, var2 in enumerate(osmnx_variables):
-                            values = datacube_feature[var2].values[:, :, 0]
+                            values = datacube_feature[var2].values
                             vec_node.append(np.nanmean(values[mask_node]))
                     
                     elif var == 'bdroute':
                         for i, var2 in enumerate(bdroute_variables):
-                            values = datacube_feature[var2].values[:, :, 0]
+                            values = datacube_feature[var2].values
                             vec_node.append(np.nanmean(values[mask_node]))
 
                     elif var == 'corine':
                         for i, var2 in enumerate(corine_variable):
-                            values = datacube_feature[var2].values[:, :, 0]
+                            values = datacube_feature[var2].values
                             vec_node.append(np.nanmean(values[mask_node]))
                 
                 target_node = np.nansum(target_values[mask_node], axis=0)
@@ -3254,7 +3262,9 @@ class GraphStructure():
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,
                                   autoRegression : bool, quantile=False, hard_or_soft='soft', weights_average=True,
-                                  top_model='all') -> np.array:
+                                  top_model='all',
+                                  model_per_task=None,
+                                  generalized_departement=None) -> np.array:
         
         isBin = 'binary' in target_name
         assert self.model is not None
@@ -3292,9 +3302,19 @@ class GraphStructure():
                         id_col = (weights_average, X[weights_average])
                     else:
                         id_col = (None, None)
-                
-                    res[:, 0] = self.model.predict(X[features], hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model, id_col=id_col).reshape(-1)
-                    #res[:, 1] = self.model.predict(X[features], hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model, id_col=id_col).reshape(-1)
+                    
+                    if model_per_task is not None:
+                        res[:, 0] = self.model.predict_with_tasks(
+                            X,
+                            hard_or_soft=hard_or_soft,
+                            weights_average=weights_average,
+                            model_per_task=model_per_task,
+                            generalized_departement=generalized_departement,
+                            id_col=id_col,
+                        )
+                    else:                
+                        res[:, 0] = self.model.predict(X[features], hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model, id_col=id_col).reshape(-1)
+
                 elif isinstance(self.model, ModelVotingPytorchAndSklearn):
                     res[:, 0] = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average, top_model=top_model).reshape(-1)
                     #res[:, 1] = self.model.predict(X, hard_or_soft=hard_or_soft, weights_average=weights_average).reshape(-1)

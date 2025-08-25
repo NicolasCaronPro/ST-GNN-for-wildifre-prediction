@@ -1202,49 +1202,49 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
 
         for id in uniques_ids:
             if 'population' in features:
-                save_values(datacube_feature['population'].values[:, :, 0], 'population', id, areas == id)
+                save_values(datacube_feature['population'].values, 'population', id, areas == id)
 
             if 'elevation' in features:
-                save_values(datacube_feature['elevation'].values[:, :, 0], 'elevation', id, areas == id)
+                save_values(datacube_feature['elevation'].values, 'elevation', id, areas == id)
 
             if 'highway' in features:
                 print(features)
                 for var in osmnx_variables:
-                    save_values(datacube_feature[osmnxint2str[var]].values[0, :, :, 0], var, id, areas == id)
+                    save_values(datacube_feature[osmnxint2str[var]].values, var, id, areas == id)
                     
             if 'foret' in features:
                 for var in foret_variables:
-                    save_values(datacube_feature[foretint2str[var]].values[:, :, 0], foretint2str[var], id, areas == id)
+                    save_values(datacube_feature[foretint2str[var]].values, foretint2str[var], id, areas == id)
 
             if 'cosia' in features:
                 for var in cosia_variables:
-                    save_values(datacube_feature[var].values[:, :, 0], var, id, areas == id)
+                    save_values(datacube_feature[var].values, var, id, areas == id)
 
             if 'corine' in features:
                 for var in corine_variable:
-                    save_values(datacube_feature[var].values[:, :, 0], var, id, areas == id)
+                    save_values(datacube_feature[var].values, var, id, areas == id)
 
             if 'bdroute' in features:
                 for var in bdroute_variables:
-                    save_values(datacube_feature[var].values[:, :, 0], var, id, areas == id)
+                    save_values(datacube_feature[var].values, var, id, areas == id)
 
             if 'foret_encoder' in features:
-                save_values_with_encoding(datacube_feature['forest_landcover'].values[:, :, 0], 'foret_encoder', id, areas == id, encoder_foret)
+                save_values_with_encoding(datacube_feature['forest_landcover'].values, 'foret_encoder', id, areas == id, encoder_foret)
 
             if 'highway_encoder' in features:
-                save_values_with_encoding(datacube_feature['highway_landcover'].values[:, :, 0], 'highway_encoder', id, areas == id, encoder_osmnx)
+                save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_encoder', id, areas == id, encoder_osmnx)
 
             if 'argile_encoder' in features:
-                save_values_with_encoding(datacube_feature['argile'].values[:, :, 0], 'argile_encoder', id, areas == id, encoder_argile)
+                save_values_with_encoding(datacube_feature['argile'].values, 'argile_encoder', id, areas == id, encoder_argile)
 
             if 'cosia_encoder' in features:
-                save_values_with_encoding(datacube_feature['cosia_landcover'].values[:, :, 0], 'cosia_encoder', id, areas == id, encoder_cosia)
+                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder', id, areas == id, encoder_cosia)
 
             if 'corine_encoder' in features:
-                save_values_with_encoding(datacube_feature['corine_landcover'].values[:, :, 0], 'corine_encoder', id, areas == id, encoder_corine)
+                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder', id, areas == id, encoder_corine)
 
             if 'bdroute_encoder' in features:
-                save_values_with_encoding(datacube_feature['route_landcover'].values[:, :, 0], 'bdroute_encoder', id, areas == id, encoder_bdroute)
+                save_values_with_encoding(datacube_feature['route_landcover'].values, 'bdroute_encoder', id, areas == id, encoder_bdroute)
 
             if 'id_encoder' in features:
                 save_value_with_encoding(areas, 'id_encoder', id, areas == id, encoder_id)

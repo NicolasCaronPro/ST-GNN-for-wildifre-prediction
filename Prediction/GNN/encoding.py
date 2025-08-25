@@ -37,7 +37,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
         temporalValues.append(np.nansum(tar.reshape(-1, tar.shape[2]), axis=0))
         spatialValues += list(np.nansum(tar, axis=2)[~np.isnan(tar[:,:,0])].reshape(-1))
 
-        fore = datacube_feature['forest_landcover'].values[:, :, 0]
+        fore = datacube_feature['forest_landcover'].values
         if fore is not None:
             fore = resize_no_dim(fore, tar.shape[0], tar.shape[1])
             foret += list(fore[~np.isnan(tar[:,:,0])])
@@ -74,7 +74,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             cosia_image = resize_no_dim(cosia_image, tar.shape[0], tar.shape[1])
             cosia += list(cosia_image[~np.isnan(tar[:, :, 0])])"""
         
-        corine_image = datacube_feature['corine_landcover'].values[:, :, 0]
+        corine_image = datacube_feature['corine_landcover'].values
         if corine_image is not None:
             corine_image = resize_no_dim(corine_image, tar.shape[0], tar.shape[1])
             #plt.figure(figsize=(15,5))
@@ -82,7 +82,7 @@ def encode_from_xarray(path_to_target, trainDates, expe, train_departements, dir
             #plt.savefig(f'{dep}_test_corine.png')
             corine += list(corine_image[~np.isnan(tar[:, :, 0])])
         
-        route_image = datacube_feature['route_landcover'].values[:, :, 0]
+        route_image = datacube_feature['route_landcover'].values
         if route_image is not None:
             route_image = resize_no_dim(route_image, tar.shape[0], tar.shape[1])
             route += list(route_image[~np.isnan(tar[:, :, 0])])
