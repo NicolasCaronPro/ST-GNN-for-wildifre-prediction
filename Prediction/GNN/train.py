@@ -5,12 +5,11 @@ from torch import Value
 from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
-from dlordinal.losses import *
 from torch.nn import KLDivLoss
 
 ############################################## Some tools ###############################################
 
-def create_weight_binary(df_train, df_val, df_test, use_weight):
+def create_weight_binary(df_train, df_val, df_test, weightedcrossentropy):
     """if not use_weight:
         df_train['weight'] = 1
         df_val['weight'] = 1
@@ -19,7 +18,7 @@ def create_weight_binary(df_train, df_val, df_test, use_weight):
     df_train['weight_binary'] = np.where(df_train['nbsinister'] == 0, 1,  df_train['nbsinister'])
     df_val['weight_binary'] = np.where(df_val['nbsinister'] == 0, 1,  df_val['nbsinister'])
     df_test['weight_binary'] = np.where(df_test['nbsinister'] == 0, 1,  df_test['nbsinister'])"""
-
+    
     df_train['binary'] = df_train['nbsinister'] > 0
     df_val['binary'] = df_val['nbsinister'] > 0
     df_test['binary'] = df_test['nbsinister'] > 0
@@ -539,7 +538,10 @@ def train_sklearn_api_model(params):
     nbfeatures = params['nbfeatures']
     n_run = params['run']
 
-    df_train, df_val, df_test = create_weight_binary(df_train, df_val, df_test, use_weight=True)
+    if task_type == 'binary':
+        df_train[target] = df_train[target] > 0
+        df_val[target] = df_val[target] > 0
+        df_test[target] = df_test[target] > 0
 
     weight_col = 'weight'
 
@@ -1338,11 +1340,8 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
     
     #features = features95
 
-    if task_type == 'classification' or task_type == 'ordinal-classification':
-        train_dataset['class'] = train_dataset[final_target]
-    elif task_type == 'binary':
-        train_dataset['binary'] = train_dataset[final_target]
-        
+    train_dataset['class'] = train_dataset[final_target]
+
     df_with_weith = add_weigh_column(train_dataset, [True for i in range(train_dataset.shape[0])], weight_type, graph_method)
 
     if 'weight' in list(train_dataset.columns):
@@ -2291,6 +2290,7 @@ def train(params):
 # Fonction pour sélectionner la fonction de perte via son nom
 def get_loss_function(loss_name, **loss_params):
     # Dictionnaire pour associer le nom de la fonction de perte à sa classe correspondante
+
     if 'ID' in loss_name:
         vec = loss_name.split('-')
         loss_name = vec[0]
@@ -2306,35 +2306,93 @@ def get_loss_function(loss_name, **loss_params):
         criterion = get_loss_function(loss_name, **loss_params)
         return LossPerId(criterion=criterion, id=id)
     
-    if 'area' in loss_name or 'area-global' in loss_name:
+    if 'area' in loss_name or 'area-global' in loss_name or 'distillation' in loss_name:
         vec = loss_name.split('-')
         loss_name = vec[0]
 
-    loss_dict = {
-        "poisson": PoissonLoss(),
-        "rmsle": RMSLELoss(),
-        "rmse": RMSELoss(),
-        "mse": MSELoss(),
-        "huber": HuberLoss(),
-        "logcosh": LogCoshLoss(),
-        "tukeybiweight": TukeyBiweightLoss(),
-        "exponential": ExponentialLoss(),
-        'ordinal-dice' : OrdinalDiceLoss(),
-        'dice' : DiceLoss2(),
-        "weightedcrossentropy": WeightedCrossEntropyLoss(**loss_params),
-        "weightedcrossentropy-2": WeightedCrossEntropyLoss(**loss_params),
-        'kappa' : WKLoss(**loss_params),
-        'cdw' : CDWCELoss(**loss_params),
-        'mcewk' : MCEAndWKLoss(**loss_params),
-        'kldivloss' : KLDivLoss(reduction='batchmean'),
-        'bceloss': BCELoss(**loss_params),
-        'eGPD' : EGPDNLLLoss(**loss_params),
-    }
-    loss_name = loss_name.lower()
-    if loss_name in loss_dict:
-        return loss_dict[loss_name]
-    else:
-        raise ValueError(f"Loss function '{loss_name}' not found in loss_dict.")
+    if '-' in loss_name:
+        import re
+        import ast
+        parts = loss_name.split('-')
+        base_name = parts[0]
+
+        for token in parts[1:]:
+            m = re.fullmatch(r'([A-Za-z]\w*)\{(.+)\}', token)
+            print(m)
+            if not m:
+                continue
+            key, raw = m.groups()
+            raw = raw.strip()
+
+            # Conversion souple vers le bon type (int/float/bool/str/liste, etc.)
+            try:
+                val = ast.literal_eval(raw)
+            except Exception:
+                # Fallback simple si pas un littéral Python valide
+                try:
+                    val = int(raw)
+                except ValueError:
+                    try:
+                        val = float(raw)
+                    except ValueError:
+                        val = raw  # laisse en chaîne
+
+            if key == 'id':
+                if val == 'departement':
+                    loss_params[key] = departement_index
+                if val == 'cluster-encoder':
+                    loss_params[key] = cluster_ncoder_index
+                elif val == 'node':
+                    loss_params[key] = graph_id_index
+                elif val == 'scale':
+                    loss_params[key] = scale_index
+                elif val == 'saison':
+                    loss_params[key] = saison_index
+                elif val == 'med':
+                    loss_params[key] = med_index
+                else:
+                    raise ValueError(f'Unknown value of id {key}')
+            else:
+                loss_params[key] = val
+
+        loss_name = base_name
+
+    #logger.info(f'Loss_params : {loss_params}')
+    loss_factories = {
+            "poisson":                     lambda: PoissonLoss(),
+            "rmsle":                       lambda: RMSLELoss(),
+            "rmse":                        lambda: RMSELoss(),
+            "mse":                         lambda: MSELoss(),
+            "huber":                       lambda: HuberLoss(),
+            "logcosh":                     lambda: LogCoshLoss(),
+            "tukeybiweight":               lambda: TukeyBiweightLoss(),
+            "exponential":                 lambda: ExponentialLoss(),
+            "ordidice":                    lambda: OrdinalDiceLoss(),
+            "dice":                        lambda: DiceLoss2(),
+            "weightedcrossentropy":        lambda: WeightedCrossEntropyLoss(**loss_params),
+            "weightedcrossentropy-2":      lambda: WeightedCrossEntropyLoss(**loss_params),
+            "cdw":                         lambda: CDWCELoss(**loss_params),
+            "mcewk":                       lambda: MCEAndWKLoss(**loss_params),
+            "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
+            "bceloss":                     lambda: BCELoss(**loss_params),
+            "TailCDF":                     lambda: IntervalCELoss(**loss_params),
+            "bulkTailCDF":                  lambda: BulkTailMixtureIntervalCELoss(**loss_params),
+            "bulkTailCDFCluster":           lambda: BulkTailMixtureIntervalCELossClusterIDs(**loss_params),
+            "bulktail":                    lambda: BulkTailNLLLoss(),
+            "egpdCDFCluster":              lambda: EGPDIntervalCEClusterIDs(**loss_params),
+            "wkloss":                      lambda: WKLoss(**loss_params),
+            "dwk":                         lambda: DiceAndWKLoss(**loss_params),
+            "odwk":                        lambda: OrdinalDiceLossAndWKLoss(**loss_params),
+            "fdwk":                        lambda: ForegroundDiceLossAndWKLoss(**loss_params),
+            "fdice":                       lambda: ForegroundDiceLoss(),
+            "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
+        }
+
+    try:
+        return loss_factories[loss_name]()   # instanciation ici seulement
+    except KeyError:
+        available = ", ".join(sorted(loss_factories.keys()))
+        raise ValueError(f"Loss function '{loss_name}' not found. Available: {available}")
 
 #############################  PCA ###################################
 
@@ -2729,6 +2787,18 @@ def define_voting_dl_models(mt, kdays, out_channels, run, loss='weightedcrossent
     # Modèles m4 avec différentes post-processings
     for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
+            if aggregation == 'gaussian' and (nb_clusters == '3' or nb_clusters == '5'):
+                continue
+            elif aggregation == 'cubic' and nb_clusters == '3':
+                continue
+            elif aggregation == 'cubic' and nb_clusters == '5':
+                continue
+            elif aggregation == 'circular' and (nb_clusters == '1' or nb_clusters == '3' or nb_clusters == '5'):
+                continue
+            elif aggregation == 'quartic' and (nb_clusters == '3' or nb_clusters == '5'):
+                continue
+            elif aggregation == 'mean' and (nb_clusters == '1' or nb_clusters == '3' or nb_clusters == '5'):
+                continue
             model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, loss, 'classification')
             models.append(model)
 

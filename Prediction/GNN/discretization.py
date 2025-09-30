@@ -1,6 +1,6 @@
 from GNN.statistical_model import *
 from scipy.ndimage import gaussian_filter1d
-
+from sklearn.mixture import GaussianMixture
 
 class KMeansRisk:
     """
@@ -24,7 +24,7 @@ class KMeansRisk:
         if np.unique(X).shape[0] < self.n_clusters:
             self.zeros = True
             return np.zeros(X.shape)
-        
+
         self.zeros = False
         self.model = KMeans(n_clusters=self.n_clusters, random_state=42, n_init=10)
         self.model.fit(np.unique(X).reshape(-1,1))
@@ -75,6 +75,10 @@ class KMeansRiskZerosHandle:
         if np.unique(X_val).shape[0] == 0:
             self.model = None
             return
+
+        if np.unique(X_val).shape[0] < self.n_clusters:
+            self.n_clusters = np.unique(X_val).shape[0]
+
         self.model = KMeans(n_clusters=min(self.n_clusters, np.unique(X_val).shape[0]), random_state=42, n_init=10)
         self.model.fit(X_val)
         centroids = self.model.cluster_centers_
@@ -104,6 +108,73 @@ class KMeansRiskZerosHandle:
             return res.reshape(-1)
         kmeans_labels = self.model.predict(X_val)
         res[X > 0] = np.vectorize(self.label_map.get)(kmeans_labels)
+        return res.reshape(-1)
+
+class GMMRiskZerosHandle:
+    """
+    Classe utilisant Gaussian Mixture Model (GMM) pour identifier les classes de risque.
+    """
+
+    def __init__(self, n_clusters):
+        """
+        :param n_clusters: Nombre total de classes, incluant la classe zéro.
+        """
+        self.n_clusters = n_clusters - 1  # exclut les zéros
+        self.name = f'GMMRisk_{n_clusters}'
+        self.label_map = None
+        self.model = None
+
+    def fit(self, X, y=None):
+        """
+        Ajuste le modèle GMM aux données.
+
+        :param X: Données à ajuster (array-like).
+        """
+        X_val = X[X > 0].reshape(-1, 1)
+        if np.unique(X_val).shape[0] == 0:
+            self.model = None
+            return
+        
+        if X_val.shape[0] == 1:
+            self.model = 'oneSample'
+            return
+
+        if np.unique(X_val).shape[0] < self.n_clusters:
+            self.n_clusters = np.unique(X_val).shape[0]
+            
+        n_comp = min(self.n_clusters, np.unique(X_val).shape[0])
+        self.model = GaussianMixture(n_components=n_comp, random_state=42, n_init=5)
+        self.model.fit(X_val)
+
+        # On ordonne les composantes par la moyenne des gaussiennes
+        means = self.model.means_.flatten()
+        sorted_indices = np.argsort(means)
+
+        # Mapping des labels GMM vers des classes ordinales
+        self.label_map = {label: i + 1 for i, label in enumerate(sorted_indices)}
+
+    def predict(self, X):
+        """
+        Prédit les classes en utilisant le modèle GMM.
+
+        :param X: Données à classer.
+        :return: Classes prédites (numpy array).
+        """
+        if self.model == 'oneSample':
+            res = np.zeros(X.shape)
+            res[X > 0] = 1
+            return res
+
+        res = np.zeros(X.shape)
+        if self.model is None:
+            return res.reshape(-1)
+
+        X_val = X[X > 0].reshape(-1, 1)
+        if X_val.shape[0] == 0:
+            return res.reshape(-1)
+
+        gmm_labels = self.model.predict(X_val)
+        res[X > 0] = np.vectorize(self.label_map.get)(gmm_labels)
         return res.reshape(-1)
 
 class ThresholdRisk:
@@ -208,7 +279,7 @@ class KSRisk:
         return new_pred
 
 class PreprocessorConv:
-    def __init__(self, graph, kernel='Specialized', conv_type='laplace+mean', id_col=None, persistence=False,):
+    def __init__(self, seq, kernel='Specialized', conv_type='laplace+mean', id_col=None, persistence=False,):
         """
         Initialize the PreprocessorConv.
 
@@ -218,7 +289,7 @@ class PreprocessorConv:
         """
         assert conv_type in ['laplace', 'laplace+median', 'mean', 'laplace+mean', 'sum', 'max', 'median', 'gradient', 'gaussian', 'cubic', 'quartic', 'circular'], \
             "conv_type must be 'laplace', 'mean', 'laplace+mean', 'sum', 'gradient' or 'max'."
-        self.graph = graph
+        self.seq = seq
         self.conv_type = conv_type
         self.id_col = id_col if id_col is not None else ['id']
         self.kernel = kernel
@@ -471,7 +542,7 @@ class PreprocessorConv:
                     month = unique_id[month_idx]
                     season_name = self._get_season_name(month)
                     #print(self.graph.sequences_month)
-                    kernel_size = int(self.graph.sequences_month[season_name][unique_id[1]]['mean_size'])
+                    kernel_size = int(self.seq[season_name][unique_id[1]]['mean_size'])
                 else:
                     raise ValueError(
                         "Error: 'month_non_encoder' is not specified in id_col. Please include it in id_col to proceed."
@@ -594,8 +665,13 @@ class ScalerClassRisk:
         :param ids: Array of IDs corresponding to each value in X.
         :param ids_preprocessor: IDs to use for preprocessing (if preprocessor is not None).
         """
+
+        X = np.asarray(X)
+        sinisters = np.asarray(sinisters)
+        ids = np.asarray(ids)
+
         self.is_fit = True
-        logger.info(f'########################################## {self.name} ##########################################')
+        #logger.info(f'########################################## {self.name} ##########################################')
 
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
@@ -670,7 +746,6 @@ class ScalerClassRisk:
                     sinisters_mean = np.array(sinisters_mean)
                     sinisters_min = np.array(sinisters_min)
                     sinisters_max = np.array(sinisters_max)
-
             self.models_by_id[unique_id] = {
                 'scaler': scaler,
                 'class_risk': class_risk,
@@ -696,9 +771,9 @@ class ScalerClassRisk:
         plt.savefig(output_path)
         plt.close()
         
-        if self.class_risk is not None:
-            for cl in np.unique(pred):
-                logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
+        #if self.class_risk is not None:
+        #    for cl in np.unique(pred):
+        #        logger.info(f'{cl} -> {pred[pred == cl].shape[0]}')
 
     def predict(self, X, sinisters, ids, ids_preprocessor=None):
         """
@@ -709,6 +784,10 @@ class ScalerClassRisk:
         :param ids_preprocessor: IDs to use for preprocessing (if preprocessor is not None).
         :return: Array of predicted class labels.
         """
+        X = np.asarray(X)
+        sinisters = np.asarray(sinisters)
+        ids = np.asarray(ids)
+        
         if len(X.shape) == 1:
             X = X.reshape(-1, 1)
 
@@ -830,146 +909,7 @@ class ScalerClassRisk:
         else:
             return self.fit_predict(X, sinisters, ids, ids_preprocessor)
 
-# Fonction pour calculer la somme dans une fenêtre de rolling, incluant les fenêtres inversées
-def calculate_rolling_sum(dataset, column, shifts, group_col, func):
-    """
-    Calcule la somme rolling sur une fenêtre donnée pour chaque groupe.
-    Combine les fenêtres normales et inversées.
-
-    :param dataset: Le DataFrame Pandas.
-    :param column: Colonne sur laquelle appliquer le rolling.
-    :param shifts: Taille de la fenêtre rolling.
-    :param group_col: Colonne pour le groupby.
-    :param func: Fonction à appliquer sur les fenêtres.
-    :return: Colonne calculée avec la somme rolling bidirectionnelle.
-    """
-    if shifts == 0:
-        return dataset[column].values
-    
-    dataset.reset_index(drop=True)
-    
-    # Rolling forward
-    forward_rolling = dataset.groupby(group_col)[column].rolling(window=shifts).apply(func).values
-    forward_rolling[np.isnan(forward_rolling)] = 0
-    
-    # Rolling backward (inversé)
-    backward_rolling = (
-        dataset.iloc[::-1]
-        .groupby(group_col)[column]
-        .rolling(window=shifts, min_periods=1)
-        .apply(func, raw=True)
-        .iloc[::-1]  # Remettre dans l'ordre original
-    ).values
-    backward_rolling[np.isnan(backward_rolling)] = 0
-
-    # Somme des deux fenêtres
-    return forward_rolling + backward_rolling - dataset[column].values
-    #return forward_rolling
-
-def calculate_rolling_sum_per_col_id(dataset, column, shifts, group_col, func):
-    """
-    Calcule la somme rolling sur une fenêtre donnée pour chaque col_id sans utiliser des boucles sur les indices internes.
-    Combine les fenêtres normales et inversées, tout en utilisant rolling.
-
-    :param dataset: Le DataFrame Pandas.
-    :param column: Colonne sur laquelle appliquer le rolling.
-    :param shifts: Taille de la fenêtre rolling.
-    :param group_col: Colonne identifiant les groupes (col_id).
-    :param func: Fonction à appliquer sur les fenêtres.
-    :return: Numpy array contenant les sommes rolling bidirectionnelles pour chaque col_id.
-    """
-    if shifts == 0:
-        return dataset[column].values
-
-    # Initialiser un tableau pour stocker les résultats
-    result = np.zeros(len(dataset))
-
-    # Obtenir les valeurs uniques de col_id
-    unique_col_ids = dataset[group_col].unique()
-
-    # Parcourir chaque groupe col_id
-    for col_id in unique_col_ids:
-        # Filtrer le groupe correspondant
-        group_data = dataset[dataset[group_col] == col_id]
-        group_data.sort_values('date', inplace=True)
-
-        # Calculer rolling forward
-        forward_rolling = group_data[column].rolling(window=shifts, min_periods=1).apply(func, raw=True).values
-
-        # Calculer rolling backward (fenêtres inversées)
-        backward_rolling = (
-            group_data[column][::-1]
-            .rolling(window=shifts, min_periods=1)
-            .apply(func, raw=True)[::-1]
-            .values
-        )
-
-        # Combine forward et backward
-        group_result = forward_rolling + backward_rolling - group_data[column].values
-
-        # Affecter le résultat au tableau final
-        result[group_data.index] = group_result
-
-    return result
-
-def class_window_sum(dataset, group_col, column, shifts):
-    # Initialize a column to store the rolling aggregation
-    column_name = f'nbsinister_sum_{shifts}'
-    dataset[column_name] = 0.0
-
-    # Case when window_size is 1
-    if shifts == 0:
-        dataset[column_name] = dataset[column].values
-        return dataset
-    else:
-        # For each unique graph_id
-        for graph_id in dataset[group_col].unique():
-            # Filter data for the current graph_id
-            df_graph = dataset[dataset[group_col] == graph_id]
-
-            # Iterate through each row in df_graph
-            for idx, row in df_graph.iterrows():
-                # Define the window bounds
-                date_min = row['date'] - shifts
-                date_max = row['date'] + shifts
-                
-                # Filter rows within the date window
-                window_df = df_graph[(df_graph['date'] >= date_min) & (df_graph['date'] <= date_max)]
-                
-                # Apply the aggregation function
-                dataset.at[idx, column_name] = window_df[column].sum()
-    return dataset
-
-def class_window_max(dataset, group_col, column, shifts):
-    # Initialize a column to store the rolling aggregation
-    column_name = f'nbsinister_max_{shifts}'
-    dataset[column_name] = 0.0
-
-    # Case when window_size is 1
-    if shifts == 0:
-        dataset[column_name] = dataset[column].values
-        return dataset
-    else:
-        # For each unique graph_id
-        for graph_id in dataset[group_col].unique():
-            # Filter data for the current graph_id
-            df_graph = dataset[dataset[group_col] == graph_id]
-
-            # Iterate through each row in df_graph
-            for idx, row in df_graph.iterrows():
-                # Define the window bounds
-                date_min = row['date'] - shifts
-                date_max = row['date'] + shifts
-                
-                # Filter rows within the date window
-                window_df = df_graph[(df_graph['date'] >= date_min) & (df_graph['date'] <= date_max)]
-                
-                # Apply the aggregation function
-                dataset.at[idx, column_name] = window_df[column].max()
-    
-    return dataset
-
-def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph):
+def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph, n_clusters=5):
 
     graph_method = graph.graph_method
 
@@ -990,534 +930,217 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     res = {}
 
-    ####################################################################################
+    evaluate = {'name' : [], 'spearman' : []}
 
-    """obj1 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=MinMaxScaler(), class_risk=ThresholdRisk([0.05, 0.15, 0.30, 0.60, 1.0]))
-
-    obj1.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(val_dataset_['nbsinister'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_['nbsinister-MinMax-thresholds-5-Class-Dept'] = obj1.predict(test_dataset_['nbsinister'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
+    classifier = ['kmeans', 'gm']
+    class_risk_dict = {'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
     
-    res[obj1.name] = obj1
+    group_col = ['Cluster', 'Season', 'Dept']
+    group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
 
-    new_cols.append('nbsinister-MinMax-thresholds-5-Class-Dept')"""
+    targets = ['nbsinister', 'burned_area']
 
-    ####################################################################################
+    for cls, col, tar in itertools.product(classifier, group_col, targets):
+        class_risk = class_risk_dict[cls]
+        col_name = group_col_dict[col]
 
-    """obj11 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=RobustScaler(), class_risk=QuantileRisk())
+        obj2 = ScalerClassRisk(col_id=col_name, dir_output = dir_post_process, target=tar, scaler=None, class_risk=class_risk)
 
-    obj11.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+        obj2.fit(train_dataset_[tar].values, train_dataset_[tar].values, train_dataset_[col_name].values)
 
-    train_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(val_dataset_['nbsinister'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_['nbsinister-Robust-Quantile-5-Class-Dept'] = obj11.predict(test_dataset_['nbsinister'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-    
-    res[obj11.name] = obj11
+        train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(train_dataset_[tar].values,  train_dataset_[tar].values, train_dataset_[col_name].values)
+        val_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(val_dataset_[tar].values,  val_dataset_[tar].values, val_dataset_[col_name].values)
+        test_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(test_dataset_[tar].values,  test_dataset_[tar].values, test_dataset_[col_name].values)
+        
+        res[obj2.name] = obj2
 
-    new_cols.append('nbsinister-Robust-Quantile-5-Class-Dept')"""
+        new_cols.append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
 
-    ####################################################################################
-    
-    obj2 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='nbsinister', scaler=None, class_risk=KMeansRiskZerosHandle(5))
+        ######################################################################################
 
-    obj2.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['nbsinister'].values,  train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(val_dataset_['nbsinister'].values,  val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['nbsinister'].values,  test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-    
-    res[obj2.name] = obj2
-
-    new_cols.append('nbsinister-kmeans-5-Class-Dept')
-
-    ######################################################################################
-
-    obj2 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='burned_area', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    obj2.fit(train_dataset_['burned_area'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['burned_area'].values,  train_dataset_['burned_area'].values, train_dataset_['departement'].values)
-    val_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(val_dataset_['burned_area'].values,  val_dataset_['burned_area'].values, val_dataset_['departement'].values)
-    test_dataset_['burnedarea-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['burned_area'].values,  test_dataset_['burned_area'].values, test_dataset_['departement'].values)
-    
-    res[obj2.name] = obj2
-
-    new_cols.append('burnedarea-kmeans-5-Class-Dept')
-
-    ###################################################################################
-
-    """obj4 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk', scaler=None, class_risk=KMeansRisk(5))
-
-    obj4.fit(train_dataset_['risk'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(train_dataset_['risk'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(val_dataset_['risk'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_['risk-kmeans-5-Class-Dept'] = obj4.predict(test_dataset_['risk'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-    
-    res[obj4.name] = obj4
-
-    new_cols.append('risk-kmeans-5-Class-Dept')"""
-
-    ##################################################################################
-
-    """obj3 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target='risk-nbsinister', scaler=RobustScaler(), class_risk=KMeansRisk(5))
-
-    obj3.fit(train_dataset_[['risk', 'nbsinister']].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(train_dataset_[['risk', 'nbsinister']].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(val_dataset_[['risk', 'nbsinister']].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_['risk-nbsinister-Robust-kmeans-5-Class-Dept'] = obj3.predict(test_dataset_[['risk', 'nbsinister']].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-
-    res[obj3.name] = obj3
-
-    new_cols.append('risk-nbsinister-Robust-kmeans-5-Class-Dept')"""
-
-    #######################################################################################
-    
-    """shifts = 3
-
-    obj14 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_.copy(deep=True),
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_.copy(deep=True),
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_.copy(deep=True),
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj14.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj14.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-
-    res[obj14.name] = obj14
-
-    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')"""
-
-    #######################################################################################
-    """shifts = 2
-    
-    obj15 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_.copy(deep=True),
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_.copy(deep=True),
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_.copy(deep=True),
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj15.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj15.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-
-    res[obj15.name] = obj15
-
-    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')"""
-
-    #######################################################################################
-    """shifts = 1
-    
-    obj16 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_.copy(deep=True),
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_.copy(deep=True),
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_.copy(deep=True),
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj16.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(train_dataset_[f'nbsinister_max_{shifts}'].values,  train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(val_dataset_[f'nbsinister_max_{shifts}'].values,  val_dataset_['nbsinister'].values,val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj16.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-
-    res[obj16.name] = obj16
-
-    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')"""
-
-    #######################################################################################
-    """shifts = 0
-    
-    obj17 = ScalerClassRisk(col_id='departement', dir_output = dir_post_process, target=f'nbsinister-max-{shifts}+{shifts}', scaler=None, class_risk=KMeansRiskZerosHandle(5))
-
-    train_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    val_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-    test_dataset_.sort_values(by=['graph_id', 'date'], inplace=True)
-
-    # Application sur les jeux de données
-    train_dataset_ = class_window_max(
-        dataset=train_dataset_.copy(deep=True),
-        column='nbsinister',
-        shifts=shifts,
-        group_col='graph_id',
-    )
-
-    val_dataset_ = class_window_max(
-            dataset=val_dataset_.copy(deep=True),
-            column='nbsinister',
-            shifts=shifts,
-            group_col='graph_id',
-        )
-    
-    test_dataset_ = class_window_max(
-                dataset=test_dataset_.copy(deep=True),
-                column='nbsinister',
-                shifts=shifts,
-                group_col='graph_id',
-            )
-
-    obj17.fit(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-
-    train_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(train_dataset_[f'nbsinister_max_{shifts}'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    val_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(val_dataset_[f'nbsinister_max_{shifts}'].values, val_dataset_['nbsinister'].values, val_dataset_['departement'].values)
-    test_dataset_[f'nbsinister-max-{shifts}-kmeans-5-Class-Dept'] = obj17.predict(test_dataset_[f'nbsinister_max_{shifts}'].values, test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
-
-    res[obj17.name] = obj17
-
-    new_cols.append(f'nbsinister-max-{shifts}-kmeans-5-Class-Dept')"""
+        spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        print(np.unique(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values))
+        #ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
+        evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
+        evaluate['spearman'].append(spearm)
+        #evaluate['ss'].append(ss)
+        
+    df_evaluate = pd.DataFrame.from_dict(evaluate)
+    df_evaluate.sort_values(by='spearman', inplace=True, ascending=False)
+    logger.info(df_evaluate.head())
 
     ###############################################################################
 
-    graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name)
-    print(train_dataset.id.unique())
-    print(train_dataset.departement.unique())
-    print(graph.compute_sequence_month)
+    departement_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'departement')
+    cluster_sequence_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'cluster-encoder')
+
+    sequences = {'Dept' : departement_sequence, 'Cluster' : cluster_sequence_sequence}
 
     conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
-    #conv_types = ['cubic']
 
     kernels = ['Specialized', 1, 3, 5]
     
-    n_clusters = 5
-
-    """for conv_type in conv_types:
-        for kernel in kernels:
-            logger.info(f"Testing with convolution type: {conv_type}")
-
-            # Sélection du préprocesseur
-            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'])
-
-            # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters) if conv_type in ['laplace', 'mean', 'laplace+mean', 'laplace+median'] else KMeansRiskZerosHandle(n_clusters)
-            obj = ScalerClassRisk(
-                col_id='departement',
-                dir_output=dir_post_process,
-                target='nbsinister',
-                scaler=None,
-                class_risk=class_risk,
-                preprocessor=preprocessor
-            )
-
-            # Application du fit et prédictions
-            obj.fit(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            val_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            test_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-
-            train_dataset_[train_col] = obj.predict(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            val_dataset_[val_col] = obj.predict(
-                val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-            test_dataset_[test_col] = obj.predict(
-                test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            # Stockage des résultats
-            res[obj.name] = deepcopy(obj)
-            new_cols.append(train_col)
-
-
-        logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")"""
-
+    targets = ['nbsinister']
+    
     ###############################################################################
 
-    n_clusters = 5
+    evaluate = {'name' : [], 'spearman' : []}
+    group_col = ['Dept']
 
-    for conv_type in conv_types:
-        for kernel in kernels:
-            logger.info(f"Testing with convolution type: {conv_type}")
+    for conv_type, kernel, cls, col, tar in itertools.product(conv_types, kernels, classifier, group_col, targets):
+        logger.info(f"Testing with convolution type: {conv_type} {kernel} {cls} {col} {tar}")
 
-            # Sélection du préprocesseur
-            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'])
+        class_risk = class_risk_dict[cls]
+        col_name = group_col_dict[col]
+        seq = sequences[col]
 
-            # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRiskZerosHandle(n_clusters=n_clusters)
-            obj = ScalerClassRisk(
-                col_id='departement',
-                dir_output=dir_post_process,
-                target='nbsinister',
-                scaler=None,
-                class_risk=class_risk,
-                preprocessor=preprocessor
-            )
+        # Sélection du préprocesseur
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name])
 
-            # Application du fit et prédictions
-            obj.fit(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        # Définition de l'objet ScalerClassRisk            
+        obj = ScalerClassRisk(
+            col_id=col_name,
+            dir_output=dir_post_process,
+            target=tar,
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
 
-            train_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            val_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            test_col = f"nbsinister-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_[tar].values,
+            train_dataset_[tar].values,
+            train_dataset_[col_name].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            train_dataset_[train_col] = obj.predict(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        train_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
+        val_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
+        test_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
 
-            val_dataset_[val_col] = obj.predict(
-                val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-            test_dataset_[test_col] = obj.predict(
-                test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_[tar].values,
+            train_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            train_dataset_[col_name].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            # Stockage des résultats
-            res[obj.name] = deepcopy(obj)
-            new_cols.append(train_col)
+        val_dataset_[val_col] = obj.predict(
+            val_dataset_[tar].values,
+            val_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            val_dataset_[col_name].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[test_col] = obj.predict(
+            test_dataset_[tar].values,
+            test_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            test_dataset_[col_name].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            train_col = f"nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
-    
-            # Sélection du préprocesseur
-            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
+        # Stockage des résultats
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
 
-            # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters)
-            obj = ScalerClassRisk(
-                col_id='departement',
-                dir_output=dir_post_process,
-                target='nbsinisterDaily',
-                scaler=None,
-                class_risk=class_risk,
-                preprocessor=preprocessor
-            )
+        train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
 
-            # Application du fit et prédictions
-            obj.fit(
-                train_dataset_['nbsinisterDaily'].values,
-                train_dataset_['nbsinisterDaily'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        # Sélection du préprocesseur
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name], persistence=True)
 
-            train_dataset_[train_col] = obj.predict(
-                train_dataset_['nbsinisterDaily'].values,
-                train_dataset_['nbsinisterDaily'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        # Définition de l'objet ScalerClassRisk
+        class_risk = KMeansRisk(n_clusters=n_clusters)
+        obj = ScalerClassRisk(
+            col_id='departement',
+            dir_output=dir_post_process,
+            target='burnedareaDaily',
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
 
-            val_dataset_[train_col] = obj.predict(
-                val_dataset_['nbsinisterDaily'].values,
-                val_dataset_['nbsinisterDaily'].values,
-                val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-            test_dataset_[train_col] = obj.predict(
-                test_dataset_['nbsinisterDaily'].values,
-                test_dataset_['nbsinisterDaily'].values,
-                test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            # Sélection du préprocesseur
-            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'], persistence=True)
+        val_dataset_[train_col] = obj.predict(
+            val_dataset_['burnedareaDaily'].values,
+            val_dataset_['burnedareaDaily'].values,
+            val_dataset_['departement'].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[train_col] = obj.predict(
+            test_dataset_['burnedareaDaily'].values,
+            test_dataset_['burnedareaDaily'].values,
+            test_dataset_['departement'].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            # Définition de l'objet ScalerClassRisk
-            class_risk = KMeansRisk(n_clusters=n_clusters)
-            obj = ScalerClassRisk(
-                col_id='departement',
-                dir_output=dir_post_process,
-                target='burnedareaDaily',
-                scaler=None,
-                class_risk=class_risk,
-                preprocessor=preprocessor
-            )
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
 
-            # Application du fit et prédictions
-            obj.fit(
-                train_dataset_['burnedareaDaily'].values,
-                train_dataset_['burnedareaDaily'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        train_col = f"nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
 
-            train_dataset_[train_col] = obj.predict(
-                train_dataset_['burnedareaDaily'].values,
-                train_dataset_['burnedareaDaily'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        class_risk = KMeansRisk(n_clusters=n_clusters)
+        obj = ScalerClassRisk(
+            col_id='departement',
+            dir_output=dir_post_process,
+            target='nbsinisterDaily',
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
 
-            val_dataset_[train_col] = obj.predict(
-                val_dataset_['burnedareaDaily'].values,
-                val_dataset_['burnedareaDaily'].values,
-                val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-            test_dataset_[train_col] = obj.predict(
-                test_dataset_['burnedareaDaily'].values,
-                test_dataset_['burnedareaDaily'].values,
-                test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
-            )
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
 
-            res[obj.name] = deepcopy(obj)
-            new_cols.append(train_col)
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+        
+        val_dataset_[train_col] = obj.predict(
+            val_dataset_['nbsinisterDaily'].values,
+            val_dataset_['nbsinisterDaily'].values,
+            val_dataset_['departement'].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[train_col] = obj.predict(
+            test_dataset_['nbsinisterDaily'].values,
+            test_dataset_['nbsinisterDaily'].values,
+            test_dataset_['departement'].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
+        
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
 
-    logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")
+    #df_evaluate = pd.DataFrame.from_dict(evaluate)
+    #df_evaluate.sort_values(by='spearman', inplace=True, ascending=False)
+    #logger.info(df_evaluate.head())
 
-    """for conv_type in conv_types:
-        for kernel in kernels:
-            logger.info(f"Testing with convolution type: {conv_type}")
-
-            # Sélection du préprocesseur
-            preprocessor = PreprocessorConv(graph=graph, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', 'graph_id'])
-
-            # Définition de l'objet ScalerClassRisk
-            class_risk = ThresholdRisk(thresholds=[0.05, 0.15, 0.30, 0.60, 1.0])
-            obj = ScalerClassRisk(
-                col_id='departement',
-                dir_output=dir_post_process,
-                target='nbsinister',
-                scaler=MinMaxScaler(),
-                class_risk=class_risk,
-                preprocessor=preprocessor
-            )
-
-            # Application du fit et prédictions
-            obj.fit(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            train_col = f"nbsinister-MinMax-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            val_col = f"nbsinister-MinMax-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-            test_col = f"nbsinister-MinMax-{n_clusters}-Class-Dept-{conv_type}-{kernel}"
-
-            train_dataset_[train_col] = obj.predict(
-                train_dataset_['nbsinister'].values,
-                train_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                train_dataset_['departement'].values,
-                train_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            val_dataset_[val_col] = obj.predict(
-                val_dataset_['nbsinister'].values,
-                val_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                val_dataset_['departement'].values,
-                val_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-            test_dataset_[test_col] = obj.predict(
-                test_dataset_['nbsinister'].values,
-                test_dataset_['nbsinister'].values,  # Ajout de dataset['nbsinister'] comme 2ème argument
-                test_dataset_['departement'].values,
-                test_dataset_[['month_non_encoder', 'graph_id']].values
-            )
-
-            # Stockage des résultats
-            res[obj.name] = deepcopy(obj)
-            new_cols.append(train_col)"""
-    
     ##################### Union des risk ###########################
-    col_raw = 'nbsinister-kmeans-5-Class-Dept'
-    col_derived = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
+    col_raw = f'nbsinister-kmeans-{n_clusters}-Class-Dept'
+    col_derived = f'nbsinister-kmeans-{n_clusters}-Class-Dept-cubic-Specialized'
 
     train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
     train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0
@@ -1829,12 +1452,12 @@ def post_process_model_inference(train_dataset, test_dataset, dir_post_process, 
 
     obj2.fit(train_dataset_['nbsinister'].values, train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
 
-    train_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(train_dataset_['nbsinister'].values,  train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
-    test_dataset_['nbsinister-kmeans-5-Class-Dept'] = obj2.predict(test_dataset_['nbsinister'].values,  test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
+    train_dataset_['nbsinister-kmeans-{n_clusters}-Class-Dept'] = obj2.predict(train_dataset_['nbsinister'].values,  train_dataset_['nbsinister'].values, train_dataset_['departement'].values)
+    test_dataset_['nbsinister-kmeans-{n_clusters}-Class-Dept'] = obj2.predict(test_dataset_['nbsinister'].values,  test_dataset_['nbsinister'].values, test_dataset_['departement'].values)
     
     res[obj2.name] = obj2
 
-    new_cols.append('nbsinister-kmeans-5-Class-Dept')
+    new_cols.append('nbsinister-kmeans-{n_clusters}-Class-Dept')
 
     ###############################################################################
 
@@ -1944,8 +1567,8 @@ def post_process_model_inference(train_dataset, test_dataset, dir_post_process, 
     logger.info(f"Completed processing for convolution type: {conv_type} with kernel {kernel}")
 
     ##################### Union des risk ###########################
-    col_raw = 'nbsinister-kmeans-5-Class-Dept'
-    col_derived = 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized'
+    col_raw = 'nbsinister-kmeans-{n_clusters}-Class-Dept'
+    col_derived = 'nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-cubic-Specialized'
 
     train_dataset_['union'] = np.maximum(train_dataset_[col_derived].values, train_dataset_[col_raw].values)
     train_dataset_.loc[train_dataset_[(train_dataset_[col_derived] > 0) & (train_dataset_[col_raw] == 0)].index, 'union'] = 0

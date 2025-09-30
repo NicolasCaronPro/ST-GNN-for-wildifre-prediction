@@ -265,7 +265,7 @@ def get_academic_zone(name, date):
         return dict_zones[name][0]
     return dict_zones[name][1]
 
-ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'days_until_next_event']
+ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'saison-encoding', 'mediterranean', 'cluster-encoder']
 
 targets_columns = ['time_intervention',
                     'burned_area',
@@ -305,10 +305,11 @@ latitude_index = ids_columns.index('latitude')
 departement_index = ids_columns.index('departement')
 date_index = ids_columns.index('date')
 weight_index = ids_columns.index('weight')
-days_until_next_event_index = ids_columns.index('days_until_next_event')
 scale_index = ids_columns.index('scale')
+saison_index = ids_columns.index('saison-encoding')
+med_index = ids_columns.index('mediterranean')
+cluster_ncoder_index = ids_columns.index('cluster-encoder')
 
-#class_index = targets_columns.index('class_risk')
 nbsinister_index = targets_columns.index('nbsinister')
 burned_index = targets_columns.index('burned_area')
 risk_index = targets_columns.index('risk')
@@ -367,6 +368,7 @@ maxDist = {
         80 : math.inf,
         100 : math.inf,
         143 : math.inf,
+        'user' : math.inf,
         'departement': 150,
         }
 

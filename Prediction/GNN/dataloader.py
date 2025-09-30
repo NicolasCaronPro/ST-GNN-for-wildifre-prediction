@@ -239,7 +239,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         if df_node is not None:
             df.drop([target_name_nbsinister, target_name_risk, target_name_class], inplace=True, axis=1)
             df = df.set_index(['graph_id', 'date']).join(df_node.set_index(['graph_id', 'date'])[[target_name_nbsinister, target_name_risk, target_name_class]], on=['graph_id', 'date']).reset_index()
-
+            
     df['burnedareaDaily'] = df['burned_area']
     df['nbsinisterDaily'] = df['nbsinister']
     df['nbsinister'] = df[target_name_nbsinister]
@@ -252,7 +252,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     logger.info(f'Unique sinister -> {df["nbsinister"].unique()}')
 
-    features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily']
+    features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily', 'saison', 'saison-encoding', 'mediterranean', 'cluster-encoder']
     columns = np.unique(ids_columns + weights_name_columns + list(np.unique(list(features_selected_kmeans) + list(features_name))) + features_obligatory + targets_columns)
     
     df = df[columns]
@@ -1000,8 +1000,6 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     
     metrics = {}
 
-    dir_predictor = dir_train / 'influenceClustering'
-
     logger.info(f'WARNING : WE CONSIDER PRED[0] = PRED[1]')
 
     ############################################## Get daily metrics #######################################################
@@ -1013,13 +1011,15 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     elif name.find('binary') != -1:
         col_class = target_name
-        col_class_1 = 'nbsinister-binary'
+        col_class_1 = target_name
         col_class_2 = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
         col_nbsinister = 'nbsinister'
-        
+
     elif name.find('regression') != -1:
         col_nbsinister = target_name
-        col_class = 'nbsinister-MinMax-5-Class-Dept'
+        col_class = 'nbsinister-kmeans-5-Class-Dept'
+        col_class_1 = 'nbsinister-kmeans-5-Class-Dept'
+        col_class_2 = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
     
     metrics = {}
 
@@ -1053,29 +1053,122 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         y_pred_max = pred_max[:, 0]
         y_pred_min = pred_min[:, 0]
 
-    y_true = df_test[col_nbsinister].values
+    y_true = df_test[target_name].values
     y_pred = df_test[f'prediction_{target_name}'].values
     
-    """ks, _ = calculate_ks_continous(df_test, 'prediction', col_nbsinister, dir_output / name)
-
-    r2 = r2_score(y_true, y_pred)
-
     metrics[f'nbsinister'] = df_test['nbsinister'].sum()
     logger.info(f'Number of sinister = {df_test["nbsinister"].sum()}')
 
-    metrics[f'nb'] = df_test[col_nbsinister].sum()
-    logger.info(f'Number of {col_nbsinister} = {df_test[col_nbsinister].sum()}')
-
+    r2 = r2_score(y_true, y_pred)
     metrics[f'r2'] = r2
     logger.info(f'r2 = {r2}')
 
-    metrics[f'KS'] = ks
-    logger.info(f'KS = {ks}')"""
+    mse = mean_squared_error(y_true, y_pred)
+    metrics[f'mse'] = mse
+    logger.info(f'mse = {mse}')
 
-    #metrics[f'apr'] = apr
-    #logger.info(f'apr = {apr}')
+    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
+    y_true_temp[:, graph_id_index] = df_test['graph_id']
+    y_true_temp[:, id_index] = df_test['graph_id']
+    y_true_temp[:, departement_index] = df_test['departement']
+    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, -1] = y_true
+    y_true_temp[:, -2] = df_test['nbsinister']
+    y_true_temp[:, -3] = df_test[col_nbsinister]
 
-    if name.find('binary') != -1:
+    realVspredict(y_pred, y_true_temp, -1,
+        dir_output / name, col_nbsinister,
+        pred_min, pred_max)
+    
+    logger.info(f'###################### Analysis {col_class} #########################')
+
+    y_true = df_test[target_name].values
+
+    if pred_max is not None:
+        y_pred_max = pred_max[:, 1]
+        y_pred_min = pred_min[:, 1]
+    else:
+        y_pred_max = None
+        y_pred_min = None
+
+    all_class = np.unique(np.concatenate((df_test[col_class].values, y_pred)))
+    all_class = all_class[~np.isnan(all_class)]
+    all_class_label = [int(c) for c in all_class]
+
+    y_pred = np.asarray(y_pred)
+
+    if name.find('classification') != -1 or name.find('egpd') != -1 :
+
+        y_true_bin = df_test[col_class].values > 0
+        y_pred_bin = y_pred > 0
+
+        _, iv = calculate_woe_iv(res, f'prediction_{target_name}', 'nbsinister')
+        metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
+        logger.info(f'IV = {iv}')
+
+        y_pred = pred[:, 1]
+        """silhouette_score = round(silhouette_score_with_plot(y_pred.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all', dir_output / name), 2)
+        metrics['SS'] = silhouette_score
+        logger.info(f'SS = {silhouette_score}')
+
+        mask_fire_pred = (y_pred > 0) | (df_test['nbsinister'].values > 0)
+
+        silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred', dir_output / name), 2)
+        metrics['SS_no_zeros'] = silhouette_score_no_zeros
+        logger.info(f'SS_no_zeros = {silhouette_score_no_zeros}')
+
+        silhouette_score = round(silhouette_score_with_plot(df_test[col_class].values.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all_gt', dir_output / name), 2)
+        metrics['SS_gt'] = silhouette_score
+        logger.info(f'SS_gt = {silhouette_score}')
+
+        mask_fire_pred = (df_test[col_class].values > 0) | (df_test['nbsinister'].values > 0)
+
+        silhouette_score_no_zeros = round(silhouette_score_with_plot(df_test[col_class][mask_fire_pred].values.reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred_gt', dir_output / name), 2)
+        metrics['SS_no_zeros_gt'] = silhouette_score_no_zeros
+        logger.info(f'SS_no_zero_gts = {silhouette_score_no_zeros}')"""
+
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='true')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='all')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='pred')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize=None)
+
+        accuracy = round(accuracy_score(y_true, y_pred), 2)
+        metrics[f'accuracy'] = accuracy
+        logger.info(f'accuracy = {accuracy}')
+        
+        conf_matrix = confusion_matrix(y_true, y_pred, normalize=None)
+        auoc = np.round(auoc_func(conf_matrix), 3)
+        metrics['auoc'] = auoc
+        logger.info(f'auoc = {auoc}')
+
+        f1 = round(f1_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'f1'] = f1
+        logger.info(f'f1 = {f1}')
+
+        prec = round(precision_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'prec'] = prec
+        logger.info(f'prec = {prec}')
+
+        rec = round(recall_score(y_true > 0, y_pred > 0), 3)
+        metrics[f'rec'] = rec
+        logger.info(f'rec = {rec}')
+
+        bca = round(balanced_accuracy_score(y_true, y_pred), 3)
+        metrics[f'bca'] = bca
+        logger.info(f'bca = {bca}')
+
+        #f1_macro = round(f1_score(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0), 3)
+        #prec_macro = round(precision_score(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0), 3)
+        #rec_macro = round(recall_score(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0), 3)
+
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0)
+
+        metrics['f1_macro'] = f1_macro
+        metrics['prec_macro'] = prec_macro
+        metrics['rec_macro'] = rec_macro
+        logger.info(f'f1_macro = {f1_macro} | prec_macro = {prec_macro} | rec_macro = {rec_macro}')
+
+    elif name.find('binary') != -1:
         apr = round(average_precision_score(y_true > 0, y_pred), 2)
         logger.info(f'apr = {apr}')
         metrics[f'apr'] = apr
@@ -1096,139 +1189,37 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         y_pred_bin = (y_pred >= best_thresh).astype(int)
         y_true_bin = (y_true >= best_thresh).astype(int)  # facultatif
 
-        f1 = round(f1_score(y_true_bin, y_pred_bin), 3)
-        prec = round(precision_score(y_true_bin, y_pred_bin), 3)
-        rec = round(recall_score(y_true_bin, y_pred_bin), 3)
         bca = round(balanced_accuracy_score(y_true_bin, y_pred_bin), 3)
 
-        metrics['f1'] = f1
-        metrics['prec'] = prec
-        metrics['rec'] = rec
         metrics['bca'] = bca
         metrics['threshold'] = round(best_thresh, 3)
-
+        
         logger.info(f'[Binary mode] Best threshold: {best_thresh:.3f}')
-        logger.info(f'f1 = {f1} | prec = {prec} | rec = {rec} | bca = {bca}')
-        
-    elif name.find('classification'):
-        f1 = round(f1_score(y_true > 0, y_pred > 0), 3)
-        metrics[f'f1'] = f1
-        logger.info(f'f1 = {f1}')
-
-        prec = round(precision_score(y_true > 0, y_pred > 0), 3)
-        metrics[f'prec'] = prec
-        logger.info(f'prec = {prec}')
-
-        rec = round(recall_score(y_true > 0, y_pred > 0), 3)
-        metrics[f'rec'] = rec
-        logger.info(f'rec = {rec}')
-
-        bca = round(balanced_accuracy_score(y_true, y_pred), 3)
-        metrics[f'bca'] = bca
-        logger.info(f'bca = {bca}')
-
-    # Calcul des scores pour les signaux
-    #iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
-
-    """# Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
-    for key, value in iou_dict.items():
-        metric_key = f'{key}_sinister'  # Ajouter un suffixe basé sur col_for_dict
-        metrics[metric_key] = value  # Ajouter au dictionnaire des métriques
-        logger.info(f'{metric_key} = {value}')  # Afficher la métrique enregistrée"""
-
-    y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-    y_true_temp[:, graph_id_index] = df_test['graph_id']
-    y_true_temp[:, id_index] = df_test['graph_id']
-    y_true_temp[:, departement_index] = df_test['departement']
-    y_true_temp[:, date_index] = df_test['date']
-    y_true_temp[:, -1] = y_true
-    y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_nbsinister]
-
-    realVspredict(y_pred, y_true_temp, -1,
-        dir_output / name, col_nbsinister,
-        pred_min, pred_max)
-    
-    logger.info(f'###################### Analysis {col_class} #########################')
-
-    _, iv = calculate_woe_iv(res, f'prediction_{target_name}', 'nbsinister')
-    metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
-    logger.info(f'IV = {iv}')
-
-    y_pred = pred[:, 1]
-    silhouette_score = round(silhouette_score_with_plot(y_pred.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all', dir_output / name), 2)
-    metrics['SS'] = silhouette_score
-    logger.info(f'SS = {silhouette_score}')
-
-    mask_fire_pred = (y_pred > 0) | (df_test['nbsinister'].values > 0)
-
-    silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred', dir_output / name), 2)
-    metrics['SS_no_zeros'] = silhouette_score_no_zeros
-    logger.info(f'SS_no_zeros = {silhouette_score_no_zeros}')
-
-    silhouette_score = round(silhouette_score_with_plot(df_test[col_class].values.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all_gt', dir_output / name), 2)
-    metrics['SS_gt'] = silhouette_score
-    logger.info(f'SS_gt = {silhouette_score}')
-
-    mask_fire_pred = (df_test[col_class].values > 0) | (df_test['nbsinister'].values > 0)
-
-    silhouette_score_no_zeros = round(silhouette_score_with_plot(df_test[col_class][mask_fire_pred].values.reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred_gt', dir_output / name), 2)
-    metrics['SS_no_zeros_gt'] = silhouette_score_no_zeros
-    logger.info(f'SS_no_zero_gts = {silhouette_score_no_zeros}')
-
-    y_true = df_test[target_name].values
-
-    if pred_max is not None:
-        y_pred_max = pred_max[:, 1]
-        y_pred_min = pred_min[:, 1]
-    else:
-        y_pred_max = None
-        y_pred_min = None
-
-    all_class = np.unique(np.concatenate((df_test[col_class].values, y_pred)))
-    all_class = all_class[~np.isnan(all_class)]
-    all_class_label = [int(c) for c in all_class]
-
-    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='true', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='all', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize='pred', filename=f'{scale}_confusion_matrix')
-    #plot_custom_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, dir_output=dir_output / name, figsize=(15,8), normalize=None, filename=f'{scale}_confusion_matrix')
-    if name.find('classification') != -1:
-
-        plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='true')
-        plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='all')
-        plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize='pred')
-        plot_confusion_matrix(df_test[col_class].values, y_pred, all_class_label, name, dir_output / name, normalize=None)
-
-        accuracy = round(accuracy_score(y_true, y_pred), 2)
-        metrics[f'accuracy'] = accuracy
-        logger.info(f'accuracy = {accuracy}')
-        
-        #auoc = round(cohen_kappa_score(y_true.astype(int), y_pred.astype(int), weights='linear'), 3)
-        conf_matrix = confusion_matrix(y_true, y_pred, normalize=None)
-        auoc = auoc_func(conf_matrix)
-        metrics['auoc'] = auoc
-        logger.info(f'auoc = {auoc}')
+        logger.info(f'f1 = {best_f1} | bca = {bca}')
     
     y_pred = np.round(y_pred).astype(int)
     
     mask_unknowed_sample = (df_test[col_class_1] == 0) & (df_test[col_class_2] > 0)
     metrics['unknow_sample_proportion'] = y_true[mask_unknowed_sample].shape[0] / y_true.shape[0]
 
-    iou_dict = calculate_signal_scores(y_pred, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    iou_dict = calculate_signal_scores(np.asarray(y_pred), y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
 
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
         metric_key = f'{key}_class_hard' # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques
-        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected' or key == 'iou_area' or key == 'iou_elt_sup_2' or key == 'iou_elt_sup_3' or key == 'iou_elt_sup_4':
+        if (
+            key in {'iou', 'bad_prediction', 'iou_area', 'rec_area', 'prec_area', 'f1_area'}
+            or key.endswith('_macro_area')
+            or key.startswith('iou_elt_sup_') or key.startswith('f1_macro_elt_sup_')
+        ):
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
     iou_dict = calculate_signal_scores(y_pred, df_test[col_class_2].values, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
     for key, value in iou_dict.items():
         metric_key = f'{key}_risk'  # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques        
-        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+        if key == 'iou' or key == 'bad_prediction' or key == 'rec':
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
     y_pred_ez = np.copy(y_pred)
@@ -1237,45 +1228,11 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     iou_dict = calculate_signal_scores(y_pred_ez, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
 
     ########################################## Gte normalized score ####################################
-    IoU_scores = []
-    F1_scores = []
-
-    positve_res = res[res['nbsinister'] > 0]
-
-    for i, department in enumerate(positve_res['departement'].unique()):
-        # Extraire les valeurs pour chaque département
-        y_true_dept = positve_res[positve_res['departement'] == department][col_class].values
-        if np.all(y_true == 0):
-            continue
-        y_pred_department = positve_res[positve_res['departement'] == department][f'prediction_{target_name}'].values  # Récupérer les prédictions associées au département
-        
-        # Calcul des scores IoU et F1
-        IoU = iou_score(y_true_dept, y_pred_department)
-        F1 = f1_score(y_true_dept > 0, y_pred_department > 0)
-        
-        IoU_scores.append(IoU)
-        F1_scores.append(F1)
-    
-    # Calcul de l'aire maximale possible (cas parfait où toutes les prédictions sont correctes)
-    max_area = np.trapz(np.ones(len(positve_res)), dx=1)
-    
-    # Calcul de l'aire sous la courbe pour l'IoU et le F1
-    IoU_area = calculate_area_under_curve(IoU_scores)
-    F1_area = calculate_area_under_curve(F1_scores)
-    
-    # Normalisation par l'aire maximale
-    normalized_IoU = IoU_area / max_area if max_area > 0 else 0
-    normalized_F1 = F1_area / max_area if max_area > 0 else 0
-    
-    # Stocker les résultats dans le dictionnaire
-    metrics['normalized_iou'] = normalized_IoU
-    metrics['normalized_f1'] = normalized_F1
-
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
         metric_key = f'{key}_class_ez'  # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques        
-        if key == 'iou' or key == 'bad_prediction' or key == 'iou_wildfire_detected':
+        if key == 'iou' or key == 'bad_prediction' or key == 'rec':
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
     for cl in np.unique(y_true):
@@ -1388,7 +1345,7 @@ def test_fire_index_model(args,
 
         logger.info(f'pred min {np.nanmin(pred[:, 0])}, pred max : {np.nanmax(pred[:, 0])}')
 
-        metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_unscale_dept, pred, y, graphScale,
+        metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
                                                test_departement, target_name, name,
                                                dir_output, scale=scale, pred_min = None, pred_max = None)
         
@@ -1568,16 +1525,9 @@ def test_sklearn_api_model(cfg,
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
 
         if not isinstance(model, ModelVoting): 
-            metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
-            metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
-            metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
-            metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
+            metrics[run].update(summarize_metrics_at_best_tp(model, run, metrics))
+            logger.info(f'Run metrics : {metrics}')
 
-            metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
-            metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
-            metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_Normalized_f1']
-            metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_Normalized_iou']
-        
         #res_dept['model'] = name
 
         res_scale.append(res)
@@ -1673,13 +1623,12 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     ind = np.lexsort((y[:, scale_index], y[:,0], y[:,4]))
     y = y[ind]
     predTensor = predTensor[ind]
-    print(y.shape)
     
     sel_indices = np.argwhere(y[:, weight_index] > 0)[:, 0]
     predTensor = predTensor[sel_indices]
     y = y[sel_indices]
+    test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     
-    #test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     return predTensor, y, test_dataset_dept
    
 def test_dl_model(cfg,
@@ -1714,6 +1663,7 @@ def test_dl_model(cfg,
 
     test_dataset_dept.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
+    print(test_dataset_dept.date.unique())
     print(allDates[int(test_dataset_dept.date.min())])
     print(allDates[int(test_dataset_dept[test_dataset_dept['weight'] > 0].date.min())])
 
@@ -1788,7 +1738,6 @@ def test_dl_model(cfg,
 
             if not isinstance(model, ProtoFederatedLearning):
                 test_loader = model.create_test_loader(graphScale, test_dataset_dept)
-
                 predTensor, YTensor = model._predict_test_loader(test_loader)
             else:
                 logger.info(test_dataset_dept.columns)
@@ -1797,8 +1746,9 @@ def test_dl_model(cfg,
             y = YTensor.detach().cpu().numpy()
             predTensor = predTensor.detach().cpu().numpy()
 
+        print(y.shape, predTensor.shape)
         predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg)
-
+        print(predTensorAll.shape, yAll.shape, test_dataset_deptAll.shape)
         scale_unique = np.unique(y[:, scale_index])
         for scale in scale_unique:
             scale = int(scale)
@@ -1872,21 +1822,26 @@ def test_dl_model(cfg,
                                                 test_departement, target_name, name,
                                                 dir_output, scale, pred_min = None, pred_max = None)
 
-            print(model)
-
-            if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) and not isinstance(model, FederatedLearningModel):
-                metrics[run]['iou'] = np.mean(model.metrics[model.metrics['best_tp']]['iou'])
-                metrics[run]['f1_'] = np.mean(model.metrics[model.metrics['best_tp']]['f1'])
-                metrics[run]['recall_'] = np.mean(model.metrics[model.metrics['best_tp']]['recall'])
-                metrics[run]['prec_'] = np.mean(model.metrics[model.metrics['best_tp']]['prec'])
-
-                metrics[run]['var_f1'] = model.metrics[model.metrics['best_tp']]['var_f1']
-                metrics[run]['var_iou'] = model.metrics[model.metrics['best_tp']]['var_iou']
-                metrics[run]['var_normalized_f1'] = model.metrics[model.metrics['best_tp']]['var_normalized_f1']
-                metrics[run]['var_normalized_iou'] = model.metrics[model.metrics['best_tp']]['var_normalized_iou']
-            
+            if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) \
+                and not isinstance(model, DualTraining):
+                metrics[run].update(summarize_metrics_at_best_tp(model, run, metrics))
+                #logger.info(f'Run metrics : {metrics}')
+                print(metrics[run]['mean_iou_test'])
+                
             if isinstance(model, ModelKnowledgeDistillation):
-                logger.info(f'Temperature : {model.temperature_value}, alpha : {model.alpha_value}')
+                temperature, alpha = model.get_temperature_alpha()
+                logger.info(f'Temperature : {temperature}, alpha : {alpha}')
+                metrics[run]['temperature'] = temperature
+                metrics[run]['alpha'] = alpha
+
+            if 'epgd' in name:
+                if isinstance(model, DualModel):
+                    metrics[run]['kappa'] = model.num_model.params.get('kappa', None)
+                    metrics[run]['xi'] = model.num_model.params.get('xi', None)
+
+                metrics[run]['kappa'] = model.params.get('kappa', None)
+                metrics[run]['xi'] = model.params.get('xi', None)
+                logger.info(f"kappa = { metrics[run]['kappa']} | xi = {metrics[run]['xi']}")
 
             if MLFLOW:
                 log_metrics_recursively(metrics[name], prefix='')
@@ -2250,6 +2205,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
     n_run = params['n_run']
+    c_n_run = params['client_n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2294,7 +2250,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     loss=loss,
                                     device=device,
                                     under_sampling=under_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     over_sampling=over_sampling,
                                     )
     elif torch_structure == 'Model_gnn':
@@ -2320,7 +2276,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     graph_method = graph_method)
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -2360,8 +2316,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
     eta = params['eta']
-    layer_idx = params['layer_idx']
     n_run = params['n_run']
+    c_n_run = params['client_n_run']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2406,7 +2362,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     loss=loss,
                                     device=device,
                                     under_sampling=under_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     over_sampling=over_sampling,
                                     )
     elif torch_structure == 'Model_gnn':
@@ -2432,7 +2388,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     graph_method = graph_method)
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -2445,12 +2401,12 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                    over_sampling=over_sampling,
                                    target_name=target_name,
                                    post_process=None,
-                                    n_run=n_run,
+                                   n_run=n_run,
                                    task_type=task_type,
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures,
                                    eta=eta,
-                                   layer_idx=layer_idx)
+                                   params_to_update=params["params_to_update"])
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -2474,6 +2430,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
     federated_cluster = params['federated_cluster']
     aggregation_method = params['aggregation_method']
     n_run = params['n_run']
+    c_n_run = params['client_n_run']
     temperature = params['temperature']
     smooth = params['smooth']
 
@@ -2518,7 +2475,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     loss=loss,
                                     device=device,
                                     under_sampling=under_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     over_sampling=over_sampling,
                                     )
     elif torch_structure == 'Model_gnn':
@@ -2544,7 +2501,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run,
+                                    n_run=c_n_run,
                                     graph_method = graph_method)
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -2961,8 +2918,11 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     features = params['features_selected_str']
     dir_output = params['dir_output']
     n_run = params['n_run']
+    task_type_num = params['task_type_num']
 
     under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+
+    infos_occ = f"{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_binary_weightedcrossentropy"
 
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset'].copy(deep=True)
@@ -2977,6 +2937,11 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     train_pos = train_dataset[train_dataset[target_name] > 0].reset_index(drop=True)
     val_pos = val_dataset[val_dataset[target_name] > 0].reset_index(drop=True)
     test_pos = test_dataset[test_dataset[target_name] > 0].reset_index(drop=True)
+
+    train_pos[target_name] = train_pos[target_name]
+    val_pos[target_name] = val_pos[target_name]
+    test_pos[target_name] = test_pos[target_name]
+
 
     for df in [train_dataset, val_dataset, test_dataset, train_pos, val_pos, test_pos]:
         df['weight'] = 1
@@ -2995,18 +2960,18 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             batch_size=batch_size,
             nbfeatures=nbfeatures,
             lr=params['lr'],
-            target_name='binary',
+            target_name=target_name,
             out_channels=2,
             features_name=features,
             ks=kdays,
             dir_log=dir_log,
-            name=f'DualTraining-occ-{model}_{infos}',
+            name=f'DualTraining-occ-{model}_{infos_occ}',
             task_type='binary',
-            loss=loss,
+            loss="weightedcrossentropy",
             device=torch.device('cpu'),
             under_sampling=under_sampling,
             over_sampling=over_sampling,
-            n_run=n_run,
+            n_run=1,
         )
 
         num_model = Model_Torch(
@@ -3020,12 +2985,12 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-num-{model}_{infos}',
-            task_type=task_type,
+            task_type=task_type_num,
             loss=loss,
             device=torch.device('cpu'),
-            under_sampling=under_sampling,
-            over_sampling=over_sampling,
-            n_run=n_run,
+            under_sampling="full",
+            over_sampling="full",
+            n_run=1,
         )
 
     elif torch_structure == 'Model_gnn':
@@ -3047,18 +3012,18 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             nbfeatures=nbfeatures,
             batch_size=batch_size,
             lr=params['lr'],
-            target_name='binary',
+            target_name=target_name,
             out_channels=2,
             features_name=features,
             ks=kdays,
             dir_log=dir_log,
-            name=f'DualTraining-occ-{model}_{infos}',
+            name=f'DualTraining-occ-{model}_{infos_occ}',
             task_type='binary',
-            loss=loss,
+            loss="weightedcrossentropy",
             device=torch.device('cpu'),
             under_sampling=under_sampling,
             over_sampling=over_sampling,
-            n_run=n_run,
+            n_run=1,
             graph_method=graph_method,
         )
 
@@ -3075,57 +3040,30 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-num-{model}_{infos}',
-            task_type=task_type,
+            task_type=task_type_num,
             loss=loss,
             device=torch.device('cpu'),
-            under_sampling=under_sampling,
-            over_sampling=over_sampling,
-            n_run=n_run,
+            under_sampling="full",
+            over_sampling="full",
+            n_run=1,
             graph_method=graph_method,
         )
 
     else:
         raise ValueError(f'{torch_structure} not implemented')
 
-    occ_model.create_train_val_test_loader(
-        params['graph'],
-        train_dataset,
-        val_dataset,
-        test_dataset,
-        params['epochs'],
-        params['PATIENCE_CNT'],
-        params['CHECKPOINT'],
-        custom_model_params=custom_model_params,
-        features_importance=False,
-        use_log=params.get('use_log', True),
-    )
-
-    num_model.create_train_val_test_loader(
-        params['graph'],
-        train_pos,
-        val_pos,
-        test_pos,
-        params['epochs'],
-        params['PATIENCE_CNT'],
-        params['CHECKPOINT'],
-        custom_model_params=custom_model_params,
-        features_importance=False,
-        use_log=params.get('use_log', True),
-    )
-
     dual_model = DualTraining(
-        occ_model,
-        num_model,
+        target_name=target_name,
+        occ_model=occ_model,
+        num_model=num_model,
         name=f'DualTraining-{model}_{infos}',
+        task_type=task_type,
+        n_run=n_run
     )
 
-    dual_model.train(
-        params['graph'],
-        params['PATIENCE_CNT'],
-        params['CHECKPOINT'],
-        params['epochs'],
-        custom_model_params=custom_model_params,
-    )
+    dual_model.create_train_val_test_loader(params['graph'], (train_dataset, train_pos), (val_dataset, val_pos), (test_dataset, test_pos),
+                                            params['epochs'], params['PATIENCE_CNT'], params['CHECKPOINT'],
+                                            custom_model_params=custom_model_params, features_importance=False, use_log=params.get('use_log', True))
 
     save_object(dual_model, f'{dual_model.name}.pkl', dir_log)
 
@@ -3424,6 +3362,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
     graph_method = input_params['graph_method']
     dir_output = input_params['dir_output']
     n_run = input_params['n_run']
+    use_log = input_params['use_log']
 
     features = input_params['features_selected_str']
     features_index = input_params['features_selected']
@@ -3605,7 +3544,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
     all_vote = ModelVotingPytorchAndSklearn(models_list, features=features, loss=loss, task_type=task_type, name=f'{model[0]}', \
                             target_name=target_name, dir_log=dir_output / Path(f'check_{input_params["scaling"]}/{input_params["prefix"]}') / model[0], under_sampling=under_sampling, post_process = model[-1])
 
-    all_vote.fit(X, y, X_val, y_val, X_test, y_test, params_dict)
+    all_vote.fit(X, y, X_val, y_val, X_test, y_test, params_dict, use_log=use_log)
 
     save_object(all_vote, all_vote.name + '.pkl', all_vote.dir_log)
 

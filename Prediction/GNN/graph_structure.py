@@ -126,7 +126,9 @@ class GraphStructure():
                 elif 'regular' in vec_base:
                     self.create_geometry_with_regular(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
                 elif 'companie' in vec_base:
-                    self.create_geometry_with_companie(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
+                    self.create_geometry_with_companie(dept, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
+                elif 'zonemeteo' in vec_base:
+                    self.create_geometry_with_meteo_zone(dept, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
 
             current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])]) + 1
             logger.info(f'{dept} Unique cluster : {np.unique(self.graph_ids[mask])}, {current_cluster}. {node_already_predicted}')
@@ -356,7 +358,7 @@ class GraphStructure():
         save_object(pred_save, f'watershed_{dept}.pkl', path / 'features_geometry')
         return pred
 
-    def create_geomtry_with_companie(self, dept, vec_base, path, sinister, dataset_name,
+    def create_geometry_with_companie(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):
             
             dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
@@ -364,6 +366,21 @@ class GraphStructure():
             companie_geo = gpd.GeoDataFrame(dir_geo / 'companie.geojson')
             pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'companie', dir_output='')
             raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+            assert raster is not None
+            raster = raster[0]
+            pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
+            self._save_feature_image(path, dept, 'pred_final', pred, raster)
+
+    def create_geometry_with_meteo_zone(self, dept, path, sinister, dataset_name,
+                                       sinister_encoding, resolution, mask, node_already_predicted):
+            
+            dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+            dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
+            companie_geo = gpd.read_file(dir_geo / 'Zones_meteo.geojson')
+            #pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'SECT_METEO', dir_output=Path(''))
+            pred = read_object("zones_meteo.pkl", dir_geo)
+            raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+            pred = resize_no_dim(pred, raster.shape[1], raster.shape[2])
             assert raster is not None
             raster = raster[0]
             pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
@@ -1948,11 +1965,6 @@ class GraphStructure():
                 print(f'{dept}')
                 continue
             
-            print(dept)
-            print(train_dates)
-            print(datacube_target)
-            print(datacube_feature)
-
             datacube_target = datacube_target.sel(date=train_dates)
 
             target_values = datacube_target['nbsinister'].values[0]
@@ -2750,7 +2762,7 @@ class GraphStructure():
                 output = self.model(inputs, edges)
                 return output
             
-    def compute_sequence_month(self, dataframe, database_name):
+    def compute_sequence_month(self, dataframe, database_name, col):
         # Define month groups representing different seasons or periods
         group_month = [
             [2, 3, 4, 5],    # Medium season
@@ -2768,12 +2780,12 @@ class GraphStructure():
         dataframe['month_non_encoder'] = dataframe['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
 
         # Sort the dataframe by date
-        dataframe = dataframe.sort_values(by=['graph_id', 'date'])
+        dataframe = dataframe.sort_values(by=[col, 'date'])
         #self.sequences_month = None
 
-        points = np.unique(self.nodes[:, graph_id_index])
+        points = np.unique(dataframe[col].unique())
 
-        self.sequences_month = {}
+        sequences_month = {}
 
         if database_name == 'firemen':
             td = 3  # Time delta in days to consider continuity
@@ -2792,17 +2804,17 @@ class GraphStructure():
             df = fire_dataframe[fire_dataframe['month_non_encoder'].isin(months)]
 
             # Initialize the dictionary for the current season
-            self.sequences_month[name[i]] = {}
+            sequences_month[name[i]] = {}
 
             for point in points:
                 # Initialize the dictionary for the current point
-                self.sequences_month[name[i]][point] = {}
-                self.sequences_month[name[i]][point]['dates'] = []
-                self.sequences_month[name[i]][point]['mean_size'] = 1
+                sequences_month[name[i]][point] = {}
+                sequences_month[name[i]][point]['dates'] = []
+                sequences_month[name[i]][point]['mean_size'] = 1
 
                 # Get the data for the current point
 
-                df_point = df[df['graph_id'] == point]
+                df_point = df[df[col] == point]
 
                 if len(df_point) == 0:
                     continue
@@ -2815,14 +2827,14 @@ class GraphStructure():
                 for date, group in df_point.groupby('date'):
 
                     # If no sequences exist yet, create a new one
-                    if not self.sequences_month[name[i]][point]['dates']:
-                        self.sequences_month[name[i]][point]['dates'].append([date])
+                    if not sequences_month[name[i]][point]['dates']:
+                        sequences_month[name[i]][point]['dates'].append([date])
                         continue
 
                     find_seq = False
 
                     # Iterate over existing sequences to see if the date continues any of them
-                    for sei, seq in enumerate(self.sequences_month[name[i]][point]['dates']):
+                    for sei, seq in enumerate(sequences_month[name[i]][point]['dates']):
                         # Check if the date continues the sequence (within td days)
                         if (date - seq[-1]) <= td:
                             # Avoid duplicate dates
@@ -2833,22 +2845,23 @@ class GraphStructure():
                             find_seq = True
 
                             # Update the sequence in the list
-                            self.sequences_month[name[i]][point]['dates'][sei] = seq
+                            sequences_month[name[i]][point]['dates'][sei] = seq
                             break
                     # If the date does not continue any existing sequence, create a new one
                     if not find_seq:
-                        self.sequences_month[name[i]][point]['dates'].append([date])
+                        sequences_month[name[i]][point]['dates'].append([date])
 
                 # Calculate the average size of sequences for the current point and season
-                total_size = sum(len(seq_dates) for seq_dates in self.sequences_month[name[i]][point]['dates'])
-                num_sequences = len(self.sequences_month[name[i]][point]['dates'])
+                total_size = sum(len(seq_dates) for seq_dates in sequences_month[name[i]][point]['dates'])
+                num_sequences = len(sequences_month[name[i]][point]['dates'])
                 mean = round(total_size / num_sequences)
                 if mean > 1:
-                    self.sequences_month[name[i]][point]['mean_size'] = 2 * mean + 1
+                    sequences_month[name[i]][point]['mean_size'] = 2 * mean + 1
                 else:
-                    self.sequences_month[name[i]][point]['mean_size'] = 1
+                    sequences_month[name[i]][point]['mean_size'] = 1
 
-                logger.info(f'{point}, {name[i]} {df_point["departement"].unique()} : {mean} -> {self.sequences_month[name[i]][point]["mean_size"]}')
+                logger.info(f'{point}, {name[i]} {df_point["departement"].unique()} : {mean} -> {sequences_month[name[i]][point]["mean_size"]}')
+        return sequences_month
             
     def compute_mean_sequence(self, dataframe, database_name, maxdate, target_spe='0_0'):
         """
@@ -3257,7 +3270,7 @@ class GraphStructure():
     
     def predict_statistical(self, X):
         assert self.model is not None
-        return self.model.predict(X, 'departement')
+        return self.model.predict(X)
     
     def predict_model_api_sklearn(self, X : pd.DataFrame,
                                   features : list, target_name : bool,

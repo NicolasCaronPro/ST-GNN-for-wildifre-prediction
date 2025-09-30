@@ -64,6 +64,8 @@ def parse_string(s):
     
     # Initialiser le dictionnaire avec None
     result = {"base": base, "attempt": None, "reduce": None, "tol": None}
+    if base == "zonemeteo":
+        return result
 
     # Utiliser findall pour capturer toutes les balises présentes
     matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
@@ -86,7 +88,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     
     train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
-
+    print(dico_config)
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
                                 attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
@@ -130,7 +132,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
 
     if doEdgesFeatures:
         graphScale.edges = edges_feature(graphScale, ['slope', 'highway'], dir_output, geo)
-    save_object(graphScale, f'graph_{scale}_{graph_construct}_{graphScale.graph_method}.pkl', dir_output)
+    save_object(graphScale, f'graph_{scale}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_output)
     return graphScale
 
 def export_to_all_date(df, dataset_name, sinister, departements, maxDate):
@@ -171,7 +173,7 @@ def export_to_all_date(df, dataset_name, sinister, departements, maxDate):
                     start_date = '2023-01-01'
 
         elif dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
-            end_date =  '2023-12-31'
+            end_date = allDates[-1]
             start_date = '2017-06-12'
         elif dataset_name == 'georisques':
             end_date =  allDates[-1]
@@ -448,8 +450,8 @@ def construct_database(
     ################################## Try loading Y database #############################
     # Define the filename for the ground truth data
     n = f'Y_full_{scale}_{graph_construct}_{graph_method}_{name_exp}.pkl'
-    #if True:
-    if not (dir_output / n).is_file():
+    if True:
+    #if not (dir_output / n).is_file():
         # If the file doesn't exist, generate the ground truth data
         Y = get_sub_nodes_ground_truth(
             graphScale,
@@ -593,7 +595,7 @@ def init(args, dir_output, script):
     do2D = args.database2D
     sinister = args.sinister
     values_per_class = args.nbpoint
-    scale = int(args.scale) if args.scale != 'departement' else args.scale
+    scale = int(args.scale) if args.scale != 'departement' and args.scale != 'user' else args.scale
     resolution = args.resolution
     ncluster = int(args.ncluster)
     k_days = int(args.k_days) # Size of the time series sequence use by DL models
@@ -730,7 +732,8 @@ def init(args, dir_output, script):
         logger.info('#      Calcualte Encoder            #')
         logger.info('#####################################')
         #encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
-        encode_from_xarray(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('occurence', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('burned_area', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     ########################## Do Database ####################################
     if doDatabase:
@@ -756,7 +759,7 @@ def init(args, dir_output, script):
         save_object(df, 'df_feat_'+prefix+'.pkl', dir_output)
         #save_object(Y, 'Y_'+prefix+'.pkl', dir_output)
     else:
-        df = read_object('df_feat_'+prefix+'.pkl', dir_output)
+        df = read_object('df_feat_'+prefix+'.pkl', dir_output)            
         #Y = read_object('Y_'+prefix+'.pkl', dir_output)
         features_name, newshape = get_features_name_list(graphScale.scale, features, METHODS_SPATIAL)
 
@@ -898,11 +901,8 @@ def init(args, dir_output, script):
 
     train_mask = (df['date'].isin([allDates.index(d) for d in all_train_dates])) & (df['departement'].isin(trainCode))
     shift_list = np.arange(0, 1)
-    train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
+    #train_break_point(df[train_mask].copy(deep=True), features_name, dir_output / 'check_none' / prefix / 'kmeans', ncluster, shift_list)
 
-    if dataset_name.find('bdiff') !=-1:
-        df = df[df['date'] <= allDates.index('2023-12-31')]
-        
     ################################ Process Target ###############################################
 
     #if dataset_name == 'bdiff' and not find_df:
@@ -918,7 +918,7 @@ def init(args, dir_output, script):
 
     ################################ Remove bad or correlated features #############################################
     if True:
-    #if (not find_df and not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated.pkl').is_file()):
+    #if (not (dir_output / 'features_correlation' / f'{scale}_{graphScale.base}_{graphScale.graph_method}_features_name_after_drop_correlated_{name_exp}.pkl').is_file()):
 
         if name_exp == 'occurence_less_feature':
             features_name, _ = get_features_name_list(scale, train_features, ['mean'])
@@ -1040,11 +1040,16 @@ def init(args, dir_output, script):
 
     ############################## Save dataframe and features ###################################
 
+    df['saison'] = df['date'].apply(get_saison)
+    df['saison-encoding'] = df['date'].apply(get_saison_encoding)
+    df['mediterranean'] = df['departement'].apply(is_mediterranean_dept)
+    df['cluster-encoder'] = df['cluster_encoder']
+
     save_object(df, f'df_{prefix}.pkl', dir_output)
     save_object(features_name, f'features_name_{prefix}.pkl', dir_output)
 
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name
-
+    
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
     return df, graphScale, prefix, fp, features_name

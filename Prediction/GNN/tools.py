@@ -7,6 +7,7 @@ from sklearn.metrics import silhouette_score, silhouette_samples
 from astropy.convolution import convolve_fft
 from scipy.ndimage import generic_filter
 import xarray as xr
+import inspect
 
 if is_pc:
     import datetime as dt
@@ -166,7 +167,7 @@ def create_larger_scale_bin(input, bin, influence, time, burned):
                 binImageScale[mask, di] = np.nansum(bin[mask, di])
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
                 timeScale[mask, di] = np.nansum(time[mask, di])
-                burnedScale[mask, di] = np.nansum(time[mask, di])
+                burnedScale[mask, di] = np.nansum(burned[mask, di])
             else:
                 binImageScale[mask, di] = 0
                 influenceImageScale[mask, di] = 0
@@ -251,7 +252,7 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-allDates = find_dates_between('2017-06-12', '2024-06-29')
+allDates = find_dates_between('2017-06-12', '2025-01-01')
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
 def save_object(obj, filename: str, path : Path):
@@ -413,6 +414,7 @@ def stat(c1, c2, clustered, osmnx, bands):
     return np.asarray(res)
 
 def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal = np.nan):
+    from osgeo import gdal, ogr
     check_and_create_path(dir_output)
 
     ori.to_file(dir_output.as_posix() + '/' + outputname+'.geojson', driver="GeoJSON")
@@ -787,7 +789,6 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
                 new_data[:, date_index] = ud
                 new_data[:, departement_index] = arrayNode[0, departement_index]
                 new_data[:, scale_index] = arrayNode[0, scale_index]
-                new_data[:, days_until_next_event_index] = 0
                 new_data[:, weight_index] = 0
 
                 for band in range(len(ids_columns), arrayNode.shape[1]):
@@ -861,8 +862,6 @@ def construct_graph_with_time_series(graph, date : int,
     mask = np.argwhere((X[:,date_index] == date))[:, 0]
 
     x = X[mask]
-    node_with_weight = np.unique(x[:, id_index])
-
     connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
     maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
@@ -962,7 +961,7 @@ def construct_time_series(date : int,
     
         xts = X[maskts]
         x = np.concatenate((x, xts))
-
+        
     if Y is not None:
         y = Y[maskgraph]
         if ks != 0:
@@ -1547,9 +1546,6 @@ def spearman_coefficient(y_true, y_pred, mask=None, tolerance=0):
     - Le coefficient de Spearman (float).
     """
     
-    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
-    ranks_ytrue = rankdata(y_true, method='average')
-
     if mask is None:
         return spearmanr(y_pred, y_true)[0]
     
@@ -3347,6 +3343,21 @@ def get_saison(x):
         return 'high'
     return 'low'
 
+def get_saison_encoding(x):
+    date = allDates[(int(x))]
+    month = int(date.split('-')[1])
+    group_month = [
+                [2, 3, 4, 5],    # Medium season
+                [6, 7, 8, 9],    # High season
+                [10, 11, 12, 1]  # Low season
+            ]
+    
+    if month in [2, 3, 4, 5]:
+        return 1
+    if month in [6, 7, 8, 9]:
+        return 2
+    return 0
+
 def calculate_ks(data, score_col, event_col, thresholds, dir_output):
     """
     Calcule le KS-Statistic pour plusieurs seuils définis et renvoie les seuils optimaux pour chaque KS.
@@ -3417,55 +3428,54 @@ def silhouette_score_with_plot(y_pred, target, name, dir_output):
     :param dir_output: Chemin du répertoire de sortie pour sauvegarder le graphique
     :return: Score de silhouette (float)
     """
-    try:
-        # Calcul du score de silhouette
-        score = silhouette_score(target, y_pred)
-        
-        # Calcul des valeurs individuelles de silhouette
-        silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
-        cluster_labels = np.unique(y_pred)
-        
-        # Création du graphique de silhouette
-        fig, ax = plt.subplots(figsize=(10, 7))
-        y_lower = 10
-        for i, label in enumerate(cluster_labels):
-            # Valeurs de silhouette pour le cluster actuel
-            cluster_silhouette_vals = silhouette_vals[y_pred == label]
-            cluster_silhouette_vals.sort()
-            
-            # Hauteur de la barre
-            y_upper = y_lower + len(cluster_silhouette_vals)
-            color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
-            
-            ax.fill_betweenx(
-                np.arange(y_lower, y_upper),
-                0, 
-                cluster_silhouette_vals,
-                facecolor=color,
-                edgecolor=color,
-                alpha=0.7
-            )
-            
-            # Ajouter une étiquette pour le cluster
-            ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
-            y_lower = y_upper + 10  # Espacement entre les clusters
-
-        # Ligne verticale correspondant au score moyen
-        ax.axvline(x=score, color="red", linestyle="--")
-        ax.set_title("Silhouette Plot")
-        ax.set_xlabel("Silhouette Coefficient Values")
-        ax.set_ylabel("Cluster Label")
-        ax.set_yticks([])  # Pas de graduation sur l'axe Y
-        ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
-        
-        # Sauvegarde du graphique
-        plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
-        fig.savefig(plot_path)
-        plt.close(fig)
-        
+    score = silhouette_score(target, y_pred)
+    if dir_output is None:
         return score
-    except:
-        return 0
+    # Calcul du score de silhouette
+    
+    # Calcul des valeurs individuelles de silhouette
+    silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
+    cluster_labels = np.unique(y_pred)
+    
+    # Création du graphique de silhouette
+    fig, ax = plt.subplots(figsize=(10, 7))
+    y_lower = 10
+    for i, label in enumerate(cluster_labels):
+        # Valeurs de silhouette pour le cluster actuel
+        cluster_silhouette_vals = silhouette_vals[y_pred == label]
+        cluster_silhouette_vals.sort()
+        
+        # Hauteur de la barre
+        y_upper = y_lower + len(cluster_silhouette_vals)
+        color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
+        
+        ax.fill_betweenx(
+            np.arange(y_lower, y_upper),
+            0, 
+            cluster_silhouette_vals,
+            facecolor=color,
+            edgecolor=color,
+            alpha=0.7
+        )
+        
+        # Ajouter une étiquette pour le cluster
+        ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
+        y_lower = y_upper + 10  # Espacement entre les clusters
+
+    # Ligne verticale correspondant au score moyen
+    ax.axvline(x=score, color="red", linestyle="--")
+    ax.set_title("Silhouette Plot")
+    ax.set_xlabel("Silhouette Coefficient Values")
+    ax.set_ylabel("Cluster Label")
+    ax.set_yticks([])  # Pas de graduation sur l'axe Y
+    ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
+    
+    # Sauvegarde du graphique
+    plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
+    fig.savefig(plot_path)
+    plt.close(fig)
+    
+    return score
 
 def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, dir_output):
     """
@@ -3783,11 +3793,11 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     # Limitation des signaux à un maximum de 1
     y_pred_clipped = np.clip(y_pred, 0, 1)  # Limiter y_pred à 1
     y_true_fire_clipped = np.clip(y_true_fire, 0, 1)  # Limiter y_true_fire à 1
-    print(np.unique(y_true_fire_clipped))
-    print(np.unique(y_pred_clipped))
-    iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped)
-    precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-    f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+    rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+    prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+    f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+    f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0)
 
     y_pred_clipped_ytrue = np.copy(y_pred)
     y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
@@ -3802,9 +3812,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         "iou": intersection / union if union > 0 else np.nan,  # To avoid division by zero
         "iou_wildfire_or_pred": iou_wildfire_or_pred,
         "iou_wildfire_and_pred": iou_wildfire_and_pred,
-        "iou_wildfire_detected": iou_wildfire_detected,
-        "precision_wildfire_detected": precision_wildfire_detected,
-        "f1_wildfire_detected": f1_wildfire_detected,
+        "rec_bin": rec_bin,
+        "prec_bin": prec_bin,
+        "f1_bin": f1_bin,
+        "rec_macro": rec_macro,
+        "prec_macro": prec_macro,
+        "f1_macro": f1_macro,
+
         "iou_no_overestimation" : iou_no_overestimation,
         
         "over_bad_prediction" : over_prediction_zeros / union if union > 0 else np.nan,
@@ -3824,6 +3838,14 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
     iou_scores = []
     f1_scores = []
+    precision_scores = []
+    recall_scores = []
+
+    f1_macro_graph_scores = []
+    precision_macro_graph_scores = []
+    recall_macro_graph_scores = []
+
+    auoc_graph_scores = []
 
     # Parcourir les graph_id triés
     for i, g_id in enumerate(sorted_graph_ids):
@@ -3847,9 +3869,24 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        if np.all(y_true_graph == 0) and np.all(y_pred_graph == 0):
+            rec_bin = 0
+            prec_bin = 0
+            f1_bin = 0
+
+            rec_macro = 0
+            prec_bin = 0
+            f1_bin = 0
+
+            auoc = 0
+        else:
+            rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            
+            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_graph, y_pred_graph, average='macro', labels=np.union1d(y_true_graph, y_pred_graph), zero_division=0)
+
+            auoc = auoc_func(confusion_matrix(y_true_graph, y_pred_graph, labels=np.union1d(y_true_graph, y_pred_graph)))
 
         y_pred_clipped_ytrue = np.copy(y_pred_graph)
         y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
@@ -3860,17 +3897,8 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
         union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
 
-        under_prediction_graph = np.trapz(np.maximum(0, y_true_graph - y_pred_graph))
-        over_prediction_graph = np.trapz(np.maximum(0, y_pred_graph - y_true_graph))
-
         over_prediction_zeros_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph == 0]))
         under_prediction_zeros_graph = np.trapz(np.maximum(0, y_true_graph[y_pred_graph == 0]))
-
-        under_prediction_fire_graph = np.trapz(np.maximum(0, y_true_graph[y_true_graph > 0] - y_pred_graph[y_true_graph > 0]))
-        over_prediction_fire_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph > 0] - y_true_graph[y_true_graph > 0]))
-
-        only_true_value = np.trapz(y_true_graph)  # Aire sous la courbe des valeurs réelles
-        only_pred_value = np.trapz(y_pred_graph)  # Aire sous la courbe des prédictions
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         graph_scores = {
@@ -3878,9 +3906,15 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_and_pred_{i}": iou_wildfire_and_pred_graph,
             f"iou_no_overestimation_{i}": iou_no_overestimation,
             f"iou_{i}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
-            f"iou_wildfire_detected_{i}": iou_wildfire_detected,
-            f"precision_wildfire_detected_{i}": precision_wildfire_detected,
-            f"f1_wildfire_detected_{i}": f1_wildfire_detected,
+            f"rec_bin_{i}": rec_bin,
+            f"prec_bin_{i}": prec_bin,
+            f"f1_bin_{i}": f1_bin,
+
+            f"rec_macro_{i}": rec_macro,
+            f"prec_macro_{i}": prec_macro,
+            f"f1_macro_{i}": f1_macro,
+
+            f"auoc_{i}": auoc,
 
             # Ajout du Dice coefficient pour chaque itération
             f"dice_coefficient_{i}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
@@ -3895,21 +3929,56 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         }
         if np.any(y_true_fire_graph > 0):
             iou_scores.append(graph_scores[f'iou_{i}'])
-            f1_scores.append(graph_scores[f'f1_wildfire_detected_{i}'])
+            f1_scores.append(graph_scores[f'f1_bin_{i}'])
+            precision_scores.append(prec_bin)
+            recall_scores.append(rec_bin)
+
+            precision_macro_graph_scores.append(prec_macro)
+            recall_macro_graph_scores.append(rec_macro)
+            f1_macro_graph_scores.append(f1_macro)
         
+        auoc_graph_scores.append(auoc)
         scores.update(graph_scores)
 
     max_area = np.trapz(np.ones(np.unique(graph_id[y_true > 0]).shape[0]))
+    
     IoU_area = calculate_area_under_curve(iou_scores)
+
     F1_area = calculate_area_under_curve(f1_scores)
+    Prec_area = calculate_area_under_curve(precision_scores)
+    Rec_area = calculate_area_under_curve(recall_scores)
+
+    F1_area_macro = calculate_area_under_curve(f1_macro_graph_scores)
+    Prec_area_macro = calculate_area_under_curve(precision_macro_graph_scores)
+    Rec_area_macro = calculate_area_under_curve(recall_macro_graph_scores)
+    
+    auoc_area = calculate_area_under_curve(auoc_graph_scores)
+
     if max_area > 0: 
         scores['iou_area'] = IoU_area / max_area
         scores['f1_area'] = F1_area / max_area
+        scores['prec_area'] = Prec_area / max_area
+        scores['rec_area'] = Rec_area / max_area
+        scores['f1_macro_area'] = F1_area_macro / max_area
+        scores['prec_macro_area'] = Prec_area_macro / max_area
+        scores['rec_macro_area'] = Rec_area_macro / max_area
+        scores['auoc_area'] = auoc_area / max_area
     else:
         scores['iou_area'] = 0
         scores['f1_area'] = 0
+        scores['prec_area'] = 0
+        scores['rec_area'] = 0
+        scores['f1_macro_area'] = 0
+        scores['prec_macro_area'] = 0
+        scores['rec_macro_area'] = 0
+        scores['auoc_area'] = 0
     
     unique_seasons = np.unique(saison)
+
+    # Collecte pour macro par saison
+    precision_scores_season = []
+    recall_scores_season = []
+    f1_scores_season = []
 
     # Trier les saisons en fonction de la somme de y_true
     season_sums = {s: y_true[saison == s].sum() for s in unique_seasons}
@@ -3937,9 +4006,24 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        if np.all(y_true_season == 0) and np.all(y_pred_season == 0):
+            rec_bin = 0
+            prec_bin = 0
+            f1_bin = 0
+
+            rec_macro = 0
+            prec_bin = 0
+            f1_bin = 0
+
+            auoc = 0
+        else:
+            rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_season, y_pred_season, average='macro', labels=np.union1d(y_true_season, y_pred_season), zero_division=0)
+
+            auoc = auoc_func(confusion_matrix(y_true_season, y_pred_season, labels=np.union1d(y_true_season, y_pred_season)))
 
         y_pred_clipped_ytrue = np.copy(y_pred_season)
         y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
@@ -3959,9 +4043,16 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_and_pred_{s}": iou_wildfire_and_pred_season,
             f"iou_no_overestimation_{s}": iou_no_overestimation,
             f"iou_{s}": intersection_season / union_season if union_season > 0 else np.nan,  # Pour éviter la division par zéro
-            f"iou_wildfire_detected_{s}": iou_wildfire_detected,
-            f"precision_wildfire_detected_{s}": precision_wildfire_detected,
-            f"f1_wildfire_detected_{s}": f1_wildfire_detected,
+            
+            f"rec_bin_{s}": rec_bin,
+            f"prec_bin_{s}": prec_bin,
+            f"f1_bin_{s}": f1_bin,
+
+            f"rec_macro_{s}": rec_macro,
+            f"prec_macro_{s}": prec_macro,
+            f"f1_macro_{s}": f1_macro,
+            
+            f"auoc_{s}": auoc,
 
             f"over_bad_prediction_local_{s}": over_prediction_zeros_season / union_season if union_season > 0 else np.nan,
             f"under_bad_prediction_local_{s}": under_prediction_zeros_season / union_season if union_season > 0 else np.nan,
@@ -3975,6 +4066,12 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         }
         scores.update(season_scores)
 
+        # Ajout aux listes macro par saison si la saison contient des feux
+        if np.any(y_true_fire_season > 0):
+            precision_scores_season.append(prec_bin)
+            recall_scores_season.append(rec_bin)
+            f1_scores_season.append(f1_bin)
+
     ###################################### For each graph_id in each season ####################################
     # Get unique seasons
     unique_seasons = np.unique(saison)
@@ -3983,6 +4080,11 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     for season in unique_seasons:
         # Mask for the current season
         season_mask = saison == season
+
+        # Collecte pour macro par graph au sein de la saison
+        precision_scores_graph_in_season = []
+        recall_scores_graph_in_season = []
+        f1_scores_graph_in_season = []
 
         # Iterate over graphs in this season
         for i, g_id in enumerate(sorted_graph_ids):
@@ -4007,9 +4109,24 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
             y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
 
-            iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-            precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-            f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+            if np.all(y_true_graph_season == 0) and np.all(y_pred_graph_season == 0):
+                rec_bin = 0
+                prec_bin = 0
+                f1_bin = 0
+
+                rec_macro = 0
+                prec_bin = 0
+                f1_bin = 0
+
+                auoc = 0
+            else:
+                rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+                prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+                f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+                f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_graph_season, y_pred_graph_season, average='macro', labels=np.union1d(y_true_graph_season, y_pred_graph_season), zero_division=0)
+
+                auoc = auoc_func(confusion_matrix(y_true_graph_season, y_pred_graph_season, labels=np.union1d(y_true_graph_season, y_pred_graph_season)))
 
             y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
             y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
@@ -4029,9 +4146,16 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
                 f"iou_wildfire_and_pred_graph_{i}_season_{season}": iou_wildfire_and_pred_graph_season,
                 f"iou_no_overestimation_graph_{i}_season_{season}": iou_no_overestimation,
                 f"iou_graph_{i}_season_{season}": intersection_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
-                f"iou_wildfire_detected_graph_{i}_season_{season}": iou_wildfire_detected,
-                f"precision_wildfire_detected_graph_{i}_season_{season}": precision_wildfire_detected,
-                f"f1_wildfire_detected_graph_{i}_season_{season}": f1_wildfire_detected,
+                
+                f"rec_bin_graph_{i}_season_{season}": rec_bin,
+                f"prec_bin_graph_{i}_season_{season}": prec_bin,
+                f"f1_bin_graph_{i}_season_{season}": f1_bin,
+
+                f"auoc_bin_graph_{i}_season_{season}": auoc,
+
+                f"rec_macro_graph_{i}_season_{season}": rec_macro,
+                f"prec_macro_graph_{i}_season_{season}": prec_macro,
+                f"f1_macro_graph_{i}_season_{season}": f1_macro,
                 
                 f"dice_coefficient_graph_{i}_season_{season}": 2 * intersection_graph_season / (union_graph_season + intersection_graph_season) if (union_graph_season + intersection_graph_season) > 0 else np.nan,
 
@@ -4043,7 +4167,18 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             # Update global scores dictionary
             scores.update(graph_season_scores)
 
+            # Ajout à la macro saisonnelle si le couple (graph, saison) contient des feux
+            if np.any(y_true_fire_graph_season > 0):
+                precision_scores_graph_in_season.append(prec_bin)
+                recall_scores_graph_in_season.append(rec_bin)
+                f1_scores_graph_in_season.append(f1_bin)
+
     # Parcourir les valeurs uniques de y_true
+    # Macro pour catégorie: elt (égalité)
+    precision_scores_elt = []
+    recall_scores_elt = []
+    f1_scores_elt = []
+
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
         mask = (y_true == unique_value) | (y_pred == unique_value)
@@ -4074,11 +4209,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
         y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
 
-        # Calcul de la métrique IOU
-        #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
-        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+
+        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
@@ -4090,28 +4227,25 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
         union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
 
-        under_prediction = np.trapz(np.maximum(0, y_true_sample - y_pred_sample))
-        over_prediction = np.trapz(np.maximum(0, y_pred_sample - y_true_sample))
-
         over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
         under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
-
-        under_prediction_fire = np.trapz(
-            np.maximum(0, y_true_sample[y_true_sample > 0] - y_pred_sample[y_true_sample > 0])
-        )
-        over_prediction_fire = np.trapz(
-            np.maximum(0, y_pred_sample[y_true_sample > 0] - y_true_sample[y_true_sample > 0])
-        )
 
         # Enregistrement dans un dictionnaire
         scores_elt = {            
             f"iou_elt_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
-            f"iou_wildfire_detected_elt_{unique_value}": iou_wildfire_detected,
             f"iou_wildfire_or_pred_elt_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_{unique_value}": iou_no_overestimation,
-            f"precision_wildfire_detected_elt_{unique_value}": precision_wildfire_detected,
-            f"f1_wildfire_detected_elt_{unique_value}": f1_wildfire_detected,
+            
+            f"rec_bin_elt_{unique_value}": rec_bin,
+            f"prec_bin_elt_{unique_value}": prec_bin,
+            f"f1_bin_elt_{unique_value}": f1_bin,
+            
+            f"auoc_elt_{unique_value}": auoc,
+
+            f"rec_macro_elt_{unique_value}": rec_macro,
+            f"prec_macro_elt_{unique_value}": prec_macro,
+            f"f1_macro_elt_{unique_value}": f1_macro,
 
             f"dice_coefficient_elt_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
 
@@ -4123,7 +4257,17 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         # Ajouter les scores pour cette valeur unique à la collection globale
         scores.update(scores_elt)
 
+        # Ajout aux listes macro elt
+        precision_scores_elt.append(prec_bin)
+        recall_scores_elt.append(rec_bin)
+        f1_scores_elt.append(f1_bin)
+
     # Parcourir les valeurs uniques de y_true
+    # Macro pour catégorie: elt_sup (>=)
+    precision_scores_elt_sup = []
+    recall_scores_elt_sup = []
+    f1_scores_elt_sup = []
+
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
         mask = (y_true >= unique_value) | (y_pred >= unique_value)
@@ -4155,10 +4299,14 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
 
         # Calcul de la métrique IOU
-        #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
-        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        #rec_bin = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+
+        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
@@ -4170,28 +4318,21 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
         union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
 
-        under_prediction = np.trapz(np.maximum(0, y_true_sample - y_pred_sample))
-        over_prediction = np.trapz(np.maximum(0, y_pred_sample - y_true_sample))
-
         over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
         under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
-
-        under_prediction_fire = np.trapz(
-            np.maximum(0, y_true_sample[y_true_sample > 0] - y_pred_sample[y_true_sample > 0])
-        )
-        over_prediction_fire = np.trapz(
-            np.maximum(0, y_pred_sample[y_true_sample > 0] - y_true_sample[y_true_sample > 0])
-        )
 
         # Enregistrement dans un dictionnaire
         scores_elt = {            
             f"iou_elt_sup_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
-            f"iou_wildfire_detected_elt_sup_{unique_value}": iou_wildfire_detected,
             f"iou_wildfire_or_pred_elt_sup_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_sup_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_sup_{unique_value}": iou_no_overestimation,
-            f"precision_wildfire_detected_elt_sup_{unique_value}": precision_wildfire_detected,
-            f"f1_wildfire_detected_elt_sup_{unique_value}": f1_wildfire_detected,
+            
+            f"rec_macro_elt_sup_{unique_value}": rec_macro,
+            f"prec_macro_elt_sup_{unique_value}": prec_macro,
+            f"f1_macro_elt_sup_{unique_value}": f1_macro,
+            
+            f"auoc_elt_sup_{unique_value}": auoc,
 
             f"dice_coefficient_elt_sup_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
             
@@ -4201,7 +4342,11 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         }
         scores.update(scores_elt)
 
-    # Parcourir les valeurs uniques de y_true
+        # Ajout aux listes macro elt_sup
+        precision_scores_elt_sup.append(prec_bin)
+        recall_scores_elt_sup.append(rec_bin)
+        f1_scores_elt_sup.append(f1_bin)
+
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
         mask =  (y_pred >= unique_value)
@@ -4233,10 +4378,13 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
 
         # Calcul de la métrique IOU
-        #iou_wildfire_detected = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
-        iou_wildfire_detected = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        precision_wildfire_detected = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
-        f1_wildfire_detected = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=np.nan)
+        rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+        f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+
+        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
         y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
@@ -4248,28 +4396,21 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
         union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
 
-        under_prediction = np.trapz(np.maximum(0, y_true_sample - y_pred_sample))
-        over_prediction = np.trapz(np.maximum(0, y_pred_sample - y_true_sample))
-
         over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
         under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
-
-        under_prediction_fire = np.trapz(
-            np.maximum(0, y_true_sample[y_true_sample > 0] - y_pred_sample[y_true_sample > 0])
-        )
-        over_prediction_fire = np.trapz(
-            np.maximum(0, y_pred_sample[y_true_sample > 0] - y_true_sample[y_true_sample > 0])
-        )
 
         # Enregistrement dans un dictionnaire
         scores_predicted = {            
             f"iou_predicted_sup_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
-            f"iou_wildfire_detected_predicted_sup_{unique_value}": iou_wildfire_detected,
             f"iou_wildfire_or_pred_predicted_sup_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_predicted_sup_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_predicted_sup_{unique_value}": iou_no_overestimation,
-            f"precision_wildfire_detected_predicted_sup_{unique_value}": precision_wildfire_detected,
-            f"f1_wildfire_detected_predicted_sup_{unique_value}": f1_wildfire_detected,
+            
+            f"rec_macro_predicted_sup_{unique_value}": rec_macro,
+            f"prec_macro_predicted_sup_{unique_value}": prec_macro,
+            f"f1_macro_predicted_sup_{unique_value}": f1_macro,
+            
+            f"auoc_predicted_sup_{unique_value}": auoc,
 
             f"dice_coefficient_predicted_sup_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
             
@@ -4278,9 +4419,38 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"bad_prediction_predicted_sup_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
         }
 
-
         # Ajouter les scores pour cette valeur unique à la collection globale
         scores.update(scores_predicted)
+
+    # Ajouter des alias plus explicites pour les métriques (sans casser l'existant)
+    import re
+    alias_rules = [
+        (r'^rec_bin(.*)$', r'recall\1'),
+        (r'^prec_bin(.*)$', r'precision\1'),
+        (r'^f1_bin(.*)$', r'f1\1'),
+        (r'^iou_no_overestimation(.*)$', r'iou_sans_surprediction\1'),
+        (r'^over_bad_prediction_local(.*)$', r'ratio_surprediction_locale\1'),
+        (r'^under_bad_prediction_local(.*)$', r'ratio_sousprediction_locale\1'),
+        (r'^bad_prediction_local(.*)$', r'ratio_erreur_locale\1'),
+        (r'^over_bad_prediction_global(.*)$', r'ratio_surprediction_global\1'),
+        (r'^under_bad_prediction_global(.*)$', r'ratio_sousprediction_global\1'),
+        (r'^bad_prediction_global(.*)$', r'ratio_erreur_global\1'),
+        (r'^dice_coefficient(.*)$', r'dice\1'),
+        (r'^iou_wildfire_or_pred(.*)$', r'iou_union_feu_ou_pred\1'),
+        (r'^iou_wildfire_and_pred(.*)$', r'iou_intersection_feu_et_pred\1'),
+        (r'^iou_area$', r'iou_area_normalized'),
+        (r'^f1_area$', r'f1_area_normalized'),
+        (r'^prec_area$', r'precision_area_normalized'),
+        (r'^rec_are$', r'recall_area_normalized'),
+    ]
+    new_aliases = {}
+    for k, v in list(scores.items()):
+        for pattern, repl in alias_rules:
+            if re.match(pattern, k):
+                new_key = re.sub(pattern, repl, k)
+                if new_key not in scores:
+                    new_aliases[new_key] = v
+    scores.update(new_aliases)
 
     return scores
 
@@ -5074,6 +5244,17 @@ def has_method(obj, method_name):
     """
     return callable(getattr(obj, method_name, None))
 
+def required_params(func):
+    sig = inspect.signature(func)
+    req = []
+    for name, p in sig.parameters.items():
+        # Un paramètre est "requis" s'il n'a pas de valeur par défaut
+        # et que ce n'est pas *args ni **kwargs
+        if (p.default is inspect._empty
+            and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)):
+            req.append(name)
+    return req
+
 def binary_closing_id(mask, selem):
 
     from skimage.morphology import binary_closing
@@ -5182,46 +5363,326 @@ def select_samples(df, n_samples=1000, kdays=5):
     
     return final_selection
 
-    import numpy as np
-
-def auoc_func(confusion_matrix, gamma=1):
+def auoc_func(conf_matrix: np.ndarray, n_beta: int = 1001) -> float:
     """
-    Calcule l'AUOC (Average Uniform Ordinal Classification Index)
-    à partir d'une matrice de confusion.
+    Compute AUOC from a multi-class confusion matrix.
 
-    confusion_matrix : ndarray (K, K)
-        Matrice de confusion (valeurs entières, lignes = classes réelles, colonnes = prédictions).
-    gamma : int
-        Exposant pour la distance ordinale (1 recommandé dans l'article).
+    Assumptions (faithful to the textual definition you provided):
+    - Paths go from top-left (0,0) to bottom-right (K-1,K-1) with monotone moves
+      (right or down), i.e., one cell is chosen per step along the grid.
+    - Benefit rewards large *correct* predictions along the path:
+        benefit(i,j) = p(j|i) if i == j else 0
+    - Penalty increases with the (ordinal) distance between classes, weighted by
+      how much mass p(j|i) sits in that cell:
+        penalty(i,j) = p(j|i) * |i - j|
+    - For each β in [0, 1], we define the path cost as:
+        UOC_1(β) = min_path [ 1 - (sum_diag_p / K) + (β / K) * sum_penalty ]
+      where K is the number of classes. AUOC is the integral of UOC_1(β) over β∈[0,1].
+    - The integral is approximated numerically by the trapezoidal rule with n_beta points.
 
-    Retour :
-        AUOC (float)
+    Parameters
+    ----------
+    conf_matrix : np.ndarray
+        Square confusion matrix of shape (K, K), counts per (true=y, pred=ŷ).
+    n_beta : int
+        Number of β samples (≥2). Larger -> finer integration.
+
+    Returns
+    -------
+    float
+        AUOC value in [0, 1+] (lower is better under this setup since cost includes 1 - benefit term).
+        If you prefer a "higher is better" score, you can transform it downstream.
     """
-    cm = np.array(confusion_matrix, dtype=float)
-    K = cm.shape[0]
+    C = np.asarray(conf_matrix, dtype=float)
+    if C.ndim != 2 or C.shape[0] != C.shape[1]:
+        raise ValueError("conf_matrix must be a square 2D array")
+    K = C.shape[0]
 
-    # Identifier les classes observées (Nr > 0)
-    Nr = cm.sum(axis=1)
-    observed_classes = np.where(Nr > 0)[0]
-    Kp = len(observed_classes)  # K' dans l'article
+    # Row-normalized conditional probabilities p(ŷ | y)
+    row_sums = C.sum(axis=1, keepdims=True)
+    # Avoid division by zero (rows with no samples); leave zeros if a class never appears
+    p = np.divide(C, np.where(row_sums == 0, 1.0, row_sums), where=row_sums != 0)
 
-    # Probabilités conditionnelles p(y_hat | y) pour classes observées
-    p_cond = np.zeros_like(cm)
-    for r in observed_classes:
-        p_cond[r, :] = cm[r, :] / Nr[r]
+    # Benefit and penalty matrices
+    benefit = np.zeros_like(p)
+    np.fill_diagonal(benefit, np.diag(p))  # only reward correct cells
 
-    # Distance ordinale |r - c|^gamma
-    R, C = np.indices((K, K))
-    dist_gamma = np.abs(R - C) ** gamma
+    # Ordinal distance |y - ŷ|
+    yy, yhat = np.indices((K, K))
+    penalty = p * np.abs(yy - yhat)
 
-    # Fonction UOC_β pour un β donné
-    def uoc_beta(beta):
-        benefit = p_cond[observed_classes, :].diagonal().sum() / Kp
-        penalty1 = ( (p_cond[observed_classes, :] * dist_gamma[observed_classes, :]).sum() / Kp ) ** (1/gamma)
-        penalty2 = (p_cond[observed_classes, :] * dist_gamma[observed_classes, :]).diagonal().sum() * (beta / Kp)
-        return min(1 - benefit + penalty1 + penalty2, 1.0)
+    # Precompute per-cell components of the additive path cost:
+    # cost(i,j; β) = [1 - (benefit(i,j)/K)] + [ (β / K) * penalty(i,j) ] aggregated along the path.
+    # Since "1" would be added K+K-1 times along a path if we put it per-cell, we only
+    # include the *summed* terms that vary with cell and add the constant '1' once at the end:
+    #   UOC_1(β) = 1 + min_path[ sum( -benefit/K + (β/K)*penalty ) ]
+    neg_benefit_over_K = -benefit / K
+    penalty_over_K = penalty / K
 
-    # Intégration numérique de β de 0 à 1 pour obtenir AUOC
-    betas = np.linspace(0, 1, 101)  # discrétisation
-    values = [uoc_beta(b) for b in betas]
-    return np.trapz(values, betas)  # intégrale par la règle des trapèzes
+    # Dynamic programming to find min path cost for each β
+    # dp[i,j](β) = min path cost to reach (i,j) = cell_cost(i,j; β) + min(dp[i-1,j], dp[i,j-1])
+    # We'll compute for all β values by reusing the structure and only changing the linear term.
+    betas = np.linspace(0.0, 1.0, n_beta)
+    uoc_vals = np.empty_like(betas)
+
+    for idx, beta in enumerate(betas):
+        cell_cost = neg_benefit_over_K + beta * penalty_over_K
+
+        # DP accumulate minimal sums along monotone paths
+        dp = np.zeros((K, K), dtype=float)
+        dp[0, 0] = cell_cost[0, 0]
+
+        # first row
+        for j in range(1, K):
+            dp[0, j] = dp[0, j-1] + cell_cost[0, j]
+        # first column
+        for i in range(1, K):
+            dp[i, 0] = dp[i-1, 0] + cell_cost[i, 0]
+        # rest
+        for i in range(1, K):
+            for j in range(1, K):
+                dp[i, j] = min(dp[i-1, j], dp[i, j-1]) + cell_cost[i, j]
+
+        # Add the lone constant "1" term explained above
+        uoc_vals[idx] = 1.0 + dp[-1, -1]
+
+    # AUOC = ∫_0^1 UOC_1(β) dβ  (numerical integration)
+    auoc_value = np.trapz(uoc_vals, betas)
+
+    return float(auoc_value)
+
+def macro_precision_recall_f1_no_tp0(y_true, y_pred, labels=None, zero_division=0, return_per_class=False, average='macro'):
+    """
+    Calcule macro-precision, macro-recall et macro-F1 en incluant la classe 0
+    mais en forçant TP_0 = 0.
+    - zero_division : valeur utilisée quand le dénominateur vaut 0 (classe absente).
+    - return_per_class : si True, retourne aussi les métriques par classe.
+    """
+    # Labels considérés
+    if labels is None:
+        labels = np.unique(np.concatenate([np.unique(y_true), np.unique(y_pred)]))
+    labels = np.array(labels)
+
+    # Matrice de confusion
+    C = confusion_matrix(y_true, y_pred, labels=labels).astype(np.int64)
+
+    # TP, FP, FN par classe
+    tp = np.diag(C).astype(float)
+    fp = C.sum(axis=0) - tp
+    fn = C.sum(axis=1) - tp
+
+    # Forcer TP de la classe 0 à 0
+    if 0 in labels:
+        i0 = int(np.where(labels == 0)[0][0])
+        tp[i0] = 0.0
+
+    # Precision_c = TP / (TP + FP)
+    prec_den = tp + fp
+    precision = np.divide(tp, prec_den,
+                          out=np.full_like(tp, float(zero_division)),
+                          where=prec_den > 0)
+
+    # Recall_c = TP / (TP + FN)
+    rec_den = tp + fn
+    recall = np.divide(tp, rec_den,
+                       out=np.full_like(tp, float(zero_division)),
+                       where=rec_den > 0)
+
+    # F1_c = 2 * P * R / (P + R)
+    f1_den = precision + recall
+    f1 = np.divide(2 * precision * recall, f1_den,
+                   out=np.full_like(tp, float(zero_division)),
+                   where=f1_den > 0)
+
+    macro_precision = float(np.mean(precision))
+    macro_recall    = float(np.mean(recall))
+    macro_f1        = float(np.mean(f1))
+
+    if return_per_class:
+        return (macro_precision, macro_recall, macro_f1,
+                {"labels": labels.tolist(),
+                 "precision_per_class": precision.tolist(),
+                 "recall_per_class": recall.tolist(),
+                 "f1_per_class": f1.tolist(),
+                 "support": C.sum(axis=1).astype(int).tolist()})
+    return macro_precision, macro_recall, macro_f1
+
+def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('best_tp',)):
+    """
+    Récupère model.metrics[model.metrics['best_tp']] puis, pour chaque champ numérique,
+    sauvegarde mean/std/var dans metrics_dict[run].
+
+    Paramètres
+    ----------
+    model : objet avec un attribut .metrics indexable
+    run : identifiant du run (clé dans metrics_dict)
+    metrics_dict : dict de sortie (sera modifié), ex: metrics[run] = {...}
+    fields : liste optionnelle de champs à résumer. Si None -> tous les champs trouvés.
+    skip : champs à ignorer
+
+    Retour
+    ------
+    dict : le sous-dict metrics_dict[run] rempli
+    """
+
+    print(model.metrics.keys(), model.metrics['best_tp'])
+
+    # Sous-bloc (comme dans ton code)
+    sub = model.metrics[model.metrics['best_tp']]
+
+    out = metrics_dict.setdefault(run, {})
+
+    # Déterminer les clés à parcourir
+    if fields is None:
+        if hasattr(sub, "keys"):
+            keys = list(sub.keys())
+        else:
+            # au cas où sub serait un objet type pandas Series
+            try:
+                keys = list(sub.index)
+            except Exception:
+                raise TypeError("Impossible d'itérer sur les champs de 'sub'. Fournis 'fields=' explicitement.")
+    else:
+        keys = list(fields)
+
+    for k in keys:
+        if k in skip:
+            continue
+        if (hasattr(sub, "keys") and k not in sub) or (not hasattr(sub, "keys") and k not in getattr(sub, "index", [])):
+            # champ absent -> on saute
+            continue
+
+        # Récupérer les valeurs et convertir en array float
+        vals = sub[k]
+        arr = np.asarray(vals, dtype=float).ravel()  # aplati au cas où
+
+        if 'ic95' in k:
+            out[f'lower_{k}'] = round(vals[0], 2)
+            out[f'upper_{k}'] = round(vals[1], 2)
+        else:
+            if arr.size == 0:
+                mean = std = var = np.nan
+            else:
+                mean = float(np.nanmean(arr))
+                if arr.size > 1:
+                    std = float(np.nanstd(arr, ddof=1))  # écart-type (échantillon)
+                    var = float(np.nanvar(arr, ddof=1))  # variance (échantillon)
+                else:
+                    std = var = float('nan')  # pas assez d'éléments pour ddof=1
+
+            # Nommage simple et homogène
+            out[f"mean_{k}"] = round(mean, 2)
+            out[f"std_{k}"]  = round(std, 2)
+            out[f"var_{k}"]  = round(var, 2)
+
+    return out
+
+from typing import Any
+
+def round_floats(obj: Any, ndigits: int = 2, round_keys: bool = False) -> Any:
+    """
+    Arrondit tous les float rencontrés dans une structure Python (dict, list, tuple, set),
+    et renvoie une nouvelle structure du même type.
+    
+    - obj: structure d'entrée (dict, list, tuple, set, scalaires)
+    - ndigits: nombre de décimales (par défaut 2)
+    - round_keys: si True, arrondit aussi les *clés* de type float dans les dicts
+                  (attention aux collisions possibles de clés après arrondi)
+    """
+    # float -> on arrondit
+    if isinstance(obj, float):
+        return round(obj, ndigits)
+
+    # dict -> on traite clés/valeurs
+    if isinstance(obj, dict):
+        new_dict = {}
+        for k, v in obj.items():
+            new_k = round(k, ndigits) if (round_keys and isinstance(k, float)) else k
+            new_dict[new_k] = round_floats(v, ndigits, round_keys)
+        return new_dict
+
+    # list -> on traite chaque élément
+    if isinstance(obj, list):
+        return [round_floats(x, ndigits, round_keys) for x in obj]
+
+    # tuple -> on traite chaque élément et on recompose un tuple
+    if isinstance(obj, tuple):
+        return tuple(round_floats(x, ndigits, round_keys) for x in obj)
+
+    # set -> on traite chaque élément (attention: l'arrondi peut fusionner des éléments)
+    if isinstance(obj, set):
+        return {round_floats(x, ndigits, round_keys) for x in obj}
+
+    # autre type (int, str, bool, None, etc.) -> inchangé
+    return obj
+
+from typing import Dict, Any, Iterable, Optional
+import numpy as np
+
+def add_ic95_to_dict(
+    d: Dict[str, Any],
+    keys: Optional[Iterable[str]] = None,
+    suffix: str = "_ic95",
+    dropna: bool = True,
+    overwrite: bool = True,
+) -> Dict[str, Any]:
+    """
+    Pour chaque clé 'metric' de d (ou sous-ensemble 'keys'), calcule l'IC95
+    via calculate_ic95(d[metric]) et stocke un tuple (lower, upper) sous
+    'metric{suffix}' (ex.: 'f1_ic95').
+
+    Hypothèses:
+    - d[metric] est une séquence numérique (list/tuple/ndarray) de valeurs (runs, sous-samples, etc.)
+    - La fonction calculate_ic95(array_like) existe et renvoie (lower, upper)
+
+    Paramètres
+    ----------
+    d : dict
+        Dictionnaire des métriques => séquences de valeurs.
+    keys : itérable de str, optionnel
+        Si fourni, ne traite que ces clés. Sinon, toutes les clés sauf celles finissant par `suffix`.
+    suffix : str
+        Suffixe pour la clé IC95 (par défaut "_ic95").
+    dropna : bool
+        Si True, ignore les NaN avant le calcul.
+    overwrite : bool
+        Si False, n’écrase pas une clé '{metric}{suffix}' déjà existante.
+
+    Retour
+    ------
+    dict (même objet) enrichi de paires '{metric}{suffix}': (lower, upper).
+    """
+    # Sélection des clés candidates
+    if keys is None:
+        candidates = [k for k in d.keys() if not k.endswith(suffix)]
+    else:
+        candidates = list(keys)
+
+    for k in candidates:
+        vals = d.get(k, None)
+        if vals is None:
+            continue
+
+        # Convertir en tableau 1D de floats
+        arr = np.asarray(vals, dtype=float).ravel()
+        if dropna:
+            arr = arr[~np.isnan(arr)]
+
+        # Besoin d'au moins 2 points pour un IC95 basé sur SD
+        if arr.size < 2:
+            d[f"{k}{suffix}"] = (np.nan, np.nan)
+            continue
+
+        # Appel à la fonction externe calculate_ic95
+        try:
+            lower, upper = calculate_ic95(arr)
+            lower = float(lower)
+            upper = float(upper)
+        except Exception:
+            lower, upper = (np.nan, np.nan)
+
+        out_key = f"{k}{suffix}"
+        if overwrite or out_key not in d:
+            d[out_key] = (lower, upper)
+
+    return d

@@ -362,7 +362,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
                         start_date = '2023-01-01'
 
             elif dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
-                end_date =  '2023-12-31'
+                end_date =  allDates[-1]
                 start_date = '2017-06-12'
             elif dataset_name == 'georisques':
                 end_date =  allDates[-1]
@@ -374,6 +374,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             logger.info(f'{departement}, ids : {ids_uniques}')
             ids_uniques = ids_uniques[~np.isnan(ids_uniques)]
             dates_uniques = datacube_dept['date'].values  # coordonnée
+            print(dates_uniques)
 
             results = []
 
@@ -440,7 +441,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             ds_avg['weight'] = 1
             
             results_by_departement[departement] = ds_avg
-
+            print(np.unique(ds_avg['date'].values))
         return results_by_departement
 
 def get_sub_nodes_feature(graph, subNode: np.array,
@@ -1081,6 +1082,18 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
     encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
     encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
 
+    encoder_ba_landcover = read_object(f'encoder_landcover_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_osmnx = read_object(f'encoder_osmnx_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_foret = read_object(f'encoder_foret_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_argile = read_object(f'encoder_argile_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_cosia = read_object(f'encoder_cosia_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_corine = read_object(f'encoder_corine_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_bdroute = read_object(f'encoder_route_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_calendar = read_object(f'encoder_calendar_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_geo = read_object(f'encoder_geo_{name_expe}_BA.pkl', dir_encoder)
+
     res = []
 
     for departement in departements:
@@ -1154,7 +1167,7 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
             # --- Étape 2 : Expand 1D → 2D (id, date), puis stack
             calendar_vars_raw = list(calendar_data.keys())
             calendar_array = np.stack([calendar_data[var] for var in calendar_vars_raw], axis=-1)  # shape (date, nb_vars)
-
+            
             # --- Étape 3 : Encodage
             calendar_flat = calendar_array.reshape(-1, len(calendar_vars_raw))  # shape (id*date, nb_vars)
             calendar_encoded = encoder_calendar.transform(calendar_flat).values.reshape(n_date, -1)
@@ -1230,24 +1243,31 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
 
             if 'foret_encoder' in features:
                 save_values_with_encoding(datacube_feature['forest_landcover'].values, 'foret_encoder', id, areas == id, encoder_foret)
+                save_values_with_encoding(datacube_feature['forest_landcover'].values, 'forest_landcover_BA', id, areas == id, encoder_ba_foret)
 
             if 'highway_encoder' in features:
                 save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_encoder', id, areas == id, encoder_osmnx)
+                save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_landcover_BA', id, areas == id, encoder_ba_osmnx)
 
             if 'argile_encoder' in features:
                 save_values_with_encoding(datacube_feature['argile'].values, 'argile_encoder', id, areas == id, encoder_argile)
+                save_values_with_encoding(datacube_feature['argile'].values, 'argile_BA', id, areas == id, encoder_ba_argile)
 
             if 'cosia_encoder' in features:
                 save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder', id, areas == id, encoder_cosia)
+                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_landcover_BA', id, areas == id, encoder_ba_cosia)
 
             if 'corine_encoder' in features:
                 save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder', id, areas == id, encoder_corine)
-
+                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_landcover_BA', id, areas == id, encoder_ba_corine)
+                
             if 'bdroute_encoder' in features:
                 save_values_with_encoding(datacube_feature['route_landcover'].values, 'bdroute_encoder', id, areas == id, encoder_bdroute)
+                save_values_with_encoding(datacube_feature['route_landcover'].values, 'route_landcover_BA', id, areas == id, encoder_ba_bdroute)
 
             if 'id_encoder' in features:
                 save_value_with_encoding(areas, 'id_encoder', id, areas == id, encoder_id)
+                save_value_with_encoding(areas, 'id_encoder_BA', id, areas == id, encoder_ba_id)
 
             if 'id_encoder' in features:
                 value = encoder_id.transform([id]).values[0][0]

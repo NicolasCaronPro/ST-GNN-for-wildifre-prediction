@@ -484,6 +484,9 @@ class GraphBuilder:
 
         # Flatten lat/lon grid
         self.lat_lon_grid_flat = lat_lon_grid.view(-1, 2)
+            # --- dans GraphBuilder.__init__ ---
+        self._g2m_src = None  # grid indices (numpy int64)
+        self._g2m_dst = None  # mesh indices (numpy int64)
 
     def create_mesh_graph(self, last_graph=None) -> DGLGraph:
         if self.doPrint:
@@ -523,7 +526,7 @@ class GraphBuilder:
         
         return mesh_graph
 
-    def create_g2m_graph(self, last_graph=None, mesh_graph=None) -> DGLGraph:
+    def create_g2m_graph_old(self, last_graph=None, mesh_graph=None) -> DGLGraph:
         if self.doPrint:
             print("Creating grid2mesh bipartite graph")
 
@@ -600,7 +603,7 @@ class GraphBuilder:
 
         return (g2m_graph, mesh_graph) if mesh_graph is not None else g2m_graph
 
-    def create_m2g_graph(self, last_graph=None) -> DGLGraph:
+    def create_m2g_graph_old(self, last_graph=None) -> DGLGraph:
         if self.doPrint:
             print("Creating mesh2grid bipartite graph")
 
@@ -663,6 +666,134 @@ class GraphBuilder:
             print("mesh2grid bipartite graph={}".format(m2g_graph))
 
         return m2g_graph
+
+    def _grid_to_face_edges(self):
+        """Construit les arêtes grid->mesh via les 4 sommets (vertices) les plus proches,
+        en ne conservant que ceux à distance <= 0.6 * edge_len.
+        Retourne (src, dst, node_max, cartesian_grid)."""
+        import numpy as np
+        from sklearn.neighbors import NearestNeighbors
+
+        # Données du maillage
+        faces = self.icospheres[f"order_{self.max_order}_faces"]             # (F, 3)
+        vertices = self.icospheres[f"order_{self.max_order}_vertices"]       # (V, 3)
+        cartesian_grid = latlon_points_to_xyz(self.lat_lon_grid_flat)        # torch.Tensor (G, 3)
+        
+        # Longueur d'arête max (comme dans create_g2m_graph) pour fixer le seuil relatif
+        edge_len = max([
+            np.max(get_edge_len(vertices[faces[:, i]], vertices[faces[:, j]]))
+            for i, j in [(0, 1), (0, 2), (1, 2)]
+        ])
+        thresh = 0.6 * edge_len
+
+        # NN sur les vertices (4 plus proches)
+        # -> scikit-learn attend du numpy
+        cart_np = cartesian_grid.detach().cpu().numpy() if hasattr(cartesian_grid, "detach") else np.asarray(cartesian_grid)
+        nn = NearestNeighbors(n_neighbors=4).fit(vertices)   # vertices est déjà un np.ndarray
+        distances, indices = nn.kneighbors(cart_np)          # shapes: (G, 4)
+
+        # Construit les arêtes en appliquant le seuil
+        src, dst = [], []
+        G = cart_np.shape[0]
+        for g in range(G):
+            keep = indices[g][distances[g] <= thresh]
+            if keep.size > 0:
+                src.extend([g] * keep.size)
+                dst.extend(keep.tolist())
+            else:
+                src.append(g)
+                dst.append(int(indices[g][0]))
+
+        # Sorties au format attendu
+        src = np.asarray(src, dtype=np.int64)
+        dst = np.asarray(dst, dtype=np.int64) if len(dst) > 0 else np.empty((0,), dtype=np.int64)
+        node_max = int(dst.max()) + 1 if dst.size > 0 else 0
+
+        return src, dst, node_max, cartesian_grid
+
+    def create_g2m_graph(self, last_graph=None, mesh_graph=None) -> DGLGraph:
+        if self.doPrint:
+            print("Creating grid2mesh bipartite graph (face-based, 3 edges/grid)")
+
+        # 1) arêtes via face la plus proche
+        src, dst, node_max, cartesian_grid = self._grid_to_face_edges()
+        self._g2m_src, self._g2m_dst = src, dst
+        self.node_max = node_max
+
+        # 2) optionnel: restreindre le mesh_graph si fourni
+        if (np.max(dst) + 1 != len(self.icospheres[f"order_{self.max_order}_vertices"])) and mesh_graph is not None:
+            mesh_graph = mesh_graph.subgraph(np.arange(0, np.max(dst) + 1))
+            if self.doPrint:
+                print("mesh graph={}".format(mesh_graph))
+
+        # 3) construction du hétérographe
+        g2m_graph = create_heterograph(src, dst, ("grid", "g2m", "mesh"), dtype=torch.int32)
+
+        vertices_mesh = torch.tensor(
+            self.icospheres[f"order_{self.max_order}_vertices"], dtype=torch.float32
+        )[:node_max]
+
+        g2m_graph.srcdata["pos"] = cartesian_grid.to(torch.float32)
+        g2m_graph.dstdata["pos"] = vertices_mesh
+
+        g2m_graph = add_edge_features(
+            g2m_graph, (g2m_graph.srcdata["pos"], g2m_graph.dstdata["pos"])
+        )
+
+        # cast dtype
+        #g2m_graph.srcdata["pos"] = g2m_graph.srcdata["_grid_to_face_edgespos"].to(dtype=self.dtype)
+        g2m_graph.dstdata["pos"] = g2m_graph.dstdata["pos"].to(dtype=self.dtype)
+        g2m_graph.ndata["pos"]["grid"] = g2m_graph.ndata["pos"]["grid"].to(dtype=self.dtype)
+        g2m_graph.ndata["pos"]["mesh"] = g2m_graph.ndata["pos"]["mesh"].to(dtype=self.dtype)
+        g2m_graph.edata["x"] = g2m_graph.edata["x"].to(dtype=self.dtype)
+
+        if self.doPrint:
+            print("grid2mesh bipartite graph={}".format(g2m_graph))
+
+        return (g2m_graph, mesh_graph) if mesh_graph is not None else g2m_graph
+
+    def create_m2g_graph(self, last_graph=None) -> DGLGraph:
+        if self.doPrint:
+            print("Creating mesh2grid bipartite graph (derived from g2m edges)")
+
+        # 1) si on a déjà construit g2m : on réutilise EXACTEMENT les mêmes arêtes, inversées
+        if self._g2m_src is None or self._g2m_dst is None:
+            # fallback : calcule les mêmes arêtes que g2m (face-based), puis inverse
+            src_g2m, dst_g2m, node_max, cartesian_grid = self._grid_to_face_edges()
+            self._g2m_src, self._g2m_dst = src_g2m, dst_g2m
+            self.node_max = node_max
+        else:
+            cartesian_grid = latlon_points_to_xyz(self.lat_lon_grid_flat)
+
+        # arêtes inversées : mesh -> grid
+        src = self._g2m_dst.copy()
+        dst = self._g2m_src.copy()
+
+        m2g_graph = create_heterograph(src, dst, ("mesh", "m2g", "grid"), dtype=torch.int32)
+
+        vertices_mesh = torch.tensor(
+            self.icospheres[f"order_{self.max_order}_vertices"], dtype=torch.float32
+        )[:self.node_max]
+
+        m2g_graph.srcdata["pos"] = vertices_mesh
+        m2g_graph.dstdata["pos"] = cartesian_grid.to(dtype=torch.float32)
+
+        m2g_graph = add_edge_features(
+            m2g_graph, (m2g_graph.srcdata["pos"], m2g_graph.dstdata["pos"])
+        )
+
+        # cast dtype
+        m2g_graph.srcdata["pos"] = m2g_graph.srcdata["pos"].to(dtype=self.dtype)
+        m2g_graph.dstdata["pos"] = m2g_graph.dstdata["pos"].to(dtype=self.dtype)
+        m2g_graph.ndata["pos"]["grid"] = m2g_graph.ndata["pos"]["grid"].to(dtype=self.dtype)
+        m2g_graph.ndata["pos"]["mesh"] = m2g_graph.ndata["pos"]["mesh"].to(dtype=self.dtype)
+        m2g_graph.edata["x"] = m2g_graph.edata["x"].to(dtype=self.dtype)
+
+        if self.doPrint:
+            print("mesh2grid bipartite graph={}".format(m2g_graph))
+
+        return m2g_graph
+
 
 class GraphBuilder2:
     def __init__(self, g_lat_lon_grid_scales, Y_scales, graph_scales, date_index, id_index) -> None:

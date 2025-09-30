@@ -27,8 +27,12 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_alafederated,
     wrapped_train_deep_learning_1D_dualtraining,
     wrapped_train_deep_learning_2D,
-    wrapped_train_deep_learning_distallation
+    wrapped_train_deep_learning_distallation,
+    test_fire_index_model
 )
+
+from GNN.statistical_model import Statistical_Model
+
 from GNN.train import wrapped_train_sklearn_api_model, wrapped_train_sklearn_api_voting_model, define_voting_dl_models
 from GNN.config_parser import ConfigParser
 from GNN.config import (
@@ -39,7 +43,7 @@ from GNN.config import (
     encoding,
     METHODS_SPATIAL_TRAIN,
 )
-from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object, get_features_selected_for_time_series_for_2D, get_features_name_lists_2D
+from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object, get_features_selected_for_time_series_for_2D, get_features_name_lists_2D, get_saison_encoding
 from GNN.discretization import post_process_model
 from GNN.features import add_past_risk
 from GNN.dico_departements import *
@@ -104,9 +108,10 @@ def main():
         )
 
         dir_post_process = dir_output / 'post_process'
-        post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
         features_selected = np.arange(len(features_selected_str))
+
+        post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
         train_dataset = add_past_risk(
             train_dataset,
@@ -143,10 +148,7 @@ def main():
         save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
         save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
         save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
-
-    
     else:
-
         prefix = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
         graphScale = read_object(f"graph_{cfg.scale}_{cfg.graphConstruct}_{cfg.graph_method}.pkl", dir_output)
 
@@ -156,12 +158,28 @@ def main():
         val_dataset = read_object(f"df_val_{prefix}.pkl", dir_output)
         test_dataset = read_object(f"df_test_{prefix}.pkl", dir_output)
 
+        train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
+        val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
+        test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
+
+        train_dataset['saison-mediterranean'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
+        val_dataset['saison-mediterranean'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
+        test_dataset['saison-mediterranean'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
+
+        train_dataset['saison-cluster-encoder'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
+        val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
+        test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
+
         if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in train_dataset.columns:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
             save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
             save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+
+        train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
+        val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
+        test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
 
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
@@ -173,18 +191,23 @@ def main():
             / "features_importance"
             / f"{cfg.nbpoint}_{getattr(cfg, 'k_days', 0)}_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{graphScale.base}_{graphScale.graph_method}",
         )
+        print(features_selected_str)
         if features_selected_str is not None:
             features_selected_str = list(np.asarray(features_selected_str)[:, 0])
         else:
             features_name, _ = get_features_name_list(graphScale.scale, cfg.features, METHODS_SPATIAL_TRAIN)
             features_selected_str = list(features_name)
-        
+
         """if "Past_risk" in cfg.features:
             features_selected_str.append("Past_risk")
         if "Past_burnedarea" in cfg.features:
             features_selected_str.append("Past_burnedarea")"""
         
         features_selected = np.arange(len(features_selected_str))
+
+        train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
+        val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
+        test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
 
         train_dataset = add_past_risk(
             train_dataset,
@@ -226,17 +249,9 @@ def main():
     val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
     test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
 
-    train_dataset['saison'] = train_dataset['date'].apply(get_saison)
-    val_dataset['saison'] = val_dataset['date'].apply(get_saison)
-    test_dataset['saison'] = test_dataset['date'].apply(get_saison)
-
-    train_dataset['mediterranean'] = train_dataset['departement'].apply(is_mediterranean_dept)
-    val_dataset['mediterranean'] = val_dataset['departement'].apply(is_mediterranean_dept)
-    test_dataset['mediterranean'] = test_dataset['departement'].apply(is_mediterranean_dept)
-
-    train_dataset['cluster-encoder'] = train_dataset['cluster_encoder']
-    val_dataset['cluster-encoder'] = val_dataset['cluster_encoder']
-    test_dataset['cluster-encoder'] = test_dataset['cluster_encoder']
+    train_dataset['burnedarea'] = train_dataset['burned_area'].values
+    val_dataset['burnedarea'] = val_dataset['burned_area'].values
+    test_dataset['burnedarea'] = test_dataset['burned_area'].values
     
     prefix = f"full_all_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
 
@@ -267,17 +282,19 @@ def main():
 
     tree_model_names = []
     dl_model_names = []
+    stat_model_names = []
 
     for i, m in enumerate(cfg.get("models", [])):
-        info = (
-            f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
-            f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
-        )
+        if m.get("type") != "fwi":
+            info = (
+                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
+                f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
+            )
 
-        if cfg.training_mode == 'voting':
-            voting_model = define_voting_dl_models(m['type'], m['kdays'], m['out_channels'], m['n_run'], m['loss'])[0]
+            if cfg.training_mode == 'voting':
+                voting_model = define_voting_dl_models(m['type'], m['kdays'], m['out_channels'], m['n_run'], m['loss'])[0]
 
-        model_name = f"{m['type']}_{info}"
+            model_name = f"{m['type']}_{info}"
         is_tree = m["type"].lower() in TREE_MODELS
 
         if is_tree:
@@ -319,10 +336,15 @@ def main():
                 tree_model_names.append(model_name)
             elif cfg.training_mode == 'voting':
                 config_weight = m.get('config_weight', 'soft-weight')
-                num_test = m.get('num_test', [1,5,10,15,20, 'all'])
+                num_test = m.get('num_test', list(np.arrange(1, 21)) + ['all'])
                 for nt in num_test:
                     test_name = f'filter-{m["type"]}-{config_weight}-{nt}_{info}'
                     tree_model_names.append(test_name)
+        elif m["type"].lower() == "fwi":
+            model = Statistical_Model(m.get('column'), m.get('thresholds'), m.get('num_cluster'), m.get('target'), m.get('task'), m.get('col_id'))
+            model.fit(train_dataset_unscale)
+            save_object(model, f'{model.name}.pkl', dir_output / Path('check_'+cfg.scaling + '/' + prefix + '/' + 'baseline') / model.name)
+            stat_model_names.append(model.name)
         else:
             params = dict(global_params)
             if cfg.doTrain:
@@ -344,6 +366,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "dir_output" : dir_output,
@@ -364,9 +387,10 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
-                        "temperature" : m.get('temperature'),
+                        "temperature" : m.get('temperature', 1.0),
                         "smooth" : m.get('smooth'),
                         "dir_output" : dir_output,
                         "global_epochs" : cfg.hyperparameters['global_epochs'],
@@ -386,6 +410,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "temperature" : m.get('temperature'),
@@ -394,14 +419,14 @@ def main():
                         "global_epochs" : cfg.hyperparameters['global_epochs'],
                         "patience_count_global" : cfg.hyperparameters['patience_count_global'],
                         "patience_count_local" : cfg.hyperparameters['PATIENCE_CNT'],
-                        "use_log" : m.get('use_log', True)
-
+                        "use_log" : m.get('use_log', True),
+                        "params_to_update" : m.get("params_to_update", [])
                     }
                     )
+                    assert len(m['params_to_update']) > 0
                     params["federated_cluster"] = m.get("federated_cluster", "department")
                     params["aggregation_method"] = m.get('aggregation_method', "median")
-                    params["eta"] = m.get('eta', 1.0)
-                    params["layer_idx"] = m.get('layer_idx', 0)
+                    params["eta"] = m.get('eta', 0.1)
                     wrapped_train_deep_learning_1D_alafederated(params)
                 
                 elif cfg.training_mode == "protofederated":
@@ -411,6 +436,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "temperature" : m.get('temperature'),
@@ -454,6 +480,7 @@ def main():
                     params.update(
                     {
                         "model": m["type"],
+                        "task_type_num": m["task_num"],
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
@@ -679,6 +706,28 @@ def main():
                 df_metrics = pd.concat(
                     (df_metrics, pd.DataFrame.from_dict(metrics, orient="index").reset_index())
                 )
+        
+        if stat_model_names:
+            metrics, _, _, _ = test_fire_index_model(
+                cfg, graphScale, test_dataset.copy(deep=True),
+                                test_dataset_unscale.copy(deep=True),
+                                    "all",
+                                    prefix,
+                                    stat_model_names,
+                                    dir_output / "all" / prefix,
+                                    prefix_config,
+                                    encoding,
+                                    f'{cfg.sinisterEncoding}_{name_exp}',
+                                    cfg.scaling,
+                                    ["all"],
+                                    dir_train,
+            )
+            if df_metrics is None:
+                df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
+            else:
+                df_metrics = pd.concat(
+                    (df_metrics, pd.DataFrame.from_dict(metrics, orient="index").reset_index())
+                ) 
 
         if cfg.doTestDepartement:
             for dept in cfg.test_departments:

@@ -18,8 +18,13 @@ landcover_variables = [
                       'argile_encoder',
                       'cosia_encoder',
                       #'corine_encoder',
-                      'bdroute_encoder'
-                        ]
+                      'bdroute_encoder',
+                      'foret_encoder_ba',
+                      'argile_encoder_ba',
+                      'cosia_encoder_ba',
+                      #'corine_encoder_ba',
+                      'bdroute_encoder_ba'
+                      ]
 
 cluster_encoder = ['cluster_encoder', 'id_encoder']
 

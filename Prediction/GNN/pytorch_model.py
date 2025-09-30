@@ -222,7 +222,7 @@ class ReadGraphDataset_2D_from_xarray(Dataset):
                     feat = 'corine_landcover'
                 elif feat == 'bdroute_encoder':
                     feat = 'route_landcover'
-                    
+
                 da = datacube[feat]
                 if "date" in da.dims:
                     if self.kdays > 0:
@@ -455,24 +455,6 @@ class InplaceMeshGraphDataset(Dataset):
         self.leni = leni
         self.icospheres_graph_path = icospheres_graph_path
 
-        """latitudes = torch.Tensor(self.Y[0][:, latitude_index, -1].reshape(-1,1))  
-        longitudes = torch.Tensor(self.Y[0][:, longitude_index, -1].reshape(-1,1))
-
-        g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
-        g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
-        graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
-
-        graph_mesh = graph_builder.create_mesh_graph(None)
-        gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(None, graph_mesh)
-        mesh2graph = graph_builder.create_m2g_graph(None)"""
-
-        #gridh2mesh.ndata['_ID'] = torch.arange(gridh2mesh.num_nodes(), dtype=torch.int32)
-        #mesh2graph.ndata['_ID'] = torch.arange(mesh2graph.num_nodes(), dtype=torch.int32)
-        
-        #self.graph_mesh = graph_mesh
-        #self.grid2mesh = gridh2mesh
-        #self.mesh2grid = mesh2graph
-
     def __getitem__(self, index) -> tuple:
         x = self.X[index]
         y = self.Y[index]
@@ -488,6 +470,42 @@ class InplaceMeshGraphDataset(Dataset):
             
         return X, Y, E, self.icospheres_graph_path
     
+    def __len__(self) -> int:
+        return self.leni
+    
+    def len(self):
+        pass
+
+    def get(self):
+        pass
+
+class InplaceMeshGraphDatasetInplace(Dataset):
+    def __init__(self, X : list, Y : list, edges : list, leni : int, device : torch.device, graph_mesh, gridh2mesh, mesh2graph) -> None:
+        self.X = X
+        self.Y = Y
+        self.device = device
+        self.edges = edges
+        self.leni = leni
+            
+        self.graph_mesh = graph_mesh
+        self.grid2mesh = gridh2mesh
+        self.mesh2grid = mesh2graph
+
+    def __getitem__(self, index) -> tuple:
+        x = self.X[index]
+        y = self.Y[index]
+
+        if len(self.edges) > 0:
+            edges = self.edges[index]
+        else:
+            edges = []
+        
+        X, Y, E = torch.tensor(x, dtype=torch.float32, device=self.device), \
+            torch.tensor(y, dtype=torch.float32, device=self.device), \
+            torch.tensor(edges, dtype=torch.long, device=self.device),  \
+
+        return X, Y, E, self.graph_mesh, self.grid2mesh, self.mesh2grid
+
     def __len__(self) -> int:
         return self.leni
     
@@ -667,6 +685,211 @@ def graph_collate_fn(batch):
 
     return node_features, node_labels, graph, graph_labels_list
 
+def match_indices(pos, sample, atol=1e-6):
+    # Utilise un dtype stable
+    pos = pos.to(dtype=torch.float64)
+    sample = sample.to(dtype=torch.float64)
+
+    D = torch.cdist(sample, pos)            # [M, N]
+    close = D <= atol                       # [M, N] True si sample m est proche de pos n
+    valid_pos = close.any(dim=0)            # masque côté POS (N)
+    pos_idx_valid = torch.where(valid_pos)[0]
+    #j = 7
+    #print('shape D =', D.shape)                 # doit être [M, N]
+    #print('col7 min =', D[:, j].min().item())
+    #print('any(col7 <= atol) =', bool((D[:, j] <= atol).any()))
+
+    valid_pos = (D <= atol).any(dim=0)          # masque côté POS (N)
+    #print('valid_pos[7] =', bool(valid_pos[j]))
+
+    # indices pos valides:
+    idx_pos = torch.where(valid_pos)[0]
+    #print('index valid (pos) =', idx_pos)
+
+    return pos_idx_valid, valid_pos
+
+def mesh_subgraph_from_graphbuilder(mesh_graph, mesh_from_g2m, mesh_from_m2g,
+                                    how="intersection"):
+    """
+    Crée un sous-graphe de mesh_graph en utilisant les nœuds mesh impliqués
+    dans g2m_graph et m2g_graph.
+    
+    - how: 'intersection' (par défaut) ou 'union' entre les deux bipartites.
+    """
+    mesh_from_g2m = torch.unique(mesh_from_g2m)
+    mesh_from_m2g = torch.unique(mesh_from_m2g)
+
+    if how == "union":
+        mesh_ids = torch.unique(torch.cat([mesh_from_g2m, mesh_from_m2g], dim=0))
+    elif how == "intersection":
+        mesh_ids = torch.tensor(
+            np.intersect1d(mesh_from_g2m.cpu().numpy(), mesh_from_m2g.cpu().numpy()),
+            device=mesh_from_g2m.device, dtype=mesh_from_g2m.dtype
+        )
+    else:
+        raise ValueError("how must be 'union' or 'intersection'")
+
+    # Sous-graphe induit par ces nœuds mesh
+    mesh_subg = dgl.node_subgraph(mesh_graph, mesh_ids, relabel_nodes=True)
+    return mesh_subg
+
+def select_sample_graph(cartesian_grid, graph, graph_type, atol=1e-6, shrink_mesh=True):
+    """
+    Sous-graphe hétéro gardant uniquement les nœuds 'grid' correspondant à cartesian_grid
+    (match par position) et, optionnellement, les nœuds 'mesh' connectés à ces 'grid'.
+
+    Returns
+    -------
+    subg : dgl.DGLHeteroGraph
+        Le sous-graphe sélectionné.
+    valid_sample_idx : torch.Tensor (1D, dtype=long, device=cartesian_grid.device)
+        Indices (dans cartesian_grid) qui ont été validés (présents dans le sous-graphe),
+        dans l'ordre d'apparition de cartesian_grid (sans doublons).
+    """
+    if graph_type not in {"g2m", "m2g"}:
+        raise ValueError("graph_type must be 'g2m' or 'm2g'")
+
+    idtype = graph.idtype  # ex: torch.int32
+    device = graph.device  # même device que le graphe
+
+    # 1) positions des nœuds GRID selon le type de graphe
+    if graph_type == "g2m":
+        pos_grid = graph.srcdata["pos"]            # grid positions
+        etype = ("grid", "g2m", "mesh")
+    else:  # "m2g"
+        pos_grid = graph.dstdata["pos"]            # grid positions
+        etype = ("mesh", "m2g", "grid")
+    
+    sample = cartesian_grid.to(dtype=pos_grid.dtype, device=pos_grid.device)
+    
+    #print('Original graph', pos_grid)
+
+    # 2) IDs locaux des nœuds GRID qui matchent 'sample'
+    #    match_indices doit renvoyer (idx_pos_grid, idx_sample) alignés
+    grid_ids, sample_ids = match_indices(pos_grid, sample, atol=atol)
+
+    #print('valid graph grid', pos_grid[grid_ids])
+
+    if grid_ids.numel() == 0:
+        empty = torch.tensor([], dtype=idtype, device=device)
+        subg = dgl.node_subgraph(graph, {'grid': empty, 'mesh': empty})
+        return subg
+
+    grid_ids = grid_ids.to(dtype=idtype, device=device)
+
+    # 3) IDs des nœuds MESH à garder
+    u, v = graph.edges(etype=etype)
+    if graph_type == "g2m":
+        # u: grid, v: mesh
+        mask_e = torch.isin(u, grid_ids)
+        mesh_ids = torch.unique(v[mask_e])
+    else:
+        # u: mesh, v: grid
+        mask_e = torch.isin(v, grid_ids)
+        mesh_ids = torch.unique(u[mask_e])
+
+    if not shrink_mesh:
+        mesh_ids = torch.arange(graph.num_nodes('mesh'), device=device, dtype=idtype)
+    else:
+        mesh_ids = mesh_ids.to(dtype=idtype, device=device)
+
+    # 4) Sous-graphe hétéro
+    subg = dgl.node_subgraph(graph, {
+        'grid': grid_ids,
+        'mesh': mesh_ids,
+    },
+    relabel_nodes=True)
+
+    #print('subgraph', subg.srcdata["pos"])
+
+    return subg, mesh_ids
+
+def graph_collate_fn_mesh(batch):
+    node_features_list = []
+    node_labels_list = []
+    graph_labels_list = []
+
+    graph_list = []
+    graph_mesh_list = []
+    grid2mesh_list = []
+    mesh2grid_list = []
+
+    num_nodes_seen = 0
+
+    for graph_id, features_labels_graph_index_tuple in enumerate(batch):
+        # Collecter les caractéristiques et les étiquettes des nœuds
+
+        graph_mesh_ = features_labels_graph_index_tuple[3]
+        gridh2mesh_ = features_labels_graph_index_tuple[4]
+        mesh2graph_ = features_labels_graph_index_tuple[5]
+
+        latitude_batch = features_labels_graph_index_tuple[1][:, latitude_index, -1].reshape(-1,1)
+        longitude_batch = features_labels_graph_index_tuple[1][:, longitude_index, -1].reshape(-1,1)
+        departement_batch = features_labels_graph_index_tuple[1][:, departement_index, -1].reshape(-1,)
+
+        g_lat_lon_grid = torch.concat((latitude_batch, longitude_batch), dim=1).to('cpu')
+        #print('Departement', torch.unique(departement_batch))
+        cartesian_grid = latlon_points_to_xyz(g_lat_lon_grid.view(-1,2))
+        #print('Original cartesian grid', cartesian_grid)
+        ## Select nodes in grid2mesh, graph_mesh, and mesh2graph
+        gridh2mesh, mesh_ids_g2m = select_sample_graph(cartesian_grid, gridh2mesh_, 'g2m')
+        mesh2graph, mesh_ids_mg2 = select_sample_graph(cartesian_grid, mesh2graph_, 'm2g')
+
+        #mesh2graph, gridh2mesh = restrict_mesh2graph_to_gridh2mesh(mesh2graph, gridh2mesh)
+
+        def _check_non_empty_edges(g, etype, name):
+                e = g.num_edges(etype)
+                if e == 0:
+                    print(f"[WARN] {name}: 0 edges pour etype {etype}.")
+                return e
+
+        _check_non_empty_edges(gridh2mesh, ("grid","g2m","mesh"), "gridh2mesh")
+        _check_non_empty_edges(mesh2graph, ("mesh","m2g","grid"), "mesh2graph")
+
+        graph_mesh = mesh_subgraph_from_graphbuilder(graph_mesh_, mesh_ids_g2m, mesh_ids_mg2, how="union")
+        
+        num_nodes = features_labels_graph_index_tuple[1].size(0)
+        num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
+        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs
+
+        #print("#############################################################################")
+
+        #print(gridh2mesh_)
+        #print(mesh2graph_)
+        #print(graph_mesh)
+        #exit(1)
+
+        #print(torch.unique(features_labels_graph_index_tuple[1][:, departement_index, -1]))
+
+        node_features_list.append(features_labels_graph_index_tuple[0])
+        node_labels_list.append(features_labels_graph_index_tuple[1])
+
+        #print(gridh2mesh)
+        #print(mesh2graph)
+
+        #print(torch.unique(features_labels_graph_index_tuple[1][:, departement_index, -1]))
+
+        graph_mesh_list.append(graph_mesh)
+        grid2mesh_list.append(gridh2mesh)
+        mesh2grid_list.append(mesh2graph)
+        
+    # Merge the PPI graphs into a single graph with multiple connected components
+    node_features = torch.cat(node_features_list, 0)
+    node_labels = torch.cat(node_labels_list, 0)
+
+    for g in graph_mesh_list:  # graphs est une liste de dgl.graph
+        if '_ID' not in g.edata:
+            g.edata['_ID'] = torch.arange(g.num_edges(), dtype=torch.int32)
+        if '_ID' not in g.ndata:
+            g.ndata['_ID'] = torch.arange(g.num_nodes(), dtype=torch.int32)
+
+    graph_list.append(dgl.batch(graph_mesh_list))
+    graph_list.append(dgl.batch(grid2mesh_list))
+    graph_list.append(dgl.batch(mesh2grid_list))
+    
+    graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
+    return node_features, node_labels, graph_list, graph_labels_list
+
 """def graph_collate_fn_mesh(batch):
     #node_indice_list = []
     node_features_list = []
@@ -690,6 +913,10 @@ def graph_collate_fn(batch):
         node_labels_list.append(features_labels_graph_index_tuple[1])
 
         icospheres_graph_path = features_labels_graph_index_tuple[3]
+        
+        #graph_mesh = features_labels_graph_index_tuple[4]
+        #gridh2mesh = features_labels_graph_index_tuple[5]
+        #mesh2graph = features_labels_graph_index_tuple[6]
 
         num_nodes = features_labels_graph_index_tuple[1].size(0)
         num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
@@ -708,7 +935,7 @@ def graph_collate_fn(batch):
 
         #gridh2mesh.ndata['_ID'] = torch.arange(gridh2mesh.num_nodes(), dtype=torch.int32)
         #mesh2graph.ndata['_ID'] = torch.arange(mesh2graph.num_nodes(), dtype=torch.int32)
-        
+
         graph_mesh_list.append(graph_mesh)
         grid2mesh_list.append(gridh2mesh)
         mesh2grid_list.append(mesh2graph)
@@ -734,82 +961,11 @@ def graph_collate_fn(batch):
     graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
     return node_features, node_labels, graph_list, graph_labels_list"""
 
-def graph_collate_fn_mesh(batch):
-    #node_indice_list = []
-    node_features_list = []
-    node_labels_list = []
-    graph_labels_list = []
-
-    graph_list = []
-    graph_mesh_list = []
-    grid2mesh_list = []
-    mesh2grid_list = []
-
-    num_nodes_seen = 0
-
-    last_graph_1 = None
-    last_graph_2 = None
-    last_graph_3 = None
-
-    for graph_id, features_labels_graph_index_tuple in enumerate(batch):
-        # Collecter les caractéristiques et les étiquettes des nœuds
-        node_features_list.append(features_labels_graph_index_tuple[0])
-        node_labels_list.append(features_labels_graph_index_tuple[1])
-
-        icospheres_graph_path = features_labels_graph_index_tuple[3]
-
-        #graph_mesh = features_labels_graph_index_tuple[4]
-        #gridh2mesh = features_labels_graph_index_tuple[5]
-        #mesh2graph = features_labels_graph_index_tuple[6]
-
-        num_nodes = features_labels_graph_index_tuple[1].size(0)
-        num_nodes_seen += num_nodes  # Mettre à jour le nombre de nœuds vus
-        graph_labels_list.append(torch.full((num_nodes,), graph_id, dtype=torch.long))  # Création d'un tensor d'IDs
-
-        latitudes = features_labels_graph_index_tuple[1][:, latitude_index, -1].reshape(-1,1)
-        longitudes = features_labels_graph_index_tuple[1][:, longitude_index, -1].reshape(-1,1)
-
-        g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
-        g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
-        graph_builder = GraphBuilder(icospheres_graph_path, g_lat_lon_grid, doPrint=False)
-
-        graph_mesh = graph_builder.create_mesh_graph(last_graph_1)
-        gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(last_graph_2, graph_mesh)
-        mesh2graph = graph_builder.create_m2g_graph(last_graph_3)
-
-        #gridh2mesh.ndata['_ID'] = torch.arange(gridh2mesh.num_nodes(), dtype=torch.int32)
-        #mesh2graph.ndata['_ID'] = torch.arange(mesh2graph.num_nodes(), dtype=torch.int32)
-        
-        graph_mesh_list.append(graph_mesh)
-        grid2mesh_list.append(gridh2mesh)
-        mesh2grid_list.append(mesh2graph)
-
-        #last_graph_1 = deepcopy(graph_mesh)
-        #last_graph_2 = deepcopy(gridh2mesh)
-        #last_graph_3 = deepcopy(mesh2graph)
-
-    # Merge the PPI graphs into a single graph with multiple connected components
-    node_features = torch.cat(node_features_list, 0)
-    node_labels = torch.cat(node_labels_list, 0)
-
-    for g in graph_mesh_list:  # graphs est une liste de dgl.graph
-        if '_ID' not in g.edata:
-            g.edata['_ID'] = torch.arange(g.num_edges(), dtype=torch.int32)
-        if '_ID' not in g.ndata:
-            g.ndata['_ID'] = torch.arange(g.num_nodes(), dtype=torch.int32)
-
-    graph_list.append(dgl.batch(graph_mesh_list))
-    graph_list.append(dgl.batch(grid2mesh_list))
-    graph_list.append(dgl.batch(mesh2grid_list))
-    
-    graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
-    return node_features, node_labels, graph_list, graph_labels_list
-
 def graph_collate_fn_multiple_graph(batch):
     #node_indice_list = []
     node_features_list = []
     node_labels_list = []
-    graph_labels_list = []
+    graph_labels_list = []  
 
     graph_list = []
     graph_scale_list = []
@@ -1100,8 +1256,10 @@ def create_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
-                    mesh=None,
-                    mesh_file=''):
+                    graph_mesh=None,
+                    gridh2mesh=None,
+                    mesh2graph=None
+                    ):
     
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
@@ -1116,33 +1274,33 @@ def create_dataset(graph,
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
     assert len(XsTe) > 0, "Le jeu de données de test est vide"
 
-    if mesh is None or mesh == False:
+    if graph_mesh is None:
         # Création des datasets finaux
         print('uzbdkazdkjzan')
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
         test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
-    elif mesh == 'mesh':
-        train_dataset = InplaceMeshGraphDataset(mesh_file, Xst, Yst, Est, len(Xst), device)
-        val_dataset = InplaceMeshGraphDataset(mesh_file, XsV, YsV, EsV, len(XsV), device)
-        test_dataset = InplaceMeshGraphDataset(mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
-    elif mesh == 'mygraph':
-        train_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, Xst, Yst, Est, len(Xst), device)
-        val_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsV, YsV, EsV, len(XsV), device)
-        test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
+    elif graph_mesh is not None:
+        train_dataset = InplaceMeshGraphDatasetInplace(Xst, Yst, Est, len(Xst), device, graph_mesh, gridh2mesh, mesh2graph)
+        val_dataset = InplaceMeshGraphDatasetInplace(XsV, YsV, EsV, len(XsV), device, graph_mesh, gridh2mesh, mesh2graph)
+        test_dataset = InplaceMeshGraphDatasetInplace(XsTe, YsTe, EsTe, len(XsTe), device, graph_mesh, gridh2mesh, mesh2graph)
+    #elif mesh == 'mygraph':
+    #    train_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, Xst, Yst, Est, len(Xst), device)
+    #    val_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsV, YsV, EsV, len(XsV), device)
+    #    test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
 
     return train_dataset, val_dataset, test_dataset
 
@@ -1153,31 +1311,32 @@ def create_train_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
-                    mesh=None,
-                    mesh_file=''):
-    
+                    graph_mesh=None,
+                    gridh2mesh=None,
+                    mesh2graph=None):
+
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
+    print('weight', df_train['weight'].unique())
 
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
 
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
-
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
 
-    if mesh is None or mesh == False:
+    if graph_mesh is None:
         # Création des datasets finaux
         print('uzbdkazdkjzan')
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
-    elif mesh == 'mesh':
-        train_dataset = InplaceMeshGraphDataset(mesh_file, Xst, Yst, Est, len(Xst), device)
-    elif mesh == 'mygraph':
-        train_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, Xst, Yst, Est, len(Xst), device)
+    elif graph_mesh is not None:
+        train_dataset = InplaceMeshGraphDatasetInplace(Xst, Yst, Est, len(Xst), device, graph_mesh, gridh2mesh, mesh2graph)
+    #elif mesh == 'mygraph':
+    #    train_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, Xst, Yst, Est, len(Xst), device)
 
     return train_dataset
 
@@ -1189,8 +1348,9 @@ def create_test_val_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
-                    mesh=None,
-                    mesh_file=''):
+                    graph_mesh=None,
+                    gridh2mesh=None,
+                    mesh2graph=None):
         
     x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns + [target_name]].values
 
@@ -1202,26 +1362,26 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, mesh is None or mesh == False)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
     assert len(XsTe) > 0, "Le jeu de données de test est vide"
 
-    if mesh is None or mesh == False:
+    if gridh2mesh is None:
         # Création des datasets finaux
         print('uzbdkazdkjzan')
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
         test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
-    elif mesh == 'mesh':
-        val_dataset = InplaceMeshGraphDataset(mesh_file, XsV, YsV, EsV, len(XsV), device)
-        test_dataset = InplaceMeshGraphDataset(mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
-    elif mesh == 'mygraph':
-        val_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsV, YsV, EsV, len(XsV), device)
-        test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
+    elif gridh2mesh is not None:
+        val_dataset = InplaceMeshGraphDatasetInplace(XsV, YsV, EsV, len(XsV), device, graph_mesh, gridh2mesh, mesh2graph)
+        test_dataset = InplaceMeshGraphDatasetInplace(XsTe, YsTe, EsTe, len(XsTe), device, graph_mesh, gridh2mesh, mesh2graph)
+    #elif mesh == 'mygraph':
+    #    val_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsV, YsV, EsV, len(XsV), device)
+    #    test_dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, XsTe, YsTe, EsTe, len(XsTe), device)
 
     return val_dataset, test_dataset
 
@@ -1295,14 +1455,16 @@ def create_test_loader(graph, df,
                        use_temporal_as_edges : bool,
                        target_name,
                        ks :int,
-                       mesh=False,
-                       mesh_file=''):
+                       graph_mesh=None,
+                        gridh2mesh=None,
+                        mesh2graph=None):
     
     Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
     X = []
     Y = []
     E = []
+
     """if graph.graph_method == 'graph':
         graphId = np.unique(Xset[:, graph_id_index])
         for id in graphId:
@@ -1356,15 +1518,15 @@ def create_test_loader(graph, df,
         Y.append(y)
         E.append(e)
 
-    if not mesh or mesh == False:
+    if gridh2mesh is None:
         dataset = InplaceGraphDataset(X, Y, E, len(X), device)
         collate = graph_collate_fn
-    elif mesh == 'mesh':
-        dataset = InplaceMeshGraphDataset(mesh_file, X, Y, E, len(X), device)
+    elif gridh2mesh is not None:
+        dataset = InplaceMeshGraphDatasetInplace(X, Y, E, len(X), device, graph_mesh, gridh2mesh, mesh2graph)
         collate = graph_collate_fn_mesh
-    elif mesh == 'mygraph':
-        dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, X, Y, E, len(X), device)
-        collate = graph_collate_fn_multiple_graph
+    #elif mesh == 'mygraph':
+    #    dataset = InplaceMulitpleGraphDataset(target_name, mesh_file, X, Y, E, len(X), device)
+    #    collate = graph_collate_fn_multiple_graph
     else:
         raise ValueError(f'{mesh} is not a known mesh value')
 
@@ -1795,10 +1957,17 @@ class Training():
         self.prototype_weight = 1.0
         self.prototypes = None
         self.ALATraining = False
+        self.area_parameters = None
+        # Distillation tracking (best/worst losses per epoch)
+        self.distill_best_log = []   # list of dicts: {epoch, graph_id, loss}
+        self.distill_worst_log = []  # list of dicts: {epoch, graph_id, loss}
+        self.criterion_params = []
+        self._current_epoch = None
+        self.seed = None 
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
-        target_is_binary = self.target_name == 'binary'
+        target_is_binary = self.task_type == 'binary'
 
         if len(labels.shape) == 3:
             weights = labels[:, weight_idx, -1]
@@ -1840,70 +2009,175 @@ class Training():
             labels = labels[first_indices]
 
         return labels
+    
+    def compute_single_loss(self, out, tar, wei, cluster_ids=None, tolong=False, criterion=None):
+        if self.task_type == 'regression':
+            tar = tar.view(out.shape[0])
+            wei = wei.view(out.shape[0])
+
+            tar = torch.masked_select(tar, wei.gt(0))
+            out = out[wei.gt(0)]
+            wei = torch.masked_select(wei, wei.gt(0))
+        else:
+            wei = wei.long()
+            #print(torch.unique(tar))
+            if not self.student_train: # works on probability
+                tar = tar.long()
+
+            tar = tar[wei.gt(0)]
+            out = out[wei.gt(0)]
+
+            if cluster_ids is not None:
+                cluster_ids = cluster_ids[wei.gt(0)]
+
+            wei = torch.masked_select(wei, wei.gt(0))
+
+            if tolong:
+                tar = tar.long()
+
+            #if self.loss in ['kappa', 'cdw', 'mcewk']:
+            #    tar = tar.to('cpu')
+            #    out = out.to('cpu')
+
+        if cluster_ids is not None:
+            return criterion(out, tar, cluster_ids=cluster_ids)
+        else:
+            return criterion(out, tar)
+
+    def loss_distill(
+        self,
+        output: torch.Tensor,          # [B, C] logits ou sorties du modèle (si compute_single_loss en a besoin)
+        target: torch.Tensor,          # [B, ...] doit contenir les IDs de région en colonne graph_id_index
+        weight: torch.Tensor,          # 
+        label : torch.Tensor,
+        hidden: torch.Tensor,          # [B, D] embeddings (features) par échantillon
+        percent_less: float,           # ex: 0.10 pour 10% pires régions
+        percent_high: float,           # ex: 0.10 pour 10% meilleures régions
+        graph_id_index: int,           # index de la colonne dans target contenant l'ID de région
+        lambda_kd: float = 1.0,        # poids du terme de distillation
+        use_cosine: bool = True,       # True = 1 - cos, False = MSE
+        tolong=False,
+        cluster_ids=None,
+        criterion=None
+    ):
+        """
+        Calcule un terme de distillation d'embeddings des régions 'fortes' (meilleures) vers les 'faibles' (pires),
+        en se basant sur la loss par région. Retourne:
+        - kd_loss: le terme de distillation,
+        - region_losses: dict {region_id: loss_scalar} (detach) pour inspection,
+        - best_ids / worst_ids: listes d'IDs sélectionnés.
+
+        On suppose l'existence d'une fonction globale:
+            compute_single_loss(output_subset, target_subset) -> scalaire (Tensor)
+        """
+
+        assert 0 < percent_less <= 1 and 0 < percent_high <= 1, "percentages doivent être dans (0,1]"
+        device = output.device
+        region_ids = label[:, graph_id_index, -1]
+        unique_ids = torch.unique(region_ids)
+
+        # 1) Loss par région (pour le tri)
+        region_losses = {}
+        for rid in unique_ids:
+            mask = (region_ids == rid)
+            # IMPORTANT: compute_single_loss peut s'attendre à des shapes [N, C] / [N, ...]
+            loss_i = self.compute_single_loss(output[mask], target[mask], weight[mask], cluster_ids, tolong, criterion)
+            # on détache pour le tri (ne pas backprop à travers la sélection)
+            region_losses[int(rid.item())] = loss_i.detach()
+
+        # 2) Tri des régions par loss (croissant: meilleures d'abord)
+        sorted_items = sorted(region_losses.items(), key=lambda kv: kv[1].item())
+        n_regions = len(sorted_items)
+        k_high = max(1, int(round(percent_high * n_regions)))
+        k_low  = max(1, int(round(percent_less * n_regions)))
+
+        best_ids  = [rid for rid, _ in sorted_items[:k_high]]           # meilleures (loss faible)
+        worst_ids = [rid for rid, _ in sorted_items[-k_low:]]           # pires (loss élevée)
+
+        # 3) Prototype enseignant = moyenne des embeddings des meilleures régions
+        best_mask = torch.zeros_like(region_ids, dtype=torch.bool)
+        for rid in best_ids:
+            best_mask |= (region_ids == rid)
+
+        # S'il n'y a pas d'échantillon (cas pathologique), on protège
+        if best_mask.any():
+            teacher_proto = hidden[best_mask].mean(dim=0, keepdim=True)  # [1, D]
+        else:
+            # fallback: moyenne globale
+            teacher_proto = hidden.mean(dim=0, keepdim=True)
+
+        # On "coupe" le gradient côté enseignant (on ne veut pas déplacer les meilleures)
+        teacher_proto = teacher_proto.detach()
+
+        # 4) Distillation: on pousse les embeddings des pires vers le prototype enseignant
+        worst_mask = torch.zeros_like(region_ids, dtype=torch.bool)
+        for rid in worst_ids:
+            worst_mask |= (region_ids == rid)
+
+        if worst_mask.any():
+            student_emb = hidden[worst_mask]                 # [N_w, D]
+
+            if use_cosine:
+                # 1 - cos(sim)  (plus stable d'échelle que MSE)
+                student = F.normalize(student_emb, dim=-1)
+                teacher = F.normalize(teacher_proto, dim=-1)
+                kd = 1.0 - (student @ teacher.T).squeeze(-1) # [N_w]
+                kd_loss = kd.mean()
+            else:
+                # MSE sur embeddings non normalisés
+                kd_loss = F.mse_loss(student_emb, teacher_proto.expand_as(student_emb))
+        else:
+            # aucune région "pire" sélectionnée
+            kd_loss = torch.tensor(0.0, device=device)
+
+        # 5) Pondération du terme de distillation
+        kd_loss = lambda_kd * kd_loss
+
+        return kd_loss, region_losses, best_ids, worst_ids
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
-        def compute_single_loss(out, tar, wei, mask_id=None):
-            if self.task_type == 'regression':
-                tar = tar.view(out.shape)
-                wei = wei.view(out.shape)
 
-                tar = torch.masked_select(tar, wei.gt(0))
-                out = torch.masked_select(out, wei.gt(0))
-                wei = torch.masked_select(wei, wei.gt(0))
-                return criterion(out, tar, wei)
-            else:
-                wei = wei.long()
-                #print(torch.unique(tar))
-                if not self.student_train: # works on probability
-                    tar = tar.long()
-
-                tar = tar[wei.gt(0)]
-                out = out[wei.gt(0)]
-
-                if mask_id is not None:
-                    mask_id = mask_id[wei.gt(0)]
-
-                wei = torch.masked_select(wei, wei.gt(0))
-
-                if tolong:
-                    tar = tar.long()
-
-                if self.loss in ['kappa', 'cdw', 'mcewk']:
-                    tar = tar.to('cpu')
-                    out = out.to('cpu')
-
-                if mask_id is not None:
-                    return criterion(out, tar, id_mask=mask_id)
-                else:
-                    return criterion(out, tar)
-
-        if 'ID' in self.loss: # Calculate loss per ID (specify loss-ID)
+        if 'cluster_ids' in required_params(criterion.forward):
             id_mask = label[:, criterion.id, -1]
+            self.cluster_id_index = criterion.id
         else:
             id_mask = None
-
-        base_loss = compute_single_loss(output, target, weights, id_mask)
+            
+        base_loss = self.compute_single_loss(output, target, weights, id_mask, tolong, criterion)
 
         if 'area' in self.loss: # Calculate area loss (specify loss-area)
             area_mask = label[:, graph_id_index, -1]
             unique_ids = torch.unique(area_mask)
             values = []
+            active_idx = []
             for aid in unique_ids:
                 m = area_mask == aid
                 if m.sum() == 0:
                     continue
-                l = compute_single_loss(output[m], target[m], weights[m], None)
+                active_idx.append(int(aid))
+                l = self.compute_single_loss(output[m], target[m], weights[m], None, tolong, criterion)
+                #print(f'{aid}, {l}')
                 values.append(l)
             if len(values) > 0:
-                vals = torch.stack(values)
-                area_score = torch.trapz(vals)
+                active_idx = torch.as_tensor(active_idx, dtype=torch.long)
+                mask = torch.zeros_like(self.area_parameters, dtype=self.area_parameters.dtype)
+                mask.index_fill_(0, active_idx, 1.0)
+                vals_active = torch.as_tensor(values, device=self.area_parameters.device,
+                              dtype=self.area_parameters.dtype)
+                vals_full = torch.zeros_like(self.area_parameters)
+                vals_full.index_copy_(0, active_idx, vals_active)
+                ap_active = self.area_parameters * mask
+                eps = 1e-8
+                ap_active = torch.log(torch.nn.functional.softplus(ap_active))
+                area_loss = (vals_full * ap_active).sum() / ap_active.sum().clamp_min(eps)
             else:
-                area_score = torch.tensor(0.0, device=output.device)
+                area_loss = torch.as_tensor(0.0, device=output.device)
 
             if 'area-global' in self.loss:  # Calculate area * global (classic) loss  (specify loss-area-global)
-                loss = area_score * base_loss
+                loss = area_loss + base_loss
+                logger.info(f'area_loss : {area_loss}, {base_loss}, {loss}')
             else:
-                loss = area_score
+                loss = area_loss
         else:
             loss = base_loss
 
@@ -1998,7 +2272,7 @@ class Training():
             return 0
 
         band = -1
-        
+
         try:
             target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
         except Exception as e:
@@ -2007,34 +2281,41 @@ class Training():
         if self.loss not in ['kldivloss']: # works on probability
             target = target.long()
         
-        if self.model.return_hidden:
-            output, hidden = self.model(inputs, edges)
-        else:
-            output = self.model(inputs, edges)
+        output, logits, hidden = self.model(inputs, edges)
 
-        loss = self.calculate_loss(criterion, output, target, weights, labels)
+        loss = self.calculate_loss(criterion, logits, target, weights, labels)
 
         if self.student_train: # distallation traning
             criterion_teacher = self.get_loss('kldivloss')
             df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
             df_test.columns = df_test.columns.astype(str)
             if self.top_model != 'task':
-                pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
+                teacher_logits = self.teacher.predict(df_test,
+                                                            weights_average=self.weights_average,
+                                                            top_model=self.top_model, id_col=(None, None),
+                                                            prediction_type='RawFormulaVal')
             else:
-                pred_teacher = self.teacher.predict_with_tasks(df_test, weights_average=self.weights_average, id_col=(None, None), proba=True)
+                teacher_logits = self.teacher.predict_with_tasks(df_test,
+                                                                 weights_average=self.weights_average,
+                                                                 id_col=(None, None), proba='RawFormulaVal')
             
-            target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+            teacher_logits = torch.Tensor(teacher_logits, device=inputs.device).to(torch.float32)
 
-            target = target / self.temperature_value
+            T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
+            
+            p_teacher = F.softmax(teacher_logits / T, dim=1)
+            p_student = F.log_softmax(logits / T, dim=1)
 
-            loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+            target = target / T
 
-            loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+            kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False) * (T * T)
+
+            loss = self.alpha_value * kl_div_loss + (1 - self.alpha_value) * loss + 1e-3 * (torch.log(T) ** 2)
         
         if self.constrastive: # MOON federated training
-            _, zprev = self.prev_model(inputs, edges)
-            _, zglob = self.global_model(inputs, edges)
-            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
+            _, _, zprev = self.prev_model(inputs, edges)
+            _, _, zglob = self.global_model(inputs, edges)
+            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.moon_temperature_value)
             loss = loss + self.smooth_value * loss_constrastive
 
         if self.use_prototypes and self.prototypes is not None:
@@ -2043,6 +2324,41 @@ class Training():
             
             proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
             loss = loss + self.prototype_weight * proto_loss
+
+        if 'distillation' in self.loss:
+            distill_loss, region_losses, best, worst = self.loss_distill(
+                output, target, weights, labels, hidden, 0.10, 0.10, graph_id_index,
+                lambda_kd=1, use_cosine=True, tolong=False, cluster_ids=None, criterion=criterion
+            )
+            loss = loss + distill_loss
+
+            # Update per-epoch best/worst trackers using region_losses
+            try:
+                # region_losses is a dict {rid: tensor_loss}
+                if isinstance(region_losses, dict) and len(region_losses) > 0:
+                    # Best: smallest loss among reported best IDs
+                    if len(best) > 0:
+                        best_pair = min(((rid, region_losses[rid].item()) for rid in best if rid in region_losses),
+                                        key=lambda kv: kv[1], default=None)
+                        if best_pair is not None:
+                            rid_b, loss_b = best_pair
+                            if hasattr(self, '_epoch_distill_best'):
+                                if loss_b < self._epoch_distill_best['loss']:
+                                    self._epoch_distill_best['loss'] = float(loss_b)
+                                    self._epoch_distill_best['graph_id'] = int(rid_b)
+                    # Worst: largest loss among reported worst IDs
+                    if len(worst) > 0:
+                        worst_pair = max(((rid, region_losses[rid].item()) for rid in worst if rid in region_losses),
+                                         key=lambda kv: kv[1], default=None)
+                        if worst_pair is not None:
+                            rid_w, loss_w = worst_pair
+                            if hasattr(self, '_epoch_distill_worst'):
+                                if loss_w > self._epoch_distill_worst['loss']:
+                                    self._epoch_distill_worst['loss'] = float(loss_w)
+                                    self._epoch_distill_worst['graph_id'] = int(rid_w)
+            except Exception as _e:
+                # Never break training because of logging
+                pass
 
         if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
             loss += self.model.kl_loss()
@@ -2053,10 +2369,18 @@ class Training():
 
         self.model.train()
         
+        if has_method(criterion, 'get_learnable_parameters'):
+            criterion.train()
+
+        # Initialize per-epoch aggregation for distillation best/worst
+        if 'distillation' in self.loss:
+            self._epoch_distill_best = {'loss': float('inf'), 'graph_id': None}
+            self._epoch_distill_worst = {'loss': float('-inf'), 'graph_id': None}
+        
         for i, data in enumerate(loader, 0):
 
             loss = self.launch_batch(data, criterion)
-            
+
             if isinstance(loss, int):
                 continue
             
@@ -2068,41 +2392,66 @@ class Training():
                 res_loss += loss.item()
             else:
                 res_loss = loss.item()
-            
-            if self.ALATraining:  # Fed ALA training
-                # Dernières couches (attention : fragile si l’ordonnancement change)
-                self.params_p = list(self.model.parameters())[-self.layer_idx:]
-                self.params_gp = self.params_gp
-                self.params_tp = self.params_tp
 
+            if self.ALATraining:
+                
                 # Mises à jour SANS autograd
                 with torch.no_grad():
                     # 1) update des weights
-                    for param_t, param, param_g, weight in zip(
-                            self.params_tp, self.params_p, self.params_gp, self.weights):
-                        # weight := clamp(weight - eta * (param.grad * (param_g - param)), 0, 1)
-                        upd = weight - self.eta * (param.grad * (param_g - param))
-                        weight.copy_(torch.clamp(upd, 0.0, 1.0))
+                    for p_t, p_prev, p_g, w in zip(
+                            self.params_p, self.params_tp, self.params_gp, self.weights):
+                        upd = w - self.eta * ((p_g - p_prev) * p_t.grad)
+                        w.copy_(torch.clamp(upd, 0.0, 1.0))
 
-                    # 2) calcul des params interpolés
-                    for param_t, param, param_g, weight in zip(
-                            self.params_tp, self.params_p, self.params_gp, self.weights):
-                        param_t.copy_(param + (param_g - param) * weight)
-
-                    # 3) écrasement des params du modèle
-                    for param, param_t in zip(self.params_p, self.params_tp):
-                        param.copy_(param_t)
+                    if not self.ala_weight_only:
+                        # 2) calcul des params interpolés
+                        for p_t, p_prev, p_g, w in zip(
+                                self.params_p, self.params_tp, self.params_gp, self.weights):
+                            p_t.copy(p_t - self.eta * (p_g - p_prev) * (p_t.grad))
 
             if optimizer is not None:
                 optimizer.step()
 
                 #self.update_weight()
+        # After finishing the epoch, persist the best/worst entries for this epoch
+        if 'distillation' in self.loss:
+            if getattr(self, '_epoch_distill_best', None) is not None and self._epoch_distill_best['graph_id'] is not None:
+                self.distill_best_log.append({
+                    'epoch': self._current_epoch if self._current_epoch is not None else -1,
+                    'graph_id': int(self._epoch_distill_best['graph_id']),
+                    'loss': float(self._epoch_distill_best['loss'])
+                })
+            if getattr(self, '_epoch_distill_worst', None) is not None and self._epoch_distill_worst['graph_id'] is not None:
+                self.distill_worst_log.append({
+                    'epoch': self._current_epoch if self._current_epoch is not None else -1,
+                    'graph_id': int(self._epoch_distill_worst['graph_id']),
+                    'loss': float(self._epoch_distill_worst['loss'])
+                })
+
+        if has_method(criterion, 'get_attribute'):
+            params = criterion.get_attribute()
+            dict_params = {'epoch': self._current_epoch}
+            for par in params:
+                name = par[0]
+                value = par[1]
+                dict_params[name] = copy.deepcopy(value.detach().cpu().numpy())
+            
+            self.criterion_params.append(dict_params)
+
+        if self.student_train:
+            self.distillation_log.append({'epoch' : self._current_epoch,
+                                 'temperature' : copy.deepcopy(self.temperature_value.detach().cpu().numpy()),
+                                  'alpha' : copy.deepcopy(self.alpha_value.detach().cpu().numpy())})
 
         return res_loss
 
     def launch_val_test_loader(self, loader, criterion, teacher=None):
-        
+
         self.model.eval()
+
+        if has_method(criterion, 'get_learnable_parameters'):
+            criterion.eval()
+
         total_loss = 0.0
 
         with torch.no_grad():
@@ -2111,6 +2460,13 @@ class Training():
                 loss = self.launch_batch(data, criterion)
 
                 total_loss += loss.item()
+            
+        if 'learnable-area' in self.loss:
+            if hasattr(self, 'area_parameters_log'):
+                self.area_parameters_log.append(self.area_parameters)
+            else:
+                self.area_parameters_log = []
+                self.area_parameters_log.append(self.area_parameters)
 
         return total_loss
     
@@ -2126,12 +2482,12 @@ class Training():
             self.model_params = params
         return model, params
     
-    def func_epoch(self, train_loader, val_loader, optimizer, criterion, criterion_val):
+    def func_epoch(self, train_loader, val_loader, optimizer, criterion):
 
         train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
 
         if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion_val)
+            val_loss = self.launch_val_test_loader(val_loader, criterion)
         else:
             val_loss = train_loss.item()
 
@@ -2154,7 +2510,6 @@ class Training():
         check_and_create_path(self.dir_log)
 
         criterion = self.get_loss(self.loss)
-        criterion_val = criterion
 
         if not isinstance(self, ModelCNN):
             static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
@@ -2174,6 +2529,7 @@ class Training():
 
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
+        best_epoch = 0
         patience_cnt = 0
 
         val_loss_list = []
@@ -2185,8 +2541,10 @@ class Training():
             self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         else:
             for epoch in tqdm(range(epochs), disable=not verbose):
+                # Expose current epoch to subroutines for logging
+                self._current_epoch = epoch
                 val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
-                                                    optimizer=optimizer, criterion=criterion, criterion_val=criterion_val)
+                                                    optimizer=optimizer, criterion=criterion)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
@@ -2195,6 +2553,7 @@ class Training():
                     BEST_VAL_LOSS = val_loss
                     BEST_MODEL_PARAMS = self.model.state_dict()
                     patience_cnt = 0
+                    best_epoch = epoch
                 else:
                     patience_cnt += 1
                     if patience_cnt >= PATIENCE_CNT:
@@ -2216,43 +2575,158 @@ class Training():
             save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
             plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-
+        
+        self.best_epoch = best_epoch
+        logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
         ##################################### TEST #################################################
 
-        test_output, y = self._predict_test_loader(self.test_loader)
+        test_output, y = self._predict_test_loader(self.test_loader, output_cdf='test')
         test_output = test_output.detach().cpu().numpy()
-
         y = y.detach().cpu().numpy()
 
-        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
-        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        if np.any(y[:, -1] > 0) or np.any(test_output > 0):
+
+            under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+            over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+            
+            iou = iou_score(y[:, -1], test_output)
+            f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
+            iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+            print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+
+            test_output, y = self._predict_test_loader(self.val_loader, output_cdf='Val')
+            test_output = test_output.detach().cpu().numpy()
+            
+            y = y.detach().cpu().numpy()
+
+            under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+            over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+            
+            iou = iou_score(y[:, -1], test_output)
+            f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
+            iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+            print(f'Val {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+
+            plt.figure(figsize=(15,5))
+            plt.plot(y[y[:, departement_index] == 13, -1])
+            plt.plot(test_output[y[:, departement_index] == 13])
+            plt.savefig(self.dir_log / 'test_13.png')
+
+            plt.figure(figsize=(15,5))
+            plt.plot(y[y[:, departement_index] == 6, -1])
+            plt.plot(test_output[y[:, departement_index] == 6])
+            plt.savefig(self.dir_log / 'test_6.png')
+
+        if BEST_MODEL_PARAMS is not None:
+            self.update_weight(BEST_MODEL_PARAMS)
         
-        iou = iou_score(y[:, -1], test_output)
-        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
-        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+        if 'learnable-area' in self.loss:
+            ids = y[:, 0]                       # première colonne
+            values = y[:, 1:]
 
-        print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+            # Somme groupée par id
+            unique_ids, inverse = np.unique(ids, return_inverse=True)
+            sums = np.zeros((len(unique_ids), values.shape[1]), dtype=values.dtype)
+            np.add.at(sums, inverse, values)
+            
+            self.plot_area_parameter(epochs_list, y[:, 0], sums[:, -1])
+            save_object(self.area_parameters_log, 'area_parameters_log.pkl' ,self.dir_log)
 
-        test_output, y = self._predict_test_loader(self.val_loader)
-        test_output = test_output.detach().cpu().numpy()
+        if has_method(criterion, 'plot_params'):
+            if has_method(criterion, 'update_params'):
+                criterion.update_params(self.criterion_params[self.best_epoch])
+            criterion.plot_params(self.criterion_params, self.dir_log)
+
+        # Save distillation best/worst logs and 3D plot at the end of training
+        if 'distillation' in self.loss:
+            try:
+                self._save_distill_logs_and_plot()
+            except Exception as _e:
+                # Keep training flow robust even if plotting fails
+                logger.info(f"Distillation log/plot skipped: {_e}")
+
+        self.params = BEST_MODEL_PARAMS
+
+    def _save_distill_logs_and_plot(self):
+        """Persist best/worst per-epoch logs and save a 3D scatter plot.
+        Axes: X=epoch, Y=loss, Z=graph_id. Two series: best (green) and worst (red).
+        """
+        # Persist raw logs
+        logs = {
+            'best': self.distill_best_log,
+            'worst': self.distill_worst_log,
+        }
+        save_object(logs, 'distill_best_worst.pkl', self.dir_log)
+
+        if len(self.distill_best_log) == 0 and len(self.distill_worst_log) == 0:
+            return
+
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 (needed for 3D projection)
+
+        # Prepare arrays for plotting
+        bx = [d['epoch'] for d in self.distill_best_log]
+        by = [d['loss'] for d in self.distill_best_log]
+        bz = [d['graph_id'] for d in self.distill_best_log]
+
+        wx = [d['epoch'] for d in self.distill_worst_log]
+        wy = [d['loss'] for d in self.distill_worst_log]
+        wz = [d['graph_id'] for d in self.distill_worst_log]
+
+        fig = plt.figure(figsize=(10, 7))
+        ax = fig.add_subplot(111, projection='3d')
+        if len(bx) > 0:
+            ax.scatter(bx, by, bz, c='green', marker='o', label='best')
+        if len(wx) > 0:
+            ax.scatter(wx, wy, wz, c='red', marker='^', label='worst')
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel('Loss')
+        ax.set_zlabel('Graph ID')
+        ax.set_title('Distillation Best/Worst per Epoch')
+        ax.legend()
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'distill_best_worst_3d.png')
+        plt.close('all')
+
+    def plot_area_parameter(self, epochs_list, ids, sinisters):
+        """
+        Plot self.area_parameter (2D array: epochs x parameters) in 3D.
+        X = epochs_list
+        Y = parameter index
+        Z = value of area_parameter
+        """
+    
+        from mpl_toolkits.mplot3d import Axes3D
+
+        sort_ids = np.argsort(sinisters)
+
+        # Vérifier dimensions
+        area_param = np.asarray([params.detach().numpy()[sort_ids] for params in self.area_parameters_log])  # doit être (epochs, n_params)
         
-        y = y.detach().cpu().numpy()
+        logger.info(f'Last aera params -> {area_param[-1]}')
 
-        under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
-        over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+        # Créer grilles X et Y
+        X = epochs_list
+        Y = sinisters[sort_ids]
+        X, Y = np.meshgrid(X, Y)
         
-        iou = iou_score(y[:, -1], test_output)
-        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
-        iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
-
-        print(f'Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
-
-        plt.figure(figsize=(15,5))
-        plt.plot(y[y[:, departement_index] == 13, -1])
-        plt.plot(test_output[y[:, departement_index] == 13])
-        plt.savefig(self.dir_log / 'test.png')
-
-        self.update_weight(BEST_MODEL_PARAMS)
+        # Z = valeurs de self.area_parameter transposées pour correspondre à la grille
+        Z = area_param.T  
+        
+        # Plot
+        fig = plt.figure(figsize=(10, 6))
+        ax = fig.add_subplot(111, projection='3d')
+        surf = ax.plot_surface(X, Y, Z, cmap='viridis')
+        
+        ax.set_xlabel('Epochs')
+        ax.set_ylabel('Parameter Index')
+        ax.set_zlabel('Area Parameter Value')
+        ax.set_title('Evolution of Area Parameter during Training')
+        
+        fig.colorbar(surf, shrink=0.5, aspect=10)
+        plt.savefig(self.dir_log / 'area_parameters.png')
+        plt.close()
 
     def split_dataset(self, dataset, nb, reset=True):
         # Separate the positive and zero classes based on y
@@ -2267,8 +2741,8 @@ class Training():
         nb = min(len(df_non_fire), nb)
 
         if self.n_run == 1:
-        #sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
-            sampled_indices = np.random.RandomState(42).choice(len(df_non_fire), nb, replace=False)
+            seed = self.seed if self.seed is not None else 42
+            sampled_indices = np.random.RandomState(seed).choice(len(df_non_fire), nb, replace=False)
         else:
             sampled_indices = np.random.RandomState().choice(len(df_non_fire), nb, replace=False)
             
@@ -2342,8 +2816,8 @@ class Training():
             y_g = y_true[mask]
             pred_g = pred[mask]
             if np.any(y_g > 0):
-                iou = jaccard_score((y_g > 0).astype(int), (pred_g > 0).astype(int))
-                f1 = f1_score((y_g > 0).astype(int), (pred_g > 0).astype(int))
+                iou = jaccard_score((y_g > 0).astype(int), (pred_g > 0).astype(int), zero_division=0)
+                f1 = f1_score((y_g > 0).astype(int), (pred_g > 0).astype(int), zero_division=0)
                 iou_scores.append(iou)
                 f1_scores.append(f1)
 
@@ -2362,7 +2836,7 @@ class Training():
         check_and_create_path(self.dir_log)
 
         if not is_unknowed_risk:
-                test_percentage = np.arange(0.05, 1.05, 0.05)
+                test_percentage = np.round(np.arange(0.1, 1.05, 0.05), 2)
         else:
             test_percentage = np.arange(0.0, 1.05, 0.05)
 
@@ -2381,6 +2855,7 @@ class Training():
         self.metrics['iou_scores'] = []
 
         if use_log:
+        #if False:
             if False:
                 if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                     data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
@@ -2414,9 +2889,8 @@ class Training():
             try:
                 self.metrics = data_log
                 #test_percentage = self.metrics['test_percentage']
-                under_prediction_score_scores = self.metrics['under_prediction_scores']
-                over_prediction_score_scores = self.metrics['over_prediction_scores']
-                iou_scores = self.metrics['iou_score']
+                #under_prediction_score_scores = self.metrics['under_prediction_scores']
+                #over_prediction_score_scores = self.metrics['over_prediction_scores']
             except Exception as e:
                 print(e)
                 self.metrics = {}
@@ -2425,62 +2899,48 @@ class Training():
 
         doSearch = True
         if data_log is not None: #and self.n_run == data_log['n_run']:
-            for i in range(0, len(iou_scores) - 1):
-                try:
-                    if data_log[test_percentage[i]]['iou_val'] > data_log[test_percentage[i + 1]]['iou_val']:
-                        print(f"Last score {data_log[test_percentage[i]]['iou_val']} current score {data_log[test_percentage[i + 1]]['iou_val']}")
-                        doSearch = False
-                except Exception as e:
-                    print(e)
-                    doSearch = True
-                    break
+            test_percentage = np.asarray(self.metrics['test_percentage'])
+            start_test = -1
+            for i in range(0, len(test_percentage) - 1):
+                start_test = i
 
-            if doSearch:
-                start_test = np.argmax(iou_scores)
+                if test_percentage[i] in self.metrics.keys():
+                    last_keys = test_percentage[i]
+                    val_1 = np.mean(data_log[test_percentage[i]]['iou_val'])
+                    val_2 = np.mean(data_log[test_percentage[i + 1]]['iou_val'])
+
+                    std_1 = np.std(data_log[test_percentage[i]]['iou_val'])
+                    std_2 = np.std(data_log[test_percentage[i + 1]]['iou_val'])
+
+                    print('#########################"')
+                    print(f'{test_percentage[i]} -> {val_1} -> {std_1}')
+                    print(f'{test_percentage[i + 1]} -> {val_2} -> {std_2}')
+
+                    try:
+                        if  val_1 >  val_2 or ((val_1 == val_2) and (std_1 < std_2)):
+                            print(f"Last score {val_1} current score {val_2}")
+                            print(f"Last std {std_1} current std {std_2}")
+                            doSearch = False
+                            tp = test_percentage[i]
+                            break
+                    except Exception as e:
+                        print(e)
+                        doSearch = True
+                        break
+
+            start_test += 1
+
         else:
             start_test = 0
         
         if doSearch:
-            last_score = -math.inf if start_test == 0 else iou_scores[start_test - 1]
+            last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['iou_val'])
             y_ori = df_train[self.target_name].values
             for i in range(start_test, test_percentage.shape[0]):
-                tp = test_percentage[i]
-                if tp in self.metrics.keys():
-                    change_value = True
-                else:
-                    change_value = False
-                    
-                if True:
-                    self.metrics[tp] = {}
-                    self.metrics[tp]['f1'] = []
-                    self.metrics[tp]['iou'] = []
-                    self.metrics[tp]['iou_val'] = []
-                    self.metrics[tp]['prec'] = []
-                    self.metrics[tp]['recall'] = []
-                    self.metrics[tp]['normalized_iou'] = []
-                    self.metrics[tp]['normalized_f1'] = []
+                tp = round(test_percentage[i], 2)
 
-                """if self.model_name in ['ResNet', 'SepLSTMGNN', 'SepGRUGNN', 'graphCastGRU']:
-                    if tp < 0.15:
-                        iou_scores.append(0)
-                        under_prediction_score_scores.append(0)
-                        over_prediction_score_scores.append(0)
-                        self.metrics[tp]['f1'].append(0)
-                        self.metrics[tp]['iou'].append(0)
-                        self.metrics[tp]['normalized_iou'].append(0)
-                        self.metrics[tp]['normalized_f1'].append(0)
-                        self.metrics[tp]['var_f1'] = 0
-                        self.metrics[tp]['IC_f1'] = (0, 0)
-                        self.metrics[tp]['var_iou'] = 0
-                        self.metrics[tp]['IC_iou'] = (0, 0)
-                        self.metrics[tp]['var_Normalized_f1'] = 0
-                        self.metrics[tp]['IC_Normalized_f1'] = (0, 0)
-                        self.metrics[tp]['var_Normalized_iou'] = 0
-                        self.metrics[tp]['IC_Normalized_iou'] = (0, 0)
-                        self.metrics['under_prediction_scores'].append(0)
-                        self.metrics['over_predictio_scores'].append(0)
-                        self.metrics['iou_scores'].append(0)
-                        continue"""
+                if tp in self.metrics.keys():
+                    continue
                 
                 df_train_copy = df_train.copy(deep=True)
                 
@@ -2498,14 +2958,14 @@ class Training():
                     # Mettre à jour df_train pour l'entraînement
                     df_train_copy['weight'] = 0
                     df_train_copy.loc[df_combined.index, 'weight'] = 1
-                    
+
                     copy_model = deepcopy(self)
                     copy_model.under_sampling = 'full'
                     copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader)
+                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_cdf='Val')
                     prediction = test_output.detach().cpu().numpy()
                     
                     y = y.detach().cpu().numpy()
@@ -2519,14 +2979,15 @@ class Training():
                     dff['departement'] = y[:, departement_index]
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1]
-                    
+
                     metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+                    metrics_run = round_floats(metrics_run)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
-                    self.metrics[tp]['iou_val'].append(metrics_run['iou'])
+                    update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
                     ############################# On set test ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader)
+                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_cdf='test')
                     prediction = test_output.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
 
@@ -2542,116 +3003,68 @@ class Training():
                     y = y[:, -1]
 
                     metrics_run = evaluate_metrics(dff, self.target_name, prediction)
-                    self.metrics[tp]['iou'].append(metrics_run['iou'])
-                    self.metrics[tp]['f1'].append(metrics_run['f1'])
-                    self.metrics[tp]['recall'].append(metrics_run['recall'])
-                    self.metrics[tp]['prec'].append(metrics_run['prec'])
-                    self.metrics[tp]['normalized_iou'].append(metrics_run['normalized_iou'])
-                    self.metrics[tp]['normalized_f1'].append(metrics_run['normalized_f1'])
-                    
-                if self.n_run == 1:
-                    self.metrics[tp]['var_f1'] = 0
-                    self.metrics[tp]['IC_f1'] = (0, 0)
-                    self.metrics[tp]['var_iou'] = 0
-                    self.metrics[tp]['IC_iou'] = (0, 0)
-                    self.metrics[tp]['var_normalized_f1'] = 0
-                    self.metrics[tp]['IC_normalized_f1'] = (0, 0)
-                    self.metrics[tp]['var_normalized_iou'] = 0
-                    self.metrics[tp]['IC_normalized_iou'] = (0, 0)
-                else:
-                    # Calcul de la variance pour chaque métrique
-                    f1_variance = np.var(self.metrics[tp]['f1'])
-                    iou_variance = np.var(self.metrics[tp]['iou'])
-                    normalized_f1_variance = np.var(self.metrics[tp]['normalized_f1'])
-                    normalized_iou_variance = np.var(self.metrics[tp]['normalized_iou'])
-                    
-                    # Calcul de l'IC 95% pour chaque métrique
-                    f1_ic = calculate_ic95(self.metrics[tp]['f1'])
-                    iou_ic = calculate_ic95(self.metrics[tp]['iou'])
-                    normalized_f1_ic = calculate_ic95(self.metrics[tp]['normalized_f1'])
-                    normalized_iou_ic = calculate_ic95(self.metrics[tp]['normalized_iou'])
-                    
-                    # Ajout de la variance et de l'IC dans le dictionnaire avec des clefs spécifiques pour chaque métrique
-                    self.metrics[tp]['var_f1'] = f1_variance
-                    self.metrics[tp]['IC_f1'] = f1_ic
-                    self.metrics[tp]['var_iou'] = iou_variance
-                    self.metrics[tp]['IC_iou'] = iou_ic
-                    self.metrics[tp]['var_normalized_f1'] = normalized_f1_variance
-                    self.metrics[tp]['IC_normalized_f1'] = normalized_f1_ic
-                    self.metrics[tp]['var_normalized_iou'] = normalized_iou_variance
-                    self.metrics[tp]['IC_normalized_iou'] = normalized_iou_ic
+                    metrics_run = round_floats(metrics_run)
+                    update_metrics_as_arrays(self, tp, metrics_run, 'test')
                 
+                self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
+
                 iou = np.mean(self.metrics[tp]['iou_val'])
-                if not change_value:
-                    iou_scores.append(iou)
-                    under_prediction_score_scores.append(under_prediction_score_value)
-                    over_prediction_score_scores.append(over_prediction_score_value)
-                else:
-                    iou_scores[i] = iou
-                    under_prediction_score_scores[i] = under_prediction_score_value
-                    over_prediction_score_scores[i] = over_prediction_score_value
+                std_iou = np.std(self.metrics[tp]['iou_val'])
 
                 save_object(self.metrics, 'metrics.pkl', self.dir_log)
                 
                 print(f'Metrics achieved : {self.metrics[tp]}')
 
-                if iou > last_score:
+                if iou >= last_score:
                     last_score = iou
                 else:
                     print(f'Last score {last_score} current score {iou}')
                     break
-            
-        index_max = np.argmax(iou_scores)
-        best_tp = test_percentage[index_max]
+        
+        keys_array = []
+        eps = 1e-9  # tolérance pour considérer deux moyennes égales
+
+        iou_means = []
+        iou_stds = []
+        for k in self.metrics.keys():
+            if isinstance(k, float) and "iou_val" in self.metrics[k]:
+                vals = np.asarray(self.metrics[k]["iou_val"], dtype=float)
+                mean_iou = float(np.nanmean(vals)) if vals.size else -np.inf
+                std_iou = np.std(vals)
+
+                print(f"{k} -> mean={mean_iou:.6f}, std={std_iou:.6f}")
+                keys_array.append(k)
+                iou_means.append(mean_iou)
+                iou_stds.append(std_iou)
+
+        if not keys_array:
+            raise ValueError("Aucune clé float avec 'iou_val' trouvée dans self.metrics.")
+
+        # Sélection avec tie-break: max(mean), puis min(std)
+        iou_means = np.array(iou_means, dtype=float)
+        iou_stds  = np.array(iou_stds,  dtype=float)
+
+        max_mean = np.nanmax(iou_means)
+        candidates = np.where(np.isclose(iou_means, max_mean, atol=eps))[0]
+        if candidates.size == 1:
+            index_max = int(candidates[0])
+        else:
+            # parmi les ex aequo en moyenne, prendre le plus petit std
+            index_max = int(candidates[np.nanargmin(iou_stds[candidates])])
+
+        best_tp = keys_array[index_max]
+        logger.info(f'Best tp {best_tp}')
         self.metrics['iou_score'] = iou_scores
         self.metrics['test_percentage'] = test_percentage
         self.metrics['under_prediction_scores'] = under_prediction_score_scores
         self.metrics['over_prediction_scores'] = over_prediction_score_scores
         self.metrics['best_tp'] = best_tp
         self.metrics['run'] = self.n_run
-        print(self.metrics)
+
+        logger.info(f'{self.metrics[best_tp]}')
+
         save_object(self.metrics, 'metrics.pkl', self.dir_log)
-        
-        if is_unknowed_risk:
-            plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], iou_scores, label='Iou')
-            plt.xticks(test_percentage)
-            plt.xlabel('Percentage of Unknowed sample')
-            plt.ylabel('IOU Score')
 
-            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
-            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
-            
-            # Ajouter une légende
-            plt.legend()
-
-            # Sauvegarder et fermer la figure
-            plt.savefig(self.dir_log / f'{self.name}_unknowned_scores_per_percentage.png')
-            plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'unknowned_scores_per_percentage.pkl', self.dir_log)
-        else:
-            plt.figure(figsize=(15, 7))
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], under_prediction_score_scores, label='under_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], over_prediction_score_scores, label='over_prediction')
-            plt.plot(test_percentage[:len(under_prediction_score_scores)], iou_scores, label='Iou')
-            plt.xticks(test_percentage)
-            plt.xlabel('Percentage of Binary sample')
-            plt.ylabel('IOU Score')
-
-            # Ajouter une ligne verticale pour le meilleur pourcentage (best_tp)
-            plt.axvline(x=best_tp, color='r', linestyle='--', label=f'Best TP: {best_tp:.2f}')
-
-            # Ajouter une légende
-            plt.legend()
-
-            # Sauvegarder et fermer la figure
-            plt.savefig(self.dir_log / f'{self.name}_scores_per_percentage.png')
-            plt.close()
-            save_object([test_percentage, under_prediction_score_scores, over_prediction_score_scores, iou_scores], 'test_percentage_scores.pkl', self.dir_log)
-
-        print(best_tp)
         return best_tp, find_log
 
     def search_samples_limit(self, X, y, X_val, y_val, X_test, y_test):
@@ -2677,27 +3090,13 @@ class Training():
         
         return iou_score(y, y_pred)
 
-    def _predict_test_loader(self, X: DataLoader, proba=False) -> torch.tensor:
-            """
-            Generates predictions using the model on the provided DataLoader, with optional autoregression.
-
-            Note:
-            - 'node_id' and 'date_id' are not included in features_name but can be found in labels[:, 0] and labels[:, 4].
-            Parameters:
-            - X_: DataLoader providing the test data.
-            - features: Numpy array of feature indices to use.
-            - device: Torch device to use for computations.
-            - target_name: Name of the target variable.
-            - autoRegression: Boolean indicating whether to use autoregression.
-            - features_name: List mapping feature names to indices.
-            - dataset: Pandas DataFrame containing 'node_id', 'date_id', and 'nbsinister' columns.
-
-            Returns:
-            - pred: Tensor containing the model's predictions.
-            - y: Tensor containing the true labels.
-            """
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf="test") -> torch.tensor:
             assert self.model is not None
             self.model.eval()
+            if len(self.criterion_params) > 0:
+                criterion = self.get_loss(self.loss)
+                criterion.update_params(self.criterion_params[self.best_epoch])
+                criterion.eval()
 
             with torch.no_grad():
                 pred = []
@@ -2713,13 +3112,27 @@ class Training():
                     #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
                     inputs_model = inputs
-                    if self.model.return_hidden:
-                        output, _ = self.model(inputs_model)
-                    else:
-                        output = self.model(inputs_model)
+                    output, logits, hidden = self.model(inputs_model)
 
-                    if output.shape[1] > 1 and not proba:
-                        output = torch.argmax(output, dim=1)
+                    if 'criterion' in locals() and hasattr(criterion, 'transform'):
+                        params = {'inputs' : logits}
+                        if 'cluster_ids' in required_params(criterion.transform):
+                            cluster_ids = orilabels[:, self.cluster_id_index].long()
+                            params['cluster_ids'] = cluster_ids
+                        if 'output_cdf' in required_params(criterion.transform):
+                            assert output_cdf is not None and self.dir_log is not None
+                            params['output_cdf'] = output_cdf
+                            params['dir_output'] = self.dir_log
+
+                        output = criterion.transform(**params)
+
+                    if prediction_type == 'Class':
+                        if self.task_type == 'classification' or self.task_type == 'binary':
+                            output = torch.argmax(output, dim=1)
+                        elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+                            output = torch.argmax(output, dim=1)
+                    elif prediction_type == 'RawFormulaVal':
+                        output = logits
 
                     #output = output[weights.gt(0)]
 
@@ -2729,24 +3142,22 @@ class Training():
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
 
-                if self.target_name == 'binary' or self.target_name == 'risk':
-                    pred = torch.round(pred, decimals=1)
-                elif self.target_name == 'nbsinister':
+                #if self.task_type == 'regression' and prediction_type == 'Class':
+                if pred.dtype != torch.long:
                     pred = torch.round(pred, decimals=1)
 
                 return pred, y
 
-    def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None):
+    def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, use_log=True):
         
         X = X.set_index(ids_columns[:-1]).join(y.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
         X_val = X_val.set_index(ids_columns[:-1]).join(y_val.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
         X_test = X_test.set_index(ids_columns[:-1]).join(y_test.set_index(ids_columns[:-1])[targets_columns  + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
-
         #if (self.dir_log / 'last.pt').is_file():
         #    self.graph = graph
         #    self._load_model_from_path(self.dir_log / 'best.pt', self.model)
         #else:
-        self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params)
+        self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
             
     def filtering_pred(self, df, predTensor, y, graph, return_y = False):
@@ -2837,7 +3248,7 @@ class Training():
             return pred, y
         return pred
 
-    def predict(self, df, graph=None, return_y=False):
+    def predict(self, df, graph=None, return_y=False, prediction_type='Class'):
         if graph is None:
             graph = self.graph
 
@@ -2851,7 +3262,7 @@ class Training():
                        self.target_name,
                        self.ks)
         
-        predTensor, YTensor = self._predict_test_loader(loader)
+        predTensor, YTensor = self._predict_test_loader(loader, prediction_type='Class')
 
         if return_y:
         #    pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
@@ -2951,14 +3362,38 @@ class Training():
         return get_loss_function(loss_name, **loss_params)
 
     def get_learnable_parameters(self, criterion):
-        parameters = self.model.parameters()
-        
+        """
+        Retourne les paramètres apprenables (list/param groups) pour l'optimizer.
+        Tous les objets doivent être nn.Parameter avec requires_grad=True.
+        """
+        params = list(self.model.parameters())
+
+        # Ajouter paramètres spécifiques à la loss (s'ils existent)
         if has_method(criterion, 'get_learnable_parameters'):
-            logger.info(f'Adding {self.loss} parameter')
-            loss_parameters = criterion.get_learnable_parameters().values()
-            parameters = list(parameters) + list(loss_parameters)
-        
-        return parameters
+            logger.info(f'Adding {self.loss} parameter(s)')
+            # On s'assure que ce sont bien des nn.Parameter
+            loss_params = []
+            for p in criterion.get_learnable_parameters().values():
+                if isinstance(p, torch.nn.Parameter):
+                    loss_params.append(p)
+                else:
+                    # Convertir un tensor en Parameter si besoin
+                    loss_params.append(torch.nn.Parameter(p, requires_grad=True))
+            params.extend(loss_params)
+
+        # Ajouter les area_parameters si la loss l'exige
+        if 'learnable-area' in self.loss:
+            logger.info("Adding learnable area parameters")
+            # self.area_parameters est déjà nn.Parameter
+            params.append(self.area_parameters)
+
+        if self.student_train and self.temperature == 'seach':
+            params.append(self.temperature_value)
+
+        if self.student_train and self.alpha == 'seach':
+            params.append(self.alpha_value)
+
+        return params
 
     def get_optimizer(self, criterion,):
         parameters = self.get_learnable_parameters(criterion)
@@ -3324,7 +3759,7 @@ class SplitTraining(Training):
         over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
 
         iou = iou_score(y[:, -1], test_output)
-        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int))
+        f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
         iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
         logger.info(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
@@ -3351,14 +3786,14 @@ class SplitTraining(Training):
 
         self.update_weight(server_model.state_dict())
 
-    def _predict_test_loader(self, X: DataLoader, proba: bool = False):
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf="test", proba=False) -> torch.tensor:
         """Generate predictions using the split learning setup."""
 
         try:
             if self.training_mode == 'normal':
-                return super()._predict_test_loader(X, proba=proba)
+                return super()._predict_test_loader(X, prediction_type=prediction_type, output_cdf=output_cdf)
         except:
-                return super()._predict_test_loader(X, proba=proba)
+                return super()._predict_test_loader(X, prediction_type=prediction_type, output_cdf=output_cdf)
 
         if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
             raise ValueError("Model is not fitted. Please train the model before predicting.")
@@ -3413,7 +3848,7 @@ class SplitTraining(Training):
 
         loader = self.prepare_batch_data(df, graph, df[self.federated_cluster].unique(), 1)
 
-        pred_tensor, y_tensor = self._predict_test_loader(loader)
+        pred_tensor, y_tensor = self._predict_test_loader(loader, output_cdf="test")
 
         if return_y:
             return pred_tensor, y_tensor
@@ -3443,7 +3878,7 @@ class SplitTraining(Training):
             self.ks,
         )
 
-        pred_tensor, y_tensor = self._predict_test_loader(loader, True)
+        pred_tensor, y_tensor = self._predict_test_loader(loader, True, output_cdf="test")
 
         if return_y:
             pred, y = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=True)
@@ -3515,13 +3950,13 @@ class SplitTraining(Training):
                 model_copy.under_sampling = 'full'
                 model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT, verbose=False)
 
-                pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader)
+                pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_cdf="val")
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
                 metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
-                pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader)
+                pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_cdf="test")
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
                 metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
@@ -3596,10 +4031,13 @@ class DualTraining:
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
 
-    def __init__(self, occ_model: Training, num_model: Training, name: str = 'DualTraining'):
+    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1):
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
+        self.task_type = task_type
+        self.n_run = n_run
+        self.target_name = target_name
 
     def train(
         self,
@@ -3611,8 +4049,8 @@ class DualTraining:
         custom_model_params=None,
         new_model: bool = True,
     ):
-        self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
         self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
+        self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
     # ------------------------------------------------------------------
     # Inference utilities
@@ -3634,8 +4072,81 @@ class DualTraining:
         self.test_loader = self.occ_model.create_test_loader(graph, df)
         self.occ_model.test_loader = self.test_loader
         return self.test_loader
+    
+    def create_train_val_test_loader(self, graph, dfs_train, dfs_val, dfs_test, eopchs, PATIENCE_CNT, CHECKPOINT, custom_model_params, features_importance, use_log):
+        train_dataset, train_pos = dfs_train
+        val_dataset, val_pos = dfs_val
+        test_dataset, test_pos = dfs_test
 
-    def _predict_test_loader(self, loader=None):
+        self.num_model.create_train_val_test_loader(
+                graph,
+                train_pos,
+                val_pos,
+                test_pos,
+                epochs,
+                PATIENCE_CNT,
+                CHECKPOINT,
+                custom_model_params=custom_model_params,
+                features_importance=False,
+                use_log=use_log,
+            )
+        
+        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
+
+        self.metrics = {}
+        tp = 'occ-based'
+        
+        for run in range(self.n_run):
+            seed = int(random.random())
+            self.occ_model.seed = seed
+            self.occ_model.n_run = 1
+            self.occ_model.create_train_val_test_loader(
+                graph,
+                train_dataset,
+                val_dataset,
+                test_dataset,
+                epochs,
+                PATIENCE_CNT,
+                CHECKPOINT,
+                custom_model_params=custom_model_params,
+                features_importance=False,
+                use_log=use_log,
+            )
+            self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, False, custom_model_params=custom_model_params, new_model=True)
+            
+            ############################# On set val ##############################
+            test_output, y = self._predict_test_loader(self.occ_model.val_loader)
+            prediction = test_output.detach().cpu().numpy()
+            
+            y = y.detach().cpu().numpy()
+        
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+
+            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'val')
+
+            ############################# On set test ##############################
+            test_output, y = self._predict_test_loader(self.occ_model.test_loader)
+            prediction = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+        
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+
+            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'test')
+        
+        self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
+        self.metrics['best_tp'] = tp
+
+    def _predict_test_loader(self, loader=None, prediction_type='Class', output_cdf=None) -> torch.tensor:
         """Run predictions combining the two sub-models.
 
         Parameters
@@ -3650,13 +4161,76 @@ class DualTraining:
             Final numeric predictions and associated ground truth.
         """
 
+        assert self.num_model is not None
+        assert self.occ_model is not None
+        self.num_model.model.eval()
+        self.occ_model.model.eval()
+
+        with torch.no_grad():
+            pred = []
+            y = []
+
+            for i, data in enumerate(loader, 0):
+                
+                inputs, orilabels, _ = data
+
+                orilabels = orilabels.to(device)
+                orilabels = orilabels[:, :, -1]
+
+                #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
+
+                inputs_model = inputs
+                output, logits, hidden = self.occ_model.model(inputs_model)
+
+                output = torch.argmax(output, dim=1)
+                output = output.to(torch.float32)
+
+                #output = output[weights.gt(0)]
+
+                if torch.all(output == 0):
+                    continue
+
+                output_num_mask = output > 0
+
+                input_num = inputs_model[output_num_mask]
+
+                output_num, logits, hidden = self.num_model.model(input_num)
+
+                if hasattr(self.num_model, 'transform'):
+                    if 'cluster_ids' in required_params(self.num_model.transform):
+                        cluster_ids = orilabels[:, self.cluster_id_index].long()
+                        output_num = self.num_model.transform(output, cluster_ids)
+                    else:
+                        output_num = self.num_model.transform(output)
+
+                if prediction_type == 'Class':
+                    if self.num_model.task_type == 'classification' or self.num_model.task_type == 'binary':
+                        output_num = torch.argmax(output, dim=1)
+                    elif self.num_model.task_type == 'regression' and  'egpd' in self.loss:
+                        output_num = torch.argmax(output, dim=1)
+                elif prediction_type == 'RawFormulaVal':
+                    output_num = logits
+                
+                output[output_num_mask] = output_num
+                
+                pred.append(output)
+                y.append(orilabels)
+                
+            y = torch.cat(y, 0)
+            pred = torch.cat(pred, 0)
+
+            if pred.dtype != torch.long:
+                pred = torch.round(pred).long()
+
+            return pred, y
+        
         if loader is None:
             loader = self.occ_model.test_loader
 
         # 1) predict occurence on the full dataset
-        occ_pred, _ = self.occ_model._predict_test_loader(loader)
+        occ_pred, y = self.occ_model._predict_test_loader(loader)
         occ_mask = occ_pred.reshape(-1) > 0
-
+        
         # 2) build a loader for the numeric model restricted to positives
         df_pos = self._test_df.iloc[occ_mask.cpu().numpy()]
         if len(df_pos) > 0:
@@ -3841,9 +4415,43 @@ class ModelGNN(SplitTraining):
         self.mesh = mesh
         self.mesh_file = mesh_file
         self.graph_method = graph_method
+        self.mesh2graph = None
+        self.gridh2mesh = None
+        self.graph_mesh = None
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
-        
+
+        if self.mesh and self.graph_mesh is None:
+            
+            df = pd.concat((df_train, df_val, df_test))
+
+            latitudes = torch.Tensor(df['latitude'].values.reshape(-1,1))
+            longitudes = torch.Tensor(df['longitude'].values.reshape(-1,1))
+            departement = torch.Tensor(df['departement'].values.reshape(-1,))
+
+            g_lat_lon_grid = torch.concat((latitudes, longitudes), dim=1).to('cpu')
+            g_lat_lon_grid = torch.unique(g_lat_lon_grid, dim=0)
+             
+            graph_builder = GraphBuilder(self.mesh_file, g_lat_lon_grid, doPrint=False)
+
+            self.graph_mesh = graph_builder.create_mesh_graph(None)
+            self.gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(None, self.graph_mesh)
+            self.mesh2graph = graph_builder.create_m2g_graph(None)
+
+            def _check_non_empty_edges(g, etype, name):
+                e = g.num_edges(etype)
+                if e == 0:
+                    print(f"[WARN] {name}: 0 edges pour etype {etype}.")
+                return e
+
+            _check_non_empty_edges(self.gridh2mesh, ("grid","g2m","mesh"), "gridh2mesh")
+            _check_non_empty_edges(self.mesh2graph, ("mesh","m2g","grid"), "mesh2graph")
+
+            if '_ID' not in graph_mesh.edata:
+                graph_mesh.edata['_ID'] = torch.arange(graph_mesh.num_edges(), dtype=torch.int32)
+            if '_ID' not in graph_mesh.ndata:
+                graph_mesh.ndata['_ID'] = torch.arange(graph_mesh.num_nodes(), dtype=torch.int32)
+
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
@@ -3869,8 +4477,10 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     None,
                                                     self.device, self.ks,
-                                                    self.mesh,
-                                                    self.mesh_file)
+                                                    graph_mesh=self.graph_mesh,
+                                                    gridh2mesh=self.gridh2mesh,
+                                                    mesh2graph=self.mesh2graph
+                                                    )
             else:
                 val_dataset, test_dataset = create_test_val_dataset(graph,
                                                     df_val,
@@ -3879,8 +4489,9 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     False,
                                                     self.device, self.ks,
-                                                    self.mesh,
-                                                    self.mesh_file)
+                                                    graph_mesh=self.graph_mesh,
+                                                    gridh2mesh=self.gridh2mesh,
+                                                    mesh2graph=self.mesh2graph)
                 
             if not self.mesh or self.mesh == False:            
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
@@ -3957,8 +4568,9 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     None,
                                                     self.device, self.ks,
-                                                    self.mesh,
-                                                    self.mesh_file)
+                                                    graph_mesh=self.graph_mesh,
+                                                    gridh2mesh=self.gridh2mesh,
+                                                    mesh2graph=self.mesh2graph)
             else:
                 train_dataset = create_train_dataset(graph,
                                                     df_train,
@@ -3966,17 +4578,18 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     False,
                                                     self.device, self.ks,
-                                                    self.mesh,
-                                                    self.mesh_file)
+                                                    graph_mesh=self.graph_mesh,
+                                                    gridh2mesh=self.gridh2mesh,
+                                                    mesh2graph=self.mesh2graph)
 
             if not self.mesh or self.mesh == False:            
-                self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn)
+                self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn)
             
             elif self.mesh == 'mesh':
-                self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_mesh)
+                self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn_mesh)
 
             elif self.mesh == 'mygraph':
-                self.train_loader = DataLoader(train_dataset, batch_size, True, collate_fn=graph_collate_fn_multiple_graph)
+                self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn_multiple_graph)
 
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
@@ -3989,8 +4602,9 @@ class ModelGNN(SplitTraining):
                        False,
                        self.target_name,
                        self.ks,
-                       self.mesh,
-                       self.mesh_file)
+                       self.graph_mesh,
+                        self.gridh2mesh,
+                        self.mesh2graph)
 
         return loader
 
@@ -3998,16 +4612,11 @@ class ModelGNN(SplitTraining):
         
         if not self.mesh or self.mesh == False:
             inputs, labels, graphs, graphs = data
-            if self.model.return_hidden:
-                output, hidden = self.model(inputs, graphs)
-            else:
-                output = self.model(inputs, graphs)
+            output, logits, hidden = self.model(inputs, graphs)
         else:
             inputs, labels, DGLgraphs, graphs = data
-            if self.model.return_hidden:
-                output, hidden = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
-            else:
-                output = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+            
+            output, logits, hidden = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
         
         if inputs.shape[0] == 1:
             return 0
@@ -4022,7 +4631,7 @@ class ModelGNN(SplitTraining):
         if self.loss not in ['kldivloss']: # works on probability
             target = target.long()
         
-        loss = self.calculate_loss(criterion, output, target, weights, labels)
+        loss = self.calculate_loss(criterion, logits, target, weights, labels)
 
         if self.student_train: # distallation traning
             criterion_teacher = self.get_loss('kldivloss')
@@ -4037,14 +4646,12 @@ class ModelGNN(SplitTraining):
             loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
         
         if self.constrastive: # MOON federated training
-            _, zprev = self.prev_model(inputs, graphs)
-            _, zglob = self.global_model(inputs, graphs)
+            _, _, zprev = self.prev_model(inputs, graphs)
+            _, _, zglob = self.global_model(inputs, graphs)
             loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
             loss = loss + self.smooth_value * loss_constrastive
 
         if self.use_prototypes and self.prototypes is not None:
-            if not self.model.return_hidden:
-                raise ValueError('Model must return hidden states for prototype training')
             
             proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
             loss = loss + self.prototype_weight * proto_loss
@@ -4054,7 +4661,7 @@ class ModelGNN(SplitTraining):
 
         return loss
 
-    def _predict_test_loader(self, X: DataLoader, proba=False) -> torch.tensor:
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf='test') -> torch.tensor:
         """
         Generates predictions using the model on the provided DataLoader, with optional autoregression.
 
@@ -4094,11 +4701,11 @@ class ModelGNN(SplitTraining):
 
                 inputs_model = inputs
                 if not self.mesh:
-                    output = self.model(inputs_model, graphs)
+                    output, logits, hidden = self.model(inputs_model, graphs)
                 else:
-                    output = self.model(inputs_model, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+                    output, logits, hidden = self.model(inputs_model, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
 
-                if output.shape[1] > 1 and not proba:
+                if output.shape[1] > 1 and self.task_type != 'regression':
                     output = torch.argmax(output, dim=1)
 
                 #output = output[weights.gt(0)]
@@ -4134,8 +4741,15 @@ class Model_Torch(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
+
+        if 'learnable-area' in self.loss:
+            area_parameters = np.sort(df_train['graph_id'].unique())
+            self.area_parameters = torch.nn.Parameter(torch.Tensor(torch.ones_like(torch.tensor(area_parameters))))
+        elif 'area' in self.loss:
+            area_parameters = np.sort(df_train['graph_id'].unique())
+            self.area_parameters = torch.ones_like(torch.tensor(area_parameters))
         
-        if features_importance:
+        if False:
             ##################################### Select features #########################################
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
@@ -4154,7 +4768,9 @@ class Model_Torch(SplitTraining):
                                                                 self.target_name,
                                                                 None,
                                                                 self.device, self.ks,
-                                                                mesh=None)
+                                                                graph_mesh=None,
+                                                                gridh2mesh=None,
+                                                                mesh2graph=None)
             
             val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
             test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
@@ -4275,7 +4891,9 @@ class Model_Torch(SplitTraining):
                                                 self.target_name,
                                                 None,
                                                 self.device, self.ks,
-                                                mesh=None)
+                                                graph_mesh=None,
+                                                gridh2mesh=None,
+                                                mesh2graph=None)
     
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
@@ -4291,9 +4909,14 @@ class Model_Torch(SplitTraining):
                        self.device,
                        None,
                        self.target_name,
-                       self.ks)
+                       self.ks,
+                        graph_mesh=None,
+                        gridh2mesh=None,
+                        mesh2graph=None)
 
         return loader
+
+########################################## Federated Learning #########################################
 
 class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
@@ -4344,11 +4967,6 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.global_model.graph = graph
 
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
-        self.global_model.model = deepcopy(initiate_model)
-        self.global_model.model_params = deepcopy(model_params)
-        self.model_params = deepcopy(model_params)
-        del initiate_model
-        del model_params
         
         # Vérifier que la méthode d'agrégation est implémentée
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
@@ -4365,73 +4983,126 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             clusters = df_train[self.federated_cluster].unique()
         else:
             raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
-
-        best_global_score = float('-inf')
-        patience_counter = 0  # Compteur pour l'arrêt anticipé
         
         print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
+        
+        self.metrics = {}
 
-        for epoch in range(global_epochs):
-            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+        tp = 'client-based'
 
-            local_models = []
-            local_weights = []
-            sample_counts = []
+        for run in range(self.n_run):
+
+            self.global_model.model = deepcopy(initiate_model)
+            self.global_model.model_params = deepcopy(model_params)
+            local_models = {}
             
-            for cluster in clusters:
-                print(f"\nTraining local model for cluster: {cluster}")
+            seed = int(random.random())
 
-                # Initialisation du modèle local
-                local_model = deepcopy(self.global_model)
-                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'federated' / local_model.name
-                if epoch == 0:
-                    check_and_create_path(local_model.dir_log)
-                local_model.features_name = self.features_name
-                local_model.nbfeatures = 'all'
+            best_global_score = float('-inf')
+            patience_counter = 0  # Compteur pour l'arrêt anticipé
+            for epoch in range(global_epochs):
+                print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
 
-                # Création des datasets pour le cluster fédéré
-                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
-                    df_train, df_val, df_test, cluster
-                )
-
-                if np.all(df_train[local_model.target_name].values == 0):
-                    print(f'Skipping {cluster} due to no positif samples')
-                    continue
-
-                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
-                    print(f'Skipping {cluster} due to empty dataset')
-                    continue
-
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
-
-                # Entraînement du modèle local
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
+                local_weights = []
+                sample_counts = []
                 
-                local_models.append(local_model)
+                for cluster in clusters:
+                    print(f"\nTraining local model for cluster: {cluster}")
 
-                # Stocker les poids des modèles locaux
-                local_weights.append(deepcopy(local_model.model.state_dict()))
-                sample_counts.append(len(df_train_cluster))
+                    # Création des datasets pour le cluster fédéré
+                    df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                        df_train, df_val, df_test, cluster
+                    )
 
-            # Agréger les modèles locaux dans le modèle global
-            self.aggregate_models(local_weights, sample_counts)
+                    if np.all(df_train[self.global_model.target_name].values == 0) or np.all(df_val[self.global_model.target_name].values == 0) or np.all(df_test[self.global_model.target_name].values == 0):
+                        print(f'Skipping {cluster} due to no positif samples')
+                        continue
+                    
+                    if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                        print(f'Skipping {cluster} due to empty dataset')
+                        continue
 
-            # Évaluer le modèle global
-            global_score = self.global_model.score(df_val, df_val[self.target_name])
-            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+                    if cluster in local_models.keys():
+                        local_model = local_models[cluster]
+                        local_model.model.load_state_dict(self.global_model.model.state_dict())
+                    else:
+                        # Initialisation du modèle local
+                        local_model = deepcopy(self.global_model)
+                        local_model.seed = seed
+                        local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                        local_model.dir_log = self.dir_log / local_model.name
+                        if epoch == 0:
+                            check_and_create_path(local_model.dir_log)
+                        local_model.features_name = self.features_name
+                        local_model.nbfeatures = 'all'
 
-            # Vérifier si le score s'est amélioré
-            if global_score > best_global_score:
-                best_global_score = global_score
-                patience_counter = 0
-            else:
-                patience_counter += 1
+                    if epoch == 0:
+                        local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+                        
+                    # Entraînement du modèle local
+                    local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
+                    
+                    local_models[cluster] = local_model
 
-            # Arrêt anticipé si le score global ne s'améliore plus
-            if patience_counter >= patience_count_global:
-                print("\nEarly stopping: Global model score did not improve.")
-                break
+                    # Stocker les poids des modèles locaux
+                    local_weights.append(deepcopy(local_model.model.state_dict()))
+                    sample_counts.append(len(df_train_cluster))
+
+                # Agréger les modèles locaux dans le modèle global
+                self.aggregate_models(local_weights, sample_counts)
+
+                # Évaluer le modèle global
+                global_score = self.global_model.score(df_val, df_val[self.target_name])
+                print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+                # Vérifier si le score s'est amélioré
+                if global_score > best_global_score:
+                    best_global_score = global_score
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+
+                # Arrêt anticipé si le score global ne s'améliore plus
+                if patience_counter >= patience_count_global:
+                    print("\nEarly stopping: Global model score did not improve.")
+                    break
+            
+            loader = self.create_test_loader(graph, df_test)
+            test_output, y = self._predict_test_loader(loader)
+            test_output = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+
+            ###################### TEST SET ########################
+            loader = self.create_test_loader(graph, df_test)
+            test_output, y = self._predict_test_loader(loader)
+
+            test_output = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'test')
+
+            ###################### VAL SET ########################
+            loader = self.create_test_loader(graph, df_val)
+            test_output, y = self._predict_test_loader(loader)
+            test_output = test_output.detach().cpu().numpy()
+            
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'val')
+
+        self.metrics['best_tp'] = tp
 
         self.is_fitted_ = True
         print("\n--- Federated Learning Training Complete ---")
@@ -4515,10 +5186,10 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
 class FederatedALA(FederatedLearningModel):
     """Federated learning strategy relying on the :class:`Training` class for local training."""
 
-    def __init__(self, federated_model, eta, layer_idx, features, federated_cluster='departement', loss='mse',
+    def __init__(self, federated_model, eta, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1):
+                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2']):
         
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
@@ -4526,8 +5197,252 @@ class FederatedALA(FederatedLearningModel):
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
                          n_run=n_run)
         self.eta = eta
-        self.layer_idx = layer_idx
+        self.weight = 0.5
+        self.params_to_update = params_to_update
 
+    def pick_params_by_name(self, model):
+        names, params = [], []
+        for n, p in model.named_parameters():
+            for pick_parm in self.params_to_update:
+                if pick_parm in n:
+                    names.append(n); params.append(p)
+        return names, params
+    
+    def pick_params_to_replace(self, model):
+        names, params = [], []
+        for n, p in model.named_parameters():
+            add = True
+            for pick_parm in self.params_to_update:
+                if pick_parm in n:
+                    add = False
+                    break
+            if add:
+                names.append(n); params.append(p)
+        return names, params
+
+    def fedALA_params(self, local_model):
+        with torch.no_grad():
+            for p_t, p_g in zip(local_model.params_erase,
+                                local_model.params_gp_erase,
+                                ):
+                p_t.copy_(p_g)
+
+            for p_t, p_prev, p_g, w in zip(local_model.params_p,
+                                        local_model.params_tp,
+                                        local_model.params_gp,
+                                        local_model.weights):
+                # met tout sur le bon device/dtype
+                p_prev = p_prev.to(local_model.device, dtype=p_t.dtype)
+                p_g    = p_g.detach().to(local_model.device, dtype=p_t.dtype)
+                w      = w.to(local_model.device, dtype=p_t.dtype)
+                w = w.clamp_(0, 1)
+                p_t.copy_(p_prev + (p_g - p_prev) * w)
+
+    def fit(self, df_train, df_val, df_test, graph, args):
+        """
+        Train local models for each federated cluster, aggregate them into a global model, 
+        and stop training once the global score does not improve for patience_count_global epochs.
+        """
+
+        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
+        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
+        
+        #if self.nbfeatures != 'all':
+        #    self.features_name = featuresAll[:int(self.nbfeatures)]
+        #else:
+        #    self.features_name = featuresAll
+
+        self.global_model.features_name = self.features_name
+        self.global_model.nbfeatures = 'all'
+        self.global_model.graph = graph
+
+        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+
+        
+        # Vérifier que la méthode d'agrégation est implémentée
+        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
+            raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
+        
+        # Récupération des paramètres d'entraînement
+        global_epochs = args.get('global_epochs')
+        local_epochs = args.get('local_epochs')
+        patience_count_global = args.get('patience_count_global')
+        patience_count_local = args.get('patience_count_local')
+
+        if self.federated_cluster in np.unique(df_train.columns):
+            clusters = df_train[self.federated_cluster].unique()
+        else:
+            raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
+
+        print(f"\n--- Training ALA Federated Model for {global_epochs} global epochs ---")
+
+        tp = 'client-based'
+        self.metrics = {}
+        
+        for run in range(self.n_run):
+            
+            self.model_params = deepcopy(model_params)
+            self.global_model.model = deepcopy(initiate_model)
+            self.global_model.model_params = deepcopy(model_params)
+            self.global_model.eta = self.eta
+            local_models = {}
+            
+            best_global_score = float('-inf')
+            patience_counter = 0  # Compteur pour l'arrêt anticipé
+            seed = int(random.random())
+
+            for epoch in range(global_epochs):
+                print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+
+                local_weights = []
+                sample_counts = []
+                
+                for cluster in clusters:
+                    print(f"\nTraining local model for cluster: {cluster}")
+
+                    # Création des datasets pour le cluster fédéré
+                    df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                        df_train, df_val, df_test, cluster
+                    )
+
+                    if np.all(df_train[self.global_model.target_name].values == 0) or np.all(df_val[self.global_model.target_name].values == 0) or np.all(df_test[self.global_model.target_name].values == 0):
+                        print(f'Skipping {cluster} due to no positif samples')
+                        continue
+
+                    if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                        print(f'Skipping {cluster} due to empty dataset')
+                        continue
+
+                    # Initialisation du modèle local
+                    if epoch == 0:
+                        local_model = deepcopy(self.global_model)
+                        local_model.ALATraining = False
+                        local_model.seed = seed
+                        local_model.features_name = self.features_name
+                        local_model.nbfeatures = 'all'
+                        self.metrics[cluster] = local_model.metrics
+                        local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                        local_model.dir_log = self.dir_log / local_model.name
+                        local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
+                        check_and_create_path(local_model.dir_log)
+                    else:
+                        local_model = local_models[cluster]
+                        local_model.ALAtraining = True
+                        local_model.ala_weight_only = False
+
+                        local_model.global_model = self.global_model.model
+                        _, params = self.pick_params_by_name(local_model.model)
+                        _, params_g = self.pick_params_by_name(self.global_model.model)
+
+                        _, params_erase = self.pick_params_to_replace(local_model.model)
+                        _, params_gp_erase = self.pick_params_to_replace(self.global_model.model)
+
+                        assert len(params) > 0
+                        
+                        local_model.params_p  = params
+                        local_model.params_gp = params_g
+                        local_model.params_erase = params_erase
+                        local_model.params_gp_erase = params_gp_erase
+
+                        # snapshot des poids locaux précédents (gelés)
+                        local_model.params_tp = [p.detach().clone() for p in local_model.params_p]
+                        
+                        for param in local_model.params_tp:
+                            param.requires_grad = False
+                        
+                        if epoch == 1:
+                            local_model_log_params = deepcopy(local_model.model.state_dict())
+                            w_t = torch.as_tensor(self.weight, device=local_model.device, dtype=local_model.params_p[0].dtype)
+                            local_model.weights = [
+                                w_t.expand_as(p).clone() for p in local_model.params_p
+                            ]
+                            local_model.ala_weight_only = True
+                            local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                            local_model.model.load_state_dict(local_model_log_params)
+
+                        # Fed ala params
+                        self.fedALA_params(local_model)
+
+                    # Entraînement du modèle local
+                    local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epoch < 1 else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                    
+                    local_models[cluster] = local_model
+                    
+                    # Stocker les poids des modèles locaux
+                    local_weights.append(deepcopy(local_model.model.state_dict()))
+                    sample_counts.append(len(df_train_cluster))
+
+                # Agréger les modèles locaux dans le modèle global
+                self.aggregate_models(local_weights, sample_counts)
+
+                # Évaluer le modèle global
+                global_score = self.global_model.score(df_val, df_val[self.target_name])
+                print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+                # Vérifier si le score s'est amélioré
+                if global_score > best_global_score:
+                    best_global_score = global_score
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+
+                # Arrêt anticipé si le score global ne s'améliore plus
+                if patience_counter >= patience_count_global:
+                    print("\nEarly stopping: Global model score did not improve.")
+                    break
+            
+            ###################### TEST SET ########################
+            loader = self.create_test_loader(graph, df_test)
+            test_output, y = self._predict_test_loader(loader)
+
+            test_output = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'test')
+
+            ###################### VAL SET ########################
+            loader = self.create_test_loader(graph, df_val)
+            test_output, y = self._predict_test_loader(loader)
+            test_output = test_output.detach().cpu().numpy()
+            
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'val')
+
+        self.metrics['best_tp'] = tp
+
+        self.is_fitted_ = True
+        print("\n--- ALA Federated Learning Training Complete ---")
+
+############################################ MOON Federated Model ##############################################################
+
+class MOONFederatedLearning(FederatedLearningModel):
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+                 name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
+                 target_name='nbsinister', post_process=None, task_type='classification', 
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
+        
+        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
+                         name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
+                         target_name=target_name, post_process=post_process, task_type=task_type,
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+        
+        self.moon_temperature_value = temperature
+        self.smooth_value = smooth
+    
     def fit(self, df_train, df_val, df_test, graph, args):
         """
         Train local models for each federated cluster, aggregate them into a global model, 
@@ -4547,168 +5462,8 @@ class FederatedALA(FederatedLearningModel):
         self.global_model.nbfeatures = 'all'
         self.global_model.graph = graph
 
-        initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
-        self.global_model.model = deepcopy(initiate_model)
-        self.global_model.model_params = deepcopy(model_params)
-        self.global_model.eta = self.eta
-        self.global_model.layer_idx = self.layer_idx
-
-        self.model_params = deepcopy(model_params)
-        del initiate_model
-        del model_params
-        
-        # Vérifier que la méthode d'agrégation est implémentée
-        if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
-            raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
-        
-        # Récupération des paramètres d'entraînement
-        global_epochs = args.get('global_epochs')
-        local_epochs = args.get('local_epochs')
-        patience_count_global = args.get('patience_count_global')
-        patience_count_local = args.get('patience_count_local')
-
-        if self.federated_cluster in np.unique(df_train.columns):
-            clusters = df_train[self.federated_cluster].unique()
-        else:
-            raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
-
-        best_global_score = float('-inf')
-        patience_counter = 0  # Compteur pour l'arrêt anticipé
-        
-        print(f"\n--- Training ALA Federated Model for {global_epochs} global epochs ---")
-
-        local_models = {}
-        
-        for epoch in range(global_epochs):
-            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
-
-            local_weights = []
-            sample_counts = []
-            
-            for cluster in clusters:
-                print(f"\nTraining local model for cluster: {cluster}")
-
-                # Initialisation du modèle local
-                if epoch == 0:
-                    local_model = deepcopy(self.global_model)
-                else:
-                    local_model = local_models[cluster]
-                
-                local_model.global_model = self.global_model.model
-                local_model.params_p = list(local_model.model.parameters())[-self.layer_idx:]
-                local_model.params_gp = list(self.global_model.model.parameters())[-self.layer_idx:]
-                local_model.params_tp = list(deepcopy(local_model).model.parameters())[-self.layer_idx:]
-                local_model.ALATraining = epoch > 0
-                
-                for param in local_model.params_tp:
-                    param.requires_grad = False
-
-                if epoch == 0:
-                    local_model.weights = [torch.ones_like(param.data).to(local_model.device) for param in local_model.params_p]
-
-                if epoch > 0:
-                    for param_t, param, param_g, weight in zip(local_model.params_tp, local_model.params_p, local_model.params_gp,
-                                                local_model.weights):
-                        param_t.data = param + (param_g - param) * weight
-                                    
-                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'alafederated' / local_model.name
-
-                if epoch == 0:
-                    check_and_create_path(local_model.dir_log)
-
-                local_model.features_name = self.features_name
-                local_model.nbfeatures = 'all'
-
-                # Création des datasets pour le cluster fédéré
-                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
-                    df_train, df_val, df_test, cluster
-                )
-
-                if np.all(df_train[local_model.target_name].values == 0):
-                    print(f'Skipping {cluster} due to no positif samples')
-                    continue
-
-                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
-                    print(f'Skipping {cluster} due to empty dataset')
-                    continue
-                
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
-
-                # Entraînement du modèle local
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epoch < 1  else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
-                
-                local_models[cluster] = local_model
-                
-                # Stocker les poids des modèles locaux
-                local_weights.append(deepcopy(local_model.model.state_dict()))
-                sample_counts.append(len(df_train_cluster))
-
-            # Agréger les modèles locaux dans le modèle global
-            self.aggregate_models(local_weights, sample_counts)
-
-            # Évaluer le modèle global
-            global_score = self.global_model.score(df_val, df_val[self.target_name])
-            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
-
-            # Vérifier si le score s'est amélioré
-            if global_score > best_global_score:
-                best_global_score = global_score
-                patience_counter = 0
-            else:
-                patience_counter += 1
-
-            # Arrêt anticipé si le score global ne s'améliore plus
-            if patience_counter >= patience_count_global:
-                print("\nEarly stopping: Global model score did not improve.")
-                break
-
-        self.is_fitted_ = True
-        print("\n--- ALA Federated Learning Training Complete ---")
-
-############################################ MOON Federated Model ##############################################################
-
-class MOONFederatedLearning(FederatedLearningModel):
-    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
-                 name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
-        
-        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
-                         name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
-                         target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
-        
-        self.temperature_value = temperature
-        self.smooth_value = smooth
-    
-    def fit(self, df_train, df_val, df_test, graph, args):
-        """
-        Train local models for each federated cluster, aggregate them into a global model, 
-        and stop training once the global score does not improve for patience_count_global epochs.
-        """
-
-        importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
-        features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=self.dir_log / '../importance', target_name=self.target_name)
-        
-        if self.nbfeatures != 'all':
-            self.features_name = featuresAll[:int(self.nbfeatures)]
-        else:
-            self.features_name = featuresAll
-
-        self.global_model.features_name = self.features_name
-        self.global_model.nbfeatures = 'all'
-        self.global_model.graph = graph
-
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params={'return_hidden' : True})
 
-        self.global_model.model = deepcopy(initiate_model)
-        self.global_model.model_params = deepcopy(model_params)
-        self.model_params = deepcopy(model_params)
-        del initiate_model
-        del model_params
-        
         # Vérifier que la méthode d'agrégation est implémentée
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
@@ -4723,87 +5478,128 @@ class MOONFederatedLearning(FederatedLearningModel):
             clusters = df_train[self.federated_cluster].unique()
         else:
             raise NotImplementedError(f"Aggregation method '{self.federated_cluster}' is not implemented.")
-
-        best_global_score = float('-inf')
-        patience_counter = 0  # Compteur pour l'arrêt anticipé
         
         print(f"\n--- Training Federated Model for {global_epochs} global epochs ---")
 
-        local_models = {}
+        tp = 'client-based'
         
-        for epoch in range(global_epochs):
-            print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
+        self.metrics = {}
+        for run in range(self.n_run):
 
-            local_weights = []
-            sample_counts = []
+            self.global_model.model = deepcopy(initiate_model)
+            self.global_model.model_params = deepcopy(model_params)
+            local_models = {}
             
-            for cluster in clusters:
-                print(f"\nTraining local model for cluster: {cluster}")
+            best_global_score = float('-inf')
+            patience_counter = 0  # Compteur pour l'arrêt anticipé
+            seed = int(random.random())
 
-                # Initialisation du modèle local
-                local_model = deepcopy(self.global_model)
-                local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'moonfederated' / local_model.name
-                local_model.global_model = self.global_model
-                local_model.temperature_value = self.temperature_value
-                local_model.smooth_value = self.smooth_value
-                #local_model.constrastive = epoch > 0
-                local_model.constrastive = True
+            for epoch in range(global_epochs):
+                print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
 
-                if epoch == 0:
-                    local_model.prev_model = self.global_model.model
-                    local_model.constrastive = False
-                    check_and_create_path(local_model.dir_log)
+                local_weights = []
+                sample_counts = []
+                
+                for cluster in clusters:
+                    print(f"\nTraining local model for cluster: {cluster}")
+
+                    # Création des datasets pour le cluster fédéré
+                    df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                        df_train, df_val, df_test, cluster
+                    )
+
+                    if np.all(df_train[self.global_model.target_name].values == 0) or np.all(df_val[self.global_model.target_name].values == 0) or np.all(df_test[self.global_model.target_name].values == 0):
+                        print(f'Skipping {cluster} due to no positif samples')
+                        continue
+
+                    if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                        print(f'Skipping {cluster} due to empty dataset')
+                        continue
+
+                    # Initialisation du modèle local
+                    if cluster in local_models.keys():
+                        local_model = local_models[cluster]
+                        local_model.model.load_state_dict(self.global_model.model.state_dict())
+                    else:
+                        local_model = deepcopy(self.global_model)
+                        local_model.seed = seed
+                        local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
+                        local_model.dir_log = self.dir_log / local_model.name
+                        print(local_model.dir_log)
+                        local_model.global_model = self.global_model
+                        local_model.moon_temperature_value = self.moon_temperature_value
+                        local_model.smooth_value = self.smooth_value
+                        local_model.constrastive = True
+
+                    if epoch == 0:
+                        local_model.prev_model = self.global_model.model
+                        local_model.constrastive = False
+                        check_and_create_path(local_model.dir_log)
+                    else:
+                        local_model.prev_model = deepcopy(local_models[cluster].model)
+                    
+                    local_model.global_model = deepcopy(self.global_model.model)
+
+                    local_model.features_name = self.features_name
+                    local_model.nbfeatures = 'all'
+
+                    if epoch == 0:
+                        local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
+                        self.metrics[cluster] = local_model.metrics
+
+                    local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
+                    
+                    local_models[cluster] = local_model
+
+                    # Stocker les poids des modèles locaux
+                    local_weights.append(deepcopy(local_model.model.state_dict()))
+                    sample_counts.append(len(df_train_cluster))
+
+                # Agréger les modèles locaux dans le modèle global
+                self.aggregate_models(local_weights, sample_counts)
+
+                # Évaluer le modèle global
+                global_score = self.global_model.score(df_val, df_val[self.target_name])
+                print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+
+                # Vérifier si le score s'est amélioré
+                if global_score > best_global_score:
+                    best_global_score = global_score
+                    patience_counter = 0
                 else:
-                    local_model.prev_model = local_models[cluster].model
-                
-                local_model.global_model = self.global_model.model
+                    patience_counter += 1
 
-                local_model.features_name = self.features_name
-                local_model.nbfeatures = 'all'
+                # Arrêt anticipé si le score global ne s'améliore plus
+                if patience_counter >= patience_count_global:
+                    print("\nEarly stopping: Global model score did not improve.")
+                    break
+            
+            loader = self.create_test_loader(graph, df_test)
+            test_output, y = self._predict_test_loader(loader)
+            test_output = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
 
-                # Création des datasets pour le cluster fédéré
-                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
-                    df_train, df_val, df_test, cluster
-                )
-
-                if np.all(df_train[local_model.target_name].values == 0):
-                    print(f'Skipping {cluster} due to no positif samples')
-                    continue
-
-                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
-                    print(f'Skipping {cluster} due to empty dataset')
-                    continue
-
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
-
-                # Entraînement du modèle local
-                local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
-                
-                local_models[cluster] = local_model
-
-                # Stocker les poids des modèles locaux
-                local_weights.append(deepcopy(local_model.model.state_dict()))
-                sample_counts.append(len(df_train_cluster))
-
-            # Agréger les modèles locaux dans le modèle global
-            self.aggregate_models(local_weights, sample_counts)
-
-            # Évaluer le modèle global
-            global_score = self.global_model.score(df_val, df_val[self.target_name])
-            print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
-
-            # Vérifier si le score s'est amélioré
-            if global_score > best_global_score:
-                best_global_score = global_score
-                patience_counter = 0
-            else:
-                patience_counter += 1
-
-            # Arrêt anticipé si le score global ne s'améliore plus
-            if patience_counter >= patience_count_global:
-                print("\nEarly stopping: Global model score did not improve.")
-                break
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'test')
+            
+            loader = self.create_test_loader(graph, df_val)
+            test_output, y = self._predict_test_loader(loader)
+            test_output = test_output.detach().cpu().numpy()
+            
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+            
+            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
         self.is_fitted_ = True
         print("\n--- Federated Learning Training Complete ---")
@@ -4920,13 +5716,26 @@ class ProtoFederatedLearning(FederatedLearningModel):
             for cluster in clusters:
                 print(f"\nTraining local model for cluster: {cluster}")
 
+                # Création des datasets pour le cluster fédéré
+                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
+                    df_train, df_val, df_test, cluster
+                )
+
+                if np.all(df_train[self.global_model.target_name].values == 0) or np.all(df_val[self.global_model.target_name].values == 0) or np.all(df_test[self.global_model.target_name].values == 0):
+                    print(f'Skipping {cluster} due to no positif samples')
+                    continue
+
+                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
+                    print(f'Skipping {cluster} due to empty dataset')
+                    continue
+                
                 if epoch == 0:
                     local_model = deepcopy(self.global_model)
                 else:
                     local_model = self.local_models[cluster]
 
                 local_model.name = f'{self.federated_cluster}_{cluster}_{self.global_model.name}'
-                local_model.dir_log = self.global_model.dir_log / '..' / 'protofederated' / local_model.name
+                local_model.dir_log = self.global_model.dir_log / local_model.name
                 if epoch == 0:
                     check_and_create_path(local_model.dir_log)
 
@@ -4935,20 +5744,10 @@ class ProtoFederatedLearning(FederatedLearningModel):
                 local_model.use_prototypes = len(self.global_prototypes) > 0
                 local_model.prototype_weight = self.prototype_weight
                 local_model.prototypes = self.global_prototypes
-
-                df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
-                    df_train, df_val, df_test, cluster
-                )
-
-                if np.all(df_train[local_model.target_name].values == 0):
-                    print(f'Skipping {cluster} due to no positif samples')
-                    continue
-
-                if df_val_cluster.shape[0] == 0 or df_train_cluster.shape[0] == 0:
-                    print(f'Skipping {cluster} due to empty dataset')
-                    continue
-
-                local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
+                
+                if epochs == 0:
+                    local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
+                    self.metrics[cluster] = local_model.metrics
 
                 local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs, verbose=False, custom_model_params=None, new_model=False)
                 
@@ -5030,7 +5829,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
             loader = self.create_test_loader(graph, df[df[self.federated_cluster] == cluster])
 
-            pred, y = self._predict_test_loader(loader, proba=False, cluster=cluster)
+            pred, y = self._predict_test_loader(loader, prediction_type='Class', cluster=cluster)
             
             final_pred.append(pred)
             ys.append(y)
@@ -5057,7 +5856,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
         for cluster in np.unique(clusters_values):
             loader = self.create_test_loader(graph, df[df[self.federated_cluster] == cluster])
 
-            pred, y = self._predict_test_loader(loader, proba=True, cluster=cluster)
+            pred, y = self._predict_test_loader(loader, prediction_type='Probability', cluster=cluster)
 
             final_pred.append(pred)
             ys.append(y)
@@ -5067,7 +5866,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
         return (final_pred, ys) if return_y else pred
 
-    def _predict_test_loader(self, loader, proba: bool = False, cluster = None):
+    def _predict_test_loader(self, loader, prediction_type='Class', cluster = None):
         """
         Effectue la prédiction sur un DataLoader en utilisant le modèle local
         + les prototypes globaux (style FedProto).
@@ -5103,7 +5902,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
                         cls: torch.norm(emb - proto.to(embeddings.device))
                         for cls, proto in self.global_prototypes.items()
                     }
-                    if proba:
+                    if prediction_type == 'Probability':
                         # Convertir les distances en "scores inversés"
                         inv = torch.tensor(
                             [-d.item() for d in distances.values()]
@@ -5117,7 +5916,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
                 preds.extend(batch_preds)
                 targets.extend(y.cpu().tolist())
 
-        if proba:
+        if prediction_type == 'Probability':
             preds = torch.stack(preds)  # [N, num_classes]
         else:
             preds = torch.tensor(preds)
@@ -5144,6 +5943,7 @@ class ModelKnowledgeDistillation(Training):
         self.alpha_value = float(alpha) if alpha != 'search' else None
         self.student_train = True
         self.load_teacher = True
+        self.distillation_log = []
 
         if 'group' in self.distillation_training_mode:
             self.model_list = []
@@ -5304,10 +6104,10 @@ class ModelKnowledgeDistillation(Training):
                        self.ks)
 
         return loader
-
+    
     def search_temperature_alpha(self, graph, PATIENCE_CNT, CHECKPOINT, epoch, verbose=True, custom_model_params=None, new_model=True):
-        temperature_grid = [4.0, 5.0, 6.0, 7.0] if self.temperature == 'search' else [self.temperature_value]
-        alpha_grid = [.1, .2, .3, .4, .5, .6, .7, .8, .9, 1.0] if self.alpha == 'search' else [self.alpha_value]
+        """temperature_grid = [4.0, 6.0] if self.temperature == 'search' else [self.temperature_value]
+        alpha_grid = [.0, .1, .2, .3, .4, .5,] if self.alpha == 'search' else [self.alpha_value]
         
         if False and (self.dir_log / 'log_parameters.pkl').is_file():
             parameters = read_object('log_parameters.pkl', self.dir_log)
@@ -5340,7 +6140,10 @@ class ModelKnowledgeDistillation(Training):
             parameters = {'temperature' : top_temp, 'alpha' : top_al}
             self.alpha_value = top_al
             self.temperature_value = top_temp
-            save_object(parameters, 'log_parameters.pkl', self.dir_log)
+            save_object(parameters, 'log_parameters.pkl', self.dir_log)"""
+        
+        self.temperature_value = torch.nn.Parameter(torch.tensor(6.0))
+        self.alpha_value = torch.nn.Parameter(torch.tensor(0.1))
             
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, search=True):
 
@@ -5427,6 +6230,45 @@ class ModelKnowledgeDistillation(Training):
                         if current_group > nbgroup:
                             break
 
+    def get_temperature_alpha(self):
+        return torch.nn.functional.softplus(self.temperature_value), torch.nn.functional.sigmoid(self.alpha_value)                   
+
+    def _save_temperature_alpha_plot(self):
+        """Sauvegarde les paramètres EGPD (kappa, xi) et trace leurs évolutions en fonction des epochs."""
+
+        # Extraction directe (car distillation_log est un dict {epoch: {"kappa":..., "xi":...}})
+        
+        print(self.distillation_log)
+        kappas = [distillation_log["temperature"] for distillation_log in self.distillation_log]
+        xis = [distillation_log["xi"] for distillation_log in self.distillation_log]
+        epochs = [distillation_log["epoch"] for distillation_log in self.distillation_log]
+
+        # Sauvegarde pickle
+        dist_to_save = {"epoch": epochs, "temperature": kappas, "xi": xis}
+        save_object(dist_to_save, 'egpd_kappa_xi.pkl', self.dir_log)
+
+        # temperature vs epoch
+        plt.figure(figsize=(8, 5))
+        plt.plot(epochs, kappas, marker='o')
+        plt.xlabel('Epoch')
+        plt.ylabel('temperature')
+        plt.title('temperature over epochs')
+        plt.grid(True, linestyle='--', alpha=0.4)
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'temperature_over_epochs.png')
+        plt.close()
+
+        # alpha vs epoch
+        plt.figure(figsize=(8, 5))
+        plt.plot(epochs, xis, marker='o')
+        plt.xlabel('Epoch')
+        plt.ylabel('alpha')
+        plt.title('alpha over epochs')
+        plt.grid(True, linestyle='--', alpha=0.4)
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'alpha_over_epochs.png')
+        plt.close()
+
 ############################################ VOTING MODEL ##############################################################
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
@@ -5452,7 +6294,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.target_name = target_name
         self.task_type = task_type
 
-    def fit(self, X, y, X_val, y_val, X_test, y_test, args):
+    def fit(self, X, y, X_val, y_val, X_test, y_test, args, use_log=True):
         """
         Train each model on the corresponding data.
 
@@ -5485,7 +6327,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             print(f'Fitting model -> {model.name}')
 
             #if issubclass(model, Model_Torch):
-            model.fit(graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None)
+            model.fit(graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, use_log=use_log)
             #else:
             #    model.fit(graph, X, y[targets[i]], X_val, y_val[targets[i]], training_mode=training_mode, optimization=optimization, grid_params=grid_params_list[i], fit_params=fit_params_list[i], cv_folds=cv_folds)
             target_name_model = model.target_name
@@ -5556,12 +6398,12 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
             return self.post_process.predict_risk(predict, None, ids, preprocessor_ids)
 
-    def predict_with_weight(self, X, hard_or_soft='soft', weights_average='weight', weights2use=[], top_model='all'):
+    def predict_with_weight(self, X, hard_or_soft='soft', weights_average='weight', weights2use=[], top_model='all', prediction_type="Class"):
         
         models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
         weights2use = np.asarray(weights2use)
         
-        if hard_or_soft == 'hard':
+        if hard_or_soft == 'hard' or prediction_type == 'RawFormulaVal':
             if top_model != 'all':
                 top_model = int(top_model)
                 key = np.argsort(weights2use)
@@ -5576,12 +6418,12 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             predictions = []
             for i, estimator in enumerate(self.best_estimator_):
                 if estimator.target_name == self.target_name:
-                    pred, y = estimator.predict(X, return_y=True)
+                    pred, y = estimator.predict(X, return_y=True, prediction_type=prediction_type)
                 if estimator.name not in models_list:
                     continue
                 else:
                     if estimator.target_name != self.target_name:
-                        pred = estimator.predict(X, return_y=False)
+                        pred = estimator.predict(X, return_y=False, prediction_type=prediction_type)
 
                     predictions.append(pred.detach().cpu().numpy())
 
@@ -5688,7 +6530,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         model_per_task=None,
         generalized_departement=None,
         id_col=(None, None),
-        proba = False
+        prediction_type='Class'
     ):
         """Predict with a specific ``top_model`` per task.
 
@@ -5734,13 +6576,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         # Normal prediction for all samples
         top_model = model_per_task.get("normal_predictions", "all")
-        if not proba:
+        if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
             predictions = self.predict_with_weight(
                 X,
                 hard_or_soft=hard_or_soft,
                 weights_average=weights_average,
                 weights2use=self.weights_for_model,
                 top_model=top_model,
+                prediction_type=prediction_type
             )
         else:
             predictions = self.predict_proba_with_weights(
@@ -5749,6 +6592,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                 weights_average=weights_average,
                 weights2use=self.weights_for_model,
                 top_model=top_model,
+                prediction_type=prediction_type
             )
 
         predictions = np.asarray(predictions)
@@ -5761,13 +6605,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         ):
             mask = X["departement"].isin(generalized_departement).values
             if mask.any():
-                if not proba:
+                if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
                     preds_gen  = self.predict_with_weight(
                         X[mask],
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task["generalized_prediction"],
+                        prediction_type=prediction_type
                     )
                 else:
                     preds_gen  = self.predict_proba_with_weights(
@@ -5776,6 +6621,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task["generalized_prediction"],
+                        prediction_type=prediction_type
                     )
                 mask = np.isin(y[:, 4], generalized_departement)
                 predictions[mask] = preds_gen
@@ -5783,13 +6629,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         for val in [2, 3, 4]:
             task_name = f"class_value_{val}_predictions"
             if task_name in model_per_task:
-                if not proba:
+                if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
                     preds_cls = self.predict_with_weight(
                         X,
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task[task_name],
+                        prediction_type=prediction_type
                     )
                     mask = (preds_cls >= val) | (predictions >= val)
                     if mask.any():
@@ -5801,6 +6648,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task[task_name],
+                        prediction_type=prediction_type
                     )
                     # prendre les lignes où la classe la plus probable est >= val
                     mask = (np.argmax(preds_cls, axis=1) >= val) | (np.argmax(predictions, axis=1) >= val)
@@ -5809,7 +6657,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         return predictions
 
-    def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None)):
+    def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None), prediction_type="Class"):
         """
         Predict labels for input data using each model and aggregate the results.
 
@@ -5829,10 +6677,10 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             for id in unique_ids:
                 print(f'Prediction for {id_col[0]} {id}')
                 mask = (id_col[1] == id)
-                prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model)
+                prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model, prediction_type=prediction_type)
             return prediction, y
         else:
-            return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model)
+            return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model,  prediction_type=prediction_type)
 
         """print(f'Predict with {hard_or_soft} and weighs at {weights_average}')
         if hard_or_soft == 'hard':
@@ -5919,7 +6767,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights_average)
         return aggregated_proba"""
 
-    def aggregate_predictions(self, predictions_list, models_to_mean, weight2use=[], id_col=(None, None)):
+    def aggregate_predictions(self, predictions_list, models_to_mean, weight2use=[], id_col=(None, None), prediction_type="RawFormulaVal"):
         """
         Aggregate predictions from multiple models with weights.
 
@@ -5929,6 +6777,10 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         Returns:
         - Aggregated predictions.
         """
+        
+        if prediction_type == 'RawFormulaVal' or prediction_type == 'Probability':
+            return self.aggregate_probabilities(predictions_list, models_to_mean, weight2use=weight2use, id_col=id_col)
+
         predictions_array = np.array(predictions_list)
         if len(weight2use) == 0 or weight2use is None:
             weight2use = np.ones_like(self.weights_for_model)[models_to_mean]
@@ -6570,7 +7422,7 @@ class Model_susceptibility():
         # Appliquez les transformations aux ensembles d'entraînement et de validation
         """train_dataset = AugmentedInplaceGraphDataset(
             X_train, y_train, [], transform=data_augmentation_transform, device=device)
-        val_dataset = AugmentedInplaceGraphDataset(
+        val_dataset = AugmentedIndef test_placeGraphDataset(
             X_val, y_val, [], transform=data_augmentation_transform, device=device)
         test_dataset = AugmentedInplaceGraphDataset(
             X_test, y_test, [], transform=None, device=device)"""  # Pas de data augmentation sur le test
