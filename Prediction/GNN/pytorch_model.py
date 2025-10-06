@@ -1908,12 +1908,14 @@ def create_dataset_2D(graph,
     return train_dataset, val_dataset, test_dataset
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, original_model, F, T, edges):
+    def __init__(self, original_model, F, T, edges, horizon=1):
         super().__init__()
         self.model = original_model
         self.F = F
         self.T = T
         self.edges = edges
+
+        self.horizon = horizon
 
     def forward(self, x_flat):
         # reshape x_flat (B, F*T) vers (B, F, T)
@@ -1923,7 +1925,8 @@ class WrapperModel(torch.nn.Module):
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
-                 loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1):
+                 loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
+                 horizon=1):
         
         self.model_name = model_name
         self.name = name
@@ -1962,7 +1965,9 @@ class Training():
         self.distill_worst_log = []  # list of dicts: {epoch, graph_id, loss}
         self.criterion_params = []
         self._current_epoch = None
-        self.seed = None 
+        self.seed = None
+
+        self.horizon = horizon
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -3526,15 +3531,18 @@ class Training():
 class SplitTraining(Training):
     def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
                  nbfeatures, batch_size, lr, target_name, task_type, out_channels,
-                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run):
-        
+                 dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
+                 horizon=1):
+
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run)
-            
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon)
+
         self.federated_cluster = federated_cluster
         self.cut_layer_name = cut_layer_name
         self.input_server_model = input_server_model
+
+        self.horizon = horizon
 
     def create_client_model_upto_cut_layer(self, model):
         """
@@ -4046,13 +4054,16 @@ class DualTraining:
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
 
-    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1):
+    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run: int = 1,
+                 horizon: int = 1):
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
+
+        self.horizon = horizon
 
     def train(
         self,
@@ -4280,12 +4291,13 @@ class DualTraining:
     
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
-                 ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
-        
+                 ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
+                 **kwargs):
+
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run)
+                         over_sampling=over_sampling, n_run=n_run, **kwargs)
 
         self.training_mode = training_mode
         self.path = path
@@ -4422,11 +4434,12 @@ class ModelCNN(SplitTraining):
 class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
-                 n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
+                 n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
+                 horizon=1):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon)
         self.training_mode = training_mode
         self.mesh = mesh
         self.mesh_file = mesh_file
@@ -4434,6 +4447,8 @@ class ModelGNN(SplitTraining):
         self.mesh2graph = None
         self.gridh2mesh = None
         self.graph_mesh = None
+
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
 
@@ -4744,7 +4759,8 @@ class ModelGNN(SplitTraining):
 class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0):
+                 training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
+                 horizon=1):
 
         #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
         #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
@@ -4753,9 +4769,11 @@ class Model_Torch(SplitTraining):
                          model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run)
-        
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon)
+
         self.training_mode = training_mode
+
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
@@ -4937,10 +4955,10 @@ class Model_Torch(SplitTraining):
 ########################################## Federated Learning #########################################
 
 class FederatedLearningModel(RegressorMixin, ClassifierMixin):
-    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all', n_run=1):
+                 target_name='nbsinister', post_process=None, task_type='classification',
+                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=1):
         """
         Initialize the Federated Learning Model.
 
@@ -4964,6 +4982,8 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.global_model = deepcopy(federated_model)  # Modèle global
         self.nbfeatures = nbfeatures
         self.n_run = n_run
+
+        self.horizon = horizon
 
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -5207,16 +5227,18 @@ class FederatedALA(FederatedLearningModel):
     def __init__(self, federated_model, eta, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2']):
-        
+                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=1):
+
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
-                         n_run=n_run)
+                         n_run=n_run, horizon=horizon)
         self.eta = eta
         self.weight = 0.5
         self.params_to_update = params_to_update
+
+        self.horizon = horizon
 
     def pick_params_by_name(self, model):
         names, params = [], []
@@ -5448,18 +5470,20 @@ class FederatedALA(FederatedLearningModel):
 ############################################ MOON Federated Model ##############################################################
 
 class MOONFederatedLearning(FederatedLearningModel):
-    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
-        
+                 target_name='nbsinister', post_process=None, task_type='classification',
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0, horizon=1):
+
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
-        
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run, horizon=horizon)
+
         self.moon_temperature_value = temperature
         self.smooth_value = smooth
+
+        self.horizon = horizon
     
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -5627,14 +5651,17 @@ class MOONFederatedLearning(FederatedLearningModel):
 class ProtoFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='ProtoFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification', nbfeatures='all', n_run=1, prototype_weight=1.0):
+                 target_name='nbsinister', post_process=None, task_type='classification', nbfeatures='all', n_run=1, prototype_weight=1.0,
+                 horizon=1):
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method='median', nbfeatures=nbfeatures, n_run=n_run)
+                         aggregation_method='median', nbfeatures=nbfeatures, n_run=n_run, horizon=horizon)
 
         self.prototype_weight = prototype_weight
+
+        self.horizon = horizon
         self.global_prototypes = {}
 
     def compute_local_prototypes(self, model):
@@ -5944,11 +5971,11 @@ class ProtoFederatedLearning(FederatedLearningModel):
 ############################################ KNOWNLEDEG DISTILLATION ##############################################################
 
 class ModelKnowledgeDistillation(Training):
-    def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device, 
-                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss):
+    def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device,
+                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss, horizon=1):
 
         super().__init__(f'{model_name}', nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, \
-        out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+        out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
         
         self.teacher_loss = teacher_loss
         self.distillation_training_mode = distillation_training_mode
@@ -5965,6 +5992,8 @@ class ModelKnowledgeDistillation(Training):
 
         if 'group' in self.distillation_training_mode:
             self.model_list = []
+
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
@@ -6289,7 +6318,7 @@ class ModelKnowledgeDistillation(Training):
 ############################################ VOTING MODEL ##############################################################
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
-    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification'):
+    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification', horizon=1):
         """
         Initialize the ModelVoting class.
 
@@ -6310,6 +6339,8 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.under_sampling = under_sampling
         self.target_name = target_name
         self.task_type = task_type
+
+        self.horizon = horizon
 
     def fit(self, X, y, X_val, y_val, X_test, y_test, args, use_log=True):
         """
@@ -6883,12 +6914,14 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         return iou_score(y, y_pred)
     
 class ModelPerID(RegressorMixin, ClassifierMixin):
-    def __init__(self, model, dir_log, cluster="departement"):
+    def __init__(self, model, dir_log, cluster="departement", horizon=1):
         self.base_model = model
         self.cluster_col = cluster
         self.models = {}
         self.is_fitted_ = False
         self.name = f'unique-{cluster}-{model.name}'
+
+        self.horizon = horizon
         self.dir_log = dir_log
 
     def fit(self, df_train, df_val, df_test, graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params, **args):
@@ -6944,7 +6977,7 @@ class ModelPerID(RegressorMixin, ClassifierMixin):
         return torch.cat(preds_list, 0), torch.cat(ys_list, 0)
 
 class Model_susceptibility():
-    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log):
+    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log, horizon=1):
             self.model_name = model_name
             self.features_name = features_name
             self.out_channels = out_channels
@@ -6957,6 +6990,8 @@ class Model_susceptibility():
             self.val_date = val_date
             self.train_departements = train_departements
             self.dir_log = dir_log
+
+            self.horizon = horizon
             self.model_params = None
             self.target = target
 

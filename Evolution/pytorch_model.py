@@ -817,8 +817,9 @@ class Training():
             plt.close()
 
 class ModelCNN(Training):
-    def __init__(self, **kwargs):
+    def __init__(self, horizon=1, **kwargs):
         super().__init__(**kwargs)
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, X, y):
         k = self.kernel_size
@@ -937,8 +938,9 @@ class ModelCNN(Training):
         return X_tensor
     
 class ModelGNN(Training):
-    def __init__(self, **kwargs):
+    def __init__(self, horizon=1, **kwargs):
         super().__init__(**kwargs)
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, X, y):
         ks = self.ks
@@ -1076,8 +1078,9 @@ class ModelGNN(Training):
         return X_tensor
 
 class Model_Torch(Training):
-    def __init__(self, **kwargs):
+    def __init__(self, horizon=1, **kwargs):
         super().__init__(**kwargs)
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, X, y):
         ks = self.ks

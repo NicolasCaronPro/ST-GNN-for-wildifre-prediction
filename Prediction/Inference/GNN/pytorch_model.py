@@ -880,7 +880,8 @@ def create_dataset_2D(graph,
 
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
-                 features_name, ks, out_channels, dir_log, loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full'):
+                 features_name, ks, out_channels, dir_log, loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full',
+                 horizon=1):
         self.model_name = model_name
         self.name = name
         self.loss = loss
@@ -900,6 +901,8 @@ class Training():
         self.over_sampling = over_sampling
         self.find_log = False
         self.nbfeatures = nbfeatures
+
+        self.horizon = horizon
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -1356,12 +1359,14 @@ class Training():
         return get_loss_function(loss_name, **loss_params)
 
 class ModelCNN(Training):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, features, ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, horizon=1):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
         self.path = path
         self.features = features
         self.image_per_node = image_per_node
         self.nbfeatures = nbfeatures
+
+        self.horizon = horizon
         
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
         
@@ -1649,11 +1654,13 @@ class ModelCNN(Training):
             logger.info(criterion.ratio_matrix)
             
 class ModelGNN(Training):
-    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+    def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, horizon=1):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
         self.mesh = mesh
         self.mesh_file = mesh_file
         self.graph_method = graph_method
+
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
         
@@ -2008,8 +2015,10 @@ class ModelGNN(Training):
             return pred, y
 
 class Model_Torch(Training):
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling):
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling)
+    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, horizon=1):
+        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
+
+        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, features_importance=True):
         self.graph = graph
@@ -2304,10 +2313,10 @@ class Model_Torch(Training):
         self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
 
 class FederatedLearningModel(RegressorMixin, ClassifierMixin):
-    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
-                 target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='mean', nbfeatures='all'):
+                 target_name='nbsinister', post_process=None, task_type='classification',
+                 aggregation_method='mean', nbfeatures='all', n_run=1, horizon=1):
         """
         Initialize the Federated Learning Model.
 
@@ -2330,6 +2339,9 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
         self.aggregation_method = aggregation_method  # Méthode d'agrégation
         self.global_model = deepcopy(federated_model)  # Modèle global
         self.nbfeatures = nbfeatures
+        self.n_run = n_run
+
+        self.horizon = horizon
 
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -2515,19 +2527,21 @@ class FederatedALA(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1):
+                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=1):
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
-                         n_run=n_run)
+                         n_run=n_run, horizon=horizon)
+
+        self.horizon = horizon
 
     def fit(self, df_train, df_val, df_test, graph, args):
         """Train the federated model using clusters defined in `federated_cluster`."""
         return super().fit(df_train, df_val, df_test, graph, args)
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
-    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification'):
+    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification', horizon=1):
         """
         Initialize the ModelVoting class.
 
@@ -2543,6 +2557,8 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.loss = loss
         self.is_fitted_ = [False] * len(models)  # Keep track of fitted models
         self.features_per_model = []
+
+        self.horizon = horizon
         self.dir_log = dir_log
         self.post_process = post_process
         self.under_sampling = under_sampling
@@ -2774,7 +2790,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         return iou_score(y, y_pred)
     
 class Model_susceptibility():
-    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log):
+    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log, horizon=1):
             self.model_name = model_name
             self.features_name = features_name
             self.out_channels = out_channels
@@ -2785,9 +2801,11 @@ class Model_susceptibility():
             self.departements = departements
             self.train_date = train_date
             self.val_date = val_date
-            self.train_departements = train_departements
-            self.dir_log = dir_log
-            self.target = target
+        self.train_departements = train_departements
+        self.dir_log = dir_log
+        self.target = target
+
+        self.horizon = horizon
 
     def susecptibility_map_individual_pixel_feature(self, dept, year, variables, target_value, sdate_year, edate_year, raster, dir_data, dir_output):
 
