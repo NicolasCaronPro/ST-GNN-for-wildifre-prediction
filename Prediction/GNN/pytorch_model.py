@@ -1967,6 +1967,7 @@ class Training():
         self._current_epoch = None
         self.seed = None
         self.horizon = horizon
+        self.seed = None 
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
         weight_idx = ids_columns.index('weight')
@@ -2991,8 +2992,8 @@ class Training():
                     update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
                     ############################# On set test ##############################
-
                     test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='test')
+
 
                     prediction = test_output.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
@@ -3804,7 +3805,6 @@ class SplitTraining(Training):
 
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", proba=False) -> torch.tensor:
 
-
         """Generate predictions using the split learning setup."""
 
         try:
@@ -3975,7 +3975,10 @@ class SplitTraining(Training):
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
                 pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5b18034 ([Update code])
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
                 metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
@@ -4049,10 +4052,9 @@ class DualTraining:
     binarised dataset while ``num_model`` is restricted to samples with a
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
-
-
     def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run: int = 1,
                  horizon: int = 1):
+
 
         self.occ_model = occ_model
         self.num_model = num_model
@@ -4060,6 +4062,7 @@ class DualTraining:
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
+
         self.horizon = horizon
 
     def train(
@@ -4100,6 +4103,7 @@ class DualTraining:
         train_dataset, train_pos = dfs_train
         val_dataset, val_pos = dfs_val
         test_dataset, test_pos = dfs_test
+<<<<<<< HEAD
 <<<<<<< HEAD
 
         self.num_model.create_train_val_test_loader(
@@ -4172,6 +4176,78 @@ class DualTraining:
 
     def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None) -> torch.tensor:
 
+=======
+
+        self.num_model.create_train_val_test_loader(
+                graph,
+                train_pos,
+                val_pos,
+                test_pos,
+                epochs,
+                PATIENCE_CNT,
+                CHECKPOINT,
+                custom_model_params=custom_model_params,
+                features_importance=False,
+                use_log=use_log,
+            )
+        
+        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
+
+        self.metrics = {}
+        tp = 'occ-based'
+        
+        for run in range(self.n_run):
+            seed = int(random.random())
+            self.occ_model.seed = seed
+            self.occ_model.n_run = 1
+            self.occ_model.create_train_val_test_loader(
+                graph,
+                train_dataset,
+                val_dataset,
+                test_dataset,
+                epochs,
+                PATIENCE_CNT,
+                CHECKPOINT,
+                custom_model_params=custom_model_params,
+                features_importance=False,
+                use_log=use_log,
+            )
+            self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, False, custom_model_params=custom_model_params, new_model=True)
+            
+            ############################# On set val ##############################
+            test_output, y = self._predict_test_loader(self.occ_model.val_loader)
+            prediction = test_output.detach().cpu().numpy()
+            
+            y = y.detach().cpu().numpy()
+        
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+
+            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'val')
+
+            ############################# On set test ##############################
+            test_output, y = self._predict_test_loader(self.occ_model.test_loader)
+            prediction = test_output.detach().cpu().numpy()
+            y = y.detach().cpu().numpy()
+        
+            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+            dff['departement'] = y[:, departement_index]
+            dff[self.target_name] = y[:, -1]
+            y = y[:, -1]
+
+            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = round_floats(metrics_run)
+            update_metrics_as_arrays(self, tp, metrics_run, 'test')
+        
+        self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
+        self.metrics['best_tp'] = tp
+
+    def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None) -> torch.tensor:
+>>>>>>> 5b18034 ([Update code])
         """Run predictions combining the two sub-models.
 
         Parameters
@@ -4446,8 +4522,11 @@ class ModelGNN(SplitTraining):
         self.gridh2mesh = None
         self.graph_mesh = None
 <<<<<<< HEAD
+<<<<<<< HEAD
 
         self.horizon = horizon
+=======
+>>>>>>> 5b18034 ([Update code])
 =======
 >>>>>>> 5b18034 ([Update code])
 
@@ -4455,7 +4534,10 @@ class ModelGNN(SplitTraining):
 
         self.graph = graph
 <<<<<<< HEAD
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5b18034 ([Update code])
 =======
 >>>>>>> 5b18034 ([Update code])
         if self.mesh and self.graph_mesh is None:
@@ -5232,9 +5314,12 @@ class FederatedALA(FederatedLearningModel):
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
 <<<<<<< HEAD
+<<<<<<< HEAD
                  aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=1):
 
 =======
+=======
+>>>>>>> 5b18034 ([Update code])
                  aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2']):
         
 >>>>>>> 5b18034 ([Update code])
@@ -5248,8 +5333,11 @@ class FederatedALA(FederatedLearningModel):
         self.params_to_update = params_to_update
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.horizon = horizon
 
+=======
+>>>>>>> 5b18034 ([Update code])
 =======
 >>>>>>> 5b18034 ([Update code])
     def pick_params_by_name(self, model):
@@ -5483,6 +5571,7 @@ class FederatedALA(FederatedLearningModel):
 
 class MOONFederatedLearning(FederatedLearningModel):
 <<<<<<< HEAD
+<<<<<<< HEAD
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
@@ -5498,6 +5587,8 @@ class MOONFederatedLearning(FederatedLearningModel):
 
         self.horizon = horizon
 =======
+=======
+>>>>>>> 5b18034 ([Update code])
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
@@ -5510,6 +5601,9 @@ class MOONFederatedLearning(FederatedLearningModel):
         
         self.moon_temperature_value = temperature
         self.smooth_value = smooth
+<<<<<<< HEAD
+>>>>>>> 5b18034 ([Update code])
+=======
 >>>>>>> 5b18034 ([Update code])
     
     def fit(self, df_train, df_val, df_test, graph, args):
@@ -6368,8 +6462,11 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.task_type = task_type
 
 <<<<<<< HEAD
+<<<<<<< HEAD
         self.horizon = horizon
 
+=======
+>>>>>>> 5b18034 ([Update code])
 =======
 >>>>>>> 5b18034 ([Update code])
     def fit(self, X, y, X_val, y_val, X_test, y_test, args, use_log=True):
