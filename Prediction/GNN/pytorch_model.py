@@ -1966,7 +1966,6 @@ class Training():
         self.criterion_params = []
         self._current_epoch = None
         self.seed = None
-
         self.horizon = horizon
 
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
@@ -2969,7 +2968,6 @@ class Training():
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
-
                     test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val')
 
                     prediction = test_output.detach().cpu().numpy()
@@ -3140,7 +3138,6 @@ class Training():
                         if self.task_type == 'classification' or self.task_type == 'binary':
                             output = torch.argmax(output, dim=1)
                         elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
-
                             print(torch.max(output[:, 0]))
                             print(torch.max(output[:, 1]))
                             print(torch.max(output[:, 2]))
@@ -3805,8 +3802,8 @@ class SplitTraining(Training):
 
         self.update_weight(server_model.state_dict())
 
-
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", proba=False) -> torch.tensor:
+
 
         """Generate predictions using the split learning setup."""
 
@@ -3972,7 +3969,6 @@ class SplitTraining(Training):
                 model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT, verbose=False)
 
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_pdf="val")
-
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
                 metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
@@ -4054,15 +4050,16 @@ class DualTraining:
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
 
+
     def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run: int = 1,
                  horizon: int = 1):
+
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
-
         self.horizon = horizon
 
     def train(
@@ -4103,6 +4100,7 @@ class DualTraining:
         train_dataset, train_pos = dfs_train
         val_dataset, val_pos = dfs_val
         test_dataset, test_pos = dfs_test
+<<<<<<< HEAD
 
         self.num_model.create_train_val_test_loader(
                 graph,
@@ -4447,13 +4445,19 @@ class ModelGNN(SplitTraining):
         self.mesh2graph = None
         self.gridh2mesh = None
         self.graph_mesh = None
+<<<<<<< HEAD
 
         self.horizon = horizon
+=======
+>>>>>>> 5b18034 ([Update code])
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
 
         self.graph = graph
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5b18034 ([Update code])
         if self.mesh and self.graph_mesh is None:
             
             df = pd.concat((df_train, df_val, df_test))
@@ -5227,8 +5231,13 @@ class FederatedALA(FederatedLearningModel):
     def __init__(self, federated_model, eta, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
+<<<<<<< HEAD
                  aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=1):
 
+=======
+                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2']):
+        
+>>>>>>> 5b18034 ([Update code])
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
@@ -5238,8 +5247,11 @@ class FederatedALA(FederatedLearningModel):
         self.weight = 0.5
         self.params_to_update = params_to_update
 
+<<<<<<< HEAD
         self.horizon = horizon
 
+=======
+>>>>>>> 5b18034 ([Update code])
     def pick_params_by_name(self, model):
         names, params = [], []
         for n, p in model.named_parameters():
@@ -5470,6 +5482,7 @@ class FederatedALA(FederatedLearningModel):
 ############################################ MOON Federated Model ##############################################################
 
 class MOONFederatedLearning(FederatedLearningModel):
+<<<<<<< HEAD
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
@@ -5484,6 +5497,20 @@ class MOONFederatedLearning(FederatedLearningModel):
         self.smooth_value = smooth
 
         self.horizon = horizon
+=======
+    def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
+                 name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
+                 target_name='nbsinister', post_process=None, task_type='classification', 
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
+        
+        super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
+                         name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
+                         target_name=target_name, post_process=post_process, task_type=task_type,
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+        
+        self.moon_temperature_value = temperature
+        self.smooth_value = smooth
+>>>>>>> 5b18034 ([Update code])
     
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -6340,8 +6367,11 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.target_name = target_name
         self.task_type = task_type
 
+<<<<<<< HEAD
         self.horizon = horizon
 
+=======
+>>>>>>> 5b18034 ([Update code])
     def fit(self, X, y, X_val, y_val, X_test, y_test, args, use_log=True):
         """
         Train each model on the corresponding data.

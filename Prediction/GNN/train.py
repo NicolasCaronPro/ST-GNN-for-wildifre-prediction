@@ -2319,7 +2319,10 @@ def get_loss_function(loss_name, **loss_params):
 
         for token in parts[1:]:
             m = re.fullmatch(r'([A-Za-z]\w*)\{(.+)\}', token)
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5b18034 ([Update code])
             if not m:
                 continue
             key, raw = m.groups()

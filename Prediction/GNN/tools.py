@@ -253,7 +253,11 @@ def defines_train_dates_from_exp(expe):
     return all_train_dates, all_val_dates, all_test_dates
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 allDates = find_dates_between('2017-06-12', '2025-01-01')
+=======
+allDates = find_dates_between('2015-01-01', '2025-01-01')
+>>>>>>> 5b18034 ([Update code])
 =======
 allDates = find_dates_between('2015-01-01', '2025-01-01')
 >>>>>>> 5b18034 ([Update code])

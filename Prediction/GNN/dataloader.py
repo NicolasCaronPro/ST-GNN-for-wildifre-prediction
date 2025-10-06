@@ -1633,6 +1633,7 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     sel_indices = np.argwhere(y[:, weight_index] > 0)[:, 0]
     predTensor = predTensor[sel_indices]
     y = y[sel_indices]
+
     test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     
     return predTensor, y, test_dataset_dept

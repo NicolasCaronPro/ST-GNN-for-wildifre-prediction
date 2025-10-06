@@ -309,8 +309,6 @@ scale_index = ids_columns.index('scale')
 saison_index = ids_columns.index('saison-encoding')
 med_index = ids_columns.index('mediterranean')
 cluster_encoder_index = ids_columns.index('cluster-encoder')
-
-
 nbsinister_index = targets_columns.index('nbsinister')
 burned_index = targets_columns.index('burned_area')
 risk_index = targets_columns.index('risk')
