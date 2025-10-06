@@ -1,5 +1,5 @@
-from tools import *
-from array_fet import *
+from GNN.tools import *
+from GNN.array_fet import *
 
 def raster_meteo(spatioTemporalRaster, h3, grid, index, n_pixel_x, n_pixel_y, dir_output):
     h3 = gpd.GeoDataFrame(h3, )

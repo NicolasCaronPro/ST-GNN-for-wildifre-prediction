@@ -6,7 +6,7 @@ from forecasting_models.pytorch.loss import *
 from forecasting_models.sklearn.sklearn_api_models_config import *
 import logging
 import socket
-from arborescence import *
+from GNN.arborescence import *
 
 is_pc = get_machine_info() == 'caron-Precision-7780'
 
@@ -308,7 +308,8 @@ weight_index = ids_columns.index('weight')
 scale_index = ids_columns.index('scale')
 saison_index = ids_columns.index('saison-encoding')
 med_index = ids_columns.index('mediterranean')
-cluster_ncoder_index = ids_columns.index('cluster-encoder')
+cluster_encoder_index = ids_columns.index('cluster-encoder')
+
 
 nbsinister_index = targets_columns.index('nbsinister')
 burned_index = targets_columns.index('burned_area')

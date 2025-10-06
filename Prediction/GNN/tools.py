@@ -79,7 +79,7 @@ else:
     import sys
     import torch
     import warnings
-    from array_fet import *
+    from GNN.array_fet import *
     from category_encoders import TargetEncoder, CatBoostEncoder
     from collections import Counter
     from copy import copy
@@ -101,9 +101,9 @@ else:
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
-    from weigh_predictor import *
-    from dico_departements import *
-    from features_selection import *
+    from GNN.weigh_predictor import *
+    from GNN.dico_departements import *
+    from GNN.features_selection import *
     import convertdate
     from sklearn.feature_selection import VarianceThreshold
     import cv2
@@ -252,7 +252,11 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
+<<<<<<< HEAD
 allDates = find_dates_between('2017-06-12', '2025-01-01')
+=======
+allDates = find_dates_between('2015-01-01', '2025-01-01')
+>>>>>>> 5b18034 ([Update code])
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
 def save_object(obj, filename: str, path : Path):

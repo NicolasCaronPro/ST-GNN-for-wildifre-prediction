@@ -2,8 +2,8 @@ from datetime import date
 from pathlib import Path
 from regex import P
 from shapely import unary_union
-from arborescence import *
-from weigh_predictor import Predictor
+from GNN.arborescence import *
+from GNN.weigh_predictor import Predictor
 import itertools
 from GNN.tools import *
 import convertdate

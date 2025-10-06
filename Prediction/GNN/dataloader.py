@@ -1,4 +1,3 @@
-from tkinter.filedialog import test
 import torch_geometric
 from zmq import device
 from GNN.pytorch_model import *
@@ -1024,14 +1023,17 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     metrics = {}
 
     logger.info(f'###################### Analysis {target_name} #########################')
- 
-    plot_and_save_roc_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
-    plot_and_save_pr_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
-    
-    calibrated_curve(pred[:, 0], y, dir_output / name, 'calibration')
-    calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
 
-    shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
+    try:
+        plot_and_save_roc_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+        plot_and_save_pr_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+        
+        calibrated_curve(pred[:, 0], y, dir_output / name, 'calibration')
+        calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
+
+        shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
+    except:
+        pass
     
     df_test['saison'] = df_test['date'].apply(get_saison)
 
@@ -1549,24 +1551,25 @@ def test_sklearn_api_model(cfg,
    
 def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg):
 
-    name_exp = cfg.name
+    if cfg is not None:
+        name_exp = cfg.name
 
-    test_dataset_list = []
-    for scale in np.unique(y[:, scale_index]):
-        print(scale)
-        if scale == 10:
-            test_dataset_scale = read_object(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
-        else:
-            test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{cfg.days_in_futur}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
-        
-        assert test_dataset_scale is not None
+        test_dataset_list = []
+        for scale in np.unique(y[:, scale_index]):
+            print(scale)
+            if scale == 10:
+                test_dataset_scale = read_object(f'df_test_full_departement_{cfg.days_in_futur}_None_{graphScale.graph_method}.pkl', dir_train  / f'occurence_{name_exp}')
+            else:
+                test_dataset_scale = read_object(f'df_test_full_{int(scale)}_{cfg.days_in_futur}_{graphScale.base}_{graphScale.graph_method}.pkl', dir_train / f'occurence_{name_exp}')
+            
+            assert test_dataset_scale is not None
 
-        if 'scale' not in np.unique(test_dataset_scale.columns):
-            test_dataset_scale['scale'] = scale
+            if 'scale' not in np.unique(test_dataset_scale.columns):
+                test_dataset_scale['scale'] = scale
 
-        test_dataset_list.append(test_dataset_scale)
+            test_dataset_list.append(test_dataset_scale)
 
-    test_dataset_dept = pd.concat(test_dataset_list).reset_index(drop=True)
+        test_dataset_dept = pd.concat(test_dataset_list).reset_index(drop=True)
     
     test_pairs = set(zip(test_dataset_dept['date'], test_dataset_dept['graph_id'], test_dataset_dept['scale']))
 
@@ -1582,8 +1585,10 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
         ]
 
     # Créer YTensor filtré
+    print(y.shape)
     y = y[filtered_indices]
 
+    print(y.shape)
     # Créer des paires et les convertir en set
     ytensor_pairs = set(zip(date_values, graph_id_values, scale_id_values))
 
@@ -1620,6 +1625,7 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
         test_dataset_dept = keep_one_per_pair(test_dataset_dept)
 
     test_dataset_dept.sort_values(['scale', 'graph_id', 'date'], inplace=True)
+    print(y.shape)
     ind = np.lexsort((y[:, scale_index], y[:,0], y[:,4]))
     y = y[ind]
     predTensor = predTensor[ind]

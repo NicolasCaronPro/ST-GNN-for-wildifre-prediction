@@ -41,12 +41,15 @@ class GraphStructure():
                  attempt : int,
                  reduce : int,
                  tol : float,
-                 graph_method : str == 'node'):
+                 graph_method : str = 'node'):
+        
 
-        for col in ['latitude', 'longitude', 'geometry', 'departement']:
-            if col not in geo.columns:
-                logger.info(f'{col} not in geo columns. Please send a correct geo dataframe')
-                exit(2)
+        if geo is not None:
+
+            for col in ['latitude', 'longitude', 'geometry', 'departement']:
+                if col not in geo.columns:
+                    logger.info(f'{col} not in geo columns. Please send a correct geo dataframe')
+                    exit(2)
 
         self.nodes = None # All nodes in graph (N, 6) [id, long, lat, dep]
         self.edges = None # All edges in graph (2 x E)
@@ -55,13 +58,15 @@ class GraphStructure():
         self.model = None # GNN model
         self.train_kmeans = None # Boolean to trace if we creating new scale
         self.scale = scale # current scale define by numUniqueNode // 6
-        self.oriLatitudes = geo.latitude # all original latitude of interest
-        self.oriLongitude = geo.longitude # all original longitude of interest
-        self.oriLen = self.oriLatitudes.shape[0] # len of data
-        self.oriGeometry = geo['geometry'].values # original geometry
-        self.oriIds = geo['scale0'].values
-        self.orihexid = geo['hex_id'].values
-        self.departements = geo.departement # original dept of each geometry
+        if geo is not None:
+            self.oriLatitudes = geo.latitude # all original latitude of interest
+            self.oriLongitude = geo.longitude # all original longitude of interest
+            self.oriLen = self.oriLatitudes.shape[0] # len of data
+            self.oriGeometry = geo['geometry'].values # original geometry
+            self.oriIds = geo['scale0'].values
+            self.orihexid = geo['hex_id'].values
+            self.departements = geo.departement # original dept of each geometry
+
         self.maxDist = maxDist # max dist to link two nodes
         self.numNei = numNei # max connect neighbor a node can have
         self.sinister = None # type of sinister
@@ -81,10 +86,11 @@ class GraphStructure():
         self.reduce = int(reduce) if reduce is not None else None
         self.attempt = int(attempt) if attempt is not None else None
         self.tol = float(tol) if tol is not None else None
-        if 'watershed' in self.base:
-            assert self.attempt is not None
-            assert self.tol is not None
-            assert self.reduce is not None
+        if self.base is not None:
+            if 'watershed' in self.base:
+                assert self.attempt is not None
+                assert self.tol is not None
+                assert self.reduce is not None
 
     def _create_sinister_region(self, path: Path, sinister: str, dataset_name:str, sinister_encoding : str, resolution, train_date) -> None:
         udept = np.unique(self.departements)

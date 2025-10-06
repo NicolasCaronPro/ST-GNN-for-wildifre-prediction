@@ -1,5 +1,4 @@
 from copy import deepcopy
-from turtle import mode
 from matplotlib.pyplot import grid
 from torch import Value
 from GNN.visualize import *
@@ -2301,6 +2300,8 @@ def get_loss_function(loss_name, **loss_params):
             id = graph_id_index
         elif id == 'scale':
             id = scale_index
+        elif id == 'cluster-encoder':
+            id = cluster_encoder_index
         else:
             raise ValueError(f'{id} not implemented')
         criterion = get_loss_function(loss_name, **loss_params)
@@ -2318,7 +2319,7 @@ def get_loss_function(loss_name, **loss_params):
 
         for token in parts[1:]:
             m = re.fullmatch(r'([A-Za-z]\w*)\{(.+)\}', token)
-            print(m)
+
             if not m:
                 continue
             key, raw = m.groups()
@@ -2340,8 +2341,8 @@ def get_loss_function(loss_name, **loss_params):
             if key == 'id':
                 if val == 'departement':
                     loss_params[key] = departement_index
-                if val == 'cluster-encoder':
-                    loss_params[key] = cluster_ncoder_index
+                if val == 'cluster':
+                    loss_params[key] = cluster_encoder_index
                 elif val == 'node':
                     loss_params[key] = graph_id_index
                 elif val == 'scale':
@@ -2376,10 +2377,12 @@ def get_loss_function(loss_name, **loss_params):
             "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
             "bceloss":                     lambda: BCELoss(**loss_params),
             "TailCDF":                     lambda: IntervalCELoss(**loss_params),
-            "bulkTailCDF":                  lambda: BulkTailMixtureIntervalCELoss(**loss_params),
-            "bulkTailCDFCluster":           lambda: BulkTailMixtureIntervalCELossClusterIDs(**loss_params),
+            "TailCDFEdges":                lambda: IntervalCELosEdges(**loss_params),
+            "TailCDFALL":                  lambda: IntervalCELoss_AllModelParams(**loss_params),
+            "bulkTailCDF":                 lambda: BulkTailMixtureIntervalCELoss(**loss_params),
+            "bulkTailCDFCluster":          lambda: BulkTailMixtureIntervalCELossClusterIDs(**loss_params),
+            "TailCDFCluster":              lambda: IntervalCEClusterIDs(**loss_params),
             "bulktail":                    lambda: BulkTailNLLLoss(),
-            "egpdCDFCluster":              lambda: EGPDIntervalCEClusterIDs(**loss_params),
             "wkloss":                      lambda: WKLoss(**loss_params),
             "dwk":                         lambda: DiceAndWKLoss(**loss_params),
             "odwk":                        lambda: OrdinalDiceLossAndWKLoss(**loss_params),

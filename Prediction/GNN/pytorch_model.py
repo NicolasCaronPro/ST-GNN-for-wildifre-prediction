@@ -29,9 +29,8 @@ from sklearn.metrics import f1_score, jaccard_score
 
 import dgl
 
-from graph_builder import *
-from tools import check_and_create_path, save_object, read_object
-
+from GNN.graph_builder import *
+from GNN.tools import check_and_create_path, save_object, read_object
 
 from tqdm import tqdm
 
@@ -2277,7 +2276,7 @@ class Training():
             target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
         except Exception as e:
             target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-        
+
         if self.loss not in ['kldivloss']: # works on probability
             target = target.long()
         
@@ -2580,7 +2579,7 @@ class Training():
         logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
         ##################################### TEST #################################################
 
-        test_output, y = self._predict_test_loader(self.test_loader, output_cdf='test')
+        test_output, y = self._predict_test_loader(self.test_loader, output_pdf='test')
         test_output = test_output.detach().cpu().numpy()
         y = y.detach().cpu().numpy()
 
@@ -2595,7 +2594,7 @@ class Training():
 
             print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
-            test_output, y = self._predict_test_loader(self.val_loader, output_cdf='Val')
+            test_output, y = self._predict_test_loader(self.val_loader, output_pdf='Val')
             test_output = test_output.detach().cpu().numpy()
             
             y = y.detach().cpu().numpy()
@@ -2965,7 +2964,9 @@ class Training():
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_cdf='Val')
+
+                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val')
+
                     prediction = test_output.detach().cpu().numpy()
                     
                     y = y.detach().cpu().numpy()
@@ -2987,7 +2988,9 @@ class Training():
                     update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
                     ############################# On set test ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_cdf='test')
+
+                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='test')
+
                     prediction = test_output.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
 
@@ -3090,7 +3093,7 @@ class Training():
         
         return iou_score(y, y_pred)
 
-    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf="test") -> torch.tensor:
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test") -> torch.tensor:
             assert self.model is not None
             self.model.eval()
             if len(self.criterion_params) > 0:
@@ -3109,6 +3112,8 @@ class Training():
                     orilabels = orilabels.to(device)
                     orilabels = orilabels[:, :, -1]
 
+                    print(torch.unique(orilabels[:, weight_index]))
+
                     #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
 
                     inputs_model = inputs
@@ -3119,9 +3124,9 @@ class Training():
                         if 'cluster_ids' in required_params(criterion.transform):
                             cluster_ids = orilabels[:, self.cluster_id_index].long()
                             params['cluster_ids'] = cluster_ids
-                        if 'output_cdf' in required_params(criterion.transform):
-                            assert output_cdf is not None and self.dir_log is not None
-                            params['output_cdf'] = output_cdf
+                        if 'output_pdf' in required_params(criterion.transform):
+                            assert output_pdf is not None and self.dir_log is not None
+                            params['output_pdf'] = output_pdf
                             params['dir_output'] = self.dir_log
 
                         output = criterion.transform(**params)
@@ -3130,6 +3135,12 @@ class Training():
                         if self.task_type == 'classification' or self.task_type == 'binary':
                             output = torch.argmax(output, dim=1)
                         elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+
+                            print(torch.max(output[:, 0]))
+                            print(torch.max(output[:, 1]))
+                            print(torch.max(output[:, 2]))
+                            print(torch.max(output[:, 3]))
+                            print(torch.max(output[:, 4]))
                             output = torch.argmax(output, dim=1)
                     elif prediction_type == 'RawFormulaVal':
                         output = logits
@@ -3249,7 +3260,7 @@ class Training():
         return pred
 
     def predict(self, df, graph=None, return_y=False, prediction_type='Class'):
-        if graph is None:
+        if graph is None and isinstance(self, ModelGNN):
             graph = self.graph
 
         if self.target_name not in list(df.columns):
@@ -3786,14 +3797,16 @@ class SplitTraining(Training):
 
         self.update_weight(server_model.state_dict())
 
-    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf="test", proba=False) -> torch.tensor:
+
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", proba=False) -> torch.tensor:
+
         """Generate predictions using the split learning setup."""
 
         try:
             if self.training_mode == 'normal':
-                return super()._predict_test_loader(X, prediction_type=prediction_type, output_cdf=output_cdf)
+                return super()._predict_test_loader(X, prediction_type=prediction_type, output_pdf=output_pdf)
         except:
-                return super()._predict_test_loader(X, prediction_type=prediction_type, output_cdf=output_cdf)
+                return super()._predict_test_loader(X, prediction_type=prediction_type, output_pdf=output_pdf)
 
         if not hasattr(self, "server_model") or not hasattr(self, "client_models"):
             raise ValueError("Model is not fitted. Please train the model before predicting.")
@@ -3848,7 +3861,7 @@ class SplitTraining(Training):
 
         loader = self.prepare_batch_data(df, graph, df[self.federated_cluster].unique(), 1)
 
-        pred_tensor, y_tensor = self._predict_test_loader(loader, output_cdf="test")
+        pred_tensor, y_tensor = self._predict_test_loader(loader, output_pdf="test")
 
         if return_y:
             return pred_tensor, y_tensor
@@ -3878,7 +3891,7 @@ class SplitTraining(Training):
             self.ks,
         )
 
-        pred_tensor, y_tensor = self._predict_test_loader(loader, True, output_cdf="test")
+        pred_tensor, y_tensor = self._predict_test_loader(loader, True, output_pdf="test")
 
         if return_y:
             pred, y = self.filtering_pred(df, pred_tensor, y_tensor, graph, return_y=True)
@@ -3950,13 +3963,15 @@ class SplitTraining(Training):
                 model_copy.under_sampling = 'full'
                 model_copy.train_split(df_train_split, df_val, df_test, graph, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT, verbose=False)
 
-                pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_cdf="val")
+                pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_pdf="val")
+
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
                 metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
-                pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_cdf="test")
+                pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
+
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
                 metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
@@ -4146,7 +4161,8 @@ class DualTraining:
         self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
         self.metrics['best_tp'] = tp
 
-    def _predict_test_loader(self, loader=None, prediction_type='Class', output_cdf=None) -> torch.tensor:
+    def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None) -> torch.tensor:
+
         """Run predictions combining the two sub-models.
 
         Parameters
@@ -4421,6 +4437,8 @@ class ModelGNN(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
 
+        self.graph = graph
+
         if self.mesh and self.graph_mesh is None:
             
             df = pd.concat((df_train, df_val, df_test))
@@ -4661,7 +4679,7 @@ class ModelGNN(SplitTraining):
 
         return loss
 
-    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_cdf='test') -> torch.tensor:
+    def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf='test') -> torch.tensor:
         """
         Generates predictions using the model on the provided DataLoader, with optional autoregression.
 
@@ -6234,7 +6252,6 @@ class ModelKnowledgeDistillation(Training):
         return torch.nn.functional.softplus(self.temperature_value), torch.nn.functional.sigmoid(self.alpha_value)                   
 
     def _save_temperature_alpha_plot(self):
-        """Sauvegarde les paramètres EGPD (kappa, xi) et trace leurs évolutions en fonction des epochs."""
 
         # Extraction directe (car distillation_log est un dict {epoch: {"kappa":..., "xi":...}})
         
