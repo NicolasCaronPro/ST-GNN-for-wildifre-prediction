@@ -3975,10 +3975,7 @@ class SplitTraining(Training):
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
                 pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
-<<<<<<< HEAD
 
-=======
->>>>>>> 5b18034 ([Update code])
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
                 metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
@@ -4052,18 +4049,14 @@ class DualTraining:
     binarised dataset while ``num_model`` is restricted to samples with a
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
-    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run: int = 1,
-                 horizon: int = 1):
 
-
+    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1):
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
-
-        self.horizon = horizon
 
     def train(
         self,
@@ -4103,8 +4096,6 @@ class DualTraining:
         train_dataset, train_pos = dfs_train
         val_dataset, val_pos = dfs_val
         test_dataset, test_pos = dfs_test
-<<<<<<< HEAD
-<<<<<<< HEAD
 
         self.num_model.create_train_val_test_loader(
                 graph,
@@ -4175,79 +4166,6 @@ class DualTraining:
         self.metrics['best_tp'] = tp
 
     def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None) -> torch.tensor:
-
-=======
-
-        self.num_model.create_train_val_test_loader(
-                graph,
-                train_pos,
-                val_pos,
-                test_pos,
-                epochs,
-                PATIENCE_CNT,
-                CHECKPOINT,
-                custom_model_params=custom_model_params,
-                features_importance=False,
-                use_log=use_log,
-            )
-        
-        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
-
-        self.metrics = {}
-        tp = 'occ-based'
-        
-        for run in range(self.n_run):
-            seed = int(random.random())
-            self.occ_model.seed = seed
-            self.occ_model.n_run = 1
-            self.occ_model.create_train_val_test_loader(
-                graph,
-                train_dataset,
-                val_dataset,
-                test_dataset,
-                epochs,
-                PATIENCE_CNT,
-                CHECKPOINT,
-                custom_model_params=custom_model_params,
-                features_importance=False,
-                use_log=use_log,
-            )
-            self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, False, custom_model_params=custom_model_params, new_model=True)
-            
-            ############################# On set val ##############################
-            test_output, y = self._predict_test_loader(self.occ_model.val_loader)
-            prediction = test_output.detach().cpu().numpy()
-            
-            y = y.detach().cpu().numpy()
-        
-            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-            dff['departement'] = y[:, departement_index]
-            dff[self.target_name] = y[:, -1]
-            y = y[:, -1]
-
-            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
-            metrics_run = round_floats(metrics_run)
-            update_metrics_as_arrays(self, tp, metrics_run, 'val')
-
-            ############################# On set test ##############################
-            test_output, y = self._predict_test_loader(self.occ_model.test_loader)
-            prediction = test_output.detach().cpu().numpy()
-            y = y.detach().cpu().numpy()
-        
-            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-            dff['departement'] = y[:, departement_index]
-            dff[self.target_name] = y[:, -1]
-            y = y[:, -1]
-
-            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
-            metrics_run = round_floats(metrics_run)
-            update_metrics_as_arrays(self, tp, metrics_run, 'test')
-        
-        self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
-        self.metrics['best_tp'] = tp
-
-    def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None) -> torch.tensor:
->>>>>>> 5b18034 ([Update code])
         """Run predictions combining the two sub-models.
 
         Parameters
@@ -4521,25 +4439,11 @@ class ModelGNN(SplitTraining):
         self.mesh2graph = None
         self.gridh2mesh = None
         self.graph_mesh = None
-<<<<<<< HEAD
-<<<<<<< HEAD
-
         self.horizon = horizon
-=======
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
 
         self.graph = graph
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-=======
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
         if self.mesh and self.graph_mesh is None:
             
             df = pd.concat((df_train, df_val, df_test))
