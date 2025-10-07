@@ -6,6 +6,7 @@ from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
 from torch import optim
+import torch.nn.functional as F
 
 torch.set_printoptions(precision=3, sci_mode=False)
 
@@ -4773,57 +4774,98 @@ class ModelGNN(SplitTraining):
         return loader
 
     def launch_batch(self, data, criterion):
-        
+
         if not self.mesh or self.mesh == False:
-            inputs, labels, graphs, graphs = data
-            output, logits, hidden = self.model(inputs, graphs)
+            inputs, labels, graphs, graphs_id = data
+            model_args = (graphs,)
         else:
-            inputs, labels, DGLgraphs, graphs = data
-            
-            output, logits, hidden = self.model(inputs, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
-        
+            inputs, labels, DGLgraphs, graphs_id = data
+            model_args = (DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+
         if inputs.shape[0] == 1:
             return 0
 
         band = -1
-        
-        try:
-            target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-        except Exception as e:
-            target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
+        total_loss = None
+        prev_output = None
 
-        if self.loss not in ['kldivloss']: # works on probability
-            target = target.long()
-        
-        loss = self.calculate_loss(criterion, logits, target, weights, labels)
+        for H in range(self.horizon + 1):
+            horizon_index = -1 - (self.horizon - H)
 
-        if self.student_train: # distallation traning
-            criterion_teacher = self.get_loss('kldivloss')
-            df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
-            df_test.columns = df_test.columns.astype(str)
-            pred_teacher = self.teacher.predict_proba(df_test, weights_average=self.weights_average, top_model=self.top_model, id_col=(None, None))
-            target = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
-            target = target / self.temperature_value
+            try:
+                target, weights = self.compute_weights_and_target(
+                    labels,
+                    band,
+                    ids_columns,
+                    getattr(self.model, 'is_graph_or_node', False),
+                    graphs_id,
+                    horizon_index
+                )
+            except Exception:
+                target, weights = self.compute_weights_and_target(
+                    labels,
+                    band,
+                    ids_columns,
+                    False,
+                    graphs_id,
+                    horizon_index
+                )
 
-            loss2 = self.calculate_loss(criterion_teacher, output, target, weights, labels, tolong=False)
+            if self.loss not in ['kldivloss']:
+                target = target.long()
 
-            loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
-        
-        if self.constrastive: # MOON federated training
-            _, _, zprev = self.prev_model(inputs, graphs)
-            _, _, zglob = self.global_model(inputs, graphs)
-            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
-            loss = loss + self.smooth_value * loss_constrastive
+            inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
 
-        if self.use_prototypes and self.prototypes is not None:
-            
-            proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
-            loss = loss + self.prototype_weight * proto_loss
+            if H > 0:
+                if self.id_past_risk is not None:
+                    inputs_horizon[:, self.id_past_risk, -1] = 0
+                if self.id_past_ba is not None:
+                    inputs_horizon[:, self.id_past_ba, :] = 0
+                if self.prev_idx is not None and prev_output is not None:
+                    inputs_horizon[:, self.prev_idx, -1] = prev_output
 
-        if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
-            loss += self.model.kl_loss()
+            output, logits, hidden = self.model(inputs_horizon, *model_args)
 
-        return loss
+            prev_output = output
+
+            loss = self.calculate_loss(criterion, logits, target, weights, labels)
+
+            if self.student_train:
+                criterion_teacher = self.get_loss('kldivloss')
+                df_test = pd.DataFrame(inputs_horizon[:, :, -1], columns=self.features_name)
+                df_test.columns = df_test.columns.astype(str)
+                pred_teacher = self.teacher.predict_proba(
+                    df_test,
+                    weights_average=self.weights_average,
+                    top_model=self.top_model,
+                    id_col=(None, None)
+                )
+                target_teacher = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
+                target_teacher = target_teacher / self.temperature_value
+
+                loss2 = self.calculate_loss(criterion_teacher, output, target_teacher, weights, labels, tolong=False)
+
+                loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
+
+            if self.constrastive:
+                _, _, zprev = self.prev_model(inputs, *model_args)
+                _, _, zglob = self.global_model(inputs, *model_args)
+                loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.temperature_value)
+                loss = loss + self.smooth_value * loss_constrastive
+
+            if self.use_prototypes and self.prototypes is not None:
+                proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
+                loss = loss + self.prototype_weight * proto_loss
+
+            if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
+                loss += self.model.kl_loss()
+
+            if total_loss is None:
+                total_loss = loss
+            else:
+                total_loss += loss
+
+        return total_loss
 
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf='test') -> torch.tensor:
         """
@@ -4852,39 +4894,71 @@ class ModelGNN(SplitTraining):
             y = []
 
             for i, data in enumerate(X, 0):
-                
+
                 if not self.mesh:
-                    inputs, orilabels, graphs, graphs_id = data
+                    inputs, orilabels_, graphs, graphs_id = data
+                    model_args = (graphs,)
                 else:
-                    inputs, orilabels, DGLgraphs, graphs_id = data
+                    inputs, orilabels_, DGLgraphs, graphs_id = data
+                    model_args = (DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
 
-                orilabels = orilabels.to(device)
-                orilabels = orilabels[:, :, -1]
+                orilabels_ = orilabels_.to(device)
 
-                #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
+                pred_horizon = []
+                labels_horizon = []
 
-                inputs_model = inputs
-                if not self.mesh:
-                    output, logits, hidden = self.model(inputs_model, graphs)
-                else:
-                    output, logits, hidden = self.model(inputs_model, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
+                prev_output = None
+                prev_logits = None
 
-                if output.shape[1] > 1 and self.task_type != 'regression':
-                    output = torch.argmax(output, dim=1)
+                for H in range(self.horizon + 1):
 
-                #output = output[weights.gt(0)]
+                    horizon_index = -1 - (self.horizon - H)
+                    orilabels = orilabels_[:, :, horizon_index]
 
-                pred.append(output)
-                y.append(orilabels)
+                    inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
+
+                    if H > 0:
+                        if self.id_past_risk is not None:
+                            inputs_horizon[:, self.id_past_risk, -1] = 0
+                        if self.id_past_ba is not None:
+                            inputs_horizon[:, self.id_past_ba, :] = 0
+                        if self.prev_idx is not None and prev_logits is not None:
+                            if prev_logits.ndim > 1 and prev_logits.shape[1] > 1:
+                                prev_values = F.softmax(prev_logits, dim=1)
+                            else:
+                                prev_values = prev_output
+                            inputs_horizon[:, self.prev_idx, -1] = prev_values
+
+                    output, logits, hidden = self.model(inputs_horizon, *model_args)
+
+                    prev_output = output
+                    prev_logits = logits
+
+                    if prediction_type == 'Class':
+
+                        if self.task_type in ['classification', 'binary']:
+                            output = torch.argmax(output, dim=1)
+
+                        elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+                            output = torch.argmax(output, dim=1)
+
+                    elif prediction_type == 'RawFormulaVal':
+                        output = logits
+
+                    pred_horizon.append(output[:, None])
+                    labels_horizon.append(orilabels[:, :, None])
+
+                pred_horizon = torch.cat(pred_horizon, dim=1)
+                labels_horizon = torch.cat(labels_horizon, dim=2)
+                pred.append(pred_horizon)
+                y.append(labels_horizon)
 
             y = torch.cat(y, 0)
             pred = torch.cat(pred, 0)
 
-            if self.target_name == 'binary' or self.target_name == 'risk':
+            if pred.dtype != torch.long:
                 pred = torch.round(pred, decimals=1)
-            elif self.target_name == 'nbsinister':
-                pred = torch.round(pred, decimals=1)
-            
+
             return pred, y
 
 class Model_Torch(SplitTraining):
