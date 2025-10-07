@@ -617,7 +617,7 @@ def train_xgboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = model.split('_')
     objective = loss
 
     model_params = {
@@ -695,7 +695,7 @@ def train_logistic_regression(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     model_params = {
         'penalty': loss if loss != 'None' else None,
@@ -758,7 +758,7 @@ def train_ordered(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     model_params = {
         'distr': loss
@@ -811,7 +811,7 @@ def train_catboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
 
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = model.split('_')
         
     # Map loss to CatBoost objectives
     catboost_objective = {
@@ -893,7 +893,7 @@ def train_ngboost(params, train=True):
     model = params['name']
     post_process = params['post_process']
     
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = model.split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = model.split('_')
 
     name = f'ngboost_{target}_{task_type}_{loss}'
     
@@ -1329,7 +1329,7 @@ def wrapped_train_sklearn_api_model(train_dataset, val_dataset, test_dataset,
                                     scale : int):
     
     
-    name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
+    name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
     ###############################################  Feature importance  ###########################################################
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[final_target], features, dir_output, final_target)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=final_target)
@@ -1418,7 +1418,7 @@ def wrapped_train_sklearn_api_voting_model(train_dataset, val_dataset, test_data
                                             do_bayes_search: bool,
                                             scale : int):
     
-    model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
+    model_name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, final_target, task_type, loss = model[0].split('_')
 
     if task_type == 'classification' or task_type == 'ordinal-classification':
         train_dataset['class'] = train_dataset[final_target]
@@ -2319,13 +2319,6 @@ def get_loss_function(loss_name, **loss_params):
 
         for token in parts[1:]:
             m = re.fullmatch(r'([A-Za-z]\w*)\{(.+)\}', token)
-<<<<<<< HEAD
-<<<<<<< HEAD
-
-=======
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
             if not m:
                 continue
             key, raw = m.groups()

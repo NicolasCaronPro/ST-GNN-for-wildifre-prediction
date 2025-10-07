@@ -45,7 +45,7 @@ from GNN.config import (
 )
 from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object, get_features_selected_for_time_series_for_2D, get_features_name_lists_2D, get_saison_encoding
 from GNN.discretization import post_process_model
-from GNN.features import add_past_risk
+from GNN.features import add_past_risk, shift_target
 from GNN.dico_departements import *
 import numpy as np
 import pandas as pd
@@ -260,8 +260,6 @@ def main():
         "train_dataset": train_dataset,
         "val_dataset": val_dataset,
         "test_dataset": test_dataset,
-        "features_selected": features_selected,
-        "features_selected_str": features_selected_str,
         "device": device,
         "optimize_feature": cfg.optimizeFeature,
         "PATIENCE_CNT": cfg.PATIENCE_CNT,
@@ -287,7 +285,7 @@ def main():
     for i, m in enumerate(cfg.get("models", [])):
         if m.get("type") != "fwi":
             info = (
-                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}"
+                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_{m['horizon']}"
                 f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
             )
 
@@ -347,6 +345,12 @@ def main():
             stat_model_names.append(model.name)
         else:
             params = dict(global_params)
+            train_dataset, features_selected_str = shift_target(train_dataset, m["target_name"], features_selected_str, m["task_type"])
+            val_dataset, _ = shift_target(val_dataset, m["target_name"], [], m["task_type"])
+            test_dataset, _ = shift_target(test_dataset, m["target_name"], [], m["task_type"])
+            features_selected = features_selected_str
+            params["features_selected"] = features_selected
+            params["features_selected_str0"] = features_selected_str
             if cfg.doTrain:
                 if m.get("mesh_file"):
                     params["mesh_file"] = m.get("mesh_file")
@@ -369,6 +373,7 @@ def main():
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "global_epochs" : cfg.hyperparameters['global_epochs'],
                         "patience_count_global" : cfg.hyperparameters['patience_count_global'],
@@ -390,6 +395,7 @@ def main():
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "temperature" : m.get('temperature', 1.0),
                         "smooth" : m.get('smooth'),
                         "dir_output" : dir_output,
@@ -413,6 +419,7 @@ def main():
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "temperature" : m.get('temperature'),
                         "smooth" : m.get('smooth'),
                         "dir_output" : dir_output,
@@ -439,6 +446,7 @@ def main():
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "temperature" : m.get('temperature'),
                         "smooth" : m.get('smooth'),
                         "dir_output" : dir_output,
@@ -461,6 +469,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "temperature" : m.get('temperature'),
                         "smooth" : m.get('smooth'),
                         "dir_output" : dir_output,
@@ -486,6 +495,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "use_log" : m.get('use_log', True)
 
@@ -502,6 +512,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "use_log" : m.get('use_log', True)
 
@@ -527,6 +538,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "global_epochs" : cfg.hyperparameters['global_epochs'],
                         "patience_count_global" : cfg.hyperparameters['patience_count_global'],
@@ -565,6 +577,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "use_log" : m.get("use_log", True),
                         "image_per_node" : m.get('image_per_node', None),
@@ -588,6 +601,7 @@ def main():
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
                         "dir_output" : dir_output,
                         "use_log" : m.get("use_log", True),
                         "image_per_node" : m.get('image_per_node', None),

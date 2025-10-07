@@ -995,7 +995,7 @@ def load_loader_test_2D(use_temporal_as_edges, image_per_node, scale, graphScale
     return loader
 
 def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departement, target_name, name, dir_output, scale,
-                      pred_min=None, pred_max=None, departement_scale = False):
+                      horizon, pred_min=None, pred_max=None, departement_scale = False):
     
     metrics = {}
 
@@ -1023,28 +1023,24 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     metrics = {}
 
     logger.info(f'###################### Analysis {target_name} #########################')
+ 
+    plot_and_save_roc_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+    plot_and_save_pr_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
+    
+    calibrated_curve(pred[:, 0], y, dir_output, 'calibration')
+    calibrated_curve(pred[:, 1], y, dir_output, 'class_calibration')
 
-    try:
-        plot_and_save_roc_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
-        plot_and_save_pr_curve(df_test['nbsinister'].values > 0, pred[:, 0], dir_output / name, target_name, departement_scale)
-        
-        calibrated_curve(pred[:, 0], y, dir_output / name, 'calibration')
-        calibrated_curve(pred[:, 1], y, dir_output / name, 'class_calibration')
-
-        shapiro_wilk(pred[:,0], y[:,-1], dir_output / name, f'shapiro_wilk_{scale}')
-    except:
-        pass
+    shapiro_wilk(pred[:,0], y[:,-1], dir_output, f'shapiro_wilk_{scale}')
     
     df_test['saison'] = df_test['date'].apply(get_saison)
 
     res_temp = pd.DataFrame(index=np.arange(0, pred.shape[0]))
     res_temp['graph_id'] = y[:, graph_id_index]
     res_temp['date'] = y[:, date_index]
-    res_temp[f'prediction_{target_name}'] = pred[:, 0]
+    res_temp[f'prediction_{target_name}_{horizon}'] = pred[:, 0]
 
-    df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])[f'prediction_{target_name}'], on=['graph_id', 'date']).reset_index()
-    
-    res = df_test.copy(deep=True)
+    df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])[f'prediction_{target_name}_{horizon}'], on=['graph_id', 'date']).reset_index()
+    res = df_test[~df_test[f'prediction_{target_name}_{horizon}'].isna()].copy(deep=True)
 
     ####################################### Sinister Evaluation ########################################
 
@@ -1055,11 +1051,11 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         y_pred_max = pred_max[:, 0]
         y_pred_min = pred_min[:, 0]
 
-    y_true = df_test[target_name].values
-    y_pred = df_test[f'prediction_{target_name}'].values
+    y_true = res[target_name].values
+    y_pred = res[f'prediction_{target_name}_{horizon}'].values
     
-    metrics[f'nbsinister'] = df_test['nbsinister'].sum()
-    logger.info(f'Number of sinister = {df_test["nbsinister"].sum()}')
+    metrics[f'nbsinister'] = res['nbsinister'].sum()
+    logger.info(f'Number of sinister = {res["nbsinister"].sum()}')
 
     r2 = r2_score(y_true, y_pred)
     metrics[f'r2'] = r2
@@ -1070,21 +1066,21 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     logger.info(f'mse = {mse}')
 
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-    y_true_temp[:, graph_id_index] = df_test['graph_id']
-    y_true_temp[:, id_index] = df_test['graph_id']
-    y_true_temp[:, departement_index] = df_test['departement']
-    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, graph_id_index] = res['graph_id']
+    y_true_temp[:, id_index] = res['graph_id']
+    y_true_temp[:, departement_index] = res['departement']
+    y_true_temp[:, date_index] = res['date']
     y_true_temp[:, -1] = y_true
-    y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_nbsinister]
+    y_true_temp[:, -2] = res['nbsinister']
+    y_true_temp[:, -3] = res[col_nbsinister]
 
     realVspredict(y_pred, y_true_temp, -1,
-        dir_output / name, col_nbsinister,
+        dir_output, col_nbsinister,
         pred_min, pred_max)
     
     logger.info(f'###################### Analysis {col_class} #########################')
 
-    y_true = df_test[target_name].values
+    y_true = res[target_name].values
 
     if pred_max is not None:
         y_pred_max = pred_max[:, 1]
@@ -1093,7 +1089,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         y_pred_max = None
         y_pred_min = None
 
-    all_class = np.unique(np.concatenate((df_test[col_class].values, y_pred)))
+    all_class = np.unique(np.concatenate((res[col_class].values, y_pred)))
     all_class = all_class[~np.isnan(all_class)]
     all_class_label = [int(c) for c in all_class]
 
@@ -1101,38 +1097,37 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
 
     if name.find('classification') != -1 or name.find('egpd') != -1 :
 
-        y_true_bin = df_test[col_class].values > 0
+        y_true_bin = res[col_class].values > 0
         y_pred_bin = y_pred > 0
 
-        _, iv = calculate_woe_iv(res, f'prediction_{target_name}', 'nbsinister')
+        _, iv = calculate_woe_iv(res, f'prediction_{target_name}_{horizon}', 'nbsinister')
         metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
         logger.info(f'IV = {iv}')
 
-        y_pred = pred[:, 1]
-        """silhouette_score = round(silhouette_score_with_plot(y_pred.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all', dir_output / name), 2)
+        """silhouette_score = round(silhouette_score_with_plot(y_pred.reshape(-1,1), res['nbsinister'].values.reshape(-1,1), 'all', dir_output / name), 2)
         metrics['SS'] = silhouette_score
         logger.info(f'SS = {silhouette_score}')
 
-        mask_fire_pred = (y_pred > 0) | (df_test['nbsinister'].values > 0)
+        mask_fire_pred = (y_pred > 0) | (res['nbsinister'].values > 0)
 
-        silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred', dir_output / name), 2)
+        silhouette_score_no_zeros = round(silhouette_score_with_plot(y_pred[mask_fire_pred].reshape(-1,1), res['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred', dir_output / name), 2)
         metrics['SS_no_zeros'] = silhouette_score_no_zeros
         logger.info(f'SS_no_zeros = {silhouette_score_no_zeros}')
 
-        silhouette_score = round(silhouette_score_with_plot(df_test[col_class].values.reshape(-1,1), df_test['nbsinister'].values.reshape(-1,1), 'all_gt', dir_output / name), 2)
+        silhouette_score = round(silhouette_score_with_plot(res[col_class].values.reshape(-1,1), res['nbsinister'].values.reshape(-1,1), 'all_gt', dir_output / name), 2)
         metrics['SS_gt'] = silhouette_score
         logger.info(f'SS_gt = {silhouette_score}')
 
-        mask_fire_pred = (df_test[col_class].values > 0) | (df_test['nbsinister'].values > 0)
+        mask_fire_pred = (res[col_class].values > 0) | (res['nbsinister'].values > 0)
 
-        silhouette_score_no_zeros = round(silhouette_score_with_plot(df_test[col_class][mask_fire_pred].values.reshape(-1,1), df_test['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred_gt', dir_output / name), 2)
+        silhouette_score_no_zeros = round(silhouette_score_with_plot(res[col_class][mask_fire_pred].values.reshape(-1,1), res['nbsinister'][mask_fire_pred].values.reshape(-1,1), 'fire_or_pred_gt', dir_output / name), 2)
         metrics['SS_no_zeros_gt'] = silhouette_score_no_zeros
         logger.info(f'SS_no_zero_gts = {silhouette_score_no_zeros}')"""
 
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='true')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='all')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize='pred')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output / name, normalize=None)
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='true')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='all')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='pred')
+        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize=None)
 
         accuracy = round(accuracy_score(y_true, y_pred), 2)
         metrics[f'accuracy'] = accuracy
@@ -1201,10 +1196,10 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     
     y_pred = np.round(y_pred).astype(int)
     
-    mask_unknowed_sample = (df_test[col_class_1] == 0) & (df_test[col_class_2] > 0)
+    mask_unknowed_sample = (res[col_class_1] == 0) & (res[col_class_2] > 0)
     metrics['unknow_sample_proportion'] = y_true[mask_unknowed_sample].shape[0] / y_true.shape[0]
 
-    iou_dict = calculate_signal_scores(np.asarray(y_pred), y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    iou_dict = calculate_signal_scores(np.asarray(y_pred), y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
 
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
@@ -1217,7 +1212,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         ):
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
-    iou_dict = calculate_signal_scores(y_pred, df_test[col_class_2].values, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    iou_dict = calculate_signal_scores(y_pred, res[col_class_2].values, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
     for key, value in iou_dict.items():
         metric_key = f'{key}_risk'  # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques        
@@ -1227,7 +1222,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
     y_pred_ez = np.copy(y_pred)
     y_pred_ez = np.round(y_pred_ez).astype(int)
     y_pred_ez[mask_unknowed_sample] = 0
-    iou_dict = calculate_signal_scores(y_pred_ez, y_true, df_test['nbsinister'].values, df_test['graph_id'].values, df_test['saison'].values)
+    iou_dict = calculate_signal_scores(y_pred_ez, y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
 
     ########################################## Gte normalized score ####################################
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
@@ -1243,43 +1238,43 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, y, graph, test_departeme
         metrics[f'{cl}_pred'] = y_pred[y_pred == y_pred].shape[0]
 
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-    y_true_temp[:, graph_id_index] = df_test['graph_id']
-    y_true_temp[:, id_index] = df_test['graph_id']
-    y_true_temp[:, departement_index] = df_test['departement']
-    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, graph_id_index] = res['graph_id']
+    y_true_temp[:, id_index] = res['graph_id']
+    y_true_temp[:, departement_index] = res['departement']
+    y_true_temp[:, date_index] = res['date']
     y_true_temp[:, -1] = y_true
-    y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_class]
+    y_true_temp[:, -2] = res['nbsinister']
+    y_true_temp[:, -3] = res[col_class]
 
     realVspredict(y_pred, y_true_temp, -1,
-        dir_output / name, f'{col_class}_{scale}_hard',
+        dir_output, f'{col_class}_{scale}_hard',
         y_pred_min, y_pred_max)
 
-    res[f'prediction_{col_class}'] = y_pred
+    res[f'prediction_{target_name}_{horizon}'] = y_pred
 
-    iou_vis(y_pred, y_true_temp, -1, dir_output / name, f'{col_class}_{scale}_hard')
+    iou_vis(y_pred, y_true_temp, -1, dir_output, f'{col_class}_{scale}_hard')
 
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-    y_true_temp[:, graph_id_index] = df_test['graph_id']
-    y_true_temp[:, id_index] = df_test['graph_id']
-    y_true_temp[:, departement_index] = df_test['departement']
-    y_true_temp[:, date_index] = df_test['date']
+    y_true_temp[:, graph_id_index] = res['graph_id']
+    y_true_temp[:, id_index] = res['graph_id']
+    y_true_temp[:, departement_index] = res['departement']
+    y_true_temp[:, date_index] = res['date']
     y_true_temp[:, -1] = y_true
-    y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_class]
+    y_true_temp[:, -2] = res['nbsinister']
+    y_true_temp[:, -3] = res[col_class]
 
-    iou_vis(y_pred_ez, y_true_temp, -1, dir_output / name, f'{col_class}_{scale}_ez')
+    iou_vis(y_pred_ez, y_true_temp, -1, dir_output, f'{col_class}_{scale}_ez')
 
     y_true_temp = np.ones((y_pred.shape[0], y.shape[1]))
-    y_true_temp[:, graph_id_index] = df_test['graph_id']
-    y_true_temp[:, id_index] = df_test['graph_id']
-    y_true_temp[:, departement_index] = df_test['departement']
-    y_true_temp[:, date_index] = df_test['date']
-    y_true_temp[:, -1] = df_test[col_class_2]
-    y_true_temp[:, -2] = df_test['nbsinister']
-    y_true_temp[:, -3] = df_test[col_class]
+    y_true_temp[:, graph_id_index] = res['graph_id']
+    y_true_temp[:, id_index] = res['graph_id']
+    y_true_temp[:, departement_index] = res['departement']
+    y_true_temp[:, date_index] = res['date']
+    y_true_temp[:, -1] = res[col_class_2]
+    y_true_temp[:, -2] = res['nbsinister']
+    y_true_temp[:, -3] = res[col_class]
 
-    iou_vis(y_pred, y_true_temp, -1, dir_output / name, f'{col_class}_{scale}_risk')
+    iou_vis(y_pred, y_true_temp, -1, dir_output, f'{col_class}_{scale}_risk')
 
     metrics['nbsinister'] = res['nbsinister'].sum()
 
@@ -1349,7 +1344,7 @@ def test_fire_index_model(args,
 
         metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
                                                test_departement, target_name, name,
-                                               dir_output, scale=scale, pred_min = None, pred_max = None)
+                                               dir_output / name, scale=scale, horizon=0, pred_min = None, pred_max = None)
         
         if MLFLOW:
             log_metrics_recursively(metrics[name], prefix='')
@@ -1416,7 +1411,8 @@ def test_sklearn_api_model(cfg,
 
         read_name = name
 
-        model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
+        model_name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
+
         model_per_task = None
         if model_name.find('filter') != -1:
             filter_name, model_type, hard_or_soft, weights_average, top_model = model_name.split('-')
@@ -1509,7 +1505,7 @@ def test_sklearn_api_model(cfg,
 
         metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
                                                test_departement, target_name, name,
-                                               dir_output, scale=scale, pred_min = pred_min, pred_max = pred_max)
+                                               dir_output / name, scale=scale, horizon=0, pred_min = pred_min, pred_max = pred_max)
         
         if MLFLOW:
             log_metrics_recursively(metrics[name], prefix='')
@@ -1574,9 +1570,9 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     test_pairs = set(zip(test_dataset_dept['date'], test_dataset_dept['graph_id'], test_dataset_dept['scale']))
 
     # Normaliser les valeurs dans YTensor
-    date_values = [item for item in y[:, date_index]]
-    graph_id_values = [item for item in y[:, graph_id_index]]
-    scale_id_values = [item for item in y[:, scale_index]]
+    date_values = [item for item in y[:, date_index, 0]]
+    graph_id_values = [item for item in y[:, graph_id_index, 0]]
+    scale_id_values = [item for item in y[:, scale_index, 0]]
 
     # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
     filtered_indices = [
@@ -1585,10 +1581,8 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
         ]
 
     # Créer YTensor filtré
-    print(y.shape)
     y = y[filtered_indices]
 
-    print(y.shape)
     # Créer des paires et les convertir en set
     ytensor_pairs = set(zip(date_values, graph_id_values, scale_id_values))
 
@@ -1625,15 +1619,13 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
         test_dataset_dept = keep_one_per_pair(test_dataset_dept)
 
     test_dataset_dept.sort_values(['scale', 'graph_id', 'date'], inplace=True)
-    print(y.shape)
-    ind = np.lexsort((y[:, scale_index], y[:,0], y[:,4]))
+    ind = np.lexsort((y[:, scale_index, 0], y[:, 0, 0], y[:,4, 0]))
     y = y[ind]
     predTensor = predTensor[ind]
-    
-    sel_indices = np.argwhere(y[:, weight_index] > 0)[:, 0]
+
+    sel_indices = np.argwhere(y[:, weight_index, 0] > 0)[:, 0]
     predTensor = predTensor[sel_indices]
     y = y[sel_indices]
-
     test_dataset_dept = test_dataset_dept[test_dataset_dept['weight'] > 0]
     
     return predTensor, y, test_dataset_dept
@@ -1683,7 +1675,7 @@ def test_dl_model(cfg,
 
         test_dataset_dept['cluster-encoder'] = test_dataset_dept['cluster_encoder']
 
-        model_name, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
+        model_name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
         is_2D_model = model_name in models_2D
         if is_2D_model:
@@ -1756,118 +1748,131 @@ def test_dl_model(cfg,
         print(y.shape, predTensor.shape)
         predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg)
         print(predTensorAll.shape, yAll.shape, test_dataset_deptAll.shape)
+
         scale_unique = np.unique(y[:, scale_index])
+        horizon = model.horizon if hasattr(model, "horizon") else 0
         for scale in scale_unique:
             scale = int(scale)
-            mask = (yAll[:, scale_index] == scale)
-            predTensor = predTensorAll[mask]
-            y = yAll[mask]
+            res_horizon = None
+            for H in range(horizon + 1):
+                logger.info(f"-------------- Horizon + {H} -----------------")
+                check_and_create_path(dir_output / f"H{H}")
+                mask = (yAll[:, scale_index, 0] == scale)
+                predTensor = predTensorAll[mask, -1 - (horizon - H)]
+                y = yAll[mask, :, -1 - (horizon - H)]
 
-            test_dataset_dept = test_dataset_deptAll[test_dataset_deptAll['scale'] == scale]
+                test_dataset_dept = test_dataset_deptAll[test_dataset_deptAll['scale'] == scale]
+                test_dataset_dept[model.target_name] = test_dataset_dept[model.target_name].shift(-H, fill_value=0)
+                test_dataset_dept[model.target_name] = np.where(~np.isnan(test_dataset_dept[model.target_name].values), test_dataset_dept[model.target_name].values, 0)
+                
+                run = f'{test_name}_{name}_{scale}_{prefix_train}'
+                
+                if MLFLOW:
+                    existing_run = get_existing_run(f'{run}')
+                    if existing_run:
+                        mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                    else:
+                        mlflow.start_run(run_name=f'{run}', nested=True)
 
-            run = f'{test_name}_{name}_{scale}_{prefix_train}'
-            
-            if MLFLOW:
-                existing_run = get_existing_run(f'{run}')
-                if existing_run:
-                    mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
+                if target_name == 'binary' or target_name == 'nbsinister':
+                    band = -2
                 else:
-                    mlflow.start_run(run_name=f'{run}', nested=True)
+                    band = -1
+                    
+                pred = np.full((predTensor.shape[0], 2), fill_value=np.nan)
+                if name in ['Unet', 'ULSTM']:
+                    pred = np.full((y.shape[0], 2), fill_value=np.nan)
+                    pred_2D = predTensor
+                    Y_2D = y
+                    udates = np.unique(test_dataset_dept ['date'].values)
+                    ugraph = np.unique(test_dataset_dept['graph_id'].values)
+                    for graph in ugraph:
+                        for date in udates:
+                            mask_2D = np.argwhere((Y_2D[:, graph_id_index] == graph) & (Y_2D[:, date_index] == date))
+                            mask = np.argwhere((y[:, graph_id_index] == graph) & (y[:, date_index] == date))
+                            if mask.shape[0] == 0:
+                                continue
+                            pred[mask[:, 0], 0] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
+                else:
+                    pred[:, 0] = predTensor
+                    pred[:, 1] = predTensor
 
-            if target_name == 'binary' or target_name == 'nbsinister':
-                band = -2
-            else:
-                band = -1
+                if MLFLOW:
+                    mlflow.set_tag(f"Testing", f"{name}")
+                    mlflow.log_param(f'relevant_feature_name', features)
+                    mlflow.log_params({k: str(v) for k, v in cfg._data.items()})
                 
-            pred = np.full((predTensor.shape[0], 2), fill_value=np.nan)
-            if name in ['Unet', 'ULSTM']:
-                pred = np.full((y.shape[0], 2), fill_value=np.nan)
-                pred_2D = predTensor
-                Y_2D = y
-                udates = np.unique(test_dataset_dept ['date'].values)
-                ugraph = np.unique(test_dataset_dept['graph_id'].values)
-                for graph in ugraph:
-                    for date in udates:
-                        mask_2D = np.argwhere((Y_2D[:, graph_id_index] == graph) & (Y_2D[:, date_index] == date))
-                        mask = np.argwhere((y[:, graph_id_index] == graph) & (y[:, date_index] == date))
-                        if mask.shape[0] == 0:
-                            continue
-                        pred[mask[:, 0], 0] = pred_2D[mask_2D[:, 0], band, mask_2D[:, 1], mask_2D[:, 2]]
-            else:
-                pred[:, 0] = predTensor
-                pred[:, 1] = predTensor
+                if doKMEANS:
+                    kmeans_features = cfg.kmeans_features
+                    df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
+                    df[ids_columns] = test_dataset_dept[ids_columns]
+                    df[targets_columns] = test_dataset_dept[targets_columns]
+                    features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
+                    df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
+                    df['prediction'] = pred[:, 0]
+                    shift = int(cfg.shift)
+                    shift_list = np.arange(0, shift+1)
+                    prefix_kmeans = f'{cfg.nbpoint}_{scale}_{graphScale.base}_{graphScale.graph_method}'
+                    df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+                    df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+                    df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
 
-            if MLFLOW:
-                mlflow.set_tag(f"Testing", f"{name}")
-                mlflow.log_param(f'relevant_feature_name', features)
-                mlflow.log_params({k: str(v) for k, v in cfg._data.items()})
-            
-            if doKMEANS:
-                kmeans_features = cfg.kmeans_features
-                df = pd.DataFrame(columns=ids_columns + targets_columns, index=np.arange(pred.shape[0]))
-                df[ids_columns] = test_dataset_dept[ids_columns]
-                df[targets_columns] = test_dataset_dept[targets_columns]
-                features_selected_kmeans,_ = get_features_name_list(scale, kmeans_features, METHODS_KMEANS_TRAIN)
-                df[features_selected_kmeans] = test_dataset_unscale_dept[features_selected_kmeans]
-                df['prediction'] = pred[:, 0]
-                shift = int(cfg.shift)
-                shift_list = np.arange(0, shift+1)
-                prefix_kmeans = f'{cfg.nbpoint}_{scale}_{graphScale.base}_{graphScale.graph_method}'
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'prediction', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'nbsinister', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
-                df = apply_kmeans_class_on_target(df.copy(deep=True), dir_train / 'check_none' / prefix_kmeans / 'kmeans', 'risk', float(cfg.thresh_kmeans), features_selected_kmeans, new_val=0, shifts=shift_list, mask_df=None)
+                    test_dataset_dept['nbsinister'] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                    test_dataset_dept['risk'] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                    pred[:, 0] = df[f"prediction_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                    y[:, risk_index] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                    y[:, nbsinister_index] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
 
-                test_dataset_dept['nbsinister'] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
-                test_dataset_dept['risk'] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
-                pred[:, 0] = df[f"prediction_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
-                y[:, risk_index] = df[f"risk_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
-                y[:, nbsinister_index] = df[f"nbsinister_{cfg.shift}_{float(cfg.thresh_kmeans)}"].values
+                    pred[:, 0] = df[target_name]
 
-                pred[:, 0] = df[target_name]
+                metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
+                                                    test_departement, target_name, name,
+                                                    dir_output / name / f"H{H}", scale, H, pred_min = None, pred_max = None)
 
-            metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, y, graphScale,
-                                                test_departement, target_name, name,
-                                                dir_output, scale, pred_min = None, pred_max = None)
+                if res_horizon is None:
+                    res_horizon = res
+                else:
+                    res_horizon[f'prediction_{model.target_name}_{H}'] = res[f'prediction_{model.target_name}_{H}']
 
-            if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) \
-                and not isinstance(model, DualTraining):
-                metrics[run].update(summarize_metrics_at_best_tp(model, run, metrics))
-                #logger.info(f'Run metrics : {metrics}')
-                print(metrics[run]['mean_iou_test'])
+                if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) \
+                    and not isinstance(model, DualTraining) and "best_tp" in model.metrics.keys():
+                    metrics[run].update(summarize_metrics_at_best_tp(model, run, metrics))
+                    #logger.info(f'Run metrics : {metrics}')
+                    print(metrics[run]['mean_iou_test'])
+                    
+                if isinstance(model, ModelKnowledgeDistillation):
+                    temperature, alpha = model.get_temperature_alpha()
+                    logger.info(f'Temperature : {temperature}, alpha : {alpha}')
+                    metrics[run]['temperature'] = temperature
+                    metrics[run]['alpha'] = alpha
+
+                if 'epgd' in name:
+                    if isinstance(model, DualModel):
+                        metrics[run]['kappa'] = model.num_model.params.get('kappa', None)
+                        metrics[run]['xi'] = model.num_model.params.get('xi', None)
+
+                    metrics[run]['kappa'] = model.params.get('kappa', None)
+                    metrics[run]['xi'] = model.params.get('xi', None)
+                    logger.info(f"kappa = { metrics[run]['kappa']} | xi = {metrics[run]['xi']}")
+
+                if MLFLOW:
+                    log_metrics_recursively(metrics[name], prefix='')
+                    
+                logger.info('Features importances')
+                maxi = np.nanmax(test_dataset_dept['nbsinister'].values)
+                samples = test_dataset_dept[test_dataset_dept['nbsinister'] == maxi].index
+                samples_name = [
+                f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
+                ]
                 
-            if isinstance(model, ModelKnowledgeDistillation):
-                temperature, alpha = model.get_temperature_alpha()
-                logger.info(f'Temperature : {temperature}, alpha : {alpha}')
-                metrics[run]['temperature'] = temperature
-                metrics[run]['alpha'] = alpha
+                test_dataset_dept_sample = select_samples(test_dataset_dept, 100, kdays=int(kdays))
 
-            if 'epgd' in name:
-                if isinstance(model, DualModel):
-                    metrics[run]['kappa'] = model.num_model.params.get('kappa', None)
-                    metrics[run]['xi'] = model.num_model.params.get('xi', None)
-
-                metrics[run]['kappa'] = model.params.get('kappa', None)
-                metrics[run]['xi'] = model.params.get('xi', None)
-                logger.info(f"kappa = { metrics[run]['kappa']} | xi = {metrics[run]['xi']}")
-
-            if MLFLOW:
-                log_metrics_recursively(metrics[name], prefix='')
+                #model.shapley_additive_explanation(test_dataset_dept, 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
                 
-            logger.info('Features importances')
-            maxi = np.nanmax(test_dataset_dept['nbsinister'].values)
-            samples = test_dataset_dept[test_dataset_dept['nbsinister'] == maxi].index
-            samples_name = [
-            f"{id_}_{allDates[int(date)]}" for id_, date in zip(test_dataset_dept.loc[samples, 'id'].values, test_dataset_dept.loc[samples, 'date'].values)
-            ]
+                save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name / f"H{H}")
             
-            test_dataset_dept_sample = select_samples(test_dataset_dept, 100, kdays=int(kdays))
-
-            #model.shapley_additive_explanation(test_dataset_dept, 'test', dir_output / name,  mode='beeswarm', figsize=(30,15), samples=None, samples_name=samples_name)
-            
-            res['model'] = name
-            save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
-
-            res_scale.append(res)
+            res_horizon['model'] = model
+            res_scale.append(res_horizon)
         
         i += 1
 
@@ -2113,7 +2118,7 @@ def wrapped_train_deep_learning_1D(params):
     dir_output = params['dir_output']
     n_run = params['n_run']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset'].copy(deep=True)
@@ -2158,7 +2163,8 @@ def wrapped_train_deep_learning_1D(params):
                                     device=torch.device("cpu"),
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run
+                                    n_run=n_run,
+                                    horizon=int(horizon)
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
@@ -2189,7 +2195,8 @@ def wrapped_train_deep_learning_1D(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    graph_method = graph_method)
+                                    graph_method = graph_method,
+                                    horizon=int(horizon))
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2214,7 +2221,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     n_run = params['n_run']
     c_n_run = params['client_n_run']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
@@ -2326,7 +2333,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
     n_run = params['n_run']
     c_n_run = params['client_n_run']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
@@ -2441,7 +2448,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
     temperature = params['temperature']
     smooth = params['smooth']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
@@ -2550,7 +2557,7 @@ def wrapped_train_deep_learning_1D_protofederated(params):
     federated_cluster = params['federated_cluster']
     n_run = params['n_run']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset']
@@ -2659,7 +2666,7 @@ def wrapped_train_deep_learning_1D_splittraining(params):
     cut_layer_name = params['cut_layer_name']
     input_server_model = params['input_server_model']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset'].copy(deep=True)
@@ -2775,7 +2782,7 @@ def wrapped_train_deep_learning_1D_unique(params):
     cluster = params['cluster']
     sub_training_mode = params['sub_training_mode']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset'].copy(deep=True)
@@ -2927,7 +2934,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     n_run = params['n_run']
     task_type_num = params['task_type_num']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     infos_occ = f"{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_binary_weightedcrossentropy"
 
@@ -3085,7 +3092,7 @@ def wrapped_train_deep_learning_2D(params):
     name_exp = params['name_exp']
     dir_output = params['dir_output']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
@@ -3157,7 +3164,7 @@ def wrapped_train_deep_learning_2D_federated(params):
     image_per_node = params['image_per_node']
     n_run = params['n_run']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target_name)
@@ -3235,7 +3242,7 @@ def wrapped_train_deep_learning_distallation(params):
     alpha = params['alpha']
     teacher_loss = params['teacher_loss']
 
-    under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
     val_dataset = params['val_dataset'].copy(deep=True)
@@ -3374,7 +3381,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
     features = input_params['features_selected_str']
     features_index = input_params['features_selected']
 
-    _, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target_name, task_type, loss = model[0].split('_')
+    _, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = model[0].split('_')
 
     #importance_df = calculate_and_plot_feature_importance_shapley(train_dataset[features], train_dataset[target], features, dir_output, target)
     #features95, featuresAll = plot_ecdf_with_threshold(importance_df, dir_output=dir_output, target_name=target)
@@ -3427,7 +3434,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
         mesh = False
 
         print(modelt)
-        model_type, under_sampling, over_sampling, kdays, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
+        model_type, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target, task_type, loss = modelt.split('_')
         if model_type in ['xgboost', 'lightgbm', 'rf', 'svm', 'dt', 'ngboost', 'poisson', 'gam']:
         
             if model_type == 'xgboost':

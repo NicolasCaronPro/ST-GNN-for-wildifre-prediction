@@ -252,19 +252,8 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-<<<<<<< HEAD
-<<<<<<< HEAD
-<<<<<<< HEAD
-allDates = find_dates_between('2017-06-12', '2025-01-01')
-=======
 allDates = find_dates_between('2015-01-01', '2025-01-01')
->>>>>>> 5b18034 ([Update code])
-=======
-allDates = find_dates_between('2015-01-01', '2025-01-01')
->>>>>>> 5b18034 ([Update code])
-=======
-allDates = find_dates_between('2015-01-01', '2025-01-01')
->>>>>>> 5b18034 ([Update code])
+
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
 def save_object(obj, filename: str, path : Path):
@@ -670,7 +659,7 @@ def generate_subgraph(graph, minNumber : int, maxNumber : int, nodes : np.array)
                     
         return newSubNode
 
-def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
+def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int):
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and temporal edges
@@ -698,6 +687,22 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
         if ks != 0:
             yts = Y[maskts]
             yts[:, weight_index] = 0
+            y = np.concatenate((y, yts))
+
+    else:
+        y = None
+
+    if horizon != 0:
+        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
+        if maskts.shape[0] == 0:
+            return None, None, None
+        xts = X[maskts]
+        x = np.concatenate((x, xts))
+
+    if Y is not None:
+        if ks != 0:
+            yts = Y[maskts]
+            yts[:, weight_index] = 1
             y = np.concatenate((y, yts))
 
     else:
@@ -769,13 +774,13 @@ def construct_graph_set(graph, date, X, Y, ks, start_features  : int):
 
     return x[:, start_features:], y, edges
 
-def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) -> np.array:
+def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, horizon:int) -> np.array:
 
     uniqueNodes = np.unique(array[:, id_index])
     res = []
 
     date_limit_min = date - ks
-    range_date = np.arange(date_limit_min, date + 1)
+    range_date = np.arange(date_limit_min, date + horizon + 1)
 
     for uNode in uniqueNodes:
         arrayNode = array[array[:, id_index] == uNode]
@@ -816,7 +821,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
                 arrayNode = arrayNode[np.argsort(arrayNode[:, date_index])]
         
         # Extraire les données dans l'intervalle de date
-        cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date)]
+        cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date + horizon)]
         cur_array = cur_array.astype(np.float32)
 
         """new_data = np.copy(cur_array)
@@ -848,8 +853,8 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
 
         print("\nIndices overflow:")
         print(np.where(is_inf)[0])"""
-                
-        res.append(cur_array[:ks+1])
+        
+        res.append(cur_array[:ks + horizon + 1])
 
     if len(res) == 0:
         return np.empty((0, ks))
@@ -860,7 +865,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int) 
 
 def construct_graph_with_time_series(graph, date : int,
                                      X : np.array, Y : np.array,
-                                     ks :int, start_features : int) -> np.array:
+                                     ks :int, horizon:int, start_features : int) -> np.array:
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and time series X
@@ -897,6 +902,23 @@ def construct_graph_with_time_series(graph, date : int,
     else:
         y = None
 
+    if horizon != 0:
+        maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
+    
+        if maskts.shape[0] == 0:
+            return None, None, None
+
+        maskts = np.asarray([index for index in maskts if index not in mask])
+
+        if maskts.shape[0] != 0:
+            xts = X[maskts]
+            x = np.concatenate((x, xts))
+
+        if Y is not None:
+            yts = Y[maskts]
+            yts[:,weight_index] = 1
+            y = np.concatenate((y, yts))
+
     def get_unique_pair_indices(array, graph_id_index, date_index):
         """
         Retourne les indices des lignes uniques basées sur les paires (graph_id, date).
@@ -920,12 +942,12 @@ def construct_graph_with_time_series(graph, date : int,
         y = y[unique_indices]
 
     # Graph indexing
-    x = concat_temporal_graph_into_time_series(x, ks, date)
+    x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
     if x is None:
         return None, None, None
     
     if Y is not None:
-        y = concat_temporal_graph_into_time_series(y, ks, date)
+        y = concat_temporal_graph_into_time_series(y, ks, date, horizon)
 
     # Get graph specific spatial
     #maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
@@ -951,7 +973,7 @@ def construct_graph_with_time_series(graph, date : int,
 
 def construct_time_series(date : int,
                             X : np.array, Y : np.array,
-                            ks :int, start_features : int) -> np.array:
+                            ks :int, horizon:int, start_features : int) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -965,7 +987,7 @@ def construct_time_series(date : int,
     x = X[maskgraph]
 
     if ks != 0:
-        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date) & (X[:,date_index] >= date - ks)))[:, 0]
+        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date ) & (X[:,date_index] >= date - ks)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
         
         if maskts.shape[0] == 0:
@@ -981,15 +1003,31 @@ def construct_time_series(date : int,
             yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
 
-    x = concat_temporal_graph_into_time_series(x, ks, date)
+    if horizon !=0:
+        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] > date ) & (X[:,date_index] <= date + horizon)))[:, 0]
+        maskts = np.asarray([index for index in maskts if index not in maskgraph])
+        
+        if maskts.shape[0] == 0:
+            return None, None
+    
+        xts = X[maskts]
+        x = np.concatenate((x, xts))
+        
+        if Y is not None:
+            yts = Y[maskts]
+            yts[:,weight_index] = 1
+            y = np.concatenate((y, yts))
+
+    x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
     if x is None:
         return None, None
     if Y is not None:
-        y = concat_temporal_graph_into_time_series(y, ks, date)
+        y = concat_temporal_graph_into_time_series(y, ks, date, horizon)
     else:
         y = None
 
-    return x[:, start_features:], y
+    x =  x[:, start_features:]
+    return x, y
 
 def order_class(predictor, pred, min_values=0):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
@@ -5326,6 +5364,10 @@ def get_static_temporal_idx(features):
         
         if 'Corine' in fet:
             static_idx.append(i)
+            continue
+
+        if 'prev' in fet:
+            temporal_idx.append(i)
             continue
         
         fet_name, _ = fet.split('_')

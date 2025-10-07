@@ -1182,7 +1182,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temporal_as_edges, isNotmesh=False):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -1218,9 +1218,10 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
     
     else:"""
     # Traiter par date
+    print(ks, horizon)
     for id in date_ids:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(id, x_data, y_data, ks, len(ids_columns))
+            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns))
             if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
@@ -1230,9 +1231,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, use_temp
                 Ys.append(y)
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, len(ids_columns))
+            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
 
         if x is None:
             continue
@@ -1255,6 +1256,7 @@ def create_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
+                    horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
                     mesh2graph=None
@@ -1273,13 +1275,13 @@ def create_dataset(graph,
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1310,6 +1312,7 @@ def create_train_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
+                    horizon:int,
                     graph_mesh=None,
                     gridh2mesh=None,
                     mesh2graph=None):
@@ -1323,7 +1326,7 @@ def create_train_dataset(graph,
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1347,6 +1350,7 @@ def create_test_val_dataset(graph,
                     use_temporal_as_edges : bool,
                     device,
                     ks : int,
+                    horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
                     mesh2graph=None):
@@ -1361,10 +1365,10 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
@@ -1454,6 +1458,7 @@ def create_test_loader(graph, df,
                        use_temporal_as_edges : bool,
                        target_name,
                        ks :int,
+                       horizon:int,
                        graph_mesh=None,
                         gridh2mesh=None,
                         mesh2graph=None):
@@ -1496,16 +1501,16 @@ def create_test_loader(graph, df,
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(date, Xset, Yset, ks, len(ids_columns))
+            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns))
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
                     Y.append(y[i])
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns))
         else:
-            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns))
 
         if x is None:
             continue
@@ -1908,7 +1913,7 @@ def create_dataset_2D(graph,
     return train_dataset, val_dataset, test_dataset
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, original_model, F, T, edges, horizon=1):
+    def __init__(self, original_model, F, T, edges, horizon=0):
         super().__init__()
         self.model = original_model
         self.F = F
@@ -1926,7 +1931,7 @@ class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
                  loss='mse', name='Training', device='cpu', under_sampling='full', over_sampling='full', n_run=1,
-                 horizon=1):
+                 horizon=0):
         
         self.model_name = model_name
         self.name = name
@@ -1967,19 +1972,47 @@ class Training():
         self._current_epoch = None
         self.seed = None
         self.horizon = horizon
-        self.seed = None 
+        self.seed = None
 
-    def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs):
+        if 'Past_risk' in self.features_name:
+            self.id_past_risk = features_name.index('Past_risk')
+        else:
+            self.id_past_risk = None
+
+        if 'Past_burnedarea' in self.features_name:
+            self.id_past_ba = features_name.index('Past_burnedarea')
+        else:
+            self.id_past_ba = None
+
+        if self.task_type == "classification":
+            # Pour classification : les colonnes one-hot sont du type f"{colunm}_prev_<classe>"
+            new_features = [f"{self.target_name}_prev_{i}" for i in range(self.out_channels)]
+            self.prev_idx = [self.features_name.index(f) for f in new_features if f in self.features_name]
+
+        elif self.task_type == "binary":
+            # Pour binaire : on a colunm_prev_bin, colunm_prev_bin_0 et colunm_prev_bin_1
+            new_features = [f"{self.target_name}_prev_bin"] + [f"{self.target_name}_prev_bin_{i}" for i in range(self.out_channels)]
+            self.prev_idx = [self.features_name.index(f) for f in new_features if f in self.features_name]
+
+        elif self.task_type == "regression" and self.target_name in ["nbsinister", "burnedarea"]:
+            # Pour régression : une seule feature ajoutée
+            new_features = [f"{self.target_name}_prev"]
+            self.prev_idx = [self.features_name.index(f) for f in new_features if f in self.features_name]
+        
+        if len(self.prev_idx) == 0:
+            self.prev_idx = None
+
+    def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs, H):
         weight_idx = ids_columns.index('weight')
         target_is_binary = self.task_type == 'binary'
 
         if len(labels.shape) == 3:
-            weights = labels[:, weight_idx, -1]
-            target = (labels[:, band, -1] > 0).long() if target_is_binary else labels[:, band, -1]
+            weights = labels[:, weight_idx, H]
+            target = (labels[:, band, -H] > 0).long() if target_is_binary else labels[:, band, H]
 
         elif len(labels.shape) == 5:
-            weights = labels[:, :, :, weight_idx, -1]
-            target = (labels[:, :, :, band, -1] > 0).long() if target_is_binary else labels[:, :, :, band, -1]
+            weights = labels[:, :, :, weight_idx, H]
+            target = (labels[:, :, :, band, -H] > 0).long() if target_is_binary else labels[:, :, :, band, H]
 
         elif len(labels.shape) == 4:
             weights = labels[:, :, :, weight_idx,]
@@ -1996,23 +2029,36 @@ class Training():
             target = target[first_indices]
 
         return target, weights
+    
+    def compute_inputs(self, inputs, H, time_steps):
+        if H + 1 == 0:
+            if len(inputs.shape) == 3:
+                inputs_horizon = inputs[:, :, H - self.ks]
 
-    def compute_labels(self, labels, is_grap_or_node, graphs):
-        if len(labels.shape) == 3:
-            labels = labels[:, :, -1]
-        elif len(labels.shape) == 5:
-            labels = labels[:, :, :, :, -1]
-        elif len(labels.shape) == 4:
-            labels = labels
-        else:
-            labels = labels
+            elif len(inputs.shape) == 5:
+                inputs_horizon = inputs[:, :, :, :, H - self.ks]
+
+            elif len(inputs.shape) == 4:
+                inputs_horizon = inputs
+            else:
+                inputs_horizon = inputs
         
-        if is_grap_or_node:
-            unique_elements = torch.unique(graphs, return_inverse=False, return_counts=False, sorted=True)
-            first_indices = torch.tensor([torch.nonzero(graphs == u, as_tuple=True)[0][0] for u in unique_elements])
-            labels = labels[first_indices]
+        else:
+            if len(inputs.shape) == 3:
+                inputs_horizon = inputs[:, :, H - self.ks :H + 1]
 
-        return labels
+            elif len(inputs.shape) == 5:
+                inputs_horizon = inputs[:, :, :, :, H - self.ks:H + 1]
+
+            elif len(inputs.shape) == 4:
+                inputs_horizon = inputs
+            else:
+                inputs_horizon = inputs
+
+        if inputs_horizon.ndim % 2 == 0:
+                inputs_horizon = inputs_horizon[:, :, None]
+            
+        return inputs_horizon
     
     def compute_single_loss(self, out, tar, wei, cluster_ids=None, tolong=False, criterion=None):
         if self.task_type == 'regression':
@@ -2024,7 +2070,6 @@ class Training():
             wei = torch.masked_select(wei, wei.gt(0))
         else:
             wei = wei.long()
-            #print(torch.unique(tar))
             if not self.student_train: # works on probability
                 tar = tar.long()
 
@@ -2038,10 +2083,6 @@ class Training():
 
             if tolong:
                 tar = tar.long()
-
-            #if self.loss in ['kappa', 'cdw', 'mcewk']:
-            #    tar = tar.to('cpu')
-            #    out = out.to('cpu')
 
         if cluster_ids is not None:
             return criterion(out, tar, cluster_ids=cluster_ids)
@@ -2276,98 +2317,144 @@ class Training():
             return 0
 
         band = -1
-
-        try:
-            target, weights = self.compute_weights_and_target(labels, band, ids_columns, self.model.is_graph_or_node, graphs)
-        except Exception as e:
-            target, weights = self.compute_weights_and_target(labels, band, ids_columns, False, graphs)
-
-        if self.loss not in ['kldivloss']: # works on probability
-            target = target.long()
         
-        output, logits, hidden = self.model(inputs, edges)
+        hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
 
-        loss = self.calculate_loss(criterion, logits, target, weights, labels)
+        for H in range(self.horizon + 1):
 
-        if self.student_train: # distallation traning
-            criterion_teacher = self.get_loss('kldivloss')
-            df_test = pd.DataFrame(inputs[:, :, -1], columns=self.features_name)
-            df_test.columns = df_test.columns.astype(str)
-            if self.top_model != 'task':
-                teacher_logits = self.teacher.predict(df_test,
-                                                            weights_average=self.weights_average,
-                                                            top_model=self.top_model, id_col=(None, None),
-                                                            prediction_type='RawFormulaVal')
+            if hasattr(self.model, 'is_graph_or_node'):
+                is_graph_or_node = self.model.is_graph_or_node
             else:
-                teacher_logits = self.teacher.predict_with_tasks(df_test,
-                                                                 weights_average=self.weights_average,
-                                                                 id_col=(None, None), proba='RawFormulaVal')
+                is_graph_or_node = False
+
+            target, weights = self.compute_weights_and_target(labels, band, ids_columns, is_graph_or_node, graphs,  -1 - (self.horizon - H))
+
+            if self.loss not in ['kldivloss']: # works on probability
+                target = target.long()
+
+            inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
+
+            if self.ks == 0 or H == 0:
+                # pas d'historique, ou premier horizon → pas de z_prev
+                z_prev = None
+            else:
+                # on prend les ks derniers états cachés déjà vus
+                history = hidden_past[-self.ks:]
+                # empilement (B, D, L) avec L = len(history)
+                z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                # padding à gauche si L < ks
+                L = z_prev.size(2)
+                if L < self.ks:
+                    B, D = z_prev.size(0), z_prev.size(1)
+                    pad = torch.zeros(
+                        (B, D, self.ks - L),
+                        device=z_prev.device,
+                        dtype=z_prev.dtype
+                    )
+                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+
+            if H == 0:
+                output, logits, hidden = self.model(inputs_horizon, None, edges)
+            else:
+                if self.id_past_risk is not None:
+                    inputs_horizon[:, self.id_past_risk, -1] = 0
+                    print(inputs_horizon[:, self.id_past_risk, -1])
+                if self.id_past_ba is not None:
+                    inputs_horizon[:, self.id_past_ba, :] = 0
+                    print(inputs_horizon[:, self.id_past_ba, :])
+
+                if self.prev_idx is not None:
+                    inputs_horizon[:, self.prev_idx, -1] = output
+
+                output, logits, hidden = self.model(inputs_horizon, z_prev, edges)
+
+            loss = self.calculate_loss(criterion, logits, target, weights, labels)
+
+            if self.student_train: # distallation traning
+                criterion_teacher = self.get_loss('kldivloss')
+                df_test = pd.DataFrame(inputs_horizon[:, :, -1], columns=self.features_name)
+                df_test.columns = df_test.columns.astype(str)
+                if self.top_model != 'task':
+                    teacher_logits = self.teacher.predict(df_test,
+                                                                weights_average=self.weights_average,
+                                                                top_model=self.top_model, id_col=(None, None),
+                                                                prediction_type='RawFormulaVal')
+                else:
+                    teacher_logits = self.teacher.predict_with_tasks(df_test,
+                                                                    weights_average=self.weights_average,
+                                                                    id_col=(None, None), proba='RawFormulaVal')
+                
+                teacher_logits = torch.Tensor(teacher_logits, device=inputs.device).to(torch.float32)
+
+                T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
+                
+                p_teacher = F.softmax(teacher_logits / T, dim=1)
+                p_student = F.log_softmax(logits / T, dim=1)
+
+                target = target / T
+
+                kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False) * (T * T)
+
+                loss = self.alpha_value * kl_div_loss + (1 - self.alpha_value) * loss + 1e-3 * (torch.log(T) ** 2)
             
-            teacher_logits = torch.Tensor(teacher_logits, device=inputs.device).to(torch.float32)
+            if self.constrastive: # MOON federated training
+                _, _, zprev = self.prev_model(inputs, edges)
+                _, _, zglob = self.global_model(inputs, edges)
+                loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.moon_temperature_value)
+                loss = loss + self.smooth_value * loss_constrastive
 
-            T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
+            if self.use_prototypes and self.prototypes is not None:
+                if not self.model.return_hidden:
+                    raise ValueError('Model must return hidden states for prototype training')
+                
+                proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
+                loss = loss + self.prototype_weight * proto_loss
+
+            if 'distillation' in self.loss:
+                distill_loss, region_losses, best, worst = self.loss_distill(
+                    output, target, weights, labels, hidden, 0.10, 0.10, graph_id_index,
+                    lambda_kd=1, use_cosine=True, tolong=False, cluster_ids=None, criterion=criterion
+                )
+                loss = loss + distill_loss
+
+                # Update per-epoch best/worst trackers using region_losses
+                try:
+                    # region_losses is a dict {rid: tensor_loss}
+                    if isinstance(region_losses, dict) and len(region_losses) > 0:
+                        # Best: smallest loss among reported best IDs
+                        if len(best) > 0:
+                            best_pair = min(((rid, region_losses[rid].item()) for rid in best if rid in region_losses),
+                                            key=lambda kv: kv[1], default=None)
+                            if best_pair is not None:
+                                rid_b, loss_b = best_pair
+                                if hasattr(self, '_epoch_distill_best'):
+                                    if loss_b < self._epoch_distill_best['loss']:
+                                        self._epoch_distill_best['loss'] = float(loss_b)
+                                        self._epoch_distill_best['graph_id'] = int(rid_b)
+                        # Worst: largest loss among reported worst IDs
+                        if len(worst) > 0:
+                            worst_pair = max(((rid, region_losses[rid].item()) for rid in worst if rid in region_losses),
+                                            key=lambda kv: kv[1], default=None)
+                            if worst_pair is not None:
+                                rid_w, loss_w = worst_pair
+                                if hasattr(self, '_epoch_distill_worst'):
+                                    if loss_w > self._epoch_distill_worst['loss']:
+                                        self._epoch_distill_worst['loss'] = float(loss_w)
+                                        self._epoch_distill_worst['graph_id'] = int(rid_w)
+                except Exception as _e:
+                    # Never break training because of logging
+                    pass
+
+            if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
+                loss += self.model.kl_loss()
             
-            p_teacher = F.softmax(teacher_logits / T, dim=1)
-            p_student = F.log_softmax(logits / T, dim=1)
+            if 'total_loss' not in locals():
+                total_loss = loss
+            else:
+                total_loss += loss
 
-            target = target / T
-
-            kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False) * (T * T)
-
-            loss = self.alpha_value * kl_div_loss + (1 - self.alpha_value) * loss + 1e-3 * (torch.log(T) ** 2)
-        
-        if self.constrastive: # MOON federated training
-            _, _, zprev = self.prev_model(inputs, edges)
-            _, _, zglob = self.global_model(inputs, edges)
-            loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.moon_temperature_value)
-            loss = loss + self.smooth_value * loss_constrastive
-
-        if self.use_prototypes and self.prototypes is not None:
-            if not self.model.return_hidden:
-                raise ValueError('Model must return hidden states for prototype training')
-            
-            proto_loss = self.calculate_prototype_alignment_loss(hidden, target, self.prototypes)
-            loss = loss + self.prototype_weight * proto_loss
-
-        if 'distillation' in self.loss:
-            distill_loss, region_losses, best, worst = self.loss_distill(
-                output, target, weights, labels, hidden, 0.10, 0.10, graph_id_index,
-                lambda_kd=1, use_cosine=True, tolong=False, cluster_ids=None, criterion=criterion
-            )
-            loss = loss + distill_loss
-
-            # Update per-epoch best/worst trackers using region_losses
-            try:
-                # region_losses is a dict {rid: tensor_loss}
-                if isinstance(region_losses, dict) and len(region_losses) > 0:
-                    # Best: smallest loss among reported best IDs
-                    if len(best) > 0:
-                        best_pair = min(((rid, region_losses[rid].item()) for rid in best if rid in region_losses),
-                                        key=lambda kv: kv[1], default=None)
-                        if best_pair is not None:
-                            rid_b, loss_b = best_pair
-                            if hasattr(self, '_epoch_distill_best'):
-                                if loss_b < self._epoch_distill_best['loss']:
-                                    self._epoch_distill_best['loss'] = float(loss_b)
-                                    self._epoch_distill_best['graph_id'] = int(rid_b)
-                    # Worst: largest loss among reported worst IDs
-                    if len(worst) > 0:
-                        worst_pair = max(((rid, region_losses[rid].item()) for rid in worst if rid in region_losses),
-                                         key=lambda kv: kv[1], default=None)
-                        if worst_pair is not None:
-                            rid_w, loss_w = worst_pair
-                            if hasattr(self, '_epoch_distill_worst'):
-                                if loss_w > self._epoch_distill_worst['loss']:
-                                    self._epoch_distill_worst['loss'] = float(loss_w)
-                                    self._epoch_distill_worst['graph_id'] = int(rid_w)
-            except Exception as _e:
-                # Never break training because of logging
-                pass
-
-        if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
-            loss += self.model.kl_loss()
-
-        return loss
+        return total_loss
     
     def launch_train_loader(self, loader, criterion, optimizer):
 
@@ -2481,11 +2568,13 @@ class Training():
                                 out_channels=self.out_channels,
                                 task_type=self.task_type,
                                 device=device, num_lstm_layers=num_lstm_layers,
-                                custom_model_params=custom_model_params)
+                                custom_model_params=custom_model_params, horizon=self.horizon)
+
         if self.model_params is None:
             self.model_params = params
+
         return model, params
-    
+
     def func_epoch(self, train_loader, val_loader, optimizer, criterion):
 
         train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
@@ -2583,13 +2672,35 @@ class Training():
         self.best_epoch = best_epoch
         logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
         ##################################### TEST #################################################
+        test_output_, y_ = self._predict_test_loader(self.test_loader, output_pdf='test')
+        test_output_ = test_output_.detach().cpu().numpy()
+        y_ = y_.detach().cpu().numpy()
 
-        test_output, y = self._predict_test_loader(self.test_loader, output_pdf='test')
-        test_output = test_output.detach().cpu().numpy()
-        y = y.detach().cpu().numpy()
+        for H in range(self.horizon + 1):
+            y = y_[:, :, -1 - (self.horizon - H)]
+            test_output = test_output_[:, -1 - (self.horizon - H)]
 
-        if np.any(y[:, -1] > 0) or np.any(test_output > 0):
+            if np.any(y[:, -1] > 0) or np.any(test_output > 0):
 
+                under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
+                over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
+                
+                iou = iou_score(y[:, -1], test_output)
+                f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
+                iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
+
+                print(f'Horizon {H} -> Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+        
+        test_output_, y_ = self._predict_test_loader(self.val_loader, output_pdf='test')
+        test_output_ = test_output_.detach().cpu().numpy()
+        y_ = y_.detach().cpu().numpy()
+        
+        for H in range(self.horizon + 1):
+            check_and_create_path(self.dir_log / f"H{H}")
+
+            y = y_[:, :, -1 - (self.horizon - H)]
+            test_output = test_output_[:, -1 - (self.horizon - H)]
+            
             under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
             over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
             
@@ -2597,31 +2708,17 @@ class Training():
             f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
             iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-            print(f'Test -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
-
-            test_output, y = self._predict_test_loader(self.val_loader, output_pdf='Val')
-            test_output = test_output.detach().cpu().numpy()
-            
-            y = y.detach().cpu().numpy()
-
-            under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
-            over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
-            
-            iou = iou_score(y[:, -1], test_output)
-            f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
-            iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
-
-            print(f'Val {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+            print(f'Horizon {H} -> Val {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
 
             plt.figure(figsize=(15,5))
             plt.plot(y[y[:, departement_index] == 13, -1])
             plt.plot(test_output[y[:, departement_index] == 13])
-            plt.savefig(self.dir_log / 'test_13.png')
+            plt.savefig(self.dir_log / f"H{H}" / 'test_13.png')
 
             plt.figure(figsize=(15,5))
             plt.plot(y[y[:, departement_index] == 6, -1])
             plt.plot(test_output[y[:, departement_index] == 6])
-            plt.savefig(self.dir_log / 'test_6.png')
+            plt.savefig(self.dir_log / f"H{H}" / 'test_6.png')
 
         if BEST_MODEL_PARAMS is not None:
             self.update_weight(BEST_MODEL_PARAMS)
@@ -3111,47 +3208,85 @@ class Training():
 
                 for i, data in enumerate(X, 0):
                     
-                    inputs, orilabels, _ = data
+                    inputs, orilabels_, _ = data
 
-                    orilabels = orilabels.to(device)
-                    orilabels = orilabels[:, :, -1]
+                    orilabels_ = orilabels_.to(device)
+                    pred_horizon = []
+                    labels_horizon = []
 
-                    print(torch.unique(orilabels[:, weight_index]))
+                    hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+                    for H in range(self.horizon + 1):
 
-                    #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
+                        orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
+                        inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
+                        
+                        if self.ks == 0 or H == 0:
+                            # pas d'historique, ou premier horizon → pas de z_prev
+                            z_prev = None
+                        else:
+                            # on prend les ks derniers états cachés déjà vus
+                            history = hidden_past[-self.ks:]
+                            # empilement (B, D, L) avec L = len(history)
+                            z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                    inputs_model = inputs
-                    output, logits, hidden = self.model(inputs_model)
+                            # padding à gauche si L < ks
+                            L = z_prev.size(2)
+                            if L < self.ks:
+                                B, D = z_prev.size(0), z_prev.size(1)
+                                pad = torch.zeros(
+                                    (B, D, self.ks - L),
+                                    device=z_prev.device,
+                                    dtype=z_prev.dtype
+                                )
+                                z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                        
+                        if H == 0:
+                            output, logits, hidden = self.model(inputs_horizon, z_prev=None, edges=None)
+                        else:
+                            if self.id_past_risk is not None:
+                                inputs_horizon[:, self.id_past_risk, :] = 0
+                            if self.id_past_ba is not None:
+                                inputs_horizon[:, self.id_past_ba, :] = 0
+                            if self.prev_idx is not None:
+                                inputs_horizon[:, self.prev_idx, -1] = F.softmax(logits)
+                                
+                            output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev, edges=None)
 
-                    if 'criterion' in locals() and hasattr(criterion, 'transform'):
-                        params = {'inputs' : logits}
-                        if 'cluster_ids' in required_params(criterion.transform):
-                            cluster_ids = orilabels[:, self.cluster_id_index].long()
-                            params['cluster_ids'] = cluster_ids
-                        if 'output_pdf' in required_params(criterion.transform):
-                            assert output_pdf is not None and self.dir_log is not None
-                            params['output_pdf'] = output_pdf
-                            params['dir_output'] = self.dir_log
+                        if 'criterion' in locals() and hasattr(criterion, 'transform'):
+                            params = {'inputs' : logits}
+                            if 'cluster_ids' in required_params(criterion.transform):
+                                cluster_ids = orilabels[:, self.cluster_id_index].long()
+                                params['cluster_ids'] = cluster_ids
+                            if 'output_pdf' in required_params(criterion.transform):
+                                assert output_pdf is not None and self.dir_log is not None
+                                params['output_pdf'] = output_pdf
+                                params['dir_output'] = self.dir_log
 
-                        output = criterion.transform(**params)
+                            output = criterion.transform(**params)
 
-                    if prediction_type == 'Class':
-                        if self.task_type == 'classification' or self.task_type == 'binary':
-                            output = torch.argmax(output, dim=1)
-                        elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
-                            print(torch.max(output[:, 0]))
-                            print(torch.max(output[:, 1]))
-                            print(torch.max(output[:, 2]))
-                            print(torch.max(output[:, 3]))
-                            print(torch.max(output[:, 4]))
-                            output = torch.argmax(output, dim=1)
-                    elif prediction_type == 'RawFormulaVal':
-                        output = logits
+                        if prediction_type == 'Class':
 
-                    #output = output[weights.gt(0)]
+                            if self.task_type == 'classification' or self.task_type == 'binary':
+                                output = torch.argmax(output, dim=1)
 
-                    pred.append(output)
-                    y.append(orilabels)
+                            elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+                                print(torch.max(output[:, 0]))
+                                print(torch.max(output[:, 1]))
+                                print(torch.max(output[:, 2]))
+                                print(torch.max(output[:, 3]))
+                                print(torch.max(output[:, 4]))
+                                output = torch.argmax(output, dim=1)
+
+                        elif prediction_type == 'RawFormulaVal':
+                            output = logits
+
+                        pred_horizon.append(output[:, None])
+                        labels_horizon.append(orilabels[:, :, None])
+
+                pred_horizon = torch.cat(pred_horizon, dim=1)
+                labels_horizon = torch.cat(labels_horizon, dim=2)
+                pred.append(pred_horizon)
+                y.append(labels_horizon)
 
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
@@ -3530,7 +3665,7 @@ class SplitTraining(Training):
     def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
                  nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 horizon=1):
+                 horizon=0):
 
         super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
@@ -4427,7 +4562,7 @@ class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
                  n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=1):
+                 horizon=0):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
@@ -4500,6 +4635,7 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     None,
                                                     self.device, self.ks,
+                                                    self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
                                                     mesh2graph=self.mesh2graph
@@ -4512,6 +4648,7 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     False,
                                                     self.device, self.ks,
+                                                    self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
                                                     mesh2graph=self.mesh2graph)
@@ -4750,7 +4887,7 @@ class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
                  training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=1):
+                 horizon=0):
 
         #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
         #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
@@ -4762,8 +4899,6 @@ class Model_Torch(SplitTraining):
                          over_sampling=over_sampling, n_run=n_run, horizon=horizon)
 
         self.training_mode = training_mode
-
-        self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
@@ -4794,6 +4929,7 @@ class Model_Torch(SplitTraining):
                                                                 self.target_name,
                                                                 None,
                                                                 self.device, self.ks,
+                                                                self.horizon,
                                                                 graph_mesh=None,
                                                                 gridh2mesh=None,
                                                                 mesh2graph=None)
@@ -4916,7 +5052,7 @@ class Model_Torch(SplitTraining):
                                                 self.features_name,
                                                 self.target_name,
                                                 None,
-                                                self.device, self.ks,
+                                                self.device, self.ks, self.horizon,
                                                 graph_mesh=None,
                                                 gridh2mesh=None,
                                                 mesh2graph=None)
@@ -4936,6 +5072,7 @@ class Model_Torch(SplitTraining):
                        None,
                        self.target_name,
                        self.ks,
+                       self.horizon,
                         graph_mesh=None,
                         gridh2mesh=None,
                         mesh2graph=None)
@@ -4948,7 +5085,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=1):
+                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=0):
         """
         Initialize the Federated Learning Model.
 
@@ -5217,16 +5354,9 @@ class FederatedALA(FederatedLearningModel):
     def __init__(self, federated_model, eta, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-<<<<<<< HEAD
-<<<<<<< HEAD
-                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=1):
+                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=0):
 
-=======
-=======
->>>>>>> 5b18034 ([Update code])
-                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2']):
-        
->>>>>>> 5b18034 ([Update code])
+
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
@@ -5235,15 +5365,8 @@ class FederatedALA(FederatedLearningModel):
         self.eta = eta
         self.weight = 0.5
         self.params_to_update = params_to_update
-
-<<<<<<< HEAD
-<<<<<<< HEAD
         self.horizon = horizon
 
-=======
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
     def pick_params_by_name(self, model):
         names, params = [], []
         for n, p in model.named_parameters():
@@ -5474,12 +5597,10 @@ class FederatedALA(FederatedLearningModel):
 ############################################ MOON Federated Model ##############################################################
 
 class MOONFederatedLearning(FederatedLearningModel):
-<<<<<<< HEAD
-<<<<<<< HEAD
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0, horizon=1):
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0, horizon=0):
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
@@ -5490,9 +5611,6 @@ class MOONFederatedLearning(FederatedLearningModel):
         self.smooth_value = smooth
 
         self.horizon = horizon
-=======
-=======
->>>>>>> 5b18034 ([Update code])
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
@@ -5505,10 +5623,6 @@ class MOONFederatedLearning(FederatedLearningModel):
         
         self.moon_temperature_value = temperature
         self.smooth_value = smooth
-<<<<<<< HEAD
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
     
     def fit(self, df_train, df_val, df_test, graph, args):
         """
@@ -5677,7 +5791,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='ProtoFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', nbfeatures='all', n_run=1, prototype_weight=1.0,
-                 horizon=1):
+                 horizon=0):
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
@@ -5997,7 +6111,7 @@ class ProtoFederatedLearning(FederatedLearningModel):
 
 class ModelKnowledgeDistillation(Training):
     def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, out_channels, dir_log, features_name, ks, loss, name, device,
-                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss, horizon=1):
+                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss, horizon=0):
 
         super().__init__(f'{model_name}', nbfeatures, batch_size, lr, target_name, task_type, features_name, ks, \
         out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
@@ -6099,7 +6213,7 @@ class ModelKnowledgeDistillation(Training):
                                                                 self.features_name,
                                                                 self.target_name,
                                                                 None,
-                                                                self.device, self.ks)
+                                                                self.device, self.ks, self.horizon)
 
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
@@ -6153,7 +6267,7 @@ class ModelKnowledgeDistillation(Training):
                                                                 self.features_name,
                                                                 self.target_name,
                                                                 None,
-                                                                self.device, self.ks)
+                                                                self.device, self.ks, self.horizon)
 
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
@@ -6343,7 +6457,7 @@ class ModelKnowledgeDistillation(Training):
 ############################################ VOTING MODEL ##############################################################
 
 class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
-    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification', horizon=1):
+    def __init__(self, models, features, loss='mse', name='ModelVoting', dir_log=Path('../'), under_sampling='full', target_name='nbsinister', post_process=None, task_type='classification', horizon=0):
         """
         Initialize the ModelVoting class.
 
@@ -6364,15 +6478,8 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.under_sampling = under_sampling
         self.target_name = target_name
         self.task_type = task_type
-
-<<<<<<< HEAD
-<<<<<<< HEAD
         self.horizon = horizon
 
-=======
->>>>>>> 5b18034 ([Update code])
-=======
->>>>>>> 5b18034 ([Update code])
     def fit(self, X, y, X_val, y_val, X_test, y_test, args, use_log=True):
         """
         Train each model on the corresponding data.
@@ -6945,7 +7052,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         return iou_score(y, y_pred)
     
 class ModelPerID(RegressorMixin, ClassifierMixin):
-    def __init__(self, model, dir_log, cluster="departement", horizon=1):
+    def __init__(self, model, dir_log, cluster="departement", horizon=0):
         self.base_model = model
         self.cluster_col = cluster
         self.models = {}
@@ -7008,7 +7115,7 @@ class ModelPerID(RegressorMixin, ClassifierMixin):
         return torch.cat(preds_list, 0), torch.cat(ys_list, 0)
 
 class Model_susceptibility():
-    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log, horizon=1):
+    def __init__(self, model_name, target, resolution, model_config, features_name, out_channels, task_type, ks, departements, train_departements, train_date, val_date, dir_log, horizon=0):
             self.model_name = model_name
             self.features_name = features_name
             self.out_channels = out_channels

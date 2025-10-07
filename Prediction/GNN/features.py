@@ -2256,3 +2256,69 @@ def is_mediterranean_dept(dept_code):
     }
 
     return 1 if dept_code in mediterranean_depts else 0
+
+from typing import List, Tuple
+import math
+
+def shift_target(
+    df: pd.DataFrame,
+    colunm: str,
+    features: List[str],
+    task_type: str,
+    output_channels: int,  # toujours fourni
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Décale `colunm` d'une date exacte -1 par graph_id :
+      - si date-1 existe -> prend la valeur correspondante
+      - sinon -> met 0
+    Remplit les manques par 0, puis encode selon task_type.
+    """
+    if not isinstance(output_channels, int) or output_channels <= 0:
+        raise ValueError("output_channels doit être un entier > 0")
+    if "graph_id" not in df.columns or "date" not in df.columns:
+        raise KeyError("Les colonnes 'graph_id' et 'date' doivent exister dans df")
+
+    prev_col = f"{colunm}_prev"
+
+    # ---------- 1) Décalage par date exacte -1 pour chaque graph_id ----------
+    df[prev_col] = 0  # initialisation par défaut
+
+    if task_type == "classification":
+        full_cols = [f"{prev_col}_{int(c)}" for c in range(output_channels)]
+    elif task_type == "binary":
+        full_cols = [f"{prev_col}_bin_{int(c)}" for c in range(output_channels)]
+    elif task_type == "regression":
+        full_cols = [f"{prev_col}"]
+    else:
+        raise ValueError(f'Unknow value of {task_type}')
+    
+    df[full_cols] = 0
+
+    graph_ids = df.graph_id.unique()
+
+    for gid in graph_ids:
+        df_graph = df[df['graph_id'] == gid]
+        date_unique = df_graph.date.unique()
+        for d in date_unique:
+            df_date_prev = df_graph[df_graph['date'] == d - 1]
+            index = df_graph[df_graph['date'] == d].index
+            if df_date_prev.shape[0] == 0:
+                prev = 0
+            else:
+                prev = df_date_prev[colunm].values[0]
+            
+            df.loc[index, prev_col] = prev
+
+            if task_type == "classification":
+                df.loc[index, full_cols[int(prev)]] = 1
+                
+            elif task_type == "binary":
+                df.loc[index, full_cols[int(prev) > 0]] = 1
+
+            elif task_type == "regression":
+                pass
+        
+    # ---------- 3) Dropna final (sécurisation) ----------
+    df = df.dropna(subset=['graph_id', 'date', 'DFE']).reset_index(drop=True)
+
+    return df, features + full_cols
