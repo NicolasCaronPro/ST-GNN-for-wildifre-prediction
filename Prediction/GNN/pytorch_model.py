@@ -2356,7 +2356,7 @@ class Training():
                     z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
 
             if H == 0:
-                output, logits, hidden = self.model(inputs_horizon, None, edges)
+                output, logits, hidden = self.model(inputs_horizon, z_prev=None, edges=edges)
             else:
                 if self.id_past_risk is not None:
                     inputs_horizon[:, self.id_past_risk, -1] = 0
@@ -2368,7 +2368,7 @@ class Training():
                 if self.prev_idx is not None:
                     inputs_horizon[:, self.prev_idx, -1] = output
 
-                output, logits, hidden = self.model(inputs_horizon, z_prev, edges)
+                output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev, edges=edges)
             
             hidden_past.append(hidden)
 
@@ -4823,8 +4823,10 @@ class ModelGNN(SplitTraining):
                     inputs_horizon[:, self.id_past_ba, :] = 0
                 if self.prev_idx is not None and prev_output is not None:
                     inputs_horizon[:, self.prev_idx, -1] = prev_output
+            else:
+                z_prev = None
 
-            output, logits, hidden = self.model(inputs_horizon, *model_args)
+            output, logits, hidden = self.model(inputs_horizon, *model_args, z_prev=z_prev)
 
             prev_output = output
 
