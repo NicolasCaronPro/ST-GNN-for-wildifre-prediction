@@ -2368,6 +2368,8 @@ class Training():
                     inputs_horizon[:, self.prev_idx, -1] = output
 
                 output, logits, hidden = self.model(inputs_horizon, z_prev, edges)
+            
+            hidden_past.append(hidden)
 
             loss = self.calculate_loss(criterion, logits, target, weights, labels)
 
@@ -2719,6 +2721,7 @@ class Training():
             plt.plot(y[y[:, departement_index] == 6, -1])
             plt.plot(test_output[y[:, departement_index] == 6])
             plt.savefig(self.dir_log / f"H{H}" / 'test_6.png')
+            plt.close('all')
 
         if BEST_MODEL_PARAMS is not None:
             self.update_weight(BEST_MODEL_PARAMS)
@@ -3199,8 +3202,9 @@ class Training():
             self.model.eval()
             if len(self.criterion_params) > 0:
                 criterion = self.get_loss(self.loss)
-                criterion.update_params(self.criterion_params[self.best_epoch])
-                criterion.eval()
+                if has_method(criterion, 'update_params'):
+                    criterion.update_params(self.criterion_params[self.best_epoch])
+                    criterion.eval()
 
             with torch.no_grad():
                 pred = []

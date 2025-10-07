@@ -1439,7 +1439,7 @@ def test_sklearn_api_model(cfg,
         if name.find('grid_search') != 1:
             logger.info(f'{model.get_params(deep=True)}')
 
-        run = f'{test_name}_{name}_{scale}_{prefix_train}'
+        run = f'{test_name}_{name}_0_{scale}_{prefix_train}'
 
         if MLFLOW:
             existing_run = get_existing_run(f'{run}')
@@ -1765,7 +1765,7 @@ def test_dl_model(cfg,
                 test_dataset_dept[model.target_name] = test_dataset_dept[model.target_name].shift(-H, fill_value=0)
                 test_dataset_dept[model.target_name] = np.where(~np.isnan(test_dataset_dept[model.target_name].values), test_dataset_dept[model.target_name].values, 0)
                 
-                run = f'{test_name}_{name}_{scale}_{prefix_train}'
+                run = f'{test_name}_{name}_{H}_{scale}_{prefix_train}'
                 
                 if MLFLOW:
                     existing_run = get_existing_run(f'{run}')
