@@ -2046,10 +2046,10 @@ class Training():
     def compute_inputs(self, inputs, H, time_steps):
         if H + 1 == 0:
             if len(inputs.shape) == 3:
-                inputs_horizon = inputs[:, :, -self.ks:]
+                inputs_horizon = inputs[:, :, -(self.ks + 1):]
 
             elif len(inputs.shape) == 5:
-                inputs_horizon = inputs[:, :, :, :, -self.ks:]
+                inputs_horizon = inputs[:, :, :, :, -(self.ks + 1):]
 
             elif len(inputs.shape) == 4:
                 inputs_horizon = inputs
@@ -2347,26 +2347,27 @@ class Training():
 
             inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
 
-            if self.ks == 0 or H == 0:
-                # pas d'historique, ou premier horizon → pas de z_prev
+            if H == 0:
                 z_prev = None
             else:
-                # on prend les ks derniers états cachés déjà vus
-                history = hidden_past[-self.ks:]
-                # empilement (B, D, L) avec L = len(history)
-                z_prev = torch.stack(history, dim=2)  # (B, D, L)
+                if self.ks > 0:
+                    # on prend les ks derniers états cachés déjà vus
+                    history = hidden_past[-(self.ks + 1):]
+                    # empilement (B, D, L) avec L = len(history)
+                    z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                # padding à gauche si L < ks
-                L = z_prev.size(2)
-                if L < self.ks:
-                    B, D = z_prev.size(0), z_prev.size(1)
-                    pad = torch.zeros(
-                        (B, D, self.ks - L),
-                        device=z_prev.device,
-                        dtype=z_prev.dtype
-                    )
-                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-
+                    # padding à gauche si L < ks
+                    L = z_prev.size(2)
+                    if L < (self.ks + 1):
+                        B, D = z_prev.size(0), z_prev.size(1)
+                        pad = torch.zeros(
+                            (B, D, self.ks + 1 - L),
+                            device=z_prev.device,
+                            dtype=z_prev.dtype
+                        )
+                        z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                else:
+                    z_prev = hidden_past[-1]
             if H == 0:
                 output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                 if batch_type == 'train' and do_update:
@@ -3254,26 +3255,27 @@ class Training():
                         orilabels[:, -1] = orilabels[:,  -1 ] > 0 if self.task_type == 'binary' else orilabels[:,  -1 ]
                         inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
                         
-                        if self.ks == 0 or H == 0:
-                            # pas d'historique, ou premier horizon → pas de z_prev
+                        if H == 0:
                             z_prev = None
                         else:
-                            # on prend les ks derniers états cachés déjà vus
-                            history = hidden_past[-self.ks:]
-                            # empilement (B, D, L) avec L = len(history)
-                            z_prev = torch.stack(history, dim=2)  # (B, D, L)
+                            if self.ks > 0:
+                                # on prend les ks derniers états cachés déjà vus
+                                history = hidden_past[-(self.ks + 1):]
+                                # empilement (B, D, L) avec L = len(history)
+                                z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                            # padding à gauche si L < ks
-                            L = z_prev.size(2)
-                            if L < self.ks:
-                                B, D = z_prev.size(0), z_prev.size(1)
-                                pad = torch.zeros(
-                                    (B, D, self.ks - L),
-                                    device=z_prev.device,
-                                    dtype=z_prev.dtype
-                                )
-                                z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                        
+                                # padding à gauche si L < ks
+                                L = z_prev.size(2)
+                                if L < (self.ks + 1):
+                                    B, D = z_prev.size(0), z_prev.size(1)
+                                    pad = torch.zeros(
+                                        (B, D, self.ks + 1 - L),
+                                        device=z_prev.device,
+                                        dtype=z_prev.dtype
+                                    )
+                                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                            else:
+                                z_prev = hidden_past[-1]
                         if H == 0:
                             output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                         else:
@@ -3283,7 +3285,7 @@ class Training():
                                 inputs_horizon[:, self.id_past_ba, :] = 0
                             if self.prev_idx is not None:
                                 inputs_horizon[:, self.prev_idx, -1] = F.softmax(logits)
-                                
+                            
                             output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
                         
                         hidden_past.append(hidden)
@@ -4891,25 +4893,27 @@ class ModelGNN(SplitTraining):
 
             inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
 
-            if self.ks == 0 or H == 0:
-                # pas d'historique, ou premier horizon → pas de z_prev
+            if H == 0:
                 z_prev = None
             else:
-                # on prend les ks derniers états cachés déjà vus
-                history = hidden_past[-self.ks:]
-                # empilement (B, D, L) avec L = len(history)
-                z_prev = torch.stack(history, dim=2)  # (B, D, L)
+                if self.ks > 0:
+                    # on prend les ks derniers états cachés déjà vus
+                    history = hidden_past[-(self.ks + 1):]
+                    # empilement (B, D, L) avec L = len(history)
+                    z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                # padding à gauche si L < ks
-                L = z_prev.size(2)
-                if L < self.ks:
-                    B, D = z_prev.size(0), z_prev.size(1)
-                    pad = torch.zeros(
-                        (B, D, self.ks - L),
-                        device=z_prev.device,
-                        dtype=z_prev.dtype
-                    )
-                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                    # padding à gauche si L < ks
+                    L = z_prev.size(2)
+                    if L < (self.ks + 1):
+                        B, D = z_prev.size(0), z_prev.size(1)
+                        pad = torch.zeros(
+                            (B, D, self.ks + 1 - L),
+                            device=z_prev.device,
+                            dtype=z_prev.dtype
+                        )
+                        z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                else:
+                    z_prev = hidden_past[-1]
                     
             if H > 0:
                 if self.id_past_risk is not None:
@@ -4920,6 +4924,8 @@ class ModelGNN(SplitTraining):
                     inputs_horizon[:, self.prev_idx, -1] = prev_output
             else:
                 z_prev = None
+
+            print(H, horizon_index, inputs.shape, inputs_horizon.shape)
 
             output, logits, hidden = self.model(inputs_horizon, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2], z_prev=z_prev)
             if batch_type == 'train' and do_update:
@@ -5017,26 +5023,27 @@ class ModelGNN(SplitTraining):
                     orilabels = orilabels_[:, :, horizon_index]
 
                     inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
-                    if self.ks == 0 or H == 0:
-                        # pas d'historique, ou premier horizon → pas de z_prev
+                    if H == 0:
                         z_prev = None
                     else:
-                        # on prend les ks derniers états cachés déjà vus
-                        history = hidden_past[-self.ks:]
-                        # empilement (B, D, L) avec L = len(history)
-                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
+                        if self.ks > 0:
+                            # on prend les ks derniers états cachés déjà vus
+                            history = hidden_past[-(self.ks + 1):]
+                            # empilement (B, D, L) avec L = len(history)
+                            z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                        # padding à gauche si L < ks
-                        L = z_prev.size(2)
-                        if L < self.ks:
-                            B, D = z_prev.size(0), z_prev.size(1)
-                            pad = torch.zeros(
-                                (B, D, self.ks - L),
-                                device=z_prev.device,
-                                dtype=z_prev.dtype
-                            )
-                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                        
+                            # padding à gauche si L < ks
+                            L = z_prev.size(2)
+                            if L < (self.ks + 1):
+                                B, D = z_prev.size(0), z_prev.size(1)
+                                pad = torch.zeros(
+                                    (B, D, self.ks + 1 - L),
+                                    device=z_prev.device,
+                                    dtype=z_prev.dtype
+                                )
+                                z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                        else:
+                            z_prev = hidden_past[-1]
                     if H > 0:
                         if self.id_past_risk is not None:
                             inputs_horizon[:, self.id_past_risk, -1] = 0
