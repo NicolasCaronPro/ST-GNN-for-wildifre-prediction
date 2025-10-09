@@ -2292,6 +2292,14 @@ def shift_target(
     else:
         raise ValueError(f'Unknow value of {task_type}')
     
+    if full_cols[0] not in features:
+        features_res = features + full_cols
+    else:
+        features_res = features
+
+    if full_cols[0] in df.columns.unique():
+        return df, features_res
+    
     df[full_cols] = 0
 
     graph_ids = df.graph_id.unique()
@@ -2319,6 +2327,6 @@ def shift_target(
                 pass
         
     # ---------- 3) Dropna final (sécurisation) ----------
-    df = df.dropna(subset=['graph_id', 'date', 'DFE']).reset_index(drop=True)
+    df = df.dropna(subset=['graph_id', 'date', colunm]).reset_index(drop=True)
 
-    return df, features + full_cols
+    return df, features_res

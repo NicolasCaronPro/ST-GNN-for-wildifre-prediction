@@ -875,11 +875,13 @@ def construct_graph_with_time_series(graph, date : int,
     ks : size of the time series
     """
 
-    #mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     mask = np.argwhere((X[:,date_index] == date))[:, 0]
 
     x = X[mask]
-    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
+    if graph.edges is not None:
+        connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
+    else:
+        connection = []
 
     maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
     
@@ -952,23 +954,26 @@ def construct_graph_with_time_series(graph, date : int,
     # Get graph specific spatial
     #maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
     #spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
-    spatialEdges = graph.edges
+    if graph.edges is not None:
+        spatialEdges = graph.edges
 
-    edges = []
-    target = []
-    src = []
+        edges = []
+        target = []
+        src = []
 
-    for i, node in enumerate(x):
-        spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
-        if spatialEdges.shape[1] != 0:
-            spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[id_index][0])]
-            for sp in spatial:
-                src.append(i)
-                target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
-        #src.append(i)
-        #target.append(i)
-        
-    edges = np.row_stack((src, target)).astype(int)
+        for i, node in enumerate(x):
+            spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
+            if spatialEdges.shape[1] != 0:
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[id_index][0])]
+                for sp in spatial:
+                    src.append(i)
+                    target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
+            #src.append(i)
+            #target.append(i)
+            
+        edges = np.row_stack((src, target)).astype(int)
+    else:
+        edges = []
     return x[:, start_features:], y, edges
 
 def construct_time_series(date : int,

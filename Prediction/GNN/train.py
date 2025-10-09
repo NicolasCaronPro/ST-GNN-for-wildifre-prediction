@@ -2374,6 +2374,7 @@ def get_loss_function(loss_name, **loss_params):
             "cdw":                         lambda: CDWCELoss(**loss_params),
             "mcewk":                       lambda: MCEAndWKLoss(**loss_params),
             "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
+            "tail":                        lambda: EGPDNLLLoss(),
             "bceloss":                     lambda: BCELoss(**loss_params),
             "TailCDF":                     lambda: IntervalCELoss(**loss_params),
             "TailCDFEdges":                lambda: IntervalCELosEdges(**loss_params),

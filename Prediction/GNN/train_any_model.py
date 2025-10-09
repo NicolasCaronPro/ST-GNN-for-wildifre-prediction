@@ -285,7 +285,7 @@ def main():
     for i, m in enumerate(cfg.get("models", [])):
         if m.get("type") != "fwi":
             info = (
-                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_{m['horizon']}"
+                f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_{m.get('horizon', 0)}"
                 f"_{m.get('nbfeatures', 'all')}_one_{m['target']}_{m['task']}_{m['loss']}"
             )
 
@@ -345,12 +345,16 @@ def main():
             stat_model_names.append(model.name)
         else:
             params = dict(global_params)
-            train_dataset, features_selected_str = shift_target(train_dataset, m["target_name"], features_selected_str, m["task_type"])
-            val_dataset, _ = shift_target(val_dataset, m["target_name"], [], m["task_type"])
-            test_dataset, _ = shift_target(test_dataset, m["target_name"], [], m["task_type"])
-            features_selected = features_selected_str
-            params["features_selected"] = features_selected
-            params["features_selected_str0"] = features_selected_str
+            if cfg.training_mode != "dualtraining":
+                train_dataset, features_selected_str = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
+                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
+                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
+                save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
+                save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
+                save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+                features_selected = features_selected_str
+                params["features_selected"] = features_selected
+                params["features_selected_str"] = features_selected
             if cfg.doTrain:
                 if m.get("mesh_file"):
                     params["mesh_file"] = m.get("mesh_file")
@@ -368,6 +372,7 @@ def main():
                     {
                         "model": m["type"],
                         "infos": info,
+                        "min_epochs": m.get('min_epochs', 1),
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
                         "client_n_run": m.get("client_n_run", 1),
@@ -392,6 +397,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
@@ -416,6 +422,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
@@ -443,6 +450,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "client_n_run": m.get("client_n_run", 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
@@ -467,6 +475,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "horizon": m.get("horizon", 0),
@@ -486,11 +495,30 @@ def main():
                     wrapped_train_deep_learning_1D_splittraining(params)
 
                 elif cfg.training_mode == "dualtraining":
+                    train_dataset, features_selected_str_occ = shift_target(train_dataset, m["target"], features_selected_str, m["task_occ"], m['out_channels_occ'])
+                    val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_occ"], m["out_channels_occ"])
+                    test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_occ"], m['out_channels_occ'])
+
+                    params["features_selected_occ"] = features_selected_str_occ
+                    params["features_selected_str_occ"] = features_selected_str_occ
+
+                    train_dataset, features_selected_str_num = shift_target(train_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'])
+                    val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_num"], m["out_channels_num"])
+                    test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_num"], m['out_channels_num'])
+
+                    params["features_selected_num"] = features_selected_str_num
+                    params["features_selected_str_num"] = features_selected_str_num
+
+                    save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
+                    save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
+                    save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+                    
                     params.update(
                     {
                         "model": m["type"],
                         "task_type_num": m["task_num"],
                         "infos": info,
+                        "min_epochs": m.get('min_epochs', 1),
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),
@@ -510,6 +538,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "horizon": m.get("horizon", 0),
@@ -536,6 +565,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "horizon": m.get("horizon", 0),
@@ -575,6 +605,7 @@ def main():
                         "infos": info,
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "horizon": m.get("horizon", 0),
@@ -597,6 +628,7 @@ def main():
                     {
                         "model": m["type"],
                         "infos": info,
+                        "min_epochs": m.get('min_epochs', 1),
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
                         "custom_model_params": m.get("params"),

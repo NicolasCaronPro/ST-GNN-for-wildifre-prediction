@@ -1631,7 +1631,7 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     return predTensor, y, test_dataset_dept
    
 def test_dl_model(cfg,
-                  graphScale, test_dataset_dept,
+                  graphScale, test_dataset_dep_,
                           test_dataset_unscale_dept,
                           train_dataset,
                            test_name,
@@ -1660,20 +1660,20 @@ def test_dl_model(cfg,
     metrics = {}
     metrics_dept = {}
 
-    test_dataset_dept.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_dep_.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
-    print(test_dataset_dept.date.unique())
-    print(allDates[int(test_dataset_dept.date.min())])
-    print(allDates[int(test_dataset_dept[test_dataset_dept['weight'] > 0].date.min())])
+    print(test_dataset_dep_.date.unique())
+    print(allDates[int(test_dataset_dep_.date.min())])
+    print(allDates[int(test_dataset_dep_[test_dataset_dep_['weight'] > 0].date.min())])
 
     #################################### GNN ###################################################
     for name in models:
 
-        test_dataset_dept['saison'] = test_dataset_dept['date'].apply(get_saison)
+        test_dataset_dep_['saison'] = test_dataset_dep_['date'].apply(get_saison)
 
-        test_dataset_dept['mediterranean'] = test_dataset_dept['departement'].apply(is_mediterranean_dept)
+        test_dataset_dep_['mediterranean'] = test_dataset_dep_['departement'].apply(is_mediterranean_dept)
 
-        test_dataset_dept['cluster-encoder'] = test_dataset_dept['cluster_encoder']
+        test_dataset_dep_['cluster-encoder'] = test_dataset_dep_['cluster_encoder']
 
         model_name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
@@ -1716,14 +1716,14 @@ def test_dl_model(cfg,
                                 'class_value_3_predictions' : 15,
                                 'class_value_4_predictions' : 20
                                 }
-                generalized_departement = test_dataset_dept.groupby('departement')['nbsinisterDaily'].sum().reset_index()
+                generalized_departement = test_dataset_dep_.groupby('departement')['nbsinisterDaily'].sum().reset_index()
                 generalized_departement = generalized_departement[generalized_departement['nbsinisterDaily'] < 100]
                 generalized_departement = generalized_departement.departement.unique()
             else:
                 model_per_task = None
                 generalized_departement = None
             predTensor, y = graphScale.predict_model_voting_pytorch(
-                test_dataset_dept,
+                test_dataset_dep_,
                 model.feature_names,
                 target_name,
                 False,
@@ -1736,17 +1736,17 @@ def test_dl_model(cfg,
         else:
 
             if not isinstance(model, ProtoFederatedLearning):
-                test_loader = model.create_test_loader(graphScale, test_dataset_dept)
+                test_loader = model.create_test_loader(graphScale, test_dataset_dep_)
                 predTensor, YTensor = model._predict_test_loader(test_loader)
             else:
-                logger.info(test_dataset_dept.columns)
-                predTensor, YTensor = model.predict(test_dataset_dept, graphScale, True)
+                logger.info(test_dataset_dep_.columns)
+                predTensor, YTensor = model.predict(test_dataset_dep_, graphScale, True)
 
             y = YTensor.detach().cpu().numpy()
             predTensor = predTensor.detach().cpu().numpy()
 
         print(y.shape, predTensor.shape)
-        predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, cfg)
+        predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dep_, predTensor, y, dir_train, cfg)
         print(predTensorAll.shape, yAll.shape, test_dataset_deptAll.shape)
 
         scale_unique = np.unique(y[:, scale_index])
@@ -1761,12 +1761,12 @@ def test_dl_model(cfg,
                 predTensor = predTensorAll[mask, -1 - (horizon - H)]
                 y = yAll[mask, :, -1 - (horizon - H)]
 
-                test_dataset_dept = test_dataset_deptAll[test_dataset_deptAll['scale'] == scale]
+                test_dataset_dept = test_dataset_deptAll[test_dataset_deptAll['scale'] == scale].copy(deep=True)
                 test_dataset_dept[model.target_name] = test_dataset_dept[model.target_name].shift(-H, fill_value=0)
                 test_dataset_dept[model.target_name] = np.where(~np.isnan(test_dataset_dept[model.target_name].values), test_dataset_dept[model.target_name].values, 0)
                 
                 run = f'{test_name}_{name}_{H}_{scale}_{prefix_train}'
-                
+
                 if MLFLOW:
                     existing_run = get_existing_run(f'{run}')
                     if existing_run:
@@ -2145,6 +2145,8 @@ def wrapped_train_deep_learning_1D(params):
     val_dataset['weight'] = 1
     test_dataset['weight'] = 1
 
+    print(torch_structure)
+
     custom_model_params = params.get('custom_model_params')
 
     if torch_structure == 'Model_Torch':
@@ -2205,7 +2207,7 @@ def wrapped_train_deep_learning_1D(params):
                                                custom_model_params=custom_model_params, features_importance=False,
                                                use_log=params.get('use_log', True))
     
-    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'], custom_model_params=custom_model_params)
+    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'], min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_1D_federated(params):
@@ -2266,6 +2268,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
+                                    horizon=int(horizon)
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2291,7 +2294,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
-                                    graph_method = graph_method)
+                                    graph_method = graph_method,
+                                    horizon=int(horizon))
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2378,6 +2382,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
+                                    horizon=int(horizon)
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2403,7 +2408,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
-                                    graph_method = graph_method)
+                                    graph_method=graph_method,
+                                    horizon=int(horizon))
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2491,6 +2497,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
+                                    horizon=int(horizon)
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2516,7 +2523,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
-                                    graph_method = graph_method)
+                                    graph_method=graph_method,
+                                    horizon=int(horizon))
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2929,7 +2937,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     torch_structure = params['torch_structure']
     infos = params['infos']
     graph_method = params['graph_method']
-    features = params['features_selected_str']
+    features_occ = params['features_selected_str_occ']
+    features_num = params['features_selected_str_num']
     dir_output = params['dir_output']
     n_run = params['n_run']
     task_type_num = params['task_type_num']
@@ -2948,14 +2957,9 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     for df in [train_dataset, val_dataset, test_dataset]:
         df['binary'] = (df[target_name] > 0).astype(int)
 
-    train_pos = train_dataset[train_dataset[target_name] > 0].reset_index(drop=True)
-    val_pos = val_dataset[val_dataset[target_name] > 0].reset_index(drop=True)
-    test_pos = test_dataset[test_dataset[target_name] > 0].reset_index(drop=True)
-
-    train_pos[target_name] = train_pos[target_name]
-    val_pos[target_name] = val_pos[target_name]
-    test_pos[target_name] = test_pos[target_name]
-
+    train_pos = train_dataset
+    val_pos = val_dataset
+    test_pos = test_dataset
 
     for df in [train_dataset, val_dataset, test_dataset, train_pos, val_pos, test_pos]:
         df['weight'] = 1
@@ -2976,7 +2980,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             lr=params['lr'],
             target_name=target_name,
             out_channels=2,
-            features_name=features,
+            features_name=features_occ,
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-occ-{model}_{infos_occ}',
@@ -2986,6 +2990,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             under_sampling=under_sampling,
             over_sampling=over_sampling,
             n_run=1,
+            horizon=int(horizon)
         )
 
         num_model = Model_Torch(
@@ -2994,8 +2999,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             nbfeatures=nbfeatures,
             lr=params['lr'],
             target_name=target_name,
-            out_channels=params['out_channels'],
-            features_name=features,
+            out_channels=1,
+            features_name=features_num,
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-num-{model}_{infos}',
@@ -3005,6 +3010,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             under_sampling="full",
             over_sampling="full",
             n_run=1,
+            horizon=0
         )
 
     elif torch_structure == 'Model_gnn':
@@ -3028,7 +3034,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             lr=params['lr'],
             target_name=target_name,
             out_channels=2,
-            features_name=features,
+            features_name=features_occ,
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-occ-{model}_{infos_occ}',
@@ -3039,6 +3045,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             over_sampling=over_sampling,
             n_run=1,
             graph_method=graph_method,
+            horizon=int(horizon)
         )
 
         num_model = ModelGNN(
@@ -3049,8 +3056,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             batch_size=batch_size,
             lr=params['lr'],
             target_name=target_name,
-            out_channels=params['out_channels'],
-            features_name=features,
+            out_channels=1,
+            features_name=features_num,
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-num-{model}_{infos}',
@@ -3061,6 +3068,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             over_sampling="full",
             n_run=1,
             graph_method=graph_method,
+            horizon=0
         )
 
     else:
@@ -3072,7 +3080,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
         num_model=num_model,
         name=f'DualTraining-{model}_{infos}',
         task_type=task_type,
-        n_run=n_run
+        n_run=n_run,
+        horizon=int(horizon)
     )
 
     dual_model.create_train_val_test_loader(params['graph'], (train_dataset, train_pos), (val_dataset, val_pos), (test_dataset, test_pos),

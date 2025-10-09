@@ -47,6 +47,16 @@ np.random.seed(42)
 g = torch.Generator()
 g.manual_seed(42)
 
+def plot_score_per_epochs(score_per_epoch, dir_output, name):
+    plt.figure(figsize=(15,5))
+    scores = score_per_epoch['score']
+    epochs = score_per_epoch['epoch']
+    plt.plot(epochs, scores)
+    plt.xlabel('Epochs')
+    plt.ylabel('IoU')
+    plt.savefig(dir_output / f'{name}.png')
+    plt.close('all')
+
 class ReadGraphDataset_2D(Dataset):
     def __init__(self, X : list,
                  Y : list,
@@ -886,7 +896,7 @@ def graph_collate_fn_mesh(batch):
     graph_list.append(dgl.batch(graph_mesh_list))
     graph_list.append(dgl.batch(grid2mesh_list))
     graph_list.append(dgl.batch(mesh2grid_list))
-    
+
     graph_labels_list = torch.cat(graph_labels_list, 0).to(device)
     return node_features, node_labels, graph_list, graph_labels_list
 
@@ -1985,6 +1995,8 @@ class Training():
         else:
             self.id_past_ba = None
 
+        self.prev_idx = []
+
         if self.task_type == "classification":
             # Pour classification : les colonnes one-hot sont du type f"{colunm}_prev_<classe>"
             new_features = [f"{self.target_name}_prev_{i}" for i in range(self.out_channels)]
@@ -2009,11 +2021,11 @@ class Training():
 
         if len(labels.shape) == 3:
             weights = labels[:, weight_idx, H]
-            target = (labels[:, band, -H] > 0).long() if target_is_binary else labels[:, band, H]
+            target = (labels[:, band, H] > 0).long() if target_is_binary else labels[:, band, H]
 
         elif len(labels.shape) == 5:
             weights = labels[:, :, :, weight_idx, H]
-            target = (labels[:, :, :, band, -H] > 0).long() if target_is_binary else labels[:, :, :, band, H]
+            target = (labels[:, :, :, band, H] > 0).long() if target_is_binary else labels[:, :, :, band, H]
 
         elif len(labels.shape) == 4:
             weights = labels[:, :, :, weight_idx,]
@@ -2034,10 +2046,10 @@ class Training():
     def compute_inputs(self, inputs, H, time_steps):
         if H + 1 == 0:
             if len(inputs.shape) == 3:
-                inputs_horizon = inputs[:, :, H - self.ks]
+                inputs_horizon = inputs[:, :, -self.ks:]
 
             elif len(inputs.shape) == 5:
-                inputs_horizon = inputs[:, :, :, :, H - self.ks]
+                inputs_horizon = inputs[:, :, :, :, -self.ks:]
 
             elif len(inputs.shape) == 4:
                 inputs_horizon = inputs
@@ -2046,7 +2058,7 @@ class Training():
         
         else:
             if len(inputs.shape) == 3:
-                inputs_horizon = inputs[:, :, H - self.ks :H + 1]
+                inputs_horizon = inputs[:, :, H - self.ks:H + 1]
 
             elif len(inputs.shape) == 5:
                 inputs_horizon = inputs[:, :, :, :, H - self.ks:H + 1]
@@ -2310,8 +2322,8 @@ class Training():
             
         return loss
     
-    def launch_batch(self, data, criterion):
-        inputs, labels, edges = data
+    def launch_batch(self, data, criterion, batch_type, do_update):
+        inputs, labels, _ = data
         graphs = None
 
         if inputs.shape[0] == 1:
@@ -2356,21 +2368,28 @@ class Training():
                     z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
 
             if H == 0:
-                output, logits, hidden = self.model(inputs_horizon, z_prev=None, edges=edges)
+                output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                if batch_type == 'train' and do_update:
+                    if has_method(criterion, 'update_after_batch'):
+                        criterion.update_after_batch(logits, target)
             else:
                 if self.id_past_risk is not None:
                     inputs_horizon[:, self.id_past_risk, -1] = 0
-                    print(inputs_horizon[:, self.id_past_risk, -1])
                 if self.id_past_ba is not None:
                     inputs_horizon[:, self.id_past_ba, :] = 0
-                    print(inputs_horizon[:, self.id_past_ba, :])
 
                 if self.prev_idx is not None:
                     inputs_horizon[:, self.prev_idx, -1] = output
 
-                output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev, edges=edges)
+                output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
             
             hidden_past.append(hidden)
+
+            if hasattr(self, 'occ_model'):
+                zeros_col = torch.zeros(inputs_horizon.size(0), 1, inputs_horizon.size(2), device=inputs_horizon.device, dtype=inputs_horizon.dtype)
+                inputs_horizon_occ = torch.cat([inputs_horizon, zeros_col], dim=1)  # -> (5, 4)
+                proba_output, proba_logits, proba_hidden = self.occ_model.model(inputs_horizon_occ)
+                logits = torch.cat((logits, proba_output[:, 1].view(-1,1)), dim=-1)
 
             loss = self.calculate_loss(criterion, logits, target, weights, labels)
 
@@ -2402,8 +2421,8 @@ class Training():
                 loss = self.alpha_value * kl_div_loss + (1 - self.alpha_value) * loss + 1e-3 * (torch.log(T) ** 2)
             
             if self.constrastive: # MOON federated training
-                _, _, zprev = self.prev_model(inputs, edges)
-                _, _, zglob = self.global_model(inputs, edges)
+                _, _, zprev = self.prev_model(inputs)
+                _, _, zglob = self.global_model(inputs)
                 loss_constrastive = self.calculate_contrastive_moon_loss(hidden, zprev, zglob, self.moon_temperature_value)
                 loss = loss + self.smooth_value * loss_constrastive
 
@@ -2459,7 +2478,7 @@ class Training():
 
         return total_loss
     
-    def launch_train_loader(self, loader, criterion, optimizer):
+    def launch_train_loader(self, loader, criterion, optimizer, do_update):
 
         self.model.train()
         
@@ -2473,7 +2492,7 @@ class Training():
         
         for i, data in enumerate(loader, 0):
 
-            loss = self.launch_batch(data, criterion)
+            loss = self.launch_batch(data, criterion, 'train', do_update)
 
             if isinstance(loss, int):
                 continue
@@ -2551,7 +2570,7 @@ class Training():
         with torch.no_grad():
 
             for i, data in enumerate(loader, 0):
-                loss = self.launch_batch(data, criterion)
+                loss = self.launch_batch(data, criterion, 'val', do_update=False)
 
                 total_loss += loss.item()
             
@@ -2578,9 +2597,9 @@ class Training():
 
         return model, params
 
-    def func_epoch(self, train_loader, val_loader, optimizer, criterion):
+    def func_epoch(self, train_loader, val_loader, optimizer, criterion, do_update):
 
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer)
+        train_loss = self.launch_train_loader(train_loader, criterion, optimizer, do_update)
 
         if val_loader is not None:
             val_loss = self.launch_val_test_loader(val_loader, criterion)
@@ -2589,10 +2608,12 @@ class Training():
 
         return val_loss, train_loss
 
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
         """
         Train neural network model
         """
+
+        self.score_per_epochs = {}
 
         if MLFLOW:
             existing_run = get_existing_run(f'{self.model_name}_')
@@ -2640,19 +2661,19 @@ class Training():
                 # Expose current epoch to subroutines for logging
                 self._current_epoch = epoch
                 val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
-                                                    optimizer=optimizer, criterion=criterion)
+                                                    optimizer=optimizer, criterion=criterion, do_update=epoch < min_epochs)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
                 epochs_list.append(epoch)
-                if val_loss < BEST_VAL_LOSS:
+                if val_loss < BEST_VAL_LOSS and epoch > min_epochs:
                     BEST_VAL_LOSS = val_loss
                     BEST_MODEL_PARAMS = self.model.state_dict()
                     patience_cnt = 0
                     best_epoch = epoch
                 else:
                     patience_cnt += 1
-                    if patience_cnt >= PATIENCE_CNT:
+                    if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
                         logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
                         save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
                         save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
@@ -3066,11 +3087,15 @@ class Training():
 
                     copy_model = deepcopy(self)
                     copy_model.under_sampling = 'full'
+                    copy_model.horizon = 0
                     copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
                     test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val')
+
+                    test_output = test_output[:, 0]
+                    y = y[:, :, 0]
 
                     prediction = test_output.detach().cpu().numpy()
                     
@@ -3084,7 +3109,7 @@ class Training():
                     dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
                     dff['departement'] = y[:, departement_index]
                     dff[self.target_name] = y[:, -1]
-                    y = y[:, -1]
+                    y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
                     metrics_run = evaluate_metrics(dff, self.target_name, prediction)
                     metrics_run = round_floats(metrics_run)
@@ -3095,6 +3120,8 @@ class Training():
                     ############################# On set test ##############################
                     test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='test')
 
+                    test_output = test_output[:, 0]
+                    y = y[:, :, 0]
 
                     prediction = test_output.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
@@ -3108,7 +3135,7 @@ class Training():
                     dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
                     dff['departement'] = y[:, departement_index]
                     dff[self.target_name] = y[:, -1]
-                    y = y[:, -1]
+                    y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
                     metrics_run = evaluate_metrics(dff, self.target_name, prediction)
                     metrics_run = round_floats(metrics_run)
@@ -3191,7 +3218,8 @@ class Training():
         - Mean score across all IDs.
         """
         predictions, y = self.predict(X, return_y=True)
-        y = y[:, -1]
+        predictions = predictions[:, -1]
+        y = y[:, -1, 0]
         return self.score_with_prediction(predictions, y, sample_weight)
 
     def score_with_prediction(self, y_pred, y, sample_weight=None):
@@ -3223,6 +3251,7 @@ class Training():
                     for H in range(self.horizon + 1):
 
                         orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
+                        orilabels[:, -1] = orilabels[:,  -1 ] > 0 if self.task_type == 'binary' else orilabels[:,  -1 ]
                         inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
                         
                         if self.ks == 0 or H == 0:
@@ -3246,7 +3275,7 @@ class Training():
                                 z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
                         
                         if H == 0:
-                            output, logits, hidden = self.model(inputs_horizon, z_prev=None, edges=None)
+                            output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                         else:
                             if self.id_past_risk is not None:
                                 inputs_horizon[:, self.id_past_risk, :] = 0
@@ -3255,7 +3284,14 @@ class Training():
                             if self.prev_idx is not None:
                                 inputs_horizon[:, self.prev_idx, -1] = F.softmax(logits)
                                 
-                            output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev, edges=None)
+                            output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+                        
+                        hidden_past.append(hidden)
+                        if hasattr(self, 'occ_model'):
+                            zeros_col = torch.zeros(inputs_horizon.size(0), 1, inputs_horizon.size(2), device=inputs_horizon.device, dtype=inputs_horizon.dtype)
+                            inputs_horizon_occ = torch.cat([inputs_horizon, zeros_col], dim=1)  # -> (5, 4)
+                            proba_output, proba_logits, proba_hidden = self.occ_model.model(inputs_horizon_occ)
+                            logits = [logits, proba_logits]
 
                         if 'criterion' in locals() and hasattr(criterion, 'transform'):
                             params = {'inputs' : logits}
@@ -3275,11 +3311,6 @@ class Training():
                                 output = torch.argmax(output, dim=1)
 
                             elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
-                                print(torch.max(output[:, 0]))
-                                print(torch.max(output[:, 1]))
-                                print(torch.max(output[:, 2]))
-                                print(torch.max(output[:, 3]))
-                                print(torch.max(output[:, 4]))
                                 output = torch.argmax(output, dim=1)
 
                         elif prediction_type == 'RawFormulaVal':
@@ -3414,7 +3445,8 @@ class Training():
                        self.device,
                        None,
                        self.target_name,
-                       self.ks)
+                       self.ks,
+                       self.horizon)
         
         predTensor, YTensor = self._predict_test_loader(loader, prediction_type='Class')
 
@@ -3437,7 +3469,8 @@ class Training():
                        self.device,
                        None,
                        self.target_name,
-                       self.ks)
+                       self.ks,
+                       self.horizon)
         
         predTensor, YTensor = self._predict_test_loader(loader, True)
         if return_y:
@@ -3823,6 +3856,7 @@ class SplitTraining(Training):
                             False,
                             self.target_name,
                             self.ks,
+                            self.horizon,
                             False,
                             '')
 
@@ -4034,6 +4068,7 @@ class SplitTraining(Training):
             None,
             self.target_name,
             self.ks,
+            self.horizon
         )
 
         pred_tensor, y_tensor = self._predict_test_loader(loader, True, output_pdf="test")
@@ -4190,13 +4225,14 @@ class DualTraining:
     positive label. Losses and parameters of both sub-models are combined so
     that a single optimisation step updates them simultaneously."""
 
-    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1):
+    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1, horizon=0):
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
+        self.horizon = 0
 
     def train(
         self,
@@ -4250,8 +4286,6 @@ class DualTraining:
                 use_log=use_log,
             )
         
-        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
-
         self.metrics = {}
         tp = 'occ-based'
         
@@ -4274,10 +4308,11 @@ class DualTraining:
             self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, False, custom_model_params=custom_model_params, new_model=True)
             
             ############################# On set val ##############################
-            test_output, y = self._predict_test_loader(self.occ_model.val_loader)
+            test_output, y = self.occ_model._predict_test_loader(self.occ_model.val_loader)
             prediction = test_output.detach().cpu().numpy()
-            
             y = y.detach().cpu().numpy()
+            prediction = prediction[:, 0]
+            y = y[:, :, 0]
         
             dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
             dff['departement'] = y[:, departement_index]
@@ -4289,9 +4324,11 @@ class DualTraining:
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
             ############################# On set test ##############################
-            test_output, y = self._predict_test_loader(self.occ_model.test_loader)
+            test_output, y = self.occ_model._predict_test_loader(self.occ_model.test_loader)
             prediction = test_output.detach().cpu().numpy()
             y = y.detach().cpu().numpy()
+            prediction = prediction[:, 0]
+            y = y[:, :, 0]
         
             dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
             dff['departement'] = y[:, departement_index]
@@ -4302,6 +4339,9 @@ class DualTraining:
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
         
+        self.num_model.occ_model = self.occ_model
+        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
+        del self.num_model.occ_model
         self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
         self.metrics['best_tp'] = tp
 
@@ -4331,49 +4371,81 @@ class DualTraining:
 
             for i, data in enumerate(loader, 0):
                 
-                inputs, orilabels, _ = data
+                inputs, orilabels_, _ = data
 
-                orilabels = orilabels.to(device)
-                orilabels = orilabels[:, :, -1]
+                hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+                pred_horizon = []
+                labels_horizon = []
+                prev_output = None
 
-                #labels = compute_labels(orilabels, self.model.is_graph_or_node, graphs)
+                for H in range(self.horizon + 1):
 
-                inputs_model = inputs
-                output, logits, hidden = self.occ_model.model(inputs_model)
+                    horizon_index = -1 - (self.horizon - H)
+                    orilabels = orilabels_[:, :, horizon_index]
 
-                output = torch.argmax(output, dim=1)
-                output = output.to(torch.float32)
+                    inputs_horizon = self.occ_model.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
 
-                #output = output[weights.gt(0)]
-
-                if torch.all(output == 0):
-                    continue
-
-                output_num_mask = output > 0
-
-                input_num = inputs_model[output_num_mask]
-
-                output_num, logits, hidden = self.num_model.model(input_num)
-
-                if hasattr(self.num_model, 'transform'):
-                    if 'cluster_ids' in required_params(self.num_model.transform):
-                        cluster_ids = orilabels[:, self.cluster_id_index].long()
-                        output_num = self.num_model.transform(output, cluster_ids)
+                    if self.ks == 0 or H == 0:
+                        # pas d'historique, ou premier horizon → pas de z_prev
+                        z_prev = None
                     else:
-                        output_num = self.num_model.transform(output)
+                        # on prend les ks derniers états cachés déjà vus
+                        history = hidden_past[-self.ks:]
+                        # empilement (B, D, L) avec L = len(history)
+                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
-                if prediction_type == 'Class':
-                    if self.num_model.task_type == 'classification' or self.num_model.task_type == 'binary':
-                        output_num = torch.argmax(output, dim=1)
-                    elif self.num_model.task_type == 'regression' and  'egpd' in self.loss:
-                        output_num = torch.argmax(output, dim=1)
-                elif prediction_type == 'RawFormulaVal':
-                    output_num = logits
+                        # padding à gauche si L < ks
+                        L = z_prev.size(2)
+                        if L < self.ks:
+                            B, D = z_prev.size(0), z_prev.size(1)
+                            pad = torch.zeros(
+                                (B, D, self.ks - L),
+                                device=z_prev.device,
+                                dtype=z_prev.dtype
+                            )
+                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                        
+                    if H > 0:
+                        if self.occ_model.id_past_risk is not None:
+                            inputs_horizon[:, self.occ_model.id_past_risk, -1] = 0
+                        if self.occ_model.id_past_ba is not None:
+                            inputs_horizon[:, self.occ_model.id_past_ba, :] = 0
+                        if self.occ_model.prev_idx is not None and prev_output is not None:
+                            inputs_horizon[:, self.occ_model.prev_idx, -1] = prev_output
+
+                    output, logits, hidden = self.occ_model.model(inputs_horizon, z_prev=z_prev)
+
+                    hidden_past.append(hidden)
+                    prev_output = output
+
+                    output_num, logits_num, hidden_num = self.num_model.model(inputs_horizon)
+
+                    if hasattr(self.num_model, 'transform'):
+                        inputs = [logits_num, logits]
+
+                        if 'cluster_ids' in required_params(self.num_model.transform):
+                            cluster_ids = orilabels[:, self.num_model.cluster_id_index].long()
+                            output_num = self.num_model.criterion.transform(inputs, cluster_ids, from_logits=True)
+                        else:
+                            output_num = self.num_model.criterion.transform(inputs, from_logits=True)
+
+                    if prediction_type == 'Class':
+                        if self.num_model.task_type == 'classification' or self.num_model.task_type == 'binary':
+                            output_num = torch.argmax(output, dim=1)
+                        elif self.num_model.task_type == 'regression' and 'tail' in self.num_model.loss:
+                            output_num = torch.round(output_num)
+                    elif prediction_type == 'RawFormulaVal':
+                        output_num = logits
+
+                    output = output_num
+
+                    pred_horizon.append(output[:, None])
+                    labels_horizon.append(orilabels[:, :, None])
                 
-                output[output_num_mask] = output_num
-                
-                pred.append(output)
-                y.append(orilabels)
+                pred_horizon = torch.cat(pred_horizon, dim=1)
+                labels_horizon = torch.cat(labels_horizon, dim=2)
+                pred.append(pred_horizon)
+                y.append(labels_horizon)
                 
             y = torch.cat(y, 0)
             pred = torch.cat(pred, 0)
@@ -4598,7 +4670,7 @@ class ModelGNN(SplitTraining):
             graph_builder = GraphBuilder(self.mesh_file, g_lat_lon_grid, doPrint=False)
 
             self.graph_mesh = graph_builder.create_mesh_graph(None)
-            self.gridh2mesh, graph_mesh = graph_builder.create_g2m_graph(None, self.graph_mesh)
+            self.gridh2mesh, self.graph_mesh = graph_builder.create_g2m_graph(None, self.graph_mesh)
             self.mesh2graph = graph_builder.create_m2g_graph(None)
 
             def _check_non_empty_edges(g, etype, name):
@@ -4610,10 +4682,10 @@ class ModelGNN(SplitTraining):
             _check_non_empty_edges(self.gridh2mesh, ("grid","g2m","mesh"), "gridh2mesh")
             _check_non_empty_edges(self.mesh2graph, ("mesh","m2g","grid"), "mesh2graph")
 
-            if '_ID' not in graph_mesh.edata:
-                graph_mesh.edata['_ID'] = torch.arange(graph_mesh.num_edges(), dtype=torch.int32)
-            if '_ID' not in graph_mesh.ndata:
-                graph_mesh.ndata['_ID'] = torch.arange(graph_mesh.num_nodes(), dtype=torch.int32)
+            if '_ID' not in self.graph_mesh.edata:
+                self.graph_mesh.edata['_ID'] = torch.arange(self.graph_mesh.num_edges(), dtype=torch.int32)
+            if '_ID' not in self.graph_mesh.ndata:
+                self.graph_mesh.ndata['_ID'] = torch.arange(self.graph_mesh.num_nodes(), dtype=torch.int32)
 
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_name], df_train[self.target_name], self.features_name, self.dir_log / '../importance', self.target_name)
@@ -4733,6 +4805,7 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     None,
                                                     self.device, self.ks,
+                                                    self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
                                                     mesh2graph=self.mesh2graph)
@@ -4743,6 +4816,7 @@ class ModelGNN(SplitTraining):
                                                     self.target_name,
                                                     False,
                                                     self.device, self.ks,
+                                                    self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
                                                     mesh2graph=self.mesh2graph)
@@ -4767,20 +4841,20 @@ class ModelGNN(SplitTraining):
                        False,
                        self.target_name,
                        self.ks,
+                        self.horizon,
                        self.graph_mesh,
                         self.gridh2mesh,
                         self.mesh2graph)
 
         return loader
 
-    def launch_batch(self, data, criterion):
+    def launch_batch(self, data, criterion, batch_type, do_update):
 
         if not self.mesh or self.mesh == False:
             inputs, labels, graphs, graphs_id = data
             model_args = (graphs,)
         else:
             inputs, labels, DGLgraphs, graphs_id = data
-            model_args = (DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
 
         if inputs.shape[0] == 1:
             return 0
@@ -4789,6 +4863,7 @@ class ModelGNN(SplitTraining):
         total_loss = None
         prev_output = None
 
+        hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
         for H in range(self.horizon + 1):
             horizon_index = -1 - (self.horizon - H)
 
@@ -4816,6 +4891,26 @@ class ModelGNN(SplitTraining):
 
             inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
 
+            if self.ks == 0 or H == 0:
+                # pas d'historique, ou premier horizon → pas de z_prev
+                z_prev = None
+            else:
+                # on prend les ks derniers états cachés déjà vus
+                history = hidden_past[-self.ks:]
+                # empilement (B, D, L) avec L = len(history)
+                z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                # padding à gauche si L < ks
+                L = z_prev.size(2)
+                if L < self.ks:
+                    B, D = z_prev.size(0), z_prev.size(1)
+                    pad = torch.zeros(
+                        (B, D, self.ks - L),
+                        device=z_prev.device,
+                        dtype=z_prev.dtype
+                    )
+                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                    
             if H > 0:
                 if self.id_past_risk is not None:
                     inputs_horizon[:, self.id_past_risk, -1] = 0
@@ -4826,7 +4921,12 @@ class ModelGNN(SplitTraining):
             else:
                 z_prev = None
 
-            output, logits, hidden = self.model(inputs_horizon, *model_args, z_prev=z_prev)
+            output, logits, hidden = self.model(inputs_horizon, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2], z_prev=z_prev)
+            if batch_type == 'train' and do_update:
+                if has_method(criterion, 'update_after_batch'):
+                    criterion.update_after_batch(logits, target)
+
+            hidden_past.append(hidden)
 
             prev_output = output
 
@@ -4902,39 +5002,53 @@ class ModelGNN(SplitTraining):
                     model_args = (graphs,)
                 else:
                     inputs, orilabels_, DGLgraphs, graphs_id = data
-                    model_args = (DGLgraphs[0], DGLgraphs[1], DGLgraphs[2])
-
+                    
                 orilabels_ = orilabels_.to(device)
 
                 pred_horizon = []
                 labels_horizon = []
 
                 prev_output = None
-                prev_logits = None
 
+                hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
                 for H in range(self.horizon + 1):
 
                     horizon_index = -1 - (self.horizon - H)
                     orilabels = orilabels_[:, :, horizon_index]
 
                     inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
+                    if self.ks == 0 or H == 0:
+                        # pas d'historique, ou premier horizon → pas de z_prev
+                        z_prev = None
+                    else:
+                        # on prend les ks derniers états cachés déjà vus
+                        history = hidden_past[-self.ks:]
+                        # empilement (B, D, L) avec L = len(history)
+                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
+                        # padding à gauche si L < ks
+                        L = z_prev.size(2)
+                        if L < self.ks:
+                            B, D = z_prev.size(0), z_prev.size(1)
+                            pad = torch.zeros(
+                                (B, D, self.ks - L),
+                                device=z_prev.device,
+                                dtype=z_prev.dtype
+                            )
+                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                        
                     if H > 0:
                         if self.id_past_risk is not None:
                             inputs_horizon[:, self.id_past_risk, -1] = 0
                         if self.id_past_ba is not None:
                             inputs_horizon[:, self.id_past_ba, :] = 0
-                        if self.prev_idx is not None and prev_logits is not None:
-                            if prev_logits.ndim > 1 and prev_logits.shape[1] > 1:
-                                prev_values = F.softmax(prev_logits, dim=1)
-                            else:
-                                prev_values = prev_output
-                            inputs_horizon[:, self.prev_idx, -1] = prev_values
+                        if self.prev_idx is not None and prev_output is not None:
+                            inputs_horizon[:, self.prev_idx, -1] = prev_output
 
-                    output, logits, hidden = self.model(inputs_horizon, *model_args)
+                    output, logits, hidden = self.model(inputs_horizon, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2], z_prev=z_prev)
 
+                    hidden_past.append(hidden)
                     prev_output = output
-                    prev_logits = logits
 
                     if prediction_type == 'Class':
 
@@ -5240,7 +5354,10 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             self.global_model.model = deepcopy(initiate_model)
             self.global_model.model_params = deepcopy(model_params)
             local_models = {}
-            
+            self.score_per_epochs = {}
+            self.score_per_epochs['epoch'] = []
+            self.score_per_epochs['score'] = []
+
             seed = int(random.random())
 
             best_global_score = float('-inf')
@@ -5252,6 +5369,12 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                 sample_counts = []
                 
                 for cluster in clusters:
+
+                    if self.federated_cluster == 'departement':
+                        if not is_below_threshold():   # threshold par défaut = 0.35
+                            print(f"\nSkip: {cluster}")
+                            continue
+
                     print(f"\nTraining local model for cluster: {cluster}")
 
                     # Création des datasets pour le cluster fédéré
@@ -5281,7 +5404,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                         local_model.features_name = self.features_name
                         local_model.nbfeatures = 'all'
 
-                    if epoch == 0:
+                    if epoch == 0 or cluster not in local_models.keys():
                         local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False)
                         
                     # Entraînement du modèle local
@@ -5299,6 +5422,8 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
                 # Évaluer le modèle global
                 global_score = self.global_model.score(df_val, df_val[self.target_name])
                 print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+                self.score_per_epochs['epoch'].append(epoch)
+                self.score_per_epochs['score'].append(global_score)
 
                 # Vérifier si le score s'est amélioré
                 if global_score > best_global_score:
@@ -5346,6 +5471,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             metrics_run = evaluate_metrics(dff, self.target_name, test_output)
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
+            plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
 
         self.metrics['best_tp'] = tp
 
@@ -5506,7 +5632,6 @@ class FederatedALA(FederatedLearningModel):
 
         initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
 
-        
         # Vérifier que la méthode d'agrégation est implémentée
         if self.aggregation_method not in ['mean', 'median', 'weighted', 'max']:
             raise NotImplementedError(f"Aggregation method '{self.aggregation_method}' is not implemented.")
@@ -5529,11 +5654,14 @@ class FederatedALA(FederatedLearningModel):
         
         for run in range(self.n_run):
             
+            self.score_per_epochs = {}
             self.model_params = deepcopy(model_params)
             self.global_model.model = deepcopy(initiate_model)
             self.global_model.model_params = deepcopy(model_params)
             self.global_model.eta = self.eta
             local_models = {}
+            self.score_per_epochs['epoch'] = []
+            self.score_per_epochs['score'] = []
             
             best_global_score = float('-inf')
             patience_counter = 0  # Compteur pour l'arrêt anticipé
@@ -5546,8 +5674,13 @@ class FederatedALA(FederatedLearningModel):
                 sample_counts = []
                 
                 for cluster in clusters:
-                    print(f"\nTraining local model for cluster: {cluster}")
 
+                    if self.federated_cluster == 'departement':
+                        if not is_below_threshold():   # threshold par défaut = 0.35
+                            print(f"\nSkip: {cluster}")
+                            continue
+
+                    print(f"\nTraining local model for cluster: {cluster}")
                     # Création des datasets pour le cluster fédéré
                     df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
                         df_train, df_val, df_test, cluster
@@ -5562,7 +5695,7 @@ class FederatedALA(FederatedLearningModel):
                         continue
 
                     # Initialisation du modèle local
-                    if epoch == 0:
+                    if cluster not in local_models.keys():
                         local_model = deepcopy(self.global_model)
                         local_model.ALATraining = False
                         local_model.seed = seed
@@ -5598,7 +5731,7 @@ class FederatedALA(FederatedLearningModel):
                         for param in local_model.params_tp:
                             param.requires_grad = False
                         
-                        if epoch == 1:
+                        if not hasattr(local_model, "weights") and cluster in local_models.keys():
                             local_model_log_params = deepcopy(local_model.model.state_dict())
                             w_t = torch.as_tensor(self.weight, device=local_model.device, dtype=local_model.params_p[0].dtype)
                             local_model.weights = [
@@ -5612,7 +5745,7 @@ class FederatedALA(FederatedLearningModel):
                         self.fedALA_params(local_model)
 
                     # Entraînement du modèle local
-                    local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if epoch < 1 else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
+                    local_model.train(graph, patience_count_local, CHECKPOINT, local_epochs if not hasattr(local_model, "weights") else 1, verbose=False, custom_model_params={'return_hidden' : True}, new_model=False)
                     
                     local_models[cluster] = local_model
                     
@@ -5625,6 +5758,8 @@ class FederatedALA(FederatedLearningModel):
 
                 # Évaluer le modèle global
                 global_score = self.global_model.score(df_val, df_val[self.target_name])
+                self.score_per_epochs['score'].append(global_score)
+                self.score_per_epochs['epoch'].append(epoch)
                 print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
 
                 # Vérifier si le score s'est amélioré
@@ -5668,6 +5803,7 @@ class FederatedALA(FederatedLearningModel):
             metrics_run = evaluate_metrics(dff, self.target_name, test_output)
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
+            plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
 
         self.metrics['best_tp'] = tp
 
@@ -5747,9 +5883,12 @@ class MOONFederatedLearning(FederatedLearningModel):
         self.metrics = {}
         for run in range(self.n_run):
 
+            self.score_per_epochs = {}
             self.global_model.model = deepcopy(initiate_model)
             self.global_model.model_params = deepcopy(model_params)
             local_models = {}
+            self.score_per_epochs['epoch'] = []
+            self.score_per_epochs['score'] = []
             
             best_global_score = float('-inf')
             patience_counter = 0  # Compteur pour l'arrêt anticipé
@@ -5762,8 +5901,13 @@ class MOONFederatedLearning(FederatedLearningModel):
                 sample_counts = []
                 
                 for cluster in clusters:
-                    print(f"\nTraining local model for cluster: {cluster}")
 
+                    if self.federated_cluster == 'departement':
+                        if not is_below_threshold():   # threshold par défaut = 0.35
+                            print(f"\nSkip: {cluster}")
+                            continue
+
+                    print(f"\nTraining local model for cluster: {cluster}")
                     # Création des datasets pour le cluster fédéré
                     df_train_cluster, df_val_cluster, df_test_cluster = self.create_cluster_set(
                         df_train, df_val, df_test, cluster
@@ -5792,7 +5936,7 @@ class MOONFederatedLearning(FederatedLearningModel):
                         local_model.smooth_value = self.smooth_value
                         local_model.constrastive = True
 
-                    if epoch == 0:
+                    if epoch == 0 or cluster not in local_models.keys():
                         local_model.prev_model = self.global_model.model
                         local_model.constrastive = False
                         check_and_create_path(local_model.dir_log)
@@ -5804,7 +5948,7 @@ class MOONFederatedLearning(FederatedLearningModel):
                     local_model.features_name = self.features_name
                     local_model.nbfeatures = 'all'
 
-                    if epoch == 0:
+                    if epoch == 0 or cluster not in local_models.keys():
                         local_model.create_train_val_test_loader(graph, df_train_cluster, df_val_cluster, df_test_cluster, local_epochs, patience_count_local, CHECKPOINT, False, custom_model_params={'return_hidden' : True})
                         self.metrics[cluster] = local_model.metrics
 
@@ -5822,6 +5966,8 @@ class MOONFederatedLearning(FederatedLearningModel):
                 # Évaluer le modèle global
                 global_score = self.global_model.score(df_val, df_val[self.target_name])
                 print(f"\nGlobal Model Score after epoch {epoch + 1}: {global_score:.4f}")
+                self.score_per_epochs['epoch'].append(epoch)
+                self.score_per_epochs['score'].append(global_score)
 
                 # Vérifier si le score s'est amélioré
                 if global_score > best_global_score:
@@ -5861,7 +6007,9 @@ class MOONFederatedLearning(FederatedLearningModel):
             metrics_run = evaluate_metrics(dff, self.target_name, test_output)
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
+            plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
 
+        self.metrics['tp'] == 'client-based'
         self.is_fitted_ = True
         print("\n--- Federated Learning Training Complete ---")
 
