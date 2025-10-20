@@ -71,8 +71,6 @@ class GenerateDatabase():
 
         self.h3 = h3
 
-        #self.elevation, self.lons, self.lats = read_tif(self.spatialParams['dir'] / 'elevation' / self.spatialParams['elevation_file'])
-
     def compute_meteo_stat(self):
         logger.info('Compute compute_meteo_stat')
         check_and_create_path(self.meteostatParams['dir'])
@@ -94,16 +92,14 @@ class GenerateDatabase():
         else:
             code_dept = f'{code_dept}'
 
-        file_subpaths = ['197475/Results/U2018_CLC2012_V2020_20u1_raster100m/U2018_CLC2012_V2020_20u1_raster100m/']
+        #file_subpath = Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data') / 'CORINE' / '197475/Results/U2006_CLC2000_V2020_20u1/U2006_CLC2000_V2020_20u1/U2006_CLC2000_V2020_20u1.tif'
         
-        years = ['2018']
-        raster_corine(self.h3, self.dir_raster, file_subpaths, self.h3tif, self.h3tif_high, src_bounds_path, years, self.dates)
+        #raster_corine(self.h3, self.dir_raster, file_subpath, self.h3tif, self.h3tif_high)
 
-        file_path = [
-                 'ROUTE500_2-1__SHP_LAMB93_FXX_2018-04-09/ROUTE500/1_DONNEES_LIVRAISON_2021-05-00012/R500_2-1_SHP_LAMB93_FXX-ED181/RESEAU_ROUTIER']
+        file_path = Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data') / 'BDROUTE' / 'ROUTE500_2-1__SHP_LAMB93_FXX_2018-04-09/ROUTE500/1_DONNEES_LIVRAISON_2021-05-00012/R500_2-1_SHP_LAMB93_FXX-ED181/RESEAU_ROUTIER'
         
-        raster_route(self.dir_raster, self.h3tif, self.h3tif_high, self.resLon_high, self.resLat_high, file_subpaths, self.h3, self.dates, years)
-
+        raster_route(self.dir_raster, self.h3tif, self.h3tif_high, self.resLon_high, self.resLat_high, file_path, self.h3)
+        
         #if 'corse' not in self.departement:
         #    raster_sat_from_france(self.h3tif, self.h3, self.dir_raster, Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / 'france' / 'data' / 'GEE' / resolution, self.dates)
         #else:
@@ -139,10 +135,10 @@ class GenerateDatabase():
         #    download_foret(code_dept, self.departement, self.spatialParams['dir'])
         #raster_foret(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
-        if not (self.spatialParams['dir'] / 'argile' / 'argile.geojson').is_file():
-            download_argile(Path('/home/caron/Bureau/csv/france/data/argile'), code_dept, self.spatialParams['dir'] / 'argile')
+        #if not (self.spatialParams['dir'] / 'argile' / 'argile.geojson').is_file():
+        #    download_argile(Path('/home/caron/Bureau/csv/france/data/argile'), code_dept, self.spatialParams['dir'] / 'argile')
         
-        raster_argile(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
+        #raster_argile(self.h3tif, self.h3tif_high, self.dir_raster, self.resLon_high, self.resLat_high, self.spatialParams['dir'], self.departement)
 
     def add_air_qualite(self):
         
@@ -517,21 +513,19 @@ class GenerateDatabase():
         sdate = start
         edate = stop
         self.dates = find_dates_between(sdate, edate)
-
+        
         resolutions = {'2x2' : {'x' : 0.02875215641173088,'y' :  0.020721094073767096},
                 '1x1' : {'x' : 0.01437607820586544,'y' : 0.010360547036883548},
                 '0.5x0.5' : {'x' : 0.00718803910293272,'y' : 0.005180273518441774},
                 '0.03x0.03' : {'x' : 0.0002694945852326214,'y' :  0.0002694945852352859}}
         
-        #n_pixel_x = 0.016133099692723363
-        #n_pixel_y = 0.016133099692723363
-
         n_pixel_x = resolutions[resolution]['x']
         n_pixel_y = resolutions[resolution]['y']
         
         self.resLon = n_pixel_x
         self.resLat = n_pixel_y
         self.h3tif, lon, lat = rasterisation(self.clusterSum, n_pixel_y, n_pixel_x, column='cluster', defval=np.nan, name=self.departement+'_low', return_lat_lon=True)
+        
         logger.info(f'Low scale {self.h3tif.shape}')
         
         f = open(self.dir_raster / f'latitude.pkl',"wb")
@@ -568,10 +562,10 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
     logger.info(departement)
     
     #dir_data = Path('/home/caron/Bureau/csv') / departement / 'data'
-    dir_data_disk = Path('/media/caron/X9 Pro1/travaille/Thèse') / 'csv' / departement / 'data'
+    dir_data_disk = Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / departement / 'data'
     dir_data = dir_data_disk 
     #dir_raster = Path('/home/caron/Bureau/csv') / departement / 'raster'
-    dir_raster =  Path('/media/caron/X9 Pro1/travaille/Thèse') / 'csv' / departement / 'raster' / resolution
+    dir_raster =  Path('/media/caron/X9 Pro/travaille/Thèse') / 'csv' / departement / 'raster' / resolution
     
     dir_meteostat = dir_data / 'meteostat'
     check_and_create_path(dir_raster)
@@ -611,8 +605,11 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
     region = gpd.read_file(region_path)
     
     if not (dir_data / 'spatial/hexagones.geojson').is_file():
-        download_hexagones(Path('/media/caron/X9 Pro1/travaille/Thèse/csv/france/data/geo'), region, dir_data / 'spatial', departement)
+        download_hexagones(Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data/geo'), region, dir_data / 'spatial', departement)
 
+    if not (Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data/BDROUTE') / 'ROUTE500_1-0__SHP_LAMB93_FXX_2000-01-01.7z').is_file():
+        download_bdroute(Path('/media/caron/X9 Pro/travaille/Thèse/csv/france/data/BDROUTE'))
+        
     h3 = gpd.read_file(dir_data / 'spatial/hexagones.geojson')
 
     database = GenerateDatabase(departement,
@@ -627,12 +624,12 @@ def launch(departement, resolution, compute_meteostat_features, compute_temporal
                     dir_raster)
     
     database.process(start, stop, resolution)
-    concat_xarrays(dir_raster, find_dates_between(start, stop))
+    #concat_xarrays(dir_raster, find_dates_between(start, stop))
 
 if __name__ == '__main__':
     RASTER = True
-    depts = gpd.read_file('/home/caron/Bureau/csv/france/data/departements/departements-20180101.shp')
-    depts = depts.to_crs("EPSG:4326")
+    #depts = gpd.read_file('/home/caron/Bureau/csv/france/data/departements/departements-20180101.shp')
+    #depts = depts.to_crs("EPSG:4326")
     parser = argparse.ArgumentParser(
         prog='Train',
         description='Create graph and database according to config.py and tained model',
@@ -658,13 +655,13 @@ if __name__ == '__main__':
     resolution = args.resolution
 
     start = '2017-06-12'
-    stop = '2024-06-29'
+    stop = '2024-12-31'
     
     ################## Ain ######################
-    """launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    launch('departement-01-ain', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
     
     ################## Aisne ######################
-    launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    """launch('departement-02-aisne', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
     ################## Allier ######################
     launch('departement-03-allier', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
@@ -764,7 +761,7 @@ if __name__ == '__main__':
 
     ################## Gers ######################
     launch('departement-32-gers', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
-    """
+    
     ################## Gironde ######################
     launch('departement-33-gironde', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
 
@@ -953,6 +950,7 @@ if __name__ == '__main__':
 
     ################## Val-d-Oise ######################
     launch('departement-95-val-d-oise', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)
+    """
     """
     ################## Guadeloupe ######################
     launch('departement-971-guadeloupe', resolution, compute_meteostat_features, compute_temporal_features, compute_spatial_features, compute_air_features, compute_trafic_features, compute_vigicrues_features, compute_nappes_features, start, stop)

@@ -2,7 +2,6 @@ import requests
 from shapely import unary_union, set_precision
 import pandas as pd
 import osmnx as ox
-from sympy import subsets
 import wget
 import subprocess
 from itertools import chain
@@ -12,7 +11,6 @@ import os
 import py7zr
 import glob
 import zipfile
-import geojson
 from tools import *
 
 def myround(x):
@@ -155,6 +153,15 @@ def download_elevation(code_dept: int, geo, dir_output: str) -> None:
         unzip_7z(dir_output / f'COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-04-01.7z', dir_output)
     
     create_elevation_geojson(dir_output / f'COURBE_1-0__SHP_LAMB93_D0{code_dept}_2021-01-01', geo.bounds, dir_output)
+    
+def download_bdroute(dir_output):
+    
+    check_and_create_path(dir_output)
+    
+    if not (dir_output / 'ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03/ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03.7z').is_file():
+        url = 'https://data.geopf.fr/telechargement/download/ROUTE500/ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03/ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03.7z'
+        subprocess.run(['wget', url, '-O', f'{dir_output}/ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03.7z'], check=True)
+        unzip_7z(dir_output / 'ROUTE500_3-0__SHP_LAMB93_FXX_2021-11-03.7z', dir_output)
 
 # Fonction pour télécharger les données de cosia
 def download_cosia(code_dept: int, geo, dir_output: str) -> None:

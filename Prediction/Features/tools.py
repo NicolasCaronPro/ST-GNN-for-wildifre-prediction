@@ -1342,6 +1342,7 @@ def raster_cosia(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, re
     pickle.dump(res3,f)
 
 def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, dept):
+    
     foret = gpd.read_file(dir_data / 'BDFORET' / 'foret.geojson')
     foret = rasterisation(foret, reslat, reslon, 'code', defval=0, name=dept)
     foret = resize_no_dim(foret, tifFile_high.shape[0], tifFile_high.shape[1])
@@ -1353,7 +1354,7 @@ def raster_foret(tifFile, tifFile_high, dir_output, reslon, reslat, dir_data, de
 
     unodes = np.unique(tifFile)
     foret_2 = np.empty((np.max(bands) + 1,*foret.shape))
-
+    
     for band in bands:
         foret_2[band] = influence_index(foret == band, np.isnan(foret))
 
@@ -1647,7 +1648,7 @@ def raster_land(tifFile, tifFile_high, dir_reg, dir_output, dates):
     f = open(dir_output / outputName,"wb")
     pickle.dump(res3,f)
 
-def rasterisation(h3, lats, longs, column='cluster', defval = 0, name='default', dir_output='/media/caron/X9 Pro1/corbeille', return_lat_lon=False):
+def rasterisation(h3, lats, longs, column='cluster', defval = 0, name='default', dir_output='/media/caron/X9 Pro/corbeille', return_lat_lon=False):
     #h3['cluster'] = h3.index
 
     h3.to_file(dir_output + '/' + name+'.geojson', driver='GeoJSON')
@@ -1700,7 +1701,8 @@ def rasterisation(h3, lats, longs, column='cluster', defval = 0, name='default',
         os.remove(dir_output + '/' + name+'.tif')
         return res[0]
     else:
-        return read_tif(dir_output + '/' + name+'.tif')
+        res, lon, lat = read_tif(dir_output + '/' + name+'.tif')
+        return res[0], lon, lat
 
 def reclass_corine_by_index(array):
     """
@@ -1760,11 +1762,11 @@ def load_shp_from_dir(subpath):
     if gdfs:
         gdf_concat = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True), crs=gdfs[0].crs)
     else:
-        print("Aucun shapefile trouvé ou tous les fichiers ont échoué à la lecture.")
+        raise ValueError("Aucun shapefile trouvé ou tous les fichiers ont échoué à la lecture.")
 
     return gdf_concat
 
-def raster_corine(geo, dir_output, file_subpaths, tifFile, tifFile_high, years, dates):
+def raster_corine(geo, dir_output, file_subpath, tifFile, tifFile_high):
     """
     Pour chaque TIFF dans dir_france :
       - masque selon la géométrie 'geo'
@@ -1774,175 +1776,57 @@ def raster_corine(geo, dir_output, file_subpaths, tifFile, tifFile_high, years, 
     """
     dir_output = Path(dir_output)
     dir_output.mkdir(parents=True, exist_ok=True)
-
+    
     unodes = np.unique(tifFile[~np.isnan(tifFile)])
 
     bands = np.arange(0, 10)
 
-    res = np.empty(tifFile.shape)
-    res2 = np.copy(res)
-    res3 = np.copy(res2)
-
-    height, width = tifFile_high[0].shape
-
-    for i, file_path in enumerate(file_subpaths):
-
-        year = years[i]
-        
-        if i == len(years):
-            index_max = -1
-        else:
-            
-            date_min = f'{year}-01-01'
-            date_max = f'{years[i + 1]}-01-01'
-
-            if date_min < dates[0]:
-                date_min = dates[0]
-            if date_max > dates[-1]:
-                date_max = dates[-1]
-
-            index_min = dates.index(date_min)
-            index_max = dates.index(date_max)
-
-        for tif_file in Path(file_path).glob("*.tif"):
-            print(f"📂 Traitement de {tif_file.name}")
-
-            with rasterio.open(tif_file) as src:
-                src_crs = src.crs
-                target_crs = "EPSG:4326"  # CRS géographique (degrés)
-
-                # Reprojeter la géométrie dans le bon CRS
-                if geo.crs != src_crs:
-                    geo_proj = geo.to_crs(src_crs)
-                else:
-                    geo_proj = geo
-                
-                #src_bounds = src_bounds.to_crs(src_crs)
-
-                polygons = unary_union(geo_proj.geometry)
-                # Masquage spatial
-                out_image, out_transform = mask(src, [polygons], crop=True, nodata=0)
-                
-                # Calcul de la résolution cible
-                dst_transform, width, height = calculate_default_transform(
-                    src.crs, target_crs,
-                    out_image.shape[1], out_image.shape[0],
-                    *polygons.bounds,
-                    dst_width=width, dst_height=height,
-                    #resolution=(reslon, reslat)  # ICI en degrés
-                )
-                
-                # Destination reprojetée (1 bande attendue)
-                dst_array = np.empty((1, height, width), dtype=np.float32)
-
-                reproject(
-                    source=out_image,  # on suppose 1 bande représentant les classes
-                    destination=dst_array[0],
-                    src_transform=out_transform,
-                    src_crs=src_crs,
-                    dst_transform=dst_transform,
-                    dst_crs=target_crs,
-                    resampling=Resampling.nearest
-                )
-
-                print(np.unique(dst_array), np.unique(out_image))
-                
-                # Reclassification 1–44 → 1–10
-                classified = reclass_corine_by_index(dst_array[0].astype(np.uint8))
-
-                for node in unodes:
-                    if node not in tifFile_high:
-                        continue
-                    mask1 = tifFile == node
-                    mask2 = tifFile_high == node
-                    if True not in np.unique(mask2):
-                        continue
-                    for band in bands:
-                        res[band, mask1, index_min:index_max] = (np.argwhere(classified[mask2] == band).shape[0] / classified[mask2].shape[0]) * 100
-                        res3[band, mask1] = np.nanmean(classified[band, mask2])
-                    try:
-                        if res[:, mask1, index_min:index_max].shape[1] == 1:
-                            res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max])
-                        else:
-                            res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max][:,0])
-                    except:
-                        continue
-
-    res[:, np.isnan(tifFile)] = np.nan
-    res2[np.isnan(tifFile)] = np.nan
-    res3[:, np.isnan(tifFile)] = np.nan
-
-    outputName = 'corine.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(res,f)
-
-    outputName = 'corine_landcover.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(res2,f)
-
-    outputName = 'corine_influence.pkl'
-    f = open(dir_output / outputName,"wb")
-    pickle.dump(res3,f)
-
-def raster_route(dir_output, tifFile, tifFile_high, reslon, reslat, file_paths, france, dates, years):
+    res = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res2 = np.full((tifFile.shape[0], tifFile.shape[1]), fill_value=np.nan)
+    res3 = np.full((np.max(bands) + 1, tifFile.shape[0], tifFile.shape[1]), fill_value=0.0)
     
-    res = np.empty(tifFile.shape)
-    res2 = np.copy(res)
-    res3 = np.copy(res2)
+    height, width = tifFile_high.shape
+    
+    with rasterio.open(file_subpath) as src:
+        src_crs = src.crs
+        target_crs = "EPSG:4326"  # CRS géographique (degrés)
 
-    unodes = np.unique(tifFile[~np.isnan(tifFile)])
-
-    bands = [0]
-
-    for i, file_path in file_paths:
-        
-        if i == len(years):
-            index_max = -1
+        # Reprojeter la géométrie dans le bon CRS
+        if geo.crs != src_crs:
+            geo_proj = geo.to_crs(src_crs)
         else:
-            
-            date_min = f'{year}-01-01'
-            date_max = f'{years[i + 1]}-01-01'
-
-            if date_min < dates[0]:
-                date_min = dates[0]
-            if date_max > dates[-1]:
-                date_max = dates[-1]
-
-            index_min = dates.index(date_min)
-            index_max = dates.index(date_max)
-
-        osmnx = load_shp_from_dir(file_path)
-        #osmnx = osmnx[osmnx['NB_VOIES'].isin(['1 voie ou 2 voies étroites', '2 voies larges', '3 voies', '4 voies', 'Plus de 4 voies'])].copy()
-        osmnx = osmnx[osmnx['NB_VOIES'].isin(['2 voies larges', '3 voies', '4 voies', 'Plus de 4 voies'])].copy()
-        #osmnx = osmnx[osmnx['NB_VOIES'].isin(['3 voies', '4 voies', 'Plus de 4 voies'])].copy()
-        #osmnx = osmnx[osmnx['NB_VOIES'].isin(['4 voies', 'Plus de 4 voies'])].copy()
-
-        osmnx['label'] = 1  # utile uniquement pour rasterisation ultérieure
-        print(f"Lignes routières filtrées : {osmnx.shape}")
+            geo_proj = geo
         
-        # Harmoniser CRS
-        if osmnx.crs != france.crs:
-            france = france.to_crs(osmnx.crs)
-
-        # -- SPATIAL JOIN : marquer les polygones qui intersectent au moins une route --
-        france = france.copy()
-        france['label'] = 0  # initialisation
-
-        # Utiliser sjoin pour récupérer les intersections
-        intersections = gpd.sjoin(france, osmnx, how='left', predicate='intersects')
-
-        # Récupérer les index de polygones qui intersectent des lignes
-        matched_idx = intersections[~intersections.index_right.isna()].index.unique()
-
-        # Mettre leur label à 1
-        france.loc[matched_idx, 'label'] = 1
+        #src_bounds = src_bounds.to_crs(src_crs)
         
-        france = france.to_crs("EPSG:4326")
+        polygons = unary_union(geo_proj.geometry)
+        # Masquage spatial
+        out_image, out_transform = mask(src, [polygons], crop=True, nodata=0)
+        
+        # Calcul de la résolution cible
+        dst_transform, width, height = calculate_default_transform(
+            src.crs, target_crs,
+            out_image.shape[1], out_image.shape[0],
+            *polygons.bounds,
+            dst_width=width, dst_height=height,
+            #resolution=(reslon, reslat)  # ICI en degrés
+        )
+        
+        # Destination reprojetée (1 bande attendue)
+        dst_array = np.empty((1, height, width), dtype=np.float32)
+        
+        reproject(
+            source=out_image,  # on suppose 1 bande représentant les classes
+            destination=dst_array[0],
+            src_transform=out_transform,
+            src_crs=src_crs,
+            dst_transform=dst_transform,
+            dst_crs=target_crs,
+            resampling=Resampling.nearest
+        )
 
-        print(f"Polygones labellisés : {france['label'].sum()} sur {len(france)}")
-
-        # Rasterisation sur les polygones maintenant labellisés
-        image = rasterisation(france, reslat, reslon, 'label', dir_output=dir_output, name='route')
+        # Reclassification 1–44 → 1–10
+        classified = reclass_corine_by_index(dst_array[0].astype(np.uint8))
 
         for node in unodes:
             if node not in tifFile_high:
@@ -1952,32 +1836,96 @@ def raster_route(dir_output, tifFile, tifFile_high, reslon, reslat, file_paths, 
             if True not in np.unique(mask2):
                 continue
             for band in bands:
-                res[band, mask1, index_min:index_max] = (np.argwhere(image[mask2] == band).shape[0] / image[mask2].shape[0]) * 100
-                res3[band, mask1] = np.nanmean(image[band, mask2])
+                res[band, mask1] = (np.argwhere(classified[mask2] == band).shape[0] / classified[mask2].shape[0]) * 100
             try:
-                if res[:, mask1, index_min:index_max].shape[1] == 1:
-                    res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max])
+                if res[:, mask1].shape[1] == 1:
+                    res2[mask1] = np.nanargmax(res[:, mask1])
                 else:
-                    res2[mask1] = np.nanargmax(res[:, mask1, index_min:index_max][:,0])
+                    res2[mask1] = np.nanargmax(res[:, mask1][:,0])
             except:
                 continue
 
-        res[:, np.isnan(tifFile)] = np.nan
-        res2[np.isnan(tifFile)] = np.nan
-        res3[:, np.isnan(tifFile)] = np.nan
-
-        outputName = 'route.pkl'
-        f = open(dir_output / outputName,"wb")
-        pickle.dump(res,f)
-
-        outputName = 'route_landcover.pkl'
-        f = open(dir_output / outputName,"wb")
-        pickle.dump(res2,f)
-
-        outputName = 'route_influence.pkl'
-        f = open(dir_output / outputName,"wb")
-        pickle.dump(res3,f)
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    res3[:, np.isnan(tifFile)] = np.nan
     
+    outputName = 'corine.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+
+    outputName = 'corine_landcover.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res2,f)
+
+def raster_route(dir_output, tifFile, tifFile_high, reslon, reslat, file_path, geo):
+    
+    
+    unodes = np.unique(tifFile[~np.isnan(tifFile)])
+
+    bands = [0, 1]
+    osmnx = load_shp_from_dir(file_path)
+    osmnx = osmnx[osmnx['NB_VOIES'].isin(['2 voies larges', '3 voies', '4 voies', 'Plus de 4 voies'])].copy()
+    
+    res = np.empty((len(bands), *tifFile.shape))
+    res2 = np.empty(tifFile.shape)
+    
+    osmnx['label'] = 1  # utile uniquement pour rasterisation ultérieure
+    
+    # Harmoniser CRS
+    if osmnx.crs != geo.crs:
+        geo = geo.to_crs(osmnx.crs)
+
+    # -- SPATIAL JOIN : marquer les polygones qui intersectent au moins une route --
+    geo = geo.copy()
+    geo['label'] = 0  # initialisation
+
+    # Utiliser sjoin pour récupérer les intersections
+    intersections = gpd.sjoin(geo, osmnx, how='left', predicate='intersects')
+
+    # Récupérer les index de polygones qui intersectent des lignes
+    matched_idx = intersections[~intersections.index_right.isna()].index.unique()
+
+    # Mettre leur label à 1
+    geo.loc[matched_idx, 'label'] = 1
+    
+    geo = geo.to_crs("EPSG:4326")
+
+    # Rasterisation sur les polygones maintenant labellisés
+    image = rasterisation(geo, reslat, reslon, 'label', dir_output=dir_output.as_posix(), name='route')
+
+    for node in unodes:
+        if node not in tifFile_high:
+            continue
+        mask1 = tifFile == node
+        mask2 = tifFile_high == node
+        if True not in np.unique(mask2):
+            continue
+        for band in bands:
+            res[band, mask1] = (np.argwhere(image[mask2] == band).shape[0] / image[mask2].shape[0]) * 100
+        try:
+            if res[:, mask1].shape[1] == 1:
+                res2[mask1] = 1
+            else:
+                res2[mask1] = np.nanargmax(res[:, mask1][:,0])
+        except Exception as e:
+            print(e)
+            continue
+        
+    plt.imshow(res)
+    plt.show()
+    exit(1)
+    
+    res[:, np.isnan(tifFile)] = np.nan
+    res2[np.isnan(tifFile)] = np.nan
+    
+    outputName = 'route.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res,f)
+    
+    outputName = 'route_landcover.pkl'
+    f = open(dir_output / outputName,"wb")
+    pickle.dump(res2,f)
+
 def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214):
     half_rows = outputShape[0] // 2
     half_cols = outputShape[1] // 2
