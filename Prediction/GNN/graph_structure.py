@@ -383,10 +383,13 @@ class GraphStructure():
             dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
             dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
             companie_geo = gpd.read_file(dir_geo / 'Zones_meteo.geojson')
-            #pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'SECT_METEO', dir_output=Path(''))
-            pred = read_object("zones_meteo.pkl", dir_geo)
+            pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['y'], resolutions[self.resolution]['x'], 'SECT_METEO', dir_output=Path(''))
+            pred = pred[0]
+            print(pred.shape)
+            #pred = read_object("zones_meteo.pkl", dir_geo)
             raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
             pred = resize_no_dim(pred, raster.shape[1], raster.shape[2])
+            print(pred.shape, raster.shape)
             assert raster is not None
             raster = raster[0]
             pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
@@ -814,14 +817,19 @@ class GraphStructure():
                 plt.close('all')
 
             bin = datacube['occurence'].values
+            try:
+                ress = datacube['ressource'].values
+            except:
+                ress = np.zeros(bin.shape)
             influence = datacube['influence'].values
             time = datacube['time_intervention'].values
             burned = datacube['burned_area'].values
 
-            binImageScale, influenceImageScale, timeScale, burnedScale = create_larger_scale_bin(mask, bin, influence, time, burned)
+            binImageScale, influenceImageScale, timeScale, burnedScale, ressScale = create_larger_scale_bin(mask, bin, influence, time, burned, ress)
 
             # Ajouter chaque image comme DataArray dans le Dataset
             datacube['nbsinister'] = xr.DataArray(binImageScale, dims=('latitude', 'longitude', 'date'))
+            datacube['ressource'] = xr.DataArray(ressScale, dims=('latitude', 'longitude', 'date'))
             datacube['risk'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
             datacube['time_intervention'] = xr.DataArray(timeScale, dims=('latitude', 'longitude', 'date'))
             datacube['burned_area'] = xr.DataArray(burnedScale, dims=('latitude', 'longitude', 'date'))

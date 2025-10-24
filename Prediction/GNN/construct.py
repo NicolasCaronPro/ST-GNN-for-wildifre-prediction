@@ -886,6 +886,8 @@ def init(args, dir_output, script):
 
     df['nbsinister_0_0'] = df['nbsinister'].values
     df['burnedarea_0_0'] = df['burned_area'].values
+    df['time_0_0'] = df['time_intervention'].values
+    df['ressource_0_0'] = df['ressource'].values
     df['risk_0_0'] = df['nbsinister'].values
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))

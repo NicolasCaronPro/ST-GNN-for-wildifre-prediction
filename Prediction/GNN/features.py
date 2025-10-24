@@ -367,6 +367,9 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             elif dataset_name == 'georisques':
                 end_date =  allDates[-1]
                 start_date = '2017-06-12'
+            elif dataset_name == 'AlpesMaritimes':
+                end_date =  allDates[-1]
+                start_date = '2017-06-12'
 
             datacube_dept = datacube_dept.sel(date=slice(start_date, end_date))
 
@@ -1115,6 +1118,7 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
         uniques_ids = np.unique(areas[~np.isnan(areas)])
         
         datacube = datacubes[departement]
+        
         datacube_feature = datacube_feature.sel(date=datacube.sel(departement=departement)['date'].values)
         
         if len(datacube) == 0:

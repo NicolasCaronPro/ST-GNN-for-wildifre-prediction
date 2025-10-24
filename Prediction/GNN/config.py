@@ -267,7 +267,9 @@ def get_academic_zone(name, date):
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'saison-encoding', 'mediterranean', 'cluster-encoder']
 
-targets_columns = ['time_intervention',
+targets_columns = [
+                    'ressource',
+                    'time_intervention',
                     'burned_area',
                    'nbsinister_id', 'nbsinister', 'risk']
 

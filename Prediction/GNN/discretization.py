@@ -939,7 +939,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
 
-    targets = ['nbsinister', 'burned_area']
+    targets = ['nbsinister', 'burned_area', 'time_intervention', 'ressource']
 
     for cls, col, tar in itertools.product(classifier, group_col, targets):
         class_risk = class_risk_dict[cls]

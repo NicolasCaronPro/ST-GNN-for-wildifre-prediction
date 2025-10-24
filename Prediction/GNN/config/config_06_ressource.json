@@ -20,8 +20,8 @@
                     "Calendar",
                     "Past_risk",
                     "Past_burnedarea"
+
                   ],
-                  
   "kmeans_features": [],
   "train_years": [2017, 2018, 2019, 2020, 2021],
   "val_years": [2023],
@@ -81,7 +81,7 @@
       "kdays": 10,
       "horizon": 10,
       "nbfeatures": "all",
-      "target": "nbsinister-kmeans-5-Class-Dept",
+      "target": "ressource-kmeans-5-Class-Dept",
       "task": "classification",
       "loss": "wkloss",
       "out_channels": 5,
@@ -89,7 +89,7 @@
       "use_log" : false,
       "params": {}
     }
-       
+   
   ],
   "hyperparameters": {
      "epochs": 3000,

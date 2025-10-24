@@ -223,6 +223,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         else:
             target_name_nbsinister = f'nbsinister_0_0'
             target_name_bunredarea = f'burnedarea_0_0'
+            target_name_time = f'time_0_0'
+            target_name_ressource = f'ressource_0_0'
             target_name_risk = f'risk_0_0'
             #target_name_class = f'class_risk_0_0'
         
@@ -241,8 +243,15 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
             
     df['burnedareaDaily'] = df['burned_area']
     df['nbsinisterDaily'] = df['nbsinister']
+    df['timeDaily'] = df['time_intervention']
+    df['ressDaily'] = df['ressource']
+    
     df['nbsinister'] = df[target_name_nbsinister]
     df['burned_area'] = df[target_name_bunredarea]
+    
+    df['timeIntervention'] = df[target_name_time]
+    df['ressource'] = df[target_name_ressource]
+    
     df['risk'] = df[target_name_risk]
     #df['class_risk'] = df[target_name_class]
 
@@ -1662,6 +1671,8 @@ def test_dl_model(cfg,
 
     test_dataset_dep_.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
+    
+    print(len(allDates))
     print(test_dataset_dep_.date.unique())
     print(allDates[int(test_dataset_dep_.date.min())])
     print(allDates[int(test_dataset_dep_[test_dataset_dep_['weight'] > 0].date.min())])

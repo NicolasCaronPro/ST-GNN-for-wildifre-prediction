@@ -181,6 +181,11 @@ def main():
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
         test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
 
+
+        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
         test_dataset_unscale = read_object(f"df_unscaled_test_{prefix}.pkl", dir_output)
@@ -346,13 +351,13 @@ def main():
         else:
             params = dict(global_params)
             if cfg.training_mode != "dualtraining":
-                train_dataset, features_selected_str = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
+                train_dataset, features_selected_str_training = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
                 val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
                 test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
                 save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
                 save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
                 save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
-                features_selected = features_selected_str
+                features_selected = features_selected_str_training
                 params["features_selected"] = features_selected
                 params["features_selected_str"] = features_selected
             if cfg.doTrain:

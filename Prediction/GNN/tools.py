@@ -152,11 +152,12 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return binImageScale, influenceImageScale"""
 
-def create_larger_scale_bin(input, bin, influence, time, burned):
+def create_larger_scale_bin(input, bin, influence, time, burned, ress):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)
     burnedScale = np.full(influence.shape, np.nan)
+    ressScale = np.full(influence.shape, np.nan)
     
     clusterID = np.unique(input)
 
@@ -168,13 +169,15 @@ def create_larger_scale_bin(input, bin, influence, time, burned):
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
                 timeScale[mask, di] = np.nansum(time[mask, di])
                 burnedScale[mask, di] = np.nansum(burned[mask, di])
+                ressScale[mask, di] = np.nansum(ress[mask, di])
             else:
                 binImageScale[mask, di] = 0
                 influenceImageScale[mask, di] = 0
                 timeScale[mask, di] = 0
                 burnedScale[mask, di] = 0
+                ressScale[mask, di] = 0
 
-    return binImageScale, influenceImageScale, timeScale, burnedScale
+    return binImageScale, influenceImageScale, timeScale, burnedScale, ressScale
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -252,7 +255,7 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-allDates = find_dates_between('2015-01-01', '2025-01-01')
+allDates = find_dates_between('2015-01-01', '2026-01-01')
 
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
@@ -659,7 +662,7 @@ def generate_subgraph(graph, minNumber : int, maxNumber : int, nodes : np.array)
                     
         return newSubNode
 
-def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int):
+def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int, proportion_0_with_positive_weight: float):
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and temporal edges
@@ -700,9 +703,20 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
         x = np.concatenate((x, xts))
 
     if Y is not None:
-        if ks != 0:
-            yts = Y[maskts]
+        if horizon != 0:
+            yts = Y[maskts].copy()
             yts[:, weight_index] = 1
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
             y = np.concatenate((y, yts))
 
     else:
@@ -865,7 +879,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
 
 def construct_graph_with_time_series(graph, date : int,
                                      X : np.array, Y : np.array,
-                                     ks :int, horizon:int, start_features : int) -> np.array:
+                                     ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight) -> np.array:
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and time series X
@@ -917,8 +931,19 @@ def construct_graph_with_time_series(graph, date : int,
             x = np.concatenate((x, xts))
 
         if Y is not None:
-            yts = Y[maskts]
-            yts[:,weight_index] = 1
+            yts = Y[maskts].copy()
+            yts[:, weight_index] = 1
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
             y = np.concatenate((y, yts))
 
     def get_unique_pair_indices(array, graph_id_index, date_index):
@@ -978,7 +1003,7 @@ def construct_graph_with_time_series(graph, date : int,
 
 def construct_time_series(date : int,
                             X : np.array, Y : np.array,
-                            ks :int, horizon:int, start_features : int) -> np.array:
+                            ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight : float) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -1019,8 +1044,19 @@ def construct_time_series(date : int,
         x = np.concatenate((x, xts))
         
         if Y is not None:
-            yts = Y[maskts]
-            yts[:,weight_index] = 1
+            yts = Y[maskts].copy()
+            yts[:, weight_index] = 1
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
             y = np.concatenate((y, yts))
 
     x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
