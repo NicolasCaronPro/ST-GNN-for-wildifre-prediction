@@ -886,8 +886,6 @@ def init(args, dir_output, script):
 
     df['nbsinister_0_0'] = df['nbsinister'].values
     df['burnedarea_0_0'] = df['burned_area'].values
-    df['time_0_0'] = df['time_intervention'].values
-    df['ressource_0_0'] = df['ressource'].values
     df['risk_0_0'] = df['nbsinister'].values
     df['class_risk_0_0'] = 1
     df['month_non_encoder'] = df['date'].apply(lambda x : int(allDates[int(x)].split('-')[1]))
@@ -1039,6 +1037,13 @@ def init(args, dir_output, script):
         if fet not in list(df.columns):
             continue
         df[fet] = df[fet].round(3)
+        
+    ############################# ADD areas ########################################
+    areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
+    
+    df['area'] = 0
+    #for departement in df.departement.unique():
+    #    df.loc[df[df['departement'] == departement].index, 'area'] = areas[name2int[departement]] 
 
     ############################## Save dataframe and features ###################################
 
@@ -1049,6 +1054,8 @@ def init(args, dir_output, script):
 
     save_object(df, f'df_{prefix}.pkl', dir_output)
     save_object(features_name, f'features_name_{prefix}.pkl', dir_output)
+    
+    ##############################
 
     ############################## Return data, graph, sinister point and features_name ################################
     fp['database'] = dataset_name

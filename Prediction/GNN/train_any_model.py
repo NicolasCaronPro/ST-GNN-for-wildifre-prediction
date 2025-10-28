@@ -26,6 +26,7 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_unique,
     wrapped_train_deep_learning_1D_alafederated,
     wrapped_train_deep_learning_1D_dualtraining,
+    wrapped_train_deep_learning_1D_distrib2classTraining,
     wrapped_train_deep_learning_2D,
     wrapped_train_deep_learning_distallation,
     test_fire_index_model
@@ -43,12 +44,18 @@ from GNN.config import (
     encoding,
     METHODS_SPATIAL_TRAIN,
 )
-from GNN.tools import check_and_create_path, get_features_name_list, read_object, save_object, get_features_selected_for_time_series_for_2D, get_features_name_lists_2D, get_saison_encoding
-from GNN.discretization import post_process_model
+from GNN.tools import (check_and_create_path, get_features_name_list,
+                       read_object, save_object, get_features_selected_for_time_series_for_2D,
+                       get_features_name_lists_2D, get_saison_encoding,
+                       #compute_department_areas_km2_dict_wgs84_union
+                       )
+
+from GNN.discretization import post_process_model, get_post_process_model
 from GNN.features import add_past_risk, shift_target
 from GNN.dico_departements import *
 import numpy as np
 import pandas as pd
+import geopandas as gpd
 
 from tools import get_saison
 from features import is_mediterranean_dept
@@ -110,6 +117,14 @@ def main():
         dir_post_process = dir_output / 'post_process'
 
         features_selected = np.arange(len(features_selected_str))
+        
+        train_dataset['burnedarea'] = train_dataset['burned_area'].values
+        val_dataset['burnedarea'] = val_dataset['burned_area'].values
+        test_dataset['burnedarea'] = test_dataset['burned_area'].values
+        
+        train_dataset['burnedareaRoot'] = train_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        val_dataset['burnedareaRoot'] = val_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
 
         post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
@@ -157,6 +172,30 @@ def main():
         train_dataset = read_object(f"df_train_{prefix}.pkl", dir_output)
         val_dataset = read_object(f"df_val_{prefix}.pkl", dir_output)
         test_dataset = read_object(f"df_test_{prefix}.pkl", dir_output)
+        
+        train_dataset['burnedarea'] = train_dataset['burned_area'].values
+        val_dataset['burnedarea'] = val_dataset['burned_area'].values
+        test_dataset['burnedarea'] = test_dataset['burned_area'].values
+        
+        train_dataset['burnedareaRoot'] = train_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        val_dataset['burnedareaRoot'] = val_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        
+        train_dataset['area'] = 0
+        val_dataset['area'] = 0
+        test_dataset['area'] = 0
+        #if 'area' not in train_dataset.columns:
+        #if True:
+        #    geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+        #    areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
+                        
+        #    print(areas)
+
+        #    train_dataset['area'] = 0.0
+        #    for departement in train_dataset.departement.unique():
+        #        train_dataset.loc[train_dataset[train_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+        #        val_dataset.loc[val_dataset[val_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+        #        test_dataset.loc[test_dataset[test_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
 
         train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
         val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
@@ -170,7 +209,9 @@ def main():
         val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
         test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
 
-        if 'nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past' not in train_dataset.columns:
+        print('burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns)
+        
+        if 'burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
@@ -180,11 +221,6 @@ def main():
         train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
         test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
-
-
-        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
 
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
@@ -253,10 +289,6 @@ def main():
     train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
     val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
     test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
-
-    train_dataset['burnedarea'] = train_dataset['burned_area'].values
-    val_dataset['burnedarea'] = val_dataset['burned_area'].values
-    test_dataset['burnedarea'] = test_dataset['burned_area'].values
     
     prefix = f"full_all_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
 
@@ -295,11 +327,12 @@ def main():
             )
 
             if cfg.training_mode == 'voting':
-                voting_model = define_voting_dl_models(m['type'], m['kdays'], m['out_channels'], m['n_run'], m['loss'])[0]
+                voting_model = define_voting_dl_models(m['type'], m['kdays'], m['horizon'], m['out_channels'], m['n_run'], m['loss'])[0]
 
             model_name = f"{m['type']}_{info}"
         is_tree = m["type"].lower() in TREE_MODELS
-
+        post_process = get_post_process_model(train_dataset, 'kmeans', m['target'], 'departement', dir_log=dir_output / 'clusterers', n_clusters=5) if m.get('apply_discretization', False) else None 
+        global_params['post_process'] = post_process
         if is_tree:
             name = 'check_'+cfg.scaling + '/' + prefix + '/' + 'baseline'
             model_tuple = (model_name, None, None, None, m.get("n_run", 1))
@@ -350,16 +383,53 @@ def main():
             stat_model_names.append(model.name)
         else:
             params = dict(global_params)
-            if cfg.training_mode != "dualtraining":
-                train_dataset, features_selected_str_training = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
-                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
+
+            if cfg.training_mode == 'distrib2classtraining':
+                train_dataset, _ = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
+                val_dataset, features_class = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
                 test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
-                save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
-                save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
-                save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
-                features_selected = features_selected_str_training
+                prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
+                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
+                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
+                features_selected = features_selected_str
+                
                 params["features_selected"] = features_selected
                 params["features_selected_str"] = features_selected
+                
+                #params["features_selected_class"] = features_class
+                #params["features_selected_str_class"] = features_class
+                
+            elif cfg.training_mode != "dualtraining":
+                train_dataset, _ = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
+                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
+                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
+                prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
+                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
+                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
+                features_selected = features_selected_str
+                params["features_selected"] = features_selected
+                params["features_selected_str"] = features_selected
+            else:
+                train_dataset, features_selected_str_occ = shift_target(train_dataset, m["target"], features_selected_str, m["task_occ"], m['out_channels_occ'])
+                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_occ"], m["out_channels_occ"])
+                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_occ"], m['out_channels_occ'])
+                
+                params["features_selected_occ"] = features_selected_str_occ
+                params["features_selected_str_occ"] = features_selected_str_occ
+                
+                train_dataset, features_selected_str_num = shift_target(train_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'])
+                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_num"], m["out_channels_num"])
+                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_num"], m['out_channels_num'])
+
+                params["features_selected_num"] = features_selected_str_num
+                params["features_selected_str_num"] = features_selected_str_num
+
+                prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
+                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
+                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
+                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
             if cfg.doTrain:
                 if m.get("mesh_file"):
                     params["mesh_file"] = m.get("mesh_file")
@@ -500,23 +570,6 @@ def main():
                     wrapped_train_deep_learning_1D_splittraining(params)
 
                 elif cfg.training_mode == "dualtraining":
-                    train_dataset, features_selected_str_occ = shift_target(train_dataset, m["target"], features_selected_str, m["task_occ"], m['out_channels_occ'])
-                    val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_occ"], m["out_channels_occ"])
-                    test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_occ"], m['out_channels_occ'])
-
-                    params["features_selected_occ"] = features_selected_str_occ
-                    params["features_selected_str_occ"] = features_selected_str_occ
-
-                    train_dataset, features_selected_str_num = shift_target(train_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'])
-                    val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_num"], m["out_channels_num"])
-                    test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_num"], m['out_channels_num'])
-
-                    params["features_selected_num"] = features_selected_str_num
-                    params["features_selected_str_num"] = features_selected_str_num
-
-                    save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
-                    save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
-                    save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
                     
                     params.update(
                     {
@@ -526,6 +579,7 @@ def main():
                         "min_epochs": m.get('min_epochs', 1),
                         "out_channels": m["out_channels"],
                         "n_run": m["n_run"],
+                        "target_num": m.get("target_num"),
                         "custom_model_params": m.get("params"),
                         "k_days": m.get("kdays", 0),
                         "horizon": m.get("horizon", 0),
@@ -535,6 +589,26 @@ def main():
                     }
                     )
                     wrapped_train_deep_learning_1D_dualtraining(params)
+                    
+                elif cfg.training_mode == "distrib2classtraining":
+                    
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "loss_distrib" : m["loss_distrib"],
+                        "loss_class" : m["loss_class"],
+                        "infos": info,
+                        "min_epochs": m.get('min_epochs', 1),
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
+                        "dir_output" : dir_output,
+                        "use_log" : m.get('use_log', True)
+                    }
+                    )
+                    wrapped_train_deep_learning_1D_distrib2classTraining(params)
 
                 elif cfg.training_mode == 'voting':
                     params.update(
@@ -689,8 +763,10 @@ def main():
             elif cfg.training_mode == 'dualtraining':
                 test_name = f'DualTraining-{m["type"]}_{info}'
                 dl_model_names.append(test_name)
+            elif cfg.training_mode == 'distrib2classtraining':
+                test_name = f'Distribution2Class-{m["type"]}_{info}'
+                dl_model_names.append(test_name)
             
-
     if cfg.doTest:
         host = "pc"
         dir_train = Path(name_dir)

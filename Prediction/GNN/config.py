@@ -265,11 +265,10 @@ def get_academic_zone(name, date):
         return dict_zones[name][0]
     return dict_zones[name][1]
 
-ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'saison-encoding', 'mediterranean', 'cluster-encoder']
+ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'saison-encoding', 'mediterranean', 'cluster-encoder', 'area']
 
-targets_columns = [
-                    'ressource',
-                    'time_intervention',
+targets_columns = ['time_intervention',
+                   'ressource',
                     'burned_area',
                    'nbsinister_id', 'nbsinister', 'risk']
 
@@ -315,6 +314,7 @@ nbsinister_index = targets_columns.index('nbsinister')
 burned_index = targets_columns.index('burned_area')
 risk_index = targets_columns.index('risk')
 time_intervention_index = targets_columns.index('time_intervention')
+area_index = ids_columns.index('area')
 
 ##########################################################################
 

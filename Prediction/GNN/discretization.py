@@ -908,6 +908,18 @@ class ScalerClassRisk:
             return self.predict(X, sinisters, ids, ids_preprocessor)
         else:
             return self.fit_predict(X, sinisters, ids, ids_preprocessor)
+        
+def get_post_process_model(train_dataset, model, target, group_col, dir_log, n_clusters=5):
+    if (dir_log / f'{model}_{target}_{group_col}.pkl').is_file():
+        return read_object(f'{model}_{target}_{group_col}.pkl', dir_log)
+    
+    class_risk_dict = {'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                    "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
+    
+    obj2 = ScalerClassRisk(col_id=group_col, dir_output = Path('./'), target=target, scaler=None, class_risk=class_risk_dict[model])
+    obj2.fit(train_dataset[target].values, train_dataset[target].values, train_dataset[group_col].values)
+    save_object(obj2, f'{model}_{target}_{group_col}.pkl', dir_log)
+    return obj2
 
 def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graph, n_clusters=5):
 
@@ -939,9 +951,13 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
 
-    targets = ['nbsinister', 'burned_area', 'time_intervention', 'ressource']
+    targets = ['burnedareaRoot', 'burned_area', 'nbsinister', 'time_intervention', 'ressource']
 
     for cls, col, tar in itertools.product(classifier, group_col, targets):
+        
+        if f'{tar}-{cls}-{n_clusters}-Class-{col}' in train_dataset_.columns:
+            continue
+        
         class_risk = class_risk_dict[cls]
         col_name = group_col_dict[col]
 
@@ -954,7 +970,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         test_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(test_dataset_[tar].values,  test_dataset_[tar].values, test_dataset_[col_name].values)
         
         res[obj2.name] = obj2
-
+        
         new_cols.append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
 
         ######################################################################################
@@ -989,6 +1005,10 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     group_col = ['Dept']
 
     for conv_type, kernel, cls, col, tar in itertools.product(conv_types, kernels, classifier, group_col, targets):
+        
+        if f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}" in train_dataset_.columns:
+            continue
+        
         logger.info(f"Testing with convolution type: {conv_type} {kernel} {cls} {col} {tar}")
 
         class_risk = class_risk_dict[cls]

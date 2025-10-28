@@ -2307,9 +2307,9 @@ def get_loss_function(loss_name, **loss_params):
         criterion = get_loss_function(loss_name, **loss_params)
         return LossPerId(criterion=criterion, id=id)
     
-    if 'area' in loss_name or 'area-global' in loss_name or 'distillation' in loss_name:
-        vec = loss_name.split('-')
-        loss_name = vec[0]
+    #if 'area' in loss_name or 'area-global' in loss_name or 'distillation' in loss_name:
+    #    vec = loss_name.split('-')
+    #    loss_name = vec[0]
 
     if '-' in loss_name:
         import re
@@ -2350,6 +2350,8 @@ def get_loss_function(loss_name, **loss_params):
                     loss_params[key] = saison_index
                 elif val == 'med':
                     loss_params[key] = med_index
+                elif val == 'area':
+                    loss_params[key] = area_index
                 else:
                     raise ValueError(f'Unknown value of id {key}')
             else:
@@ -2374,7 +2376,13 @@ def get_loss_function(loss_name, **loss_params):
             "cdw":                         lambda: CDWCELoss(**loss_params),
             "mcewk":                       lambda: MCEAndWKLoss(**loss_params),
             "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
-            "tail":                        lambda: EGPDNLLLoss(),
+            "egpd":                        lambda: EGPDNLLLoss(),
+            "degpd":                       lambda: dEGPDLossTrunc(),
+            "pdegpd":                      lambda: PredictdEGPDLossTruncMostProbable(),
+            "pdegpd2":                      lambda: PredictdEGPDLossTrunc2(),
+            "pdegpdCluster":               lambda : PredictdEGPDLossTruncClusterIDs(**loss_params),
+            "degpdCluster":                lambda: dEGPDLossTruncClusterIDs(**loss_params),
+            "egpdRoot":                    lambda: EGPDNLLLossSqrt(**loss_params),
             "bceloss":                     lambda: BCELoss(**loss_params),
             "TailCDF":                     lambda: IntervalCELoss(**loss_params),
             "TailCDFEdges":                lambda: IntervalCELosEdges(**loss_params),
@@ -2382,7 +2390,6 @@ def get_loss_function(loss_name, **loss_params):
             "bulkTailCDF":                 lambda: BulkTailMixtureIntervalCELoss(**loss_params),
             "bulkTailCDFCluster":          lambda: BulkTailMixtureIntervalCELossClusterIDs(**loss_params),
             "TailCDFCluster":              lambda: IntervalCEClusterIDs(**loss_params),
-            "bulktail":                    lambda: BulkTailNLLLoss(),
             "wkloss":                      lambda: WKLoss(**loss_params),
             "dwk":                         lambda: DiceAndWKLoss(**loss_params),
             "odwk":                        lambda: OrdinalDiceLossAndWKLoss(**loss_params),
@@ -2767,15 +2774,15 @@ def define_voting_trees_model(training_mode, dataset_name, scale, graph_construc
     
     return res
 
-def define_voting_dl_models(mt, kdays, out_channels, run, loss='weightedcrossentropy'):
+def define_voting_dl_models(mt, kdays, horizon, out_channels, run, loss='weightedcrossentropy'):
     ##############################################
     models = []  # Liste pour contenir tous les modèles
 
     # Configurations de undersampling
-    m1_undersampling = f'search_full_{kdays}_all'
-    m2_undersampling = f'search_full_{kdays}_all'
-    m3_undersampling = f'search_full_{kdays}_all'
-    m4_undersampling = f'search_full_{kdays}_all'
+    m1_undersampling = f'search_full_{kdays}_{horizon}_all'
+    m2_undersampling = f'search_full_{kdays}_{horizon}_all'
+    m3_undersampling = f'search_full_{kdays}_{horizon}_all'
+    m4_undersampling = f'search_full_{kdays}_{horizon}_all'
 
     # Modèles m2
     for nb_clusters in ['1', '3', '5', 'Specialized']:
@@ -2805,11 +2812,11 @@ def define_voting_dl_models(mt, kdays, out_channels, run, loss='weightedcrossent
             model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, loss, 'classification')
             models.append(model)
 
-    mlast = f'{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
+    mlast = f'{mt}_search_full_{kdays}_{horizon}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
     models.append(mlast)
 
     # Nom du modèle principal
-    m = f'filter-{mt}_search_full_{kdays}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
+    m = f'filter-{mt}_search_full_{kdays}_{horizon}_all_one_nbsinister-kmeans-5-Class-Dept_classification_{loss}'
     #m = f'filter_full_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy'
 
     # Retourner la structure finale

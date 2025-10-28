@@ -1,4 +1,3 @@
-from ast import arg
 from GNN.features_2D import *
 
 def encode_from_xarray(target, trainDates, expe, train_departements, dir_output, resolution, graph):
