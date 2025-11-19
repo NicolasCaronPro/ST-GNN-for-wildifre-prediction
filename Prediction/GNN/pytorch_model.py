@@ -1193,7 +1193,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False, proportion_0_with_positive_weight=1.0):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -1232,7 +1232,7 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
     print(ks, horizon)
     for id in date_ids:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
+            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns))
             if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
@@ -1242,9 +1242,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
                 Ys.append(y)
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
+            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
+            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
 
         if x is None:
             continue
@@ -1273,8 +1273,6 @@ def create_dataset(graph,
                     mesh2graph=None
                     ):
     
-    proportion_0_with_positive_weight = df_train[(df_train[target_name] == 0) & (df_train['weight'] > 0)].shape[0] / df_train[(df_train[target_name] == 0)].shape[0]
-    
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
     x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns + [target_name]].values
@@ -1286,15 +1284,15 @@ def create_dataset(graph,
     dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
 
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
-    
+
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_with_positive_weight)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_with_positive_weight)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_with_positive_weight)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1329,19 +1327,17 @@ def create_train_dataset(graph,
                     graph_mesh=None,
                     gridh2mesh=None,
                     mesh2graph=None):
-    
-    proportion_0_with_positive_weight = df_train[(df_train[target_name] == 0) & (df_train['weight'] > 0)].shape[0] / df_train[(df_train[target_name] == 0)].shape[0]
 
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
-    print('weight', df_train['weight'].unique())
+    #print('weight', df_train['weight'].unique())
 
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
 
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_with_positive_weight)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1380,10 +1376,10 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, 1.0)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, graph_mesh is None, 1.0)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
@@ -1927,6 +1923,45 @@ def create_dataset_2D(graph,
         test_datset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
     return train_dataset, val_dataset, test_dataset
 
+def to_numpy(x):
+    if isinstance(x, torch.Tensor):
+        return x.detach().cpu().numpy()
+    return np.asarray(x)
+
+def build_dataframe(
+    inputs_horizon: torch.Tensor,   # shape: (X, F, T)
+    labels: torch.Tensor,           # shape: (X, L, T)
+    features_name,                  # list[str], len F
+    ids_columns,                    # list[str]
+    targets_columns,                # list[str]
+    target_name                     # str
+) -> pd.DataFrame:
+    # --- vérifs de shapes ---
+    X, F, T = inputs_horizon.shape
+    X2, L, T2 = labels.shape
+    assert X == X2,  f"X mismatch: {X} vs {X2}"
+    assert T == T2,  f"T mismatch: {T} vs {T2}"
+    expected_L = len(ids_columns) + len(targets_columns) + 1
+    assert L == expected_L, f"L mismatch: got {L}, expected {expected_L}"
+
+    # --- (X, F, T) -> (X, T, F) -> (X*T, F)
+    inputs_np = to_numpy(inputs_horizon).transpose(0, 2, 1).reshape(-1, F)
+
+    # --- (X, L, T) -> (X, T, L) -> (X*T, L)
+    labels_np = to_numpy(labels).transpose(0, 2, 1).reshape(-1, L)
+
+    # --- colonnes ---
+    label_cols = list(ids_columns) + list(targets_columns) + [target_name]
+    all_cols = list(map(str, features_name)) + list(map(str, label_cols))
+
+    # --- DataFrame final (large) ---
+    data = np.concatenate([inputs_np, labels_np], axis=1)
+    df = pd.DataFrame(data, columns=all_cols)
+
+    # Toujours des noms de colonnes str
+    df.columns = df.columns.astype(str)
+    return df
+
 class WrapperModel(torch.nn.Module):
     def __init__(self, original_model, F, T, edges, horizon=0):
         super().__init__()
@@ -2022,6 +2057,17 @@ class Training():
         if len(self.prev_idx) == 0:
             self.prev_idx = None
 
+    def remove_graph(self):
+        del self.graph
+        
+    def clean(self):
+        del self.df_train
+        del self.df_val
+        del self.df_test
+        del self.train_loader
+        del self.val_loader
+        del self.test_loader
+    
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs, H):
         weight_idx = ids_columns.index('weight')
         target_is_binary = self.task_type == 'binary'
@@ -2035,7 +2081,7 @@ class Training():
             target = (labels[:, :, :, band, H] > 0).long() if target_is_binary else labels[:, :, :, band, H]
 
         elif len(labels.shape) == 4:
-            weights = labels[:, :, :, weight_idx]
+            weights = labels[:, :, :, weight_idx,]
             target = (labels[:, :, :, band] > 0).long() if target_is_binary else labels[:, :, :, band]
 
         else:
@@ -2090,8 +2136,6 @@ class Training():
             wei = torch.masked_select(wei, wei.gt(0))
         else:
             wei = wei.long()
-            if not self.student_train: # works on probability
-                tar = tar.long()
 
             tar = tar[wei.gt(0)]
             out = out[wei.gt(0)]
@@ -2112,7 +2156,13 @@ class Training():
         if areas is not None:
             additionnal_params['areas'] = areas
         
-        return criterion(out, tar, **additionnal_params)
+        
+        try:
+            additionnal_params['sample_weight'] = wei
+        
+            return criterion(out, tar, **additionnal_params)
+        except:
+            return criterion(out, tar)
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
 
@@ -2274,7 +2324,7 @@ class Training():
                 target = target.long()
 
             inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
-        
+
             if H == 0:
                 z_prev = None
             else:
@@ -2308,7 +2358,7 @@ class Training():
                     inputs_horizon[:, self.id_past_ba, -H:] = 0
                 if self.prev_idx is not None:
                     inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-                    
+
                 output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
             
             hidden_past.append(hidden)
@@ -2318,31 +2368,72 @@ class Training():
             
             if self.student_train: # distallation traning
                 criterion_teacher = self.get_loss('kldivloss')
-                df_test = pd.DataFrame(inputs_horizon[:, :, -1], columns=self.features_name)
-                df_test.columns = df_test.columns.astype(str)
+                #df_test = build_dataframe(inputs_horizon, labels, self.features_name, ids_columns, targets_columns, self.target_name)
                 if self.top_model != 'task':
-                    teacher_logits = self.teacher.predict(df_test,
-                                                                weights_average=self.weights_average,
-                                                                top_model=self.top_model, id_col=(None, None),
-                                                                prediction_type='RawFormulaVal')
+                    teacher_logits, _ = self.teacher.predict((inputs_horizon, labels, None),
+                                                          hard_or_soft='soft',
+                                                        weights_average=self.weights_average,
+                                                        top_model=self.top_model, id_col=(None, None),
+                                                        prediction_type='RawFormulaVal', aggregation=False)
                 else:
-                    teacher_logits = self.teacher.predict_with_tasks(df_test,
+                    teacher_logits, _ = self.teacher.predict_with_tasks((labels, inputs_horizon, None),
                                                                     weights_average=self.weights_average,
-                                                                    id_col=(None, None), proba='RawFormulaVal')
+                                                                    id_col=(None, None), proba='RawFormulaVal', aggregation=False)
                 
-                teacher_logits = torch.Tensor(teacher_logits, device=inputs.device).to(torch.float32)
-
-                T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
+                if isinstance(teacher_logits, list):
+                    teacher_logits = torch.stack(
+                        [t.to(device=inputs.device, dtype=torch.float32) for t in teacher_logits],
+                        dim=0
+                    )
+                else:
+                    teacher_logits = torch.as_tensor(teacher_logits, device=inputs.device, dtype=torch.float32)    
                 
-                p_teacher = F.softmax(teacher_logits / T, dim=1)
-                p_student = F.log_softmax(logits / T, dim=1)
+                #T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
+                T = 1.0
+                
+                p_student = F.log_softmax(logits / T, dim=-1)
+                p_teacher = F.softmax(teacher_logits / T, dim=-1)
+                
+                #print(torch.unique(p_student))
+                
+                device = p_student.device
+                models_to_mean, weights2use, self_idx = self.teacher.get_weights(self.top_model, return_self_model_idx=True)
+                
+                if self.distillation_training_mode == 'normal':
+                    p_teacher = self.teacher.aggregate_probabilities_tensor(p_teacher, models_to_mean, weights2use)
+                    #kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False)
+                    kl_div_loss = F.kl_div(p_student, p_teacher, reduction='batchmean') * (T * T)
+                    #kl_div_loss = (torch.sum(p_teacher * (p_teacher.log() - p_student)) / p_student.size()[0]) * (T**2)
+                    
+                elif self.distillation_training_mode == 'allTeacher':
+                    mask = torch.ones(teacher_logits.shape[0], dtype=torch.bool, device=device)
+                    mask[self_idx] = False
 
-                target = target / T
+                    # 2) Sélection des teachers et des poids
+                    p_teacher_sel = p_teacher[mask]                      # [M', B, C]
+                    if p_teacher_sel.numel() == 0:
+                        # Fallback: pas de teacher restant -> KD = 0
+                        kl_div_loss = p_student.new_zeros(())
+                    else:
+                        if weights2use is None:
+                            w = torch.full((p_teacher_sel.shape[0],), 1.0/p_teacher_sel.shape[0],
+                                            device=device, dtype=dtype)
+                        else:
+                            w_all = torch.as_tensor(weights2use, device=device, dtype=dtype)
+                            w = w_all[mask]
+                            #w = w / w.sum().clamp_min(1e-12)
 
-                kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False) * (T * T)
+                        # 3) KL par teacher (entrée = log-probas élève, cible = probas teacher)
+                        kl_terms = torch.stack([
+                            F.kl_div(p_student, p_teacher_sel[m], reduction='batchmean')
+                            for m in range(p_teacher_sel.shape[0])
+                        ])  # [M']
 
-                loss = self.alpha_value * kl_div_loss + (1 - self.alpha_value) * loss + 1e-3 * (torch.log(T) ** 2)
-            
+                        # 4) Moyenne pondérée + facteur T^2
+                        kl_div_loss = (T * T) * torch.dot(w, kl_terms)
+                
+                loss = (1 - self.alpha_value) * kl_div_loss + self.alpha_value * loss
+                
             if self.constrastive: # MOON federated training
                 _, _, zprev = self.prev_model(inputs)
                 _, _, zglob = self.global_model(inputs)
@@ -3006,14 +3097,18 @@ class Training():
                     df_combined = self.split_dataset(df_train_copy, nb, reset=False)
 
                     # Mettre à jour df_train pour l'entraînement
+                    #df_train_copy["weight"] = df_combined["weight"].reindex(df_train_copy.index, fill_value=0)
+                    
                     df_train_copy['weight'] = 0
+                    weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
                     df_train_copy.loc[df_combined.index, 'weight'] = 1
-
+                    #df_train_copy.loc[df_combined.index, 'weight'] = weight
+                    
                     copy_model = deepcopy(self)
                     copy_model.under_sampling = 'full'
-                    #copy_model.horizon = 0
+                    copy_model.horizon = 0
                     copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
-                    copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
+                    copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
                     test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val')
@@ -3142,10 +3237,10 @@ class Training():
         - Mean score across all IDs.
         """
         predictions, y = self.predict(X, return_y=True)
-        predictions = predictions[:, -1]
+        predictions = predictions[:, 0]
         y = y[:, -1, 0]
         return self.score_with_prediction(predictions, y, sample_weight)
-
+    
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
@@ -3163,109 +3258,12 @@ class Training():
                 pred = []
                 y = []
 
-                for i, data in enumerate(X, 0):
+                for _, data in enumerate(X, 0):
                     
-                    inputs, orilabels_, _ = data
-
-                    orilabels_ = orilabels_.to(device)
-                    pred_horizon = []
-                    labels_horizon = []
-
-                    hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
-                    output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
-                    for H in range(self.horizon + 1):
-
-                        orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
-                        orilabels[:, -1] = orilabels[:,  -1 ] > 0 if self.task_type == 'binary' else orilabels[:,  -1 ]
-                        inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
+                    pred_horizon, labels_horizon = self._predict_tensor(data, prediction_type=prediction_type, output_pdf=output_pdf, calibrate=calibrate)
                         
-                        if H == 0:
-                            z_prev = None
-                        else:
-                            if self.ks > 0:
-                                # on prend les ks derniers états cachés déjà vus
-                                history = hidden_past[-(self.ks + 1):]
-                                # empilement (B, D, L) avec L = len(history)
-                                z_prev = torch.stack(history, dim=2)  # (B, D, L)
-
-                                # padding à gauche si L < ks
-                                L = z_prev.size(2)
-                                if L < (self.ks + 1):
-                                    B, D = z_prev.size(0), z_prev.size(1)
-                                    pad = torch.zeros(
-                                        (B, D, self.ks + 1 - L),
-                                        device=z_prev.device,
-                                        dtype=z_prev.dtype
-                                    )
-                                    z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                            else:
-                                z_prev = hidden_past[-1]
-                        if H == 0:
-                            output, logits, hidden = self.model(inputs_horizon, z_prev=None)
-                        else:
-                            if self.id_past_risk is not None:
-                                inputs_horizon[:, self.id_past_risk, -H:] = 0
-                            if self.id_past_ba is not None:
-                                inputs_horizon[:, self.id_past_ba, -H:] = 0
-                            if self.prev_idx is not None:
-                                inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-                            
-                            output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
-                        
-                        hidden_past.append(hidden)
-                        output_past.append(output)
-                        
-                        if 'criterion' in locals() and hasattr(criterion, 'calibrate') and calibrate:
-                            if 'clusters_ids' in required_params(criterion.transform):
-                                clusters_ids = orilabels[:, criterion.id].long()
-                                calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, clusters_ids=clusters_ids, dir_output=self.dir_log)
-                            else:
-                                calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, dir_output=self.dir_log)
-                            
-                            self.calibration = calibration
-                        
-                        elif 'criterion' in locals() and hasattr(criterion, 'calibrate'):
-                            assert hasattr(self, 'calibration')
-                                
-                        if 'criterion' in locals() and hasattr(criterion, 'transform'):
-                            params = {'inputs' : logits}
-                            if 'clusters_ids' in required_params(criterion.transform):
-                                clusters_ids = orilabels[:, criterion.id].long()
-                                params['clusters_ids'] = clusters_ids
-                                
-                            if 'output_pdf' in required_params(criterion.transform):
-                                assert output_pdf is not None and self.dir_log is not None
-                                params['output_pdf'] = output_pdf
-                            
-                            if 'dir_output' in required_params(criterion.transform):    
-                                params['dir_output'] = self.dir_log
-                                
-                            if 'areas' in required_params(criterion.transform):
-                                params['areas'] = orilabels[:, area_index]
-                                
-                            if 'p_thresh' in required_params(criterion.transform):
-                                params['p_thresh'] = self.calibration
-
-                            output = criterion.transform(**params)
-                            
-                        if prediction_type == 'Class':
-
-                            if self.task_type == 'classification' or self.task_type == 'binary':
-                                output = torch.argmax(output, dim=1)
-
-                            elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
-                                output = torch.argmax(output, dim=1)
-
-                        elif prediction_type == 'RawFormulaVal':
-                            output = logits
-                            
-                        pred_horizon.append(output[:, None])
-                        labels_horizon.append(orilabels[:, :, None])
-                        
-                pred_horizon = torch.cat(pred_horizon, dim=1)
-                labels_horizon = torch.cat(labels_horizon, dim=2)
-                pred.append(pred_horizon)
-                y.append(labels_horizon)
+                    pred.append(pred_horizon)
+                    y.append(labels_horizon)
 
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
@@ -3288,8 +3286,141 @@ class Training():
                 #if pred.dtype != torch.long:
                     pred = torch.round(pred, decimals=1)
                     
-                return pred, y
+            return pred, y
+            
+    def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
+        assert self.model is not None
+        self.model.eval()
+        criterion = self.get_loss(self.loss)
+        if len(self.criterion_params) > 0:
+            if has_method(criterion, 'update_params'):
+                criterion.update_params(self.criterion_params[self.best_epoch])
+                criterion.eval()
 
+        with torch.no_grad():
+                
+            inputs, orilabels_, _ = X
+
+            orilabels_ = orilabels_.to(device)
+            pred_horizon = []
+            labels_horizon = []
+
+            hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+            output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+            for H in range(self.horizon + 1):
+
+                orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
+                orilabels[:, -1] = orilabels[:,  -1 ] > 0 if self.task_type == 'binary' else orilabels[:,  -1 ]
+                inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
+                
+                if H == 0:
+                    z_prev = None
+                else:
+                    if self.ks > 0:
+                        # on prend les ks derniers états cachés déjà vus
+                        history = hidden_past[-(self.ks + 1):]
+                        # empilement (B, D, L) avec L = len(history)
+                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                        # padding à gauche si L < ks
+                        L = z_prev.size(2)
+                        if L < (self.ks + 1):
+                            B, D = z_prev.size(0), z_prev.size(1)
+                            pad = torch.zeros(
+                                (B, D, self.ks + 1 - L),
+                                device=z_prev.device,
+                                dtype=z_prev.dtype
+                            )
+                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                    else:
+                        z_prev = hidden_past[-1]
+                if H == 0:
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                else:
+                    if self.id_past_risk is not None:
+                        inputs_horizon[:, self.id_past_risk, -H:] = 0
+                    if self.id_past_ba is not None:
+                        inputs_horizon[:, self.id_past_ba, -H:] = 0
+                    if self.prev_idx is not None:
+                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                    
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+                
+                hidden_past.append(hidden)
+                output_past.append(output)
+                
+                if prediction_type != 'RawFormulaVal':
+                    if 'criterion' in locals() and hasattr(criterion, 'calibrate') and calibrate:
+                        if 'clusters_ids' in required_params(criterion.transform):
+                            clusters_ids = orilabels[:, criterion.id].long()
+                            calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, clusters_ids=clusters_ids, dir_output=self.dir_log)
+                        else:
+                            calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, dir_output=self.dir_log)
+                        
+                        self.calibration = calibration
+                    
+                    elif 'criterion' in locals() and hasattr(criterion, 'calibrate'):
+                        assert hasattr(self, 'calibration')
+                            
+                    if 'criterion' in locals() and hasattr(criterion, 'transform'):
+                        params = {'inputs' : logits}
+                        if 'clusters_ids' in required_params(criterion.transform):
+                            clusters_ids = orilabels[:, criterion.id].long()
+                            params['clusters_ids'] = clusters_ids
+                            
+                        if 'output_pdf' in required_params(criterion.transform):
+                            assert output_pdf is not None and self.dir_log is not None
+                            params['output_pdf'] = output_pdf
+                        
+                        if 'dir_output' in required_params(criterion.transform):    
+                            params['dir_output'] = self.dir_log
+                            
+                        if 'areas' in required_params(criterion.transform):
+                            params['areas'] = orilabels[:, area_index]
+                            
+                        if 'p_thresh' in required_params(criterion.transform):
+                            params['p_thresh'] = self.calibration
+
+                        params['prediction_type'] = prediction_type
+                        output = criterion.transform(**params)
+                        
+                if prediction_type == 'Class':
+                    
+                    if self.task_type == 'classification' or self.task_type == 'binary':
+                        output = torch.argmax(output, dim=1)
+
+                    elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+                        output = torch.argmax(output, dim=1)
+
+                elif prediction_type == 'RawFormulaVal':
+                    output = logits
+                    
+                pred_horizon.append(output[:, None])
+                labels_horizon.append(orilabels[:, :, None])
+                
+        pred = torch.cat(pred_horizon, dim=1)
+        y = torch.cat(labels_horizon, dim=2)
+
+        if self.task_type == 'regression' and prediction_type == 'Class' and self.apply_discretization:
+            for H in range(self.horizon + 1):
+                pred_h = pred[:, -1 - (self.horizon - H)].detach().cpu().numpy()
+                y_cluster = y[:, departement_index, -1 - (self.horizon - H)]
+                pred_h = self.post_process.predict(pred_h, pred_h, y_cluster)
+                pred[:, -1 - (self.horizon - H)] = torch.as_tensor(pred_h)
+                
+                y_h = y[:, -1, -1 - (self.horizon - H)].detach().cpu().numpy()
+                y_cluster = y[:, departement_index, -1 - (self.horizon - H)]
+                y_h = self.post_process.predict(y_h, y_h, y_cluster)
+                y[:, -1, -1 - (self.horizon - H)] = torch.as_tensor(y_h)
+                
+                print(np.unique(pred_h), np.unique(y_h))
+                
+        elif prediction_type == 'Class' and pred.dtype != torch.long:
+        #if pred.dtype != torch.long:
+            pred = torch.round(pred, decimals=1)
+            
+        return pred, y
+    
     def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, use_log=True):
         
         X = X.set_index(ids_columns[:-1]).join(y.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
@@ -3311,9 +3442,9 @@ class Training():
         test_pairs = set(zip(df['date'], df['graph_id'], df['scale']))
 
         # Normaliser les valeurs dans YTensor
-        date_values = [item for item in y[:, date_index]]
-        graph_id_values = [item for item in y[:, graph_id_index]]
-        scale_values = [item for item in y[:, scale_index]]
+        date_values = [item for item in y[:, date_index, 0]]
+        graph_id_values = [item for item in y[:, graph_id_index, 0]]
+        scale_values = [item for item in y[:, scale_index, 0]]
 
         # Filtrer les lignes de YTensor correspondant aux paires présentes dans test_dataset_dept
         filtered_indices = [
@@ -3360,7 +3491,7 @@ class Training():
             df = keep_one_per_pair(df)
 
         df.sort_values(['graph_id', 'date', 'scale'], inplace=True)
-        ind = np.lexsort((y[:, scale_index], y[:,0], y[:,4]))
+        ind = np.lexsort((y[:, graph_id_index, 0], y[:, date_index, 0], y[:, scale_index, 0]))
         y = y[ind]
         predTensor = predTensor[ind]
         
@@ -3394,48 +3525,65 @@ class Training():
         if graph is None and isinstance(self, ModelGNN):
             graph = self.graph
 
-        if self.target_name not in list(df.columns):
-            df[self.target_name] = 0
+        if isinstance(df, pd.DataFrame):
 
-        loader = create_test_loader(graph, df,
-                       self.features_name,
-                       self.device,
-                       None,
-                       self.target_name,
-                       self.ks,
-                       self.horizon)
+            if self.target_name not in list(df.columns):
+                df[self.target_name] = 0
+            
+            loader = create_test_loader(graph, df,
+                        self.features_name,
+                        self.device,
+                        None,
+                        self.target_name,
+                        self.ks,
+                        self.horizon)
+            
+            predTensor, YTensor = self._predict_test_loader(loader, prediction_type=prediction_type)
         
-        predTensor, YTensor = self._predict_test_loader(loader, prediction_type='Class')
-
+        else:
+            predTensor, YTensor = self._predict_tensor(df, prediction_type=prediction_type)
+            if return_y:
+                return predTensor, YTensor
+            else:
+                return predTensor
+            
         if return_y:
-        #    pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
             return predTensor, YTensor
         
-        #pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
         return predTensor
     
-    def predict_proba(self, df, graph=None, return_y=False):
+    def predict_proba(self, df, graph=None, return_y=False, prediction_type="Proba"):
         if graph is None:
             graph = self.graph
 
-        if self.target_name not in list(df.columns):
-            df[self.target_name] = 0
+        if isinstance(df, pd.DataFrame):
+            
+            if self.target_name not in list(df.columns):
+                df[self.target_name] = 0
 
-        loader = create_test_loader(graph, df,
-                       self.features_name,
-                       self.device,
-                       None,
-                       self.target_name,
-                       self.ks,
-                       self.horizon)
+            loader = create_test_loader(graph, df,
+                        self.features_name,
+                        self.device,
+                        None,
+                        self.target_name,
+                        self.ks,
+                        self.horizon)
+            
+            predTensor, YTensor = self._predict_test_loader(loader, prediction_type=prediction_type)
         
-        predTensor, YTensor = self._predict_test_loader(loader, True)
+        else:
+            predTensor, YTensor = self._predict_tensor(df, prediction_type=prediction_type)
+            if return_y:
+                return predTensor, YTensor
+            else:
+                return predTensor
+            
         if return_y:
             pred, y = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
             return pred, y
         pred = self.filtering_pred(df, predTensor, YTensor, graph, return_y=return_y)
         return pred
-        
+    
     def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_log):
         # Création de la figure et des axes
         plt.figure(figsize=(10, 6))
@@ -3533,15 +3681,16 @@ class Training():
 
         if self.student_train and self.temperature == 'seach':
             params.append(self.temperature_value)
-
+            
         if self.student_train and self.alpha == 'seach':
             params.append(self.alpha_value)
-
+            
         return params
-
+    
     def get_optimizer(self, criterion,):
         parameters = self.get_learnable_parameters(criterion)
         optimizer = optim.Adam(parameters, lr=self.lr)
+        #optimizer = optim.SGD(parameters, lr=self.lr, momentum=0.9)
         return optimizer
 
     def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None):
@@ -3981,13 +4130,13 @@ class SplitTraining(Training):
 
         return pred_tensor, y_tensor
 
-    def predict(self, df, graph=None, return_y=False):
+    def predict(self, df, graph=None, return_y=False, prediction_type="Class"):
         
         try:
             if self.training_mode == 'normal':
-                return super().predict(df, graph=graph, return_y=return_y)
+                return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         except:
-                return super().predict(df, graph=graph, return_y=return_y)
+                return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         
         if graph is None:
             graph = self.graph
@@ -4004,12 +4153,12 @@ class SplitTraining(Training):
 
         return pred_tensor
 
-    def predict_proba(self, df, graph=None, return_y=False):
+    def predict_proba(self, df, graph=None, return_y=False, prediction_type='Proba'):
         try:
             if self.training_mode == 'normal':
-                return super().predict_proba(df, graph=graph, return_y=return_y)
+                return super().predict_proba(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         except:
-                return super().predict_proba(df, graph=graph, return_y=return_y)
+                return super().predict_proba(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         
         if graph is None:
             graph = self.graph
@@ -4160,7 +4309,7 @@ class SplitTraining(Training):
             self.metrics['best_score'] = best_score
             self.metrics['best_combination'] = best_combination
             save_object(self.metrics, 'metrics_cluster.pkl', self.dir_log)
-
+            
         if best_state is not None:
             self.server_model.load_state_dict(best_state)
 
@@ -4337,6 +4486,136 @@ class DualTraining:
 
         return self.occ_model.search_samples_proportion(*args, **kwargs)
     
+class Distribution2Class:
+    def __init__(self, target_name, distrib_model: Training, class_model: Training, name, task_type: str, n_run : int = 1, horizon=0):
+        self.distrib_model = distrib_model
+        self.class_model = class_model
+        self.name = name
+        self.task_type = task_type
+        self.n_run = n_run
+        self.target_name = target_name
+        self.horizon = horizon
+        
+        print(distrib_model.dir_log / f'{distrib_model.name}.pkl')
+        if (distrib_model.dir_log / f'{distrib_model.name}.pkl').is_file():
+            self.distrib_model = read_object(f'{distrib_model.name}.pkl', distrib_model.dir_log)
+            self.train_distrib_model = False
+        else:
+            self.train_distrib_model = True
+
+    def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT,
+                                     features_importance=True, custom_model_params=None, use_log=True):
+        
+        if self.train_distrib_model:
+            print('################ Train distribution model ####################')
+            self.distrib_model.create_train_val_test_loader(graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT,
+                                     features_importance=features_importance, custom_model_params=custom_model_params, use_log=use_log)
+            
+            self.distrib_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=custom_model_params, new_model=True)
+
+        print('################ Train class model ####################')
+        ### Update df_train
+        
+        loader = self.distrib_model.create_test_loader(graph, df_train)
+        output_train, y_train = self.distrib_model._predict_test_loader(loader, prediction_type='RawFormulaVal', output_pdf='train')
+        output_val, y_val = self.distrib_model._predict_test_loader(self.distrib_model.val_loader, prediction_type='RawFormulaVal', output_pdf='Val')
+        output_test, y_test = self.distrib_model._predict_test_loader(self.distrib_model.test_loader, prediction_type='RawFormulaVal', output_pdf='test')
+        
+        df_class_train = pd.DataFrame(index=np.arange(0, y_train.shape[0]))
+        df_class_val = pd.DataFrame(index=np.arange(0, y_val.shape[0]))
+        df_class_test = pd.DataFrame(index=np.arange(0, y_test.shape[0]))
+        
+        y_train = y_train[:, :, 0]
+        y_val = y_val[:, :, 0]
+        y_test = y_test[:, :, 0]
+        
+        output_train = output_train[:, :, 0]
+        output_val = output_val[:, :, 0]
+        output_test = output_test[:, :, 0]
+
+        columns_y = ids_columns + targets_columns + [f'{self.distrib_model.target_name}']
+        
+        y_train = y_train.reshape(y_train.shape[0], -1)
+        y_val = y_val.reshape(y_val.shape[0], -1)
+        y_test = y_test.reshape(y_test.shape[0], -1)
+        
+        output_train = output_train.reshape(output_train.shape[0], -1)
+        output_val = output_val.reshape(output_val.shape[0], -1)
+        output_test = output_test.reshape(output_test.shape[0], -1)
+                
+        df_class_train[columns_y] = y_train
+        df_class_val[columns_y] = y_val
+        df_class_test[columns_y] = y_test
+        
+        df_class_train['weight'] = 1
+        
+        columns_x = [f'fet_{i}' for i in range(output_train.shape[-1])]
+        
+        df_class_train[columns_x] = output_train
+        df_class_val[columns_x] = output_val
+        df_class_test[columns_x] = output_test
+        
+        self.class_model.features_name = columns_x
+        
+        self.class_model.create_train_val_test_loader(graph, df_class_train, df_class_val, df_class_test, epochs, PATIENCE_CNT, CHECKPOINT, 
+                        features_importance=features_importance, custom_model_params=custom_model_params, use_log=use_log)
+        
+        
+        self.metrics = self.class_model.model
+        
+        self.class_model.graph = graph
+        
+        self.class_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
+    
+    def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None, calibrate=False):
+        pred_distrib, y_distrib = self.distrib_model._predict_test_loader(loader, prediction_type='RawFormulaVal', output_pdf=output_pdf, calibrate=calibrate)
+
+        y_distrib = y_distrib[:, :, 0]
+        pred_distrib = pred_distrib[:, :, 0]
+        
+        y_distrib = y_distrib.reshape(y_distrib.shape[0], -1)
+        pred_distrib = pred_distrib.reshape(pred_distrib.shape[0], -1)
+        
+        df_class = pd.DataFrame(index=np.arange(0, y_distrib.shape[0]))
+        
+        columns_y = ids_columns + [f'{self.distrib_model.target_name}']
+        columns_x = [f'fet_{i}' for i in pred_distrib.shape[-1]]
+        
+        df_class[columns_y] = y_distrib
+        df_class[columns_x] = pred_distrib
+        
+        loader = self.class_model.create_test_loader(self.class_model.graph, df_class)
+        
+        res, y = self.class_model._predict_test_loader(loader, prediction_type, output_pdf, calibrate)
+        
+        return res, y
+    
+    def create_test_loader(self, graph, df):
+        return self.distrib_model.create_test_loader(graph, df)
+    
+    def score(self, X, y, sample_weight=None):
+        pred_distrib, y_distrib = self.distrib_model.predict(X, return_y=True)
+        
+        y_distrib = y_distrib[:, :, 0]
+        pred_distrib = pred_distrib[:, :, 0]
+        
+        y_distrib = y_distrib.reshape(y_distrib.shape[0], -1)
+        pred_distrib = pred_distrib.reshape(pred_distrib.shape[0], -1)
+        
+        df_class = pd.DataFrame(index=np.arange(0, y_distrib.shape[0]))
+        
+        columns_y = ids_columns + [f'{self.distrib_model.target_name}']
+        columns_x = [f'fet_{i}' for i in pred_distrib.shape[-1]]
+        
+        df_class[columns_y] = y_distrib
+        df_class[columns_x] = pred_distrib
+        
+        predictions, y = self.class_model.predict(df_class, return_y=True)
+        predictions = predictions[:, 0]
+        y = y[:, -1, 0]
+        
+        return self.class_model.score_with_prediction(predictions, y, sample_weight)
+
 ################################################################# Base Models #############################################################
     
 class ModelCNN(SplitTraining):
@@ -4783,8 +5062,8 @@ class ModelGNN(SplitTraining):
 
             if self.student_train:
                 criterion_teacher = self.get_loss('kldivloss')
-                df_test = pd.DataFrame(inputs_horizon[:, :, -1], columns=self.features_name)
-                df_test.columns = df_test.columns.astype(str)
+                #df_test = pd.DataFrame(inputs_horizon[:, :, -1], columns=self.features_name)
+                #df_test.columns = df_test.columns.astype(str)
                 pred_teacher = self.teacher.predict_proba(
                     df_test,
                     weights_average=self.weights_average,
@@ -4793,7 +5072,7 @@ class ModelGNN(SplitTraining):
                 )
                 target_teacher = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
                 target_teacher = target_teacher / self.temperature_value
-
+                
                 loss2 = self.calculate_loss(criterion_teacher, output, target_teacher, weights, labels, tolong=False)
 
                 loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
@@ -4839,6 +5118,11 @@ class ModelGNN(SplitTraining):
         """
         assert self.model is not None
         self.model.eval()
+        criterion = self.get_loss(self.loss)
+        if len(self.criterion_params) > 0:
+            if has_method(criterion, 'update_params'):
+                criterion.update_params(self.criterion_params[self.best_epoch])
+                criterion.eval()
 
         with torch.no_grad():
             pred = []
@@ -4900,6 +5184,41 @@ class ModelGNN(SplitTraining):
 
                     hidden_past.append(hidden)
                     output_past.append(output)
+                    
+                    if 'criterion' in locals() and hasattr(criterion, 'calibrate') and calibrate:
+                            if 'clusters_ids' in required_params(criterion.transform):
+                                clusters_ids = orilabels[:, criterion.id].long()
+                                calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, clusters_ids=clusters_ids, dir_output=self.dir_log)
+                            else:
+                                calibration = criterion.calibrate(inputs=logits, y_true=orilabels[:, -1], score_fn=iou_score, dir_output=self.dir_log)
+                            
+                            self.calibration = calibration
+                        
+                    elif 'criterion' in locals() and hasattr(criterion, 'calibrate'):
+                        assert hasattr(self, 'calibration')
+                            
+                    if 'criterion' in locals() and hasattr(criterion, 'transform'):
+                        params = {'inputs' : logits}
+                        if 'clusters_ids' in required_params(criterion.transform):
+                            clusters_ids = orilabels[:, criterion.id].long()
+                            params['clusters_ids'] = clusters_ids
+                            
+                        if 'output_pdf' in required_params(criterion.transform):
+                            assert output_pdf is not None and self.dir_log is not None
+                            params['output_pdf'] = output_pdf
+                        
+                        if 'dir_output' in required_params(criterion.transform):    
+                            params['dir_output'] = self.dir_log
+                            
+                        if 'areas' in required_params(criterion.transform):
+                            params['areas'] = orilabels[:, area_index]
+                            
+                        if 'p_thresh' in required_params(criterion.transform):
+                            params['p_thresh'] = self.calibration
+                            
+                        params['prediction_type'] = prediction_type
+
+                        output = criterion.transform(**params)
 
                     if prediction_type == 'Class':
 
@@ -6229,8 +6548,14 @@ class ModelKnowledgeDistillation(Training):
             self.hard_or_soft = hard_or_soft
             self.weights_average = weights_average
             self.top_model = top_model
-            full_teacher_name = f'{filter_name}-{model_type}_{self.under_sampling}_{self.over_sampling}_0_{self.nbfeatures}_{self.weight_type}_{self.target_name}_{self.task_type}_{self.teacher_loss}'
-            self.teacher = read_object(f'{full_teacher_name}.pkl', self.dir_log / '..' / 'baseline' / full_teacher_name)
+            full_teacher_name = f'{filter_name}-{model_type}_{self.under_sampling}_{self.over_sampling}_{self.ks}_{self.horizon}_{self.nbfeatures}_{self.weight_type}_{self.target_name}_{self.task_type}_{self.teacher_loss}'
+            print(full_teacher_name)
+            if model_type in ['catboost', 'xgboost']:
+                self.teacher = read_object(f'{full_teacher_name}.pkl', self.dir_log / '..' / 'baseline' / full_teacher_name)
+            else:
+                self.teacher = read_object(f'{full_teacher_name}.pkl', self.dir_log / '..' / full_teacher_name)
+            assert self.teacher is not None
+            self.teacher.clean()
             self.load_teacher = False
 
         if self.distillation_training_mode == 'normal':
@@ -6407,8 +6732,8 @@ class ModelKnowledgeDistillation(Training):
             self.temperature_value = top_temp
             save_object(parameters, 'log_parameters.pkl', self.dir_log)"""
         
-        self.temperature_value = torch.nn.Parameter(torch.tensor(6.0))
-        self.alpha_value = torch.nn.Parameter(torch.tensor(0.1))
+        self.temperature_value = torch.nn.Parameter(torch.tensor(1.0))
+        self.alpha_value = torch.nn.Parameter(torch.tensor(0.5))
             
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, search=True):
 
@@ -6456,7 +6781,7 @@ class ModelKnowledgeDistillation(Training):
                     break
                     self.update_weight(model_params_log)
 
-        elif self.distillation_training_mode == 'normal':
+        elif self.distillation_training_mode == 'normal' or self.distillation_training_mode == 'allTeacher':
             super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
         elif 'group' in self.distillation_training_mode:
@@ -6601,6 +6926,10 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             test_loader = model.create_test_loader(graph, df_val)
             test_output, y_test_val = model._predict_test_loader(test_loader)
             test_output = test_output.detach().cpu().numpy()
+            
+            test_output = test_output[:, 0]
+            y_test_val = y_test_val[:, :, 0]
+            
             y_test_val = y_test_val.detach().cpu().numpy()[:, -1]
                 
             model.target_name = target_name_model
@@ -6663,12 +6992,12 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
             return self.post_process.predict_risk(predict, None, ids, preprocessor_ids)
 
-    def predict_with_weight(self, X, hard_or_soft='soft', weights_average='weight', weights2use=[], top_model='all', prediction_type="Class"):
+    def predict_with_weight(self, X, hard_or_soft='soft', weights_average='weight', weights2use=[], top_model='all', prediction_type="Class", aggregation=True):
         
         models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
         weights2use = np.asarray(weights2use)
         
-        if hard_or_soft == 'hard' or prediction_type == 'RawFormulaVal':
+        if hard_or_soft == 'hard':
             if top_model != 'all':
                 top_model = int(top_model)
                 key = np.argsort(weights2use)
@@ -6678,7 +7007,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                 #weights2use = weights2use[-top_model:]
             else:
                 key = np.arange(0, len(self.best_estimator_))
-
+                
             models_to_mean = []
             predictions = []
             for i, estimator in enumerate(self.best_estimator_):
@@ -6699,9 +7028,10 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             except:
                 pass
             # Aggregate predictions
-            aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights2use)
-            #print(aggregated_pred)
-            #print(y)
+            if aggregation:
+                aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights2use)
+            else:
+                aggregated_pred = predictions
             return aggregated_pred, y.detach().cpu().numpy()
         elif hard_or_soft == 'None':
             top_model = int(top_model)
@@ -6709,21 +7039,49 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             idx = key[-top_model]
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
-                pred, y = estimator.predict(X, return_y=True)
-                return pred.detach().cpu().numpy(), y.detach().cpu().numpy(),
+                pred, y = estimator.predict(X, return_y=True, prediction_type=prediction_type)
+                return pred.detach().cpu().numpy(), y.detach().cpu().numpy(), y
             else:
                 pred = estimator.predict(X, return_y=False)
                 y = None
                 for estimator in self.best_estimator_:
                     if estimator.target_name == self.target_name:
-                        _, y = estimator.predict(X, return_y=True)
+                        _, y = estimator.predict(X, return_y=True, prediction_type=prediction_type)
                         return pred.detach().cpu().numpy(), y.detach().cpu().numpy(),
         else:
-            aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use)
-            predictions = np.argmax(aggregated_pred, axis=1)
+            aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use, prediction_type=prediction_type, aggregation=aggregation)
+            if prediction_type == 'Class':
+                predictions = np.argmax(aggregated_pred, axis=-1)
+            else:
+                predictions = aggregated_pred
+            
             return predictions, y
+        
+    def get_weights(self, top_model, return_self_model_idx=False):
+        weights2use = self.weights_for_model
+        models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
+        weights2use = np.asarray(weights2use)
+        models_to_mean = []
+        self_model_idx = math.inf
+        if top_model != 'all':
+            top_model = int(top_model)
+            key = np.argsort(weights2use)
+            models_list = models_list[np.asarray(key)]
+            models_list = models_list[-top_model:]
+            
+        for i, estimator in enumerate(self.best_estimator_):
+            if estimator.name not in models_list:
+                continue
+            if estimator.target_name == self.target_name:
+                self_model_idx = i
+            models_to_mean.append(key[i])
+        
+        if return_self_model_idx:
+            return models_to_mean, weights2use[models_to_mean], self_model_idx
+        else:
+            return models_to_mean, weights2use[models_to_mean], i
 
-    def predict_proba_with_weights(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', weights2use=[], id_col=(None, None)):
+    def predict_proba_with_weights(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', weights2use=[], id_col=(None, None), prediction_type='Proba', aggregation=True):
         """
         Predict probabilities for input data using each model and aggregate the results.
 
@@ -6748,33 +7106,32 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         
         probas = []
         models_to_mean = []
-        print(models_list)
 
         if hard_or_soft == 'None':
             top_model = int(top_model)
             idx = np.argsort(weights2use)[-top_model]
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
-                pred, y = estimator.predict_proba(X, return_y=True)
+                pred, y = estimator.predict_proba(X, return_y=True, prediction_type=prediction_type)
                 return pred.detach().cpu().numpy(), y.detach().cpu().numpy()
             else:
                 pred = estimator.predict(X, return_y=False)
                 y = None
                 for estimator in self.best_estimator_:
                     if estimator.target_name == self.target_name:
-                        _, y = estimator.predict_proba(X, return_y=True)
+                        _, y = estimator.predict_proba(X, return_y=True, prediction_type=prediction_type)
                         return pred.detach().cpu().numpy(), y.detach().cpu().numpy()
 
         for i, estimator in enumerate(self.best_estimator_):
             X_ = X
             if estimator.target_name == self.target_name:
-                proba, y = estimator.predict_proba(X, return_y=True)
+                proba, y = estimator.predict_proba(X, return_y=True, prediction_type=prediction_type)
             if estimator.name not in models_list:
                 continue
             else:
                 if estimator.target_name != self.target_name:
-                    proba = estimator.predict_proba(X_, return_y=False)
-            if proba.shape[1] != 5:
+                    proba = estimator.predict_proba(X_, return_y=False, prediction_type=prediction_type)
+            if proba.shape[-1] != 5:
                 continue
             #print(estimator.name, np.asarray(probas).shape)
             models_to_mean.append(key[i])
@@ -6784,9 +7141,12 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         except:
             pass
         # Aggregate probabilities
-        aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights2use)
-        return aggregated_proba, y
-    
+        if aggregation:
+            aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights2use)
+            return aggregated_proba, y
+        else:
+            return probas, y
+        
     def predict_with_tasks(
         self,
         X,
@@ -6795,7 +7155,8 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         model_per_task=None,
         generalized_departement=None,
         id_col=(None, None),
-        prediction_type='Class'
+        prediction_type='Class',
+        aggregation=True
     ):
         """Predict with a specific ``top_model`` per task.
 
@@ -6842,22 +7203,24 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         # Normal prediction for all samples
         top_model = model_per_task.get("normal_predictions", "all")
         if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
-            predictions = self.predict_with_weight(
+            predictions, y = self.predict_with_weight(
                 X,
                 hard_or_soft=hard_or_soft,
                 weights_average=weights_average,
                 weights2use=self.weights_for_model,
                 top_model=top_model,
-                prediction_type=prediction_type
+                prediction_type=prediction_type,
+                aggregation=aggregation
             )
         else:
-            predictions = self.predict_proba_with_weights(
+            predictions, y = self.predict_proba_with_weights(
                 X,
                 hard_or_soft=hard_or_soft,
                 weights_average=weights_average,
                 weights2use=self.weights_for_model,
                 top_model=top_model,
-                prediction_type=prediction_type
+                prediction_type=prediction_type,
+                aggregation=aggregation
             )
 
         predictions = np.asarray(predictions)
@@ -6871,64 +7234,68 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             mask = X["departement"].isin(generalized_departement).values
             if mask.any():
                 if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
-                    preds_gen  = self.predict_with_weight(
+                    preds_gen, _  = self.predict_with_weight(
                         X[mask],
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task["generalized_prediction"],
-                        prediction_type=prediction_type
+                        prediction_type=prediction_type,
+                        aggregation=aggregation   
                     )
                 else:
-                    preds_gen  = self.predict_proba_with_weights(
+                    preds_gen, _  = self.predict_proba_with_weights(
                         X[mask],
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task["generalized_prediction"],
-                        prediction_type=prediction_type
+                        prediction_type=prediction_type,
+                        aggregation=aggregation
                     )
-                mask = np.isin(y[:, 4], generalized_departement)
+                mask = np.isin(y[:, departement_index], generalized_departement)
                 predictions[mask] = preds_gen
 
         for val in [2, 3, 4]:
             task_name = f"class_value_{val}_predictions"
             if task_name in model_per_task:
                 if prediction_type == 'Class' or prediction_type == 'RawFormulaVal':
-                    preds_cls = self.predict_with_weight(
+                    preds_cls, _ = self.predict_with_weight(
                         X,
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task[task_name],
-                        prediction_type=prediction_type
+                        prediction_type=prediction_type,
+                        aggregation=aggregation
                     )
                     mask = (preds_cls >= val) | (predictions >= val)
                     if mask.any():
                         predictions[mask] = preds_cls[mask]
                 else:
-                    preds_cls = self.predict_proba_with_weights(
+                    preds_cls, _ = self.predict_proba_with_weights(
                         X,
                         hard_or_soft=hard_or_soft,
                         weights_average=weights_average,
                         weights2use=self.weights_for_model,
                         top_model=model_per_task[task_name],
-                        prediction_type=prediction_type
+                        prediction_type=prediction_type,
+                        aggregation=aggregation
                     )
                     # prendre les lignes où la classe la plus probable est >= val
                     mask = (np.argmax(preds_cls, axis=1) >= val) | (np.argmax(predictions, axis=1) >= val)
                     if mask.any():
                         predictions[mask] = preds_cls[mask]
+                        
+        return predictions[:, None], y
 
-        return predictions
-
-    def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None), prediction_type="Class"):
+    def predict(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', id_col=(None, None), prediction_type="Class", aggregation=True):
         """
         Predict labels for input data using each model and aggregate the results.
 
         Parameters:
         - X_list: List of data to predict labels for.
-
+        
         Returns:
         - Aggregated predicted labels.
         """
@@ -6942,39 +7309,16 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             for id in unique_ids:
                 print(f'Prediction for {id_col[0]} {id}')
                 mask = (id_col[1] == id)
-                prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model, prediction_type=prediction_type)
+                prediction[mask], y[mask] = self.predict_with_weight(X[mask], hard_or_soft=hard_or_soft, weights_average='weight', \
+                    weights2use=self.weights_id_model[id_col[0]][id], top_model=top_model, prediction_type=prediction_type, aggregation=aggregation)
             return prediction, y
         else:
-            return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model,  prediction_type=prediction_type)
-
-        """print(f'Predict with {hard_or_soft} and weighs at {weights_average}')
-        if hard_or_soft == 'hard':
-            if top_model != 'all':
-                top_model = int(top_model)
-                key = np.argsort(self.weights_for_model)
-                models_list = models_list[key]
-                models_list = models_list[-top_model:]
-            else:
-                key = np.arange(0, len(self.best_estimator_))
-
-            predictions = []
-            for i, estimator in enumerate(self.best_estimator_):
-                if estimator.name not in models_list:
-                    continue
-                else:
-                    pred = estimator.predict(X)
-                    predictions.append(pred)
-
-                models_to_mean.append(key[i])
-
-            # Aggregate predictions
-            aggregated_pred = self.aggregate_predictions(predictions, models_to_mean, weights_average)
-            return aggregated_pred
-        else:
-            aggregated_pred = self.predict_proba(X, weights_average, top_model)
-            predictions = np.argmax(aggregated_pred, axis=1)
-            return predictions"""
-
+            return self.predict_with_weight(X, hard_or_soft=hard_or_soft, weights_average='weight', weights2use=self.weights_for_model, top_model=top_model,  prediction_type=prediction_type, aggregation=aggregation)
+    
+    def remove_graph(self):
+        for teacher in self.best_estimator_:
+            del teacher.graph
+            
     def predict_proba(self, X, weights_average='weight', top_model='all', id_col=(None, None)):
         """
         Predict probabilities for input data using each model and aggregate the results.
@@ -7000,37 +7344,15 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         else:
             return self.predict_proba_with_weights(X, hard_or_soft='soft', weights_average='weight', weights2use=self.weights_for_model, top_model=top_model)
-
-        """models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
-
-        if top_model != 'all':
-                top_model = int(top_model)
-                key = np.argsort(self.weights_for_model)
-                models_list = models_list[np.asarray(key)]
-                models_list = models_list[-top_model:]
-        else:
-            key = np.arange(0, len(self.best_estimator_))
-        
-        print(models_list)
-        probas = []
-        models_to_mean = []
-        for i, estimator in enumerate(self.best_estimator_):
-            if estimator.name not in models_list:
-                continue
-            X_ = X
-            if hasattr(estimator, "predict_proba"):
-                proba = estimator.predict_proba(X_)
-                if proba.shape[1] != 5:
-                    continue
-                #print(estimator.name, np.asarray(probas).shape)
-                models_to_mean.append(key[i])
-                probas.append(proba)
-            else:
-                raise AttributeError(f"The model at index {i} does not support predict_proba.")
-            
-        # Aggregate probabilities
-        aggregated_proba = self.aggregate_probabilities(probas, models_to_mean, weights_average)
-        return aggregated_proba"""
+    
+    def clean(self):
+        for teacher in self.best_estimator_:
+            del teacher.df_train
+            del teacher.df_test
+            del teacher.df_val
+            del teacher.train_loader
+            del teacher.val_loader
+            del teacher.test_loader
 
     def aggregate_predictions(self, predictions_list, models_to_mean, weight2use=[], id_col=(None, None), prediction_type="RawFormulaVal"):
         """
@@ -7106,9 +7428,61 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             weight2use = np.ones_like(self.weights_for_model)[models_to_mean]
         
         # Weighted average for probabilities
-        weighted_sum = np.sum(probas_array * weight2use[:, None, None], axis=0)
+        weighted_sum = np.sum(probas_array * weight2use[:, None, None, None], axis=0)
         aggregated_proba = weighted_sum / np.sum(weight2use)
         #aggregated_proba = np.max(probas_array * weight2use[:, None, None], axis=0)
+        return aggregated_proba
+    
+    def aggregate_probabilities_tensor(self, probas_list, models_to_mean, weight2use=None, id_col=(None, None)):
+        """
+        Agrège des probabilités issues de plusieurs modèles (torch tensors).
+
+        Paramètres
+        ----------
+        probas_list : torch.Tensor ou list[torch.Tensor]
+            Liste ou tensor de taille [M, B, ..., C] contenant les probabilités des M modèles.
+        models_to_mean : list[int] ou torch.Tensor
+            Indices des modèles à inclure dans l’agrégation.
+        weight2use : list[float] ou torch.Tensor ou None
+            Poids associés à chaque modèle (même longueur que models_to_mean).
+            Si None ou vide, poids uniformes.
+        id_col : tuple (optionnel)
+            Non utilisé ici (inclus pour compatibilité).
+
+        Retour
+        ------
+        aggregated_proba : torch.Tensor
+            Tensor agrégé de taille [B, ..., C] (moyenne pondérée sur les modèles).
+        """
+        # Convertir en tensor unique si liste
+        if isinstance(probas_list, (list, tuple)):
+            probas_tensor = torch.stack(probas_list, dim=0)  # [M, B, ..., C]
+        else:
+            probas_tensor = probas_list  # déjà un tensor
+
+        device = probas_tensor.device
+        dtype = probas_tensor.dtype
+
+        M = probas_tensor.shape[0]
+
+        # Gérer les poids
+        if weight2use is None or len(weight2use) == 0:
+            weights = torch.as_tensor(self.weights_for_model, dtype=dtype)
+            if models_to_mean is not None:
+                weights = weights[models_to_mean]
+            else:
+                weights = torch.ones(M, device=device, dtype=dtype)
+        else:
+            weights = torch.as_tensor(weight2use, device=device, dtype=dtype)
+        
+        weights = weights / weights.sum().clamp_min(1e-12)
+
+        # Agrégation pondérée (diffusée sur les dimensions suivantes)
+        # poids shape [M, 1, 1, ...] compatible avec probas_tensor [M, B, ..., C]
+        view_shape = [M] + [1] * (probas_tensor.dim() - 1)
+        weighted_sum = (probas_tensor * weights.view(view_shape)).sum(dim=0)
+        aggregated_proba = weighted_sum / weights.sum().clamp_min(1e-12)
+
         return aggregated_proba
 
     def score(self, X, y, sample_weight=None):
