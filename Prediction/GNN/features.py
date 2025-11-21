@@ -1428,7 +1428,7 @@ def get_sub_nodes_feature_with_geodataframe(
         encoder_geo = read_object("encoder_geo.pkl", dir_encoder)
 
     dir_mask = path / "raster"
-    LOGGER.info(f"Shape of X {X.shape}, {np.unique(X[:, 3])}")
+    logger.info(f"Shape of X {X.shape}, {np.unique(X[:, 3])}")
 
     name = f"{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl"
     mask = read_object(name, dir_mask)
@@ -1438,22 +1438,22 @@ def get_sub_nodes_feature_with_geodataframe(
 
     nodeDepartementMask = np.argwhere(subNode[:, departement_index] == name2int[departement])
     nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
-    LOGGER.debug(
+    logger.debug(
         "Unique mask values for %s: raster=%s, nodes=%s",
         departement,
         np.unique(mask),
         np.unique(nodeDepartement[:, id_index]),
     )
-    LOGGER.debug(
+    logger.debug(
         "Unique graph mask values for %s: raster=%s, graph nodes=%s",
         departement,
         np.unique(mask_graph),
         np.unique(nodeDepartement[:, graph_id_index]),
     )
 
-    LOGGER.debug("GeoDataFrame columns for %s: %s", departement, list(geo.columns))
+    logger.debug("GeoDataFrame columns for %s: %s", departement, list(geo.columns))
 
-    LOGGER.info("Calendar")
+    logger.info("Calendar")
     if "Calendar" in features:
         unDate = np.unique(subNode[:, date_index]).astype(int)
         band = calendar_variables[0]
@@ -1528,20 +1528,20 @@ def get_sub_nodes_feature_with_geodataframe(
                         np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
                     )
                 else:
-                    LOGGER.info(f"Unknow operation {var_ir}")
+                    logger.info(f"Unknow operation {var_ir}")
                     exit(1)
     ### Geo spatial
-    LOGGER.info("Geo")
+    logger.info("Geo")
     if "Geo" in features:
         X[:, features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[
             0
         ]  # departement
 
-    LOGGER.info("Meteorological")
+    logger.info("Meteorological")
     array = None
     ### Meteo
     for _i, var in enumerate(cems_variables):
-        LOGGER.info(var)
+        logger.info(var)
         if 'precipitationIndex' in var:
             n = int(var[-1])
             array = calculate_precipitation_index_image_full(geo['prec24h'].values, A=0.1657, n=n)
@@ -1557,10 +1557,10 @@ def get_sub_nodes_feature_with_geodataframe(
 
     del array
 
-    LOGGER.info("Air Quality")
+    logger.info("Air Quality")
     if "air" in features:
         for _i, var in enumerate(air_variables):
-            LOGGER.info(var)
+            logger.info(var)
             name = var + "raw.pkl"
             for node in subNode:
                 maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
@@ -1569,7 +1569,7 @@ def get_sub_nodes_feature_with_geodataframe(
                 )
                 save_value(geo[var].values, var, index, maskNode)
 
-    LOGGER.info("Population elevation Highway Sentinel Foret")
+    logger.info("Population elevation Highway Sentinel Foret")
 
     unode = np.unique(subNode[:, id_index])
     for node in unode:
@@ -1629,7 +1629,7 @@ def get_sub_nodes_feature_with_geodataframe(
         if "id_encoder" in features:
             save_value_with_encoding(geo["id"].values, "id_encoder", index, maskNode, encoder_id)
 
-    LOGGER.info("Sentinel Dynamic World")
+    logger.info("Sentinel Dynamic World")
     for node in subNode:
         maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
 
@@ -1649,7 +1649,7 @@ def get_sub_nodes_feature_with_geodataframe(
             for band, var in enumerate(dynamic_world_variables):
                 save_values(geo[var].values, var, index, maskNode)
 
-    LOGGER.info("Historical")
+    logger.info("Historical")
     if "Historical" in features:
         name = departement + "pastInfluence.pkl"
         arrayInfluence = read_object(name, Path(__file__).absolute().parent.resolve() / "log" / resolution)
@@ -1663,7 +1663,7 @@ def get_sub_nodes_feature_with_geodataframe(
                 save_values(arrayInfluence[:, :, int(node[date_index] - 1)], historical_variables[0], index, maskNode)
             del arrayInfluence
 
-    LOGGER.info("AutoRegressionReg")
+    logger.info("AutoRegressionReg")
     if "AutoRegressionReg" in features:
         for node in subNode:
             index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
@@ -1676,7 +1676,7 @@ def get_sub_nodes_feature_with_geodataframe(
 
                 save_value(geo["AutoRegressionReg"].values, f"AutoRegressionReg-{var}", index, maskNode)
 
-    LOGGER.info("AutoRegressionBin")
+    logger.info("AutoRegressionBin")
     if "AutoRegressionBin" in features:
         for node in subNode:
             index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
@@ -1689,7 +1689,7 @@ def get_sub_nodes_feature_with_geodataframe(
                 maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index] - step)].index
                 save_value(geo["AutoRegressionBin"].values, f"AutoRegressionBin-{var}", index, maskNode)
 
-    LOGGER.info("Vigicrues")
+    logger.info("Vigicrues")
     if "vigicrues" in features:
         for var in vigicrues_variables:
             for node in subNode:
@@ -1699,7 +1699,7 @@ def get_sub_nodes_feature_with_geodataframe(
                 maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
                 save_values(geo[var].values, var, index, maskNode)
 
-    LOGGER.info("nappes")
+    logger.info("nappes")
     if "nappes" in features:
         for var in nappes_variables:
             for node in subNode:
@@ -1709,7 +1709,7 @@ def get_sub_nodes_feature_with_geodataframe(
                 maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
                 save_values(geo[var].values, var, index, maskNode)
 
-    LOGGER.info("Cluster encoder")
+    logger.info("Cluster encoder")
     assert encoder_cluster is not None
     if "cluster_encoder" in features:
         ugraph = np.unique(nodeDepartement[:, graph_id_index])
