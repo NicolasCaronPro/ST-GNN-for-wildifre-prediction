@@ -1,0 +1,39 @@
+{
+    "train_departements": [
+        "departement-06-alpes-maritimes"  
+    ],
+    
+    "test_departements": [
+        "departement-13-bouches-du-rhone"
+    ],
+    "train": true,
+    "test": true,
+    "new_test_departements": ["departement-17-charente-maritime"],
+    "frequency": "full",
+    "pipeline_params": {
+        "scale": 0.3,
+        "tol": 0.3,
+        "attempt": 3,
+        "reduce": 5
+    },
+    "model_params": {
+        "type": "UNet",
+        "params": {
+            "n_channels": 0,
+            "out_channels": 1,
+            "conv_channels": [
+                64,
+                128,
+                256
+            ],
+            "bilinear": false,
+            "task_type": "binary"
+        },
+        "epochs": 10,
+        "batch_size": 1,
+        "learning_rate": 0.001,
+        "loss": "bceloss"
+    },
+    "target_variable": "risk",
+    "dataset_name" : "bdiff"
+}

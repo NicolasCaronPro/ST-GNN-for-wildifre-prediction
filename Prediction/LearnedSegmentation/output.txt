@@ -1,0 +1,84 @@
+Nom de l'hôte : caron-Precision-7780
+Adresse IP locale : 127.0.1.1
+Nom de l'hôte : caron-Precision-7780
+Adresse IP locale : 127.0.1.1
+Parsing configuration...
+Experiment Directory: /media/caron/X9 Pro/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/Experiments/target_risk_scale_0.3_tol_0.3_attempt_3_reduce_5
+Starting new run: /media/caron/X9 Pro/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/Experiments/target_risk_scale_0.3_tol_0.3_attempt_3_reduce_5/Run_20251217_032115
+Loading training data...
+2025-12-17 03:21:15,047 [INFO ]  Loading data for department departement-13-bouches-du-rhone...
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/LearnedSegmentation/load_data.py:275: RuntimeWarning: Mean of empty slice
+  feat_mean = np.nanmean(data_slice, axis=2)
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/graph_structure.py:391: FutureWarning: `square` is deprecated since version 0.25 and will be removed in version 0.27. Use `skimage.morphology.footprint_rectangle` instead.
+  data[valid_mask] = morphology.erosion(data, morphology.square(1))[valid_mask]
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/tools.py:2700: FutureWarning: `square` is deprecated since version 0.25 and will be removed in version 0.27. Use `skimage.morphology.footprint_rectangle` instead.
+  mask_label = morphology.dilation(mask_label, morphology.square(3))
+/media/caron/X9 Pro/travaille/Thèse/csv/departement-13-bouches-du-rhone/raster/2x2/datacube.pkl
+2025-12-17 03:21:16,715 [INFO ]  Fitting target encoder...
+2025-12-17 03:21:16,715 [INFO ]  Applying target encoding...
+2025-12-17 03:21:16,715 [INFO ]  Fitting scaler on training data...
+2025-12-17 03:21:16,716 [INFO ]  Transforming data with scaler...
+2025-12-17 03:21:16,721 [INFO ]  Preprocessed data saved to /media/caron/X9 Pro/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/Experiments/target_risk_scale_0.3_tol_0.3_attempt_3_reduce_5/Run_20251217_032115
+Detected 64 input channels.
+Initializing trainer...
+2025-12-17 03:21:16,721 [INFO ]  Initializing model: UNet
+2025-12-17 03:21:16,835 [INFO ]  Training UNet model...
+2025-12-17 03:21:17,102 [INFO ]  Epoch 1/10, Loss: 0.6637611985206604
+2025-12-17 03:21:17,106 [INFO ]  Epoch 2/10, Loss: 0.4918915927410126
+2025-12-17 03:21:17,109 [INFO ]  Epoch 3/10, Loss: 0.36648789048194885
+2025-12-17 03:21:17,113 [INFO ]  Epoch 4/10, Loss: 0.2811897099018097
+2025-12-17 03:21:17,116 [INFO ]  Epoch 5/10, Loss: 0.240777388215065
+2025-12-17 03:21:17,119 [INFO ]  Epoch 6/10, Loss: 0.22478492558002472
+2025-12-17 03:21:17,122 [INFO ]  Epoch 7/10, Loss: 0.21885345876216888
+2025-12-17 03:21:17,126 [INFO ]  Epoch 8/10, Loss: 0.2178937792778015
+2025-12-17 03:21:17,129 [INFO ]  Epoch 9/10, Loss: 0.18179018795490265
+2025-12-17 03:21:17,132 [INFO ]  Epoch 10/10, Loss: 0.18448948860168457
+2025-12-17 03:21:17,132 [INFO ]  Training completed.
+2025-12-17 03:21:17,151 [INFO ]  Model saved to /media/caron/X9 Pro/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/Experiments/target_risk_scale_0.3_tol_0.3_attempt_3_reduce_5/Run_20251217_032115/learned_segmentation_model.pth
+Loading test data...
+2025-12-17 03:21:17,151 [INFO ]  Loading data for department departement-06-alpes-maritimes...
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/LearnedSegmentation/load_data.py:275: RuntimeWarning: Mean of empty slice
+  feat_mean = np.nanmean(data_slice, axis=2)
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/graph_structure.py:391: FutureWarning: `square` is deprecated since version 0.25 and will be removed in version 0.27. Use `skimage.morphology.footprint_rectangle` instead.
+  data[valid_mask] = morphology.erosion(data, morphology.square(1))[valid_mask]
+/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/tools.py:2700: FutureWarning: `square` is deprecated since version 0.25 and will be removed in version 0.27. Use `skimage.morphology.footprint_rectangle` instead.
+  mask_label = morphology.dilation(mask_label, morphology.square(3))
+/media/caron/X9 Pro/travaille/Thèse/csv/departement-06-alpes-maritimes/raster/2x2/datacube.pkl
+2025-12-17 03:21:18,419 [INFO ]  Applying target encoding...
+2025-12-17 03:21:18,419 [INFO ]  Transforming data with scaler...
+Test data shape: X=(1, 64, 40, 36), y=(1, 1, 40, 36)
+Loading model from /media/caron/X9 Pro/travaille/Thèse/Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/Target/Experiments/target_risk_scale_0.3_tol_0.3_attempt_3_reduce_5/Run_20251217_032115/learned_segmentation_model.pth...
+Testing model...
+Mean IoU: 0.501030927835051
+Visualizing prediction. Type: <class 'numpy.ndarray'>, Shape: (40, 36)
+Target Type: <class 'numpy.ndarray'>, Shape: (1, 1, 40, 36)
+Traceback (most recent call last):
+  File "/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/LearnedSegmentation/main.py", line 170, in <module>
+    main()
+    ~~~~^^
+  File "/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/LearnedSegmentation/main.py", line 148, in main
+    tester.visualize_prediction(predictions, y_test, vis_path)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/LearnedSegmentation/test.py", line 177, in visualize_prediction
+    plt.imshow(target_vis, cmap='gray')
+    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/caron/anaconda3/lib/python3.13/site-packages/matplotlib/pyplot.py", line 3592, in imshow
+    __ret = gca().imshow(
+        X,
+    ...<16 lines>...
+        **kwargs,
+    )
+  File "/home/caron/anaconda3/lib/python3.13/site-packages/matplotlib/__init__.py", line 1521, in inner
+    return func(
+        ax,
+        *map(cbook.sanitize_sequence, args),
+        **{k: cbook.sanitize_sequence(v) for k, v in kwargs.items()})
+  File "/home/caron/anaconda3/lib/python3.13/site-packages/matplotlib/axes/_axes.py", line 5945, in imshow
+    im.set_data(X)
+    ~~~~~~~~~~~^^^
+  File "/home/caron/anaconda3/lib/python3.13/site-packages/matplotlib/image.py", line 675, in set_data
+    self._A = self._normalize_image_array(A)
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "/home/caron/anaconda3/lib/python3.13/site-packages/matplotlib/image.py", line 643, in _normalize_image_array
+    raise TypeError(f"Invalid shape {A.shape} for image data")
+TypeError: Invalid shape (1, 1, 40, 36) for image data
