@@ -109,7 +109,275 @@ class KMeansRiskZerosHandle:
         kmeans_labels = self.model.predict(X_val)
         res[X > 0] = np.vectorize(self.label_map.get)(kmeans_labels)
         return res.reshape(-1)
+    
+import numpy as np
+from dataclasses import dataclass
+from typing import Iterable, Tuple
+import scipy.optimize as spo
 
+@dataclass
+class eGPDRisk:
+    """
+    Clusteriseur ordinal basé sur l'eGPD.
+      - Classe 0 : X == 0
+      - Classes 1..4 : seuils définis par quantiles (théoriques continus OU discrets tronqués)
+    """
+    quantiles: Tuple[float, float, float] = (0.3, 0.60, 0.90)
+    bounds_sigma: Tuple[float, float] = (1e-6, np.inf)   # sigma > 0
+    bounds_kappa: Tuple[float, float] = (1e-3, 50.0)     # kappa > 0
+    bounds_xi: Tuple[float, float] = (-0.49, 1.0)        # bornes prudentes pour stabilité
+    maxiter_nm: int = 2000
+    maxiter_lbfgs: int = 1000
+    discrete: bool = True                                # <<< Contrôle discret/théorique
+    name: str = "eGPDRisk"
+
+    # appris à l'entraînement
+    params_: Tuple[float, float, float] = None   # (sigma, kappa, xi)
+    thresholds_: np.ndarray = None              # 4 seuils croissants
+    zeros_: bool = None
+
+    # ------------------ eGPD utilitaires ------------------ #
+    @staticmethod
+    def _H(y: np.ndarray, sigma: float, xi: float) -> np.ndarray:
+        """CDF GPD H(y) avec gestion xi→0."""
+        y = np.asarray(y, dtype=float)
+        if np.isclose(xi, 0.0):
+            return 1.0 - np.exp(-y / sigma)
+        t = 1.0 + xi * y / sigma
+        t = np.maximum(t, 1e-15)  # clamp domaine
+        return 1.0 - np.power(t, -1.0 / xi)
+
+    @classmethod
+    def _F_plus(cls, y: np.ndarray, sigma: float, kappa: float, xi: float) -> np.ndarray:
+        """CDF eGPD F+(y) = H(y)^kappa, clampée pour stabilité."""
+        H = cls._H(y, sigma, xi)
+        H = np.clip(H, 1e-15, 1.0 - 1e-15)
+        return np.power(H, kappa)
+
+    @staticmethod
+    def _log_h(y: np.ndarray, sigma: float, xi: float) -> np.ndarray:
+        """log pdf de la GPD h(y) avec gestion xi→0."""
+        y = np.asarray(y, dtype=float)
+        if np.isclose(xi, 0.0):
+            return -np.log(sigma) - (y / sigma)
+        t = 1.0 + xi * y / sigma
+        bad = t <= 0
+        out = (-np.log(sigma) + (-1.0/xi - 1.0) * np.log(np.maximum(t, 1e-15)))
+        out[bad] = -np.inf
+        return out
+
+    @classmethod
+    def _nll_eGPD(cls, y: np.ndarray, sigma: float, kappa: float, xi: float) -> float:
+        """
+        NLL eGPD (densité non tronquée) :
+          f(y) = kappa * H(y)^(kappa-1) * h(y)
+          log f = log kappa + (kappa-1) log H + log h
+        """
+        if not (sigma > 0 and kappa > 0):
+            return np.inf
+        H = cls._H(y, sigma, xi)
+        if np.any((H <= 0) | (H >= 1)):
+            return np.inf
+        log_h = cls._log_h(y, sigma, xi)
+        if np.any(~np.isfinite(log_h)):
+            return np.inf
+        return -np.sum(np.log(kappa) + (kappa - 1.0) * np.log(H) + log_h)
+
+    @staticmethod
+    def _inv_F_plus(q: Iterable[float], sigma: float, kappa: float, xi: float) -> np.ndarray:
+        """
+        Inverse analytique de F+(y)=q → quantile y(q).
+          H = q^(1/kappa).
+          xi != 0 : y = (sigma/xi) * ((1 - H)^(-xi) - 1)
+          xi == 0 : y = -sigma * ln(1 - H)
+        """
+        q = np.asarray(q, dtype=float)
+        q = np.clip(q, 1e-15, 1.0 - 1e-15)
+        Hq = np.power(q, 1.0 / kappa)
+        if np.isclose(xi, 0.0):
+            return -sigma * np.log(1.0 - Hq)
+        base = 1.0 - Hq
+        base = np.clip(base, 1e-15, 1.0 - 1e-15)
+        return (sigma / xi) * (np.power(base, -xi) - 1.0)
+
+    # ------------------ Seuils discrets (TDeGPD) ------------------ #
+    def _discrete_thresholds(self, X_pos: np.ndarray, sigma: float, kappa: float, xi: float) -> np.ndarray:
+        """
+        Seuils via CDF eGPD DISCRÈTE tronquée:
+          F_disc(y) = F+(y)
+          t_i = min { y | F_disc(y) ≥ q_i }.
+        """
+        y_max = int(np.floor(np.max(X_pos)))
+        if y_max < 1:
+            return np.zeros(3, dtype=float)
+
+        ys = np.arange(1, y_max + 1, dtype=int)
+        F_vals = self._F_plus(ys, sigma, kappa, xi)
+
+        thr = []
+        for q in self.quantiles:
+            idx = np.argmax(F_vals >= q)
+            # si aucun y ne dépasse, prendre y_max
+            if F_vals[idx] < q and idx == len(F_vals) - 1:
+                yi = ys[-1]
+            else:
+                yi = ys[idx]
+            thr.append(float(yi))
+
+        thr = np.array(thr, dtype=float)
+        thr = np.maximum.accumulate(thr)
+        return thr
+
+    # ------------------ API sklearn-like ------------------ #
+    def fit(self, X: np.ndarray, dir_output, y: np.ndarray = None):
+        """
+        Ajuste (sigma, kappa, xi) par MLE sur X>0, puis calcule 4 seuils
+        - discrets (si self.discrete) sur {1..ymax}
+        - ou continus (inversion CDF)
+        """
+        X = np.asarray(X).reshape(-1)
+        self.zeros_ = np.any(X == 0)
+
+        X_pos = X[X > 0]
+        if X_pos.size == 0:
+            self.params_ = (np.nan, np.nan, np.nan)
+            self.thresholds_ = np.array([0, 0, 0], dtype=float)
+            return self
+
+        # Définir borne sup de sigma si ∞
+        s_lo, s_hi = self.bounds_sigma
+        if np.isinf(s_hi):
+            s_hi = max(10.0 * np.std(X_pos), 10.0 * np.max(X_pos), 1.0)
+        bounds = ((s_lo, s_hi), self.bounds_kappa, self.bounds_xi)
+
+        # Init heuristique
+        sigma0 = float(np.median(X_pos)) if np.median(X_pos) > 0 else float(np.mean(X_pos) + 1e-6)
+        x0 = np.array([sigma0, 1.0, 0.1], dtype=float)
+
+        def obj(theta):
+            sigma, kappa, xi = theta
+            if not (bounds[0][0] < sigma < bounds[0][1] and
+                    bounds[1][0] < kappa < bounds[1][1] and
+                    bounds[2][0] < xi    < bounds[2][1]):
+                return 1e50
+            return self._nll_eGPD(X_pos, sigma, kappa, xi)
+
+        # Amorçage Nelder-Mead, raffinement L-BFGS-B
+        res_nm = spo.minimize(obj, x0, method="Nelder-Mead",
+                              options={"maxiter": self.maxiter_nm, "xatol": 1e-6, "fatol": 1e-6})
+        start = res_nm.x if res_nm.success else x0
+        res = spo.minimize(obj, start, method="L-BFGS-B", bounds=bounds,
+                           options={"maxiter": self.maxiter_lbfgs})
+
+        if res.success:
+            sigma_hat, kappa_hat, xi_hat = res.x
+        else:
+            sigma_hat = float(np.clip(x0[0], *bounds[0]))
+            kappa_hat = float(np.clip(x0[1], *bounds[1]))
+            xi_hat    = float(np.clip(x0[2], *bounds[2]))
+
+        self.params_ = (float(sigma_hat), float(kappa_hat), float(xi_hat))
+
+        # Seuils
+        if self.discrete:
+            thr = self._discrete_thresholds(X_pos, sigma_hat, kappa_hat, xi_hat)
+        else:
+            thr = self._inv_F_plus(self.quantiles, sigma_hat, kappa_hat, xi_hat)
+
+        thr = np.maximum.accumulate(thr)
+        self.thresholds_ = thr.astype(float)
+        self.plot_cdf(X, dir_output=dir_output)
+        return self
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        """
+        Retourne un vecteur d'étiquettes {0..4}.
+          - 0 si X==0
+          - 1..4 selon les 4 seuils
+        """
+        if self.thresholds_ is None:
+            raise RuntimeError("eGPDRisk must be fitted before predicting.")
+
+        X = np.asarray(X).reshape(-1)
+        labels = np.zeros_like(X, dtype=int)
+
+        mask_pos = X > 0
+        xv = X[mask_pos]
+        t1, t2, t3 = self.thresholds_
+
+        lab = np.zeros_like(xv, dtype=int)
+        lab[(xv > 0)  & (xv <= t1)] = 1
+        lab[(xv > t1) & (xv <= t2)] = 2
+        lab[(xv > t2) & (xv <= t3)] = 3
+        lab[(xv > t3)]              = 4
+
+        labels[mask_pos] = lab
+        return labels
+
+    # Helpers
+    def get_thresholds(self) -> Tuple[float, float, float, float]:
+        if self.thresholds_ is None:
+            raise RuntimeError("eGPDRisk must be fitted first.")
+        return tuple(map(float, self.thresholds_))
+
+    def get_params(self) -> Tuple[float, float, float]:
+        if self.params_ is None:
+            raise RuntimeError("eGPDRisk must be fitted first.")
+        return self.params_
+    
+    def plot_cdf(self, X, dir_output, ax=None, n_points=200):
+        """
+        Affiche la CDF empirique de X>0 et la CDF eGPD estimée.
+
+        :param X: données 1D (les mêmes que pour fit)
+        :param ax: axe matplotlib optionnel
+        :param n_points: nombre de points pour le tracé théorique
+        """
+        if dir_output is None:
+            dir_output = Path('egpd')
+            
+        if self.params_ is None:
+            raise RuntimeError("eGPDRisk must be fitted before plotting.")
+
+        # Récupération des paramètres
+        sigma, kappa, xi = self.params_
+
+        # Données positives
+        X = np.asarray(X).reshape(-1)
+        X_pos = X[X > 0]
+        if X_pos.size == 0:
+            raise ValueError("No positive data to plot.")
+
+        X_pos_sorted = np.sort(X_pos)
+        emp_cdf = np.arange(1, len(X_pos_sorted) + 1) / len(X_pos_sorted)
+
+        # Grille de points pour la CDF théorique
+        grid = np.linspace(0, X_pos_sorted.max(), n_points)
+        theor_cdf = self._F_plus(grid, sigma, kappa, xi)
+
+        # Création figure
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(7, 5))
+
+        # Tracés
+        ax.step(X_pos_sorted, emp_cdf, where='post', label="CDF empirique", linewidth=2)
+        ax.plot(grid, theor_cdf, '--', label="CDF eGPD théorique", linewidth=2)
+
+        # Seuils de classes
+        if self.thresholds_ is not None:
+            for thr in self.thresholds_:
+                ax.axvline(thr, color='gray', linestyle=':', alpha=0.7)
+
+        ax.set_xlabel("Valeurs positives de X")
+        ax.set_ylabel("CDF")
+        ax.set_title("Ajustement eGPD — CDF empirique vs théorique")
+        ax.grid(alpha=0.3)
+        ax.legend()
+        plt.tight_layout()
+        
+        plt.savefig(dir_output / 'egpg_cdf.png')
+        plt.close("all")
+        
 class GMMRiskZerosHandle:
     """
     Classe utilisant Gaussian Mixture Model (GMM) pour identifier les classes de risque.
@@ -678,7 +946,7 @@ class ScalerClassRisk:
 
         if sinisters is not None and len(sinisters.shape) == 1:
             sinisters = sinisters.reshape(-1)
-
+            
         X_ = np.copy(X)
 
         # Apply preprocessor if provided
@@ -720,7 +988,11 @@ class ScalerClassRisk:
             sinisters_min = None
             sinisters_max = None
             if class_risk is not None:
-                class_risk.fit(X_scaled, sinisters_id)
+                if 'dir_output' in required_params(class_risk.fit):
+                    check_and_create_path(self.dir_output / Path(str(unique_id)))
+                    class_risk.fit(X_scaled, y=sinisters_id, dir_output=self.dir_output / Path(str(unique_id)))
+                else:
+                    class_risk.fit(X_scaled, y=sinisters_id)
 
                 # Predict classes for current ID
                 classes = class_risk.predict(X_scaled)
@@ -746,6 +1018,7 @@ class ScalerClassRisk:
                     sinisters_mean = np.array(sinisters_mean)
                     sinisters_min = np.array(sinisters_min)
                     sinisters_max = np.array(sinisters_max)
+                    
             self.models_by_id[unique_id] = {
                 'scaler': scaler,
                 'class_risk': class_risk,
@@ -767,7 +1040,7 @@ class ScalerClassRisk:
         plt.ylabel('Frequency')
 
         # Save the plot
-        output_path = os.path.join(self.dir_output, f'histogram_train.png')
+        output_path = os.path.join(self.dir_output, f'histogram_{ids[0]}_train.png')
         plt.savefig(output_path)
         plt.close()
         
@@ -942,25 +1215,37 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     res = {}
 
-    evaluate = {'name' : [], 'spearman' : []}
-
-    classifier = ['kmeans', 'gm']
-    class_risk_dict = {'kmeans': KMeansRiskZerosHandle(n_clusters), 
-                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
+    evaluate = {'name' : [], 'spearman' : [], 'kendall' : [], 'pearson' : [], 'ss' : []}
+    
+    classifier = ['egpd', 'kmeans', 'gm']
+    class_risk_dict = {
+                        'egpd' : eGPDRisk(),
+                       'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)
+                       }
     
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
 
-    targets = ['burnedareaRoot', 'burned_area', 'nbsinister', 'time_intervention', 'ressource']
+    targets = ['nbsinister', 'time_intervention', 'ressource', 'burned_area', 'burnedareaRoot']
 
     for cls, col, tar in itertools.product(classifier, group_col, targets):
         
-        if f'{tar}-{cls}-{n_clusters}-Class-{col}' in train_dataset_.columns:
+        print(f'{cls}, {col}, {tar}')
+        
+        #if f'{tar}-{cls}-{n_clusters}-Class-{col}' in train_dataset_.columns and cls != 'egpd':
+        if False:
             continue
         
         class_risk = class_risk_dict[cls]
         col_name = group_col_dict[col]
-
+        
+        if cls == 'egpd':
+            if tar != 'nbsinister':
+                class_risk.discrete = False
+            else:
+                class_risk.discrete = True
+        
         obj2 = ScalerClassRisk(col_id=col_name, dir_output = dir_post_process, target=tar, scaler=None, class_risk=class_risk)
 
         obj2.fit(train_dataset_[tar].values, train_dataset_[tar].values, train_dataset_[col_name].values)
@@ -969,22 +1254,30 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         val_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(val_dataset_[tar].values,  val_dataset_[tar].values, val_dataset_[col_name].values)
         test_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(test_dataset_[tar].values,  test_dataset_[tar].values, test_dataset_[col_name].values)
         
+        
+        
         res[obj2.name] = obj2
         
         new_cols.append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
 
         ######################################################################################
 
-        spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
-        print(np.unique(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values))
-        #ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
-        evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
-        evaluate['spearman'].append(spearm)
-        #evaluate['ss'].append(ss)
+        if np.unique(train_dataset_[tar].values).shape[0] > 1:
+            spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+            pears = pearson_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+            kend = kendall_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+            ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
+            evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
+            evaluate['spearman'].append(spearm)
+            evaluate['pearson'].append(pears)
+            evaluate['kendall'].append(kend)
+            evaluate['ss'].append(ss)
         
     df_evaluate = pd.DataFrame.from_dict(evaluate)
-    df_evaluate.sort_values(by='spearman', inplace=True, ascending=False)
+    df_evaluate.sort_values(by='ss', inplace=True, ascending=False)
     logger.info(df_evaluate.head())
+    print(dir_post_process)
+    df_evaluate.to_csv(dir_post_process / 'risk_clustering_evaluation.csv', index=False)
 
     ###############################################################################
 

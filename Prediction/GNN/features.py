@@ -445,7 +445,8 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             ds_avg['nbsinister_id'] = ds_avg['nbsinister']
             ds_avg['weight'] = 1
             
-            results_by_departement[departement] = ds_avg
+            results_by_departement[departement] = ds_avg            
+            
             print(np.unique(ds_avg['date'].values))
         return results_by_departement
 
@@ -2348,9 +2349,9 @@ def is_mediterranean_dept(dept_code):
         83,  # Var
         84,  # Vaucluse
         100, # Corse 2A 
-        101, # Corse 2B 
+        101, # Corse 2B
     }
-
+    
     return 1 if dept_code in mediterranean_depts else 0
 
 from typing import List, Tuple

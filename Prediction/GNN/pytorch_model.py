@@ -1193,7 +1193,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, proportion_0_with_positive_weight, isNotmesh=False):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -1232,7 +1232,7 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
     print(ks, horizon)
     for id in date_ids:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
             if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
@@ -1242,9 +1242,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
                 Ys.append(y)
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_with_positive_weight)
 
         if x is None:
             continue
@@ -1279,6 +1279,8 @@ def create_dataset(graph,
 
     x_test, y_test = df_test[ids_columns + features_name].values, df_test[ids_columns + targets_columns + [target_name]].values
 
+    proportion_0 = df_train[(df_train[target_name] == 0) & (df_train['weight'] > 0)].shape[0] / df_train[df_train[target_name] == 0].shape[0]
+
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
     dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
     dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
@@ -1286,13 +1288,13 @@ def create_dataset(graph,
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, proportion_0, graph_mesh is None)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, 1.0, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, 1.0, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1333,11 +1335,13 @@ def create_train_dataset(graph,
     #print('weight', df_train['weight'].unique())
 
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
+    
+    proportion_0 = df_train[(df_train[target_name] == 0) & (df_train['weight'] > 0)].shape[0] / df_train[df_train[target_name] == 0].shape[0]
 
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, proportion_0, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1376,10 +1380,10 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, 1.0, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, 1.0, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
@@ -1402,13 +1406,19 @@ def create_test_val_dataset(graph,
 def get_numpy_data(graph, df,
                        features_name,
                        use_temporal_as_edges : bool,
-                       ks :int):
+                       ks :int,
+                       horizon :int = 0):
 
     Xset = df[ids_columns + features_name].values
 
     X = []
     E = []
-    Yset = None
+    # Create a dummy Yset with the same structure as Xset for compatibility
+    # This is needed because construct_time_series expects a Yset parameter
+    # even though we're only interested in X data for SHAP analysis
+    Yset = np.zeros((Xset.shape[0], len(ids_columns) + 1))
+    Yset[:, :len(ids_columns)] = Xset[:, :len(ids_columns)]
+    
     """if graph.graph_method == 'graph':
         graphId = np.unique(Xset[:, graph_id_index])
         for id in graphId:
@@ -1438,18 +1448,19 @@ def get_numpy_data(graph, df,
                 Y.append(y)
                 E.append(e)
     else:"""
-    graphId = np.unique(Xset[:, date_index])
+    mask_pos = df['weight'] > 0
+    graphId = np.unique(Xset[mask_pos, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, _ = construct_time_series(date, Xset, Yset, ks, len(ids_columns))
+            x, _ = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
             continue
         elif use_temporal_as_edges:
-            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
         else:
-            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
 
         if x is None:
             continue
@@ -1512,16 +1523,16 @@ def create_test_loader(graph, df,
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns))
+            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
                     Y.append(y[i])
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
         else:
-            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns), 1.0)
 
         if x is None:
             continue
@@ -1963,19 +1974,79 @@ def build_dataframe(
     return df
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, original_model, F, T, edges, horizon=0):
+    def __init__(self, training_instance, F, T, edges, horizon_shap):
         super().__init__()
-        self.model = original_model
+        self.training_instance = training_instance
+        self.model = training_instance.model
         self.F = F
         self.T = T
         self.edges = edges
-
-        self.horizon = horizon
+        self.horizon = horizon_shap
 
     def forward(self, x_flat):
-        # reshape x_flat (B, F*T) vers (B, F, T)
-        x_orig = x_flat.reshape(-1, self.F, self.T)
-        return self.model(x_orig, self.edges)
+        """
+        Forward pass avec gestion de l'horizon autorégressif (basé sur _predict_tensor).
+        """
+        # 1. Conversion (Reshape)
+        inputs = x_flat.reshape(-1, self.F, self.T)
+        
+        hidden_past = []
+        output_past = []
+        self.model.eval()
+        
+        for H in range(self.horizon + 1):
+            
+            # Sélection des inputs pour cet horizon
+            inputs_horizon = self.training_instance.compute_inputs(inputs, -1 - (self.horizon - H), "current" if H == 0 else "futur").clone()
+            # Gestion de z_prev
+            if H == 0:
+                z_prev = None
+            else:
+                if self.training_instance.ks > 0:
+                    history = hidden_past[-(self.training_instance.ks + 1):]
+                    z_prev = torch.stack(history, dim=2)
+                    L = z_prev.size(2)
+                    if L < (self.training_instance.ks + 1):
+                        B, D = z_prev.size(0), z_prev.size(1)
+                        pad = torch.zeros((B, D, self.training_instance.ks + 1 - L), device=z_prev.device, dtype=z_prev.dtype)
+                        z_prev = torch.cat([pad, z_prev], dim=2)
+                else:
+                    z_prev = hidden_past[-1]
+
+            # Gestion des inputs passés (mise à jour autoregressive)
+            if H > 0:
+                if self.training_instance.id_past_risk is not None:
+                    inputs_horizon[:, self.training_instance.id_past_risk, -H:] = 0
+                if self.training_instance.id_past_ba is not None:
+                    inputs_horizon[:, self.training_instance.id_past_ba, -H:] = 0
+                if self.training_instance.prev_idx is not None:
+                    # Attention : output_past contient des tenseurs (B, output_dim)
+                    # On doit les empiler pour avoir (B, output_dim, H)
+                    # Vérifier dimensions : inputs_horizon[:, idx, -H:] attend (B, H) ou (B, 1, H) ?
+                    # prev_idx correspond à une feature.
+                    # output_past est une liste de H tenseurs.
+                    stack_output = torch.stack(output_past, dim=2) # (B, D, H)
+                    # On suppose que prev_idx pointe vers les features correspondant à la sortie
+                    inputs_horizon[:, self.training_instance.prev_idx, -H:] = stack_output
+            
+            # Forward pass
+            if hasattr(self.model, 'forward') and 'z_prev' in self.model.forward.__code__.co_varnames:
+                 output, logits, hidden = self.model(inputs_horizon, self.edges, z_prev=z_prev)
+            else:
+                 # Fallback si pas de z_prev (ne devrait pas arriver avec horizon > 0 si bien configuré)
+                 result = self.model(inputs_horizon, self.edges)
+                 if isinstance(result, tuple) and len(result) == 3:
+                     output, logits, hidden = result
+                 else:
+                     output = result
+                     hidden = None # Ou gérer autrement
+
+            hidden_past.append(hidden)
+            output_past.append(output)
+            
+            # Retourner la sortie du dernier horizon
+            if H == self.horizon:
+                return output
 
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
@@ -2299,6 +2370,75 @@ class Training():
             
         return loss
     
+    def model_distillation_loss(self, loss, inputs_horizon, labels, logits):
+        criterion_teacher = self.get_loss('kldivloss')
+        #df_test = build_dataframe(inputs_horizon, labels, self.features_name, ids_columns, targets_columns, self.target_name)
+        if self.top_model != 'task':
+            teacher_logits, _ = self.teacher.predict((inputs_horizon, labels, None),
+                                                    hard_or_soft='soft',
+                                                weights_average=self.weights_average,
+                                                top_model=self.top_model, id_col=(None, None),
+                                                prediction_type='RawFormulaVal', aggregation=False)
+        else:
+            teacher_logits, _ = self.teacher.predict_with_tasks((labels, inputs_horizon, None),
+                                                            weights_average=self.weights_average,
+                                                            id_col=(None, None), proba='RawFormulaVal', aggregation=False)
+        
+        if isinstance(teacher_logits, list):
+            teacher_logits = torch.stack(
+                [t.to(device=inputs_horizon.device, dtype=torch.float32) for t in teacher_logits],
+                dim=0
+            )
+        else:
+            teacher_logits = torch.as_tensor(teacher_logits, device=inputs_horizon.device, dtype=torch.float32)    
+        
+        T = self.temperature_value
+        
+        p_student = F.log_softmax(logits / T, dim=-1)
+        p_teacher = F.softmax(teacher_logits / T, dim=-1)
+        
+        #print(torch.unique(p_student))
+        
+        device = p_student.device
+        models_to_mean, weights2use, self_idx = self.teacher.get_weights(self.top_model, return_self_model_idx=True)
+        
+        if self.distillation_training_mode == 'normal':
+            p_teacher = self.teacher.aggregate_probabilities_tensor(p_teacher, models_to_mean, weights2use)
+            #kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False)
+            kl_div_loss = F.kl_div(p_student, p_teacher, reduction='batchmean') * (T * T) * 1e-3
+            #kl_div_loss = (torch.sum(p_teacher * (p_teacher.log() - p_student)) / p_student.size()[0]) * (T**2)
+            
+        elif self.distillation_training_mode == 'allTeacher':
+            mask = torch.ones(teacher_logits.shape[0], dtype=torch.bool, device=device)
+            mask[self_idx] = False
+
+            # 2) Sélection des teachers et des poids
+            p_teacher_sel = p_teacher[mask]                      # [M', B, C]
+            if p_teacher_sel.numel() == 0:
+                # Fallback: pas de teacher restant -> KD = 0
+                kl_div_loss = p_student.new_zeros(())
+            else:
+                if weights2use is None:
+                    w = torch.full((p_teacher_sel.shape[0],), 1.0/p_teacher_sel.shape[0],
+                                    device=device, dtype=torch.float32)
+                else:
+                    w_all = torch.as_tensor(weights2use, device=device, dtype=torch.float32)
+                    w = w_all[mask]
+                    #w = w / w.sum().clamp_min(1e-12)
+
+                # 3) KL par teacher (entrée = log-probas élève, cible = probas teacher)
+                kl_terms = torch.stack([
+                    F.kl_div(p_student, p_teacher_sel[m], reduction='batchmean')
+                    for m in range(p_teacher_sel.shape[0])
+                ]) * (T * T)  * 1e-3 # [M'] 
+
+                # 4) Moyenne pondérée + facteur T^2
+                #kl_div_loss = torch.dot(w, kl_terms)
+                kl_div_loss = kl_div_loss.mean()
+                
+        loss = (1 - self.alpha_value) * kl_div_loss + self.alpha_value * loss
+        return loss
+
     def launch_batch(self, data, criterion, batch_type, do_update):
         inputs, labels, _ = data
         graphs = None
@@ -2367,72 +2507,7 @@ class Training():
             loss = self.calculate_loss(criterion, logits, target, weights, labels)
             
             if self.student_train: # distallation traning
-                criterion_teacher = self.get_loss('kldivloss')
-                #df_test = build_dataframe(inputs_horizon, labels, self.features_name, ids_columns, targets_columns, self.target_name)
-                if self.top_model != 'task':
-                    teacher_logits, _ = self.teacher.predict((inputs_horizon, labels, None),
-                                                          hard_or_soft='soft',
-                                                        weights_average=self.weights_average,
-                                                        top_model=self.top_model, id_col=(None, None),
-                                                        prediction_type='RawFormulaVal', aggregation=False)
-                else:
-                    teacher_logits, _ = self.teacher.predict_with_tasks((labels, inputs_horizon, None),
-                                                                    weights_average=self.weights_average,
-                                                                    id_col=(None, None), proba='RawFormulaVal', aggregation=False)
-                
-                if isinstance(teacher_logits, list):
-                    teacher_logits = torch.stack(
-                        [t.to(device=inputs.device, dtype=torch.float32) for t in teacher_logits],
-                        dim=0
-                    )
-                else:
-                    teacher_logits = torch.as_tensor(teacher_logits, device=inputs.device, dtype=torch.float32)    
-                
-                #T = torch.nn.functional.softplus(self.temperature_value) + 1e-6
-                T = 1.0
-                
-                p_student = F.log_softmax(logits / T, dim=-1)
-                p_teacher = F.softmax(teacher_logits / T, dim=-1)
-                
-                #print(torch.unique(p_student))
-                
-                device = p_student.device
-                models_to_mean, weights2use, self_idx = self.teacher.get_weights(self.top_model, return_self_model_idx=True)
-                
-                if self.distillation_training_mode == 'normal':
-                    p_teacher = self.teacher.aggregate_probabilities_tensor(p_teacher, models_to_mean, weights2use)
-                    #kl_div_loss = self.calculate_loss(criterion_teacher, p_student, p_teacher, weights, labels, tolong=False)
-                    kl_div_loss = F.kl_div(p_student, p_teacher, reduction='batchmean') * (T * T)
-                    #kl_div_loss = (torch.sum(p_teacher * (p_teacher.log() - p_student)) / p_student.size()[0]) * (T**2)
-                    
-                elif self.distillation_training_mode == 'allTeacher':
-                    mask = torch.ones(teacher_logits.shape[0], dtype=torch.bool, device=device)
-                    mask[self_idx] = False
-
-                    # 2) Sélection des teachers et des poids
-                    p_teacher_sel = p_teacher[mask]                      # [M', B, C]
-                    if p_teacher_sel.numel() == 0:
-                        # Fallback: pas de teacher restant -> KD = 0
-                        kl_div_loss = p_student.new_zeros(())
-                    else:
-                        if weights2use is None:
-                            w = torch.full((p_teacher_sel.shape[0],), 1.0/p_teacher_sel.shape[0],
-                                            device=device, dtype=dtype)
-                        else:
-                            w_all = torch.as_tensor(weights2use, device=device, dtype=dtype)
-                            w = w_all[mask]
-                            #w = w / w.sum().clamp_min(1e-12)
-
-                        # 3) KL par teacher (entrée = log-probas élève, cible = probas teacher)
-                        kl_terms = torch.stack([
-                            F.kl_div(p_student, p_teacher_sel[m], reduction='batchmean')
-                            for m in range(p_teacher_sel.shape[0])
-                        ])  # [M']
-
-                        # 4) Moyenne pondérée + facteur T^2
-                        kl_div_loss = (T * T) * torch.dot(w, kl_terms)
-                
-                loss = (1 - self.alpha_value) * kl_div_loss + self.alpha_value * loss
+                loss = self.model_distillation_loss(loss, inputs_horizon, labels, logits)
                 
             if self.constrastive: # MOON federated training
                 _, _, zprev = self.prev_model(inputs)
@@ -2491,7 +2566,7 @@ class Training():
                 total_loss += loss
 
         return total_loss
-    
+
     def launch_train_loader(self, loader, criterion, optimizer, do_update):
 
         self.model.train()
@@ -3001,6 +3076,7 @@ class Training():
                 if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                     data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
             else:
+                print(self.dir_log / 'metrics.pkl')
                 if (self.dir_log / 'metrics.pkl').is_file():
                     print(f'Load metrics')
                     find_log = True
@@ -3111,14 +3187,17 @@ class Training():
                     copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=custom_model_params)
                     
                     ############################# On set val ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val')
+                    test_output_proba, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val', prediction_type='Proba')
 
-                    test_output = test_output[:, 0]
+                    test_output_proba = test_output_proba[:, :, 0]
                     y = y[:, :, 0]
+                    
+                    test_output = F.softmax(test_output_proba, dim=-1)
 
                     prediction = test_output.detach().cpu().numpy()
-                    
+                    prediction_proba = test_output_proba.detach().cpu().numpy()
                     y = y.detach().cpu().numpy()
+                    
                     if 'MultiScale' in self.model_name:
                         id_mask = y[:, scale_index]
                     else:
@@ -3130,21 +3209,24 @@ class Training():
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, prediction_proba)
                     metrics_run = round_floats(metrics_run)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
                     update_metrics_as_arrays(self, tp, metrics_run, 'val')
 
                     ############################# On set test ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='test')
-                    
-                    test_output = test_output[:, 0]
+                    test_output_proba, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='Val', prediction_type='Proba')
+
+                    test_output_proba = test_output_proba[:, :, 0]
                     y = y[:, :, 0]
                     
-                    prediction = test_output.detach().cpu().numpy()
-                    y = y.detach().cpu().numpy()
+                    test_output = F.softmax(test_output_proba, dim=-1)
 
+                    prediction = test_output.detach().cpu().numpy()
+                    prediction_proba = test_output_proba.detach().cpu().numpy()
+                    y = y.detach().cpu().numpy()
+                    
                     if 'MultiScale' in self.model_name:
                         id_mask = y[:, scale_index]
                     else:
@@ -3156,7 +3238,7 @@ class Training():
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, prediction_proba)
                     metrics_run = round_floats(metrics_run)
                     update_metrics_as_arrays(self, tp, metrics_run, 'test')
                 
@@ -3555,6 +3637,9 @@ class Training():
     def predict_proba(self, df, graph=None, return_y=False, prediction_type="Proba"):
         if graph is None:
             graph = self.graph
+            
+        if prediction_type == 'Class':
+            prediction_type = 'Proba'
 
         if isinstance(df, pd.DataFrame):
             
@@ -3693,7 +3778,7 @@ class Training():
         #optimizer = optim.SGD(parameters, lr=self.lr, momentum=0.9)
         return optimizer
 
-    def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None):
+    def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None, horizon_shap=0, max_features=None):
         """
         Visualisation des valeurs SHAP pour expliquer les prédictions.
         :param df_set: DataFrame des caractéristiques d'entrée.
@@ -3703,33 +3788,55 @@ class Training():
         :param figsize: Taille de la figure.
         :param samples: Échantillons spécifiques à analyser.
         :param samples_name: Noms des échantillons à afficher.
+        :param horizon_shap: Horizon pour le calcul SHAP.
+        :param max_features: Nombre maximum de features les plus influentes à analyser (None = toutes).
         """
         if hasattr(self, 'use_temporal_as_edges'):
             use_temporal_as_edges = self.use_temporal_as_edges
         else:
             use_temporal_as_edges = None
 
-        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks)
+        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         Xst = torch.Tensor(Xst).to(self.device)
 
         B, F, T = Xst.shape
-
+        
+        Xst_horizon = self.compute_inputs(Xst,  -1 - (self.horizon - horizon_shap), "current" if horizon_shap == 0 else "futur")
+        Xst_horizon = Xst_horizon[:, :, 0]
         Xst_flat = Xst.reshape((B, F*T))
+        Xst_horizon_flat = Xst_horizon.reshape((B, -1))
+        
         df_features = []
+        
         # SHAP DeepExplainer avec wrapper du modèle
-        explainer = shap.DeepExplainer(WrapperModel(self.model, F, T, e).to(self.device), Xst_flat)
-        shap_values = explainer.shap_values(Xst_flat)
-
+        explainer = shap.DeepExplainer(WrapperModel(self, F, T, e, horizon_shap).to(self.device), Xst_flat)
+        shap_values = explainer.shap_values(Xst_flat, check_additivity=False)
+        
         n_classes = self.out_channels
+
+        # Vérifier la forme des valeurs SHAP pour débogage
+        print(f"SHAP values type: {type(shap_values)}")
+        print(f"SHAP values shape (before processing): {np.asarray(shap_values).shape if isinstance(shap_values, (list, np.ndarray)) else 'N/A'}")
 
         # Vérifier si la sortie SHAP est multi-classes
         if n_classes == 1:
             shap_values = shap_values[:, :, np.newaxis]
         
         shap_values = np.asarray(shap_values)
-        shap_values = np.reshape(shap_values, (n_classes, B, F, T))
-        shap_values = shap_values[:, :, :, -1]
+        
+        # Vérification de dimensions pour éviter les erreurs de reshape
+        expected_shape = (n_classes, B, F, T)
+        try:
+            shap_values = np.reshape(shap_values, expected_shape)
+        except ValueError as e:
+            print(f"Erreur de reshape: forme actuelle {shap_values.shape}, forme attendue {expected_shape}")
+            raise e
+        
+        # Extraire seulement le dernier pas de temps (T=-1) pour l'analyse
+        shap_values = shap_values[:, :, :, -1 - (self.horizon - horizon_shap)]
         shap_values = np.moveaxis(shap_values, 0, 2)
+        print(shap_values.shape)
+        print(len(self.features_name))
         #shap_values = shap_values.values
 
         # Pour chaque classe, calculer et sauvegarder les résultats SHAP
@@ -3746,39 +3853,54 @@ class Training():
 
             df_shap['class'] = class_idx
             df_features.append(df_shap)
+            
+            # Filtrer les features si max_features est spécifié
+            if max_features is not None and max_features < len(self.features_name):
+                # Obtenir les indices des top features
+                top_feature_indices = df_shap.head(max_features).index.tolist()
+                # Filtrer les valeurs SHAP et les noms de features
+                shap_values_filtered = shap_values[:, top_feature_indices, class_idx]
+                Xst_horizon_flat_filtered = Xst_horizon_flat[:, top_feature_indices]
+                feature_names_filtered = [self.features_name[i] for i in top_feature_indices]
+                print(f"Utilisation des {max_features} features les plus influentes sur {len(self.features_name)}")
+            else:
+                shap_values_filtered = shap_values[:, :, class_idx]
+                Xst_horizon_flat_filtered = Xst_horizon_flat
+                feature_names_filtered = self.features_name
 
             # Visualisation globale (summary_plot) pour chaque classe
             plt.figure(figsize=figsize)
-            """if mode == 'bar':
+            if mode == 'bar':
                 shap.summary_plot(
-                    shap_values[:, :, class_idx],
-                    features=Xst_flat, 
-                    feature_names=self.features_name,
+                    shap_values_filtered,
+                    features=Xst_horizon_flat_filtered,
+                    feature_names=feature_names_filtered,
                     plot_type='bar',
                     show=False
                 )
             elif mode == 'beeswarm':
                 #print(shap_values[:, :, class_idx].shape, df.values.shape, len(self.features_name))
-                fig, ax = plt.subplots(figsize=(10, 6))
+                fig, ax = plt.subplots(figsize=figsize)
 
                 # Générer le graphique SHAP pour une classe spécifique (class_idx)
                 shap.summary_plot(
-                    shap_values[:, :, class_idx],
-                    features=Xst_flat,
-                    feature_names=self.features_name,
+                    shap_values_filtered,
+                    features=Xst_horizon_flat_filtered,
+                    feature_names=feature_names_filtered,
                     show=False,
                     plot_type="dot",  # Vous pouvez choisir 'dot', 'bar', ou 'violin' comme type de plot
                     ax=ax
                 )
 
                 # Ajouter explicitement la colorbar
-                plt.colorbar(ax.collections[0], ax=ax)
-                """
+                if len(ax.collections) > 0:
+                    plt.colorbar(ax.collections[0], ax=ax)
+                
                 #plt.show()
 
-            #print(dir_output / f"{outname}_class_{class_idx}_shapley.png")
-            #plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png")
-            #plt.close()
+            print(f"Sauvegarde: {dir_output / f'{outname}_class_{class_idx}_shapley.png'}")
+            plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png", bbox_inches='tight', dpi=100)
+            plt.close('all')
 
             # Visualisations spécifiques aux échantillons (force_plot)
             if samples is not None and samples_name is not None:
@@ -3798,10 +3920,166 @@ class Training():
                         dir_output / f"{outname}_class_{class_idx}_{samples_name[i]}_shapley.png",
                         bbox_inches='tight'
                     )
-                    plt.close()
+                    plt.close('all')
 
         df_features = pd.concat(df_features)
         save_object(df_features, 'features_importance.pkl', dir_output)
+        
+        # Sauvegarder les valeurs SHAP pour réutilisation ultérieure
+        shap_data = {
+            'shap_values': shap_values,  # Shape: (B, F, n_classes)
+            'expected_values': explainer.expected_value,
+            'feature_names': self.features_name,
+            'n_classes': n_classes,
+            'B': B,
+            'F': F,
+            'T': T,
+            'Xst_flat': Xst_flat.cpu().numpy() if torch.is_tensor(Xst_flat) else Xst_flat
+        }
+        save_object(shap_data, f'{outname}_shap_values.pkl', dir_output)
+        print(f"SHAP values sauvegardées dans: {dir_output / f'{outname}_shap_values.pkl'}")
+
+    def shapley_additive_explanation_sample(self, sample_idx, outname, dir_output, 
+                                           shap_data_file=None, sample_name=None, 
+                                           figsize=(15, 10), generate_force_plot=True):
+        """
+        Calcule et visualise les valeurs SHAP pour un échantillon spécifique.
+        Utilise les valeurs SHAP pré-calculées si disponibles, sinon calcule uniquement pour cet échantillon.
+        
+        :param sample_idx: Index de l'échantillon à analyser
+        :param outname: Nom de sortie pour les fichiers
+        :param dir_output: Répertoire de sortie
+        :param shap_data_file: Chemin vers le fichier de SHAP values sauvegardé (optionnel)
+        :param sample_name: Nom de l'échantillon pour les fichiers de sortie
+        :param figsize: Taille des figures
+        :param generate_force_plot: Si True, génère les force plots
+        :return: Dictionary contenant les SHAP values pour cet échantillon
+        """
+        from pathlib import Path
+        
+        if sample_name is None:
+            sample_name = f"sample_{sample_idx}"
+        
+        # Essayer de charger les SHAP values pré-calculées
+        if shap_data_file is None:
+            shap_data_file = dir_output / f'{outname}_shap_values.pkl'
+        
+        shap_data = None
+        if Path(shap_data_file).exists():
+            print(f"Chargement des SHAP values depuis: {shap_data_file}")
+            shap_data = read_object(Path(shap_data_file).name, Path(shap_data_file).parent)
+        
+        if shap_data is not None:
+            # Utiliser les valeurs pré-calculées
+            print(f"Utilisation des SHAP values pré-calculées")
+            shap_values = shap_data['shap_values']
+            expected_values = shap_data['expected_values']
+            feature_names = shap_data['feature_names']
+            n_classes = shap_data['n_classes']
+            Xst_flat = shap_data['Xst_flat']
+            
+            # Vérifier que l'index est valide
+            if sample_idx >= shap_values.shape[0]:
+                raise ValueError(f"sample_idx {sample_idx} est hors limites. Maximum: {shap_values.shape[0] - 1}")
+            
+            # Extraire les valeurs pour cet échantillon
+            sample_shap_values = shap_values[sample_idx, :, :]  # Shape: (F, n_classes)
+            sample_features = Xst_flat[sample_idx, :]  # Shape: (F,)
+            
+        else:
+            print(f"Aucune SHAP value pré-calculée trouvée. Calcul pour l'échantillon {sample_idx}...")
+            raise NotImplementedError(
+                "Le calcul de SHAP pour un seul échantillon sans valeurs pré-calculées "
+                "n'est pas encore implémenté. Veuillez d'abord exécuter "
+                "shapley_additive_explanation() pour calculer et sauvegarder toutes les valeurs SHAP."
+            )
+        
+        # Générer les visualisations pour chaque classe
+        results = {
+            'sample_idx': sample_idx,
+            'sample_name': sample_name,
+            'shap_values': sample_shap_values,
+            'features': sample_features,
+            'feature_names': feature_names,
+            'plots_generated': []
+        }
+        
+        for class_idx in range(n_classes):
+            # 1. Bar plot des valeurs SHAP pour cet échantillon
+            plt.figure(figsize=figsize)
+            
+            # Créer un DataFrame pour faciliter la visualisation
+            shap_df = pd.DataFrame({
+                'feature': feature_names,
+                'shap_value': sample_shap_values[:, class_idx],
+                'feature_value': sample_features[:len(feature_names)]
+            })
+            shap_df = shap_df.reindex(shap_df['shap_value'].abs().sort_values(ascending=False).index)
+            
+            # Limiter aux 10 features les plus importantes pour le bar plot
+            shap_df_top10 = shap_df.head(10)
+            
+            # Bar plot
+            colors = ['red' if x < 0 else 'blue' for x in shap_df_top10['shap_value']]
+            plt.barh(range(len(shap_df_top10)), shap_df_top10['shap_value'], color=colors)
+            plt.yticks(range(len(shap_df_top10)), shap_df_top10['feature'])
+            plt.xlabel('SHAP value')
+            plt.title(f'SHAP Values (Top 10) - {sample_name} - Class {class_idx}')
+            plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+            plt.tight_layout()
+            
+            bar_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_bar.png"
+            plt.savefig(bar_plot_path, bbox_inches='tight', dpi=100)
+            plt.close('all')
+            results['plots_generated'].append(str(bar_plot_path))
+            print(f"Sauvegardé: {bar_plot_path}")
+            # 2. Waterfall plot (si SHAP le supporte)
+            try:
+                plt.figure(figsize=figsize)
+                shap.plots._waterfall.waterfall_legacy(
+                    expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
+                    sample_shap_values[:, class_idx],
+                    feature_names=feature_names,
+                    max_display=20,
+                    show=False
+                )
+                waterfall_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_waterfall.png"
+                plt.savefig(waterfall_path, bbox_inches='tight', dpi=100)
+                plt.close('all')
+                results['plots_generated'].append(str(waterfall_path))
+                print(f"Sauvegardé: {waterfall_path}")
+            except Exception as e:
+                print(f"Impossible de générer le waterfall plot: {e}")
+            
+            # 3. Force plot (optionnel)
+            if generate_force_plot:
+                try:
+                    plt.figure(figsize=figsize)
+                    # Arrondir les valeurs SHAP à 3 décimales pour meilleure visibilité
+                    sample_shap_values_rounded = np.round(sample_shap_values[:, class_idx], 5)
+                    expected_values = np.round(expected_values, 3)
+                    shap.force_plot(
+                        expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
+                        sample_shap_values_rounded,
+                        features=sample_features[:len(feature_names)],
+                        feature_names=feature_names,
+                        matplotlib=True,
+                        show=False
+                    )
+                    force_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_force.png"
+                    plt.savefig(force_plot_path, bbox_inches='tight', dpi=100)
+                    plt.close('all')
+                    results['plots_generated'].append(str(force_plot_path))
+                    print(f"Sauvegardé: {force_plot_path}")
+                except Exception as e:
+                    print(f"Impossible de générer le force plot: {e}")
+        
+        # Sauvegarder les résultats pour cet échantillon
+        save_object(results, f'{outname}_{sample_name}_shap_results.pkl', dir_output)
+        print(f"\nRésultats sauvegardés: {dir_output / f'{outname}_{sample_name}_shap_results.pkl'}")
+        print(f"Nombre de visualisations générées: {len(results['plots_generated'])}")
+        
+        return results
 
 ############################################ Split training ##############################################################
 
@@ -4781,6 +5059,11 @@ class ModelGNN(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
 
+        if self.target_name == 'DFE':
+            df_train = df_train[df_train['DFE'] > 0].reset_index(drop=True)
+            df_val = df_val[df_val['DFE'] > 0].reset_index(drop=True)
+            df_test = df_test[df_test['DFE'] > 0].reset_index(drop=True)
+
         self.graph = graph
         if self.mesh and self.graph_mesh is None:
             
@@ -5266,6 +5549,11 @@ class Model_Torch(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
+
+        if self.target_name == 'DFE':
+            df_train = df_train[df_train['DFE'] >= 0].reset_index(drop=True)
+            df_val = df_val[df_val['DFE'] >= 0].reset_index(drop=True)
+            df_test = df_test[df_test['DFE'] >= 0].reset_index(drop=True)
 
         if 'learnable-area' in self.loss:
             area_parameters = np.sort(df_train['graph_id'].unique())
@@ -6530,7 +6818,7 @@ class ModelKnowledgeDistillation(Training):
         if 'group' in self.distillation_training_mode:
             self.model_list = []
 
-        self.horizon = horizon
+        self.horizon = int(horizon)
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
@@ -6557,8 +6845,8 @@ class ModelKnowledgeDistillation(Training):
             assert self.teacher is not None
             self.teacher.clean()
             self.load_teacher = False
-
-        if self.distillation_training_mode == 'normal':
+            
+        if self.distillation_training_mode == 'normal' or self.distillation_training_mode == 'allTeacher':
             if self.under_sampling != 'full':
                 old_shape = df_train.shape
                 y = df_train[self.target_name]
@@ -6601,7 +6889,7 @@ class ModelKnowledgeDistillation(Training):
         self.df_test = df_test
         self.df_val = df_val
 
-        if self.distillation_training_mode != 'normal':
+        if self.distillation_training_mode != 'normal' and self.distillation_training_mode != 'allTeacher':
             return
 
         ##################################### Create loader #########################################
@@ -6691,7 +6979,8 @@ class ModelKnowledgeDistillation(Training):
                        self.device,
                        None,
                        self.target_name,
-                       self.ks)
+                       self.ks,
+                       horizon=self.horizon)
 
         return loader
     
@@ -6710,6 +6999,7 @@ class ModelKnowledgeDistillation(Training):
             top_temp = 0
             top_al = 0
             for temp in temperature_grid:
+                
                 for al in alpha_grid:
                     
                     logger.info(f'########### temperature {temp}, alpha {al} #############')
@@ -6717,7 +7007,7 @@ class ModelKnowledgeDistillation(Training):
                     self.temperature_value = temp
                     self.alpha_value = al
                     self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, search=False)
-                    score = self.score(self.df_test, self.df_test[self.target_name])
+                    score = self.score(self.df_val, self.df_val[self.target_name])
                     if score > score_0:
                         logger.info(f'temperature {temp}, alpha {al} -> {score}')
                         score_0 = score
@@ -6727,13 +7017,14 @@ class ModelKnowledgeDistillation(Training):
                         patience_i += 1
                         if patience_i == patience_c:
                             break
+                            
             parameters = {'temperature' : top_temp, 'alpha' : top_al}
             self.alpha_value = top_al
             self.temperature_value = top_temp
             save_object(parameters, 'log_parameters.pkl', self.dir_log)"""
         
-        self.temperature_value = torch.nn.Parameter(torch.tensor(1.0))
-        self.alpha_value = torch.nn.Parameter(torch.tensor(0.5))
+        self.temperature_value = torch.nn.Parameter(torch.tensor(3.0))
+        self.alpha_value = torch.nn.Parameter(torch.tensor(0.2))
             
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, search=True):
 
@@ -6819,9 +7110,11 @@ class ModelKnowledgeDistillation(Training):
                         current_group += 1
                         if current_group > nbgroup:
                             break
+            
+            del self.teacher
 
     def get_temperature_alpha(self):
-        return torch.nn.functional.softplus(self.temperature_value), torch.nn.functional.sigmoid(self.alpha_value)                   
+        return self.temperature_value, self.alpha_value
 
     def _save_temperature_alpha_plot(self):
 
@@ -7049,7 +7342,9 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
                         _, y = estimator.predict(X, return_y=True, prediction_type=prediction_type)
                         return pred.detach().cpu().numpy(), y.detach().cpu().numpy(),
         else:
-            aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model, weights2use=weights2use, prediction_type=prediction_type, aggregation=aggregation)
+            aggregated_pred, y = self.predict_proba_with_weights(X, weights_average=weights_average, top_model=top_model,
+                                                                 weights2use=weights2use, prediction_type=prediction_type,
+                                                                 aggregation=aggregation)
             if prediction_type == 'Class':
                 predictions = np.argmax(aggregated_pred, axis=-1)
             else:
@@ -7058,28 +7353,36 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             return predictions, y
         
     def get_weights(self, top_model, return_self_model_idx=False):
-        weights2use = self.weights_for_model
-        models_list = np.asarray([estimator.name for estimator in self.best_estimator_])
-        weights2use = np.asarray(weights2use)
-        models_to_mean = []
-        self_model_idx = math.inf
+        weights = np.asarray(self.weights_for_model)
+        n_models = len(weights)
+
+        # Liste des modèles
+        estimators = list(self.best_estimator_)
+        names = np.asarray([est.name for est in estimators])
+
+        # Indices triés par poids (croissant)
+        order = np.argsort(weights)
+
         if top_model != 'all':
-            top_model = int(top_model)
-            key = np.argsort(weights2use)
-            models_list = models_list[np.asarray(key)]
-            models_list = models_list[-top_model:]
-            
-        for i, estimator in enumerate(self.best_estimator_):
-            if estimator.name not in models_list:
-                continue
-            if estimator.target_name == self.target_name:
-                self_model_idx = i
-            models_to_mean.append(key[i])
-        
-        if return_self_model_idx:
-            return models_to_mean, weights2use[models_to_mean], self_model_idx
+            k = int(top_model)
+            k = max(1, min(k, n_models))  # clamp entre 1 et n_models
+            # indices des top-k modèles (les plus gros poids)
+            selected_idx = order[-k:]
         else:
-            return models_to_mean, weights2use[models_to_mean], i
+            selected_idx = np.arange(n_models)
+
+        # On repère l'indice (dans l'ensemble global) du modèle "self"
+        self_idx = math.inf
+        for i, idx in enumerate(selected_idx):
+            if estimators[idx].target_name == self.target_name:
+                self_idx = i
+                break
+
+        if return_self_model_idx:
+            # on renvoie: indices sélectionnés, leurs poids, et l'indice du modèle "self"
+            return selected_idx.tolist(), weights[selected_idx], self_idx
+        else:
+            return selected_idx.tolist(), weights[selected_idx], self_idx
 
     def predict_proba_with_weights(self, X, hard_or_soft='soft', weights_average='weight', top_model='all', weights2use=[], id_col=(None, None), prediction_type='Proba', aggregation=True):
         """
@@ -7503,6 +7806,31 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
+
+    def plot_weights_by_target(self, save_path=None):
+        """
+        Plot the weights of each model against its target name.
+        """
+        if save_path is None:
+            save_path = self.dir_log / 'weights_by_target.png'
+            
+        target_names = []
+        weights = []
+        
+        for model, weight in zip(self.best_estimator_, self.weights_for_model):
+            target_names.append(model.target_name)
+            weights.append(weight)
+            
+        plt.figure(figsize=(12, 6))
+        plt.scatter(target_names, weights, alpha=0.7)
+        plt.xlabel('Target Name')
+        plt.ylabel('Weight')
+        plt.title('Model Weights by Target Name')
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close()
     
 class ModelPerID(RegressorMixin, ClassifierMixin):
     def __init__(self, model, dir_log, cluster="departement", horizon=0):

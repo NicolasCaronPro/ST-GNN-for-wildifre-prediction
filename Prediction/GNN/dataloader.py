@@ -151,6 +151,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     departements = cfg.train_departments + cfg.test_departments
     train_departements = cfg.train_departments
+    test_departements = cfg.test_departments
     if 'select' in name_exp:
         # Utiliser findall pour capturer toutes les balises présentes
         matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
@@ -250,8 +251,9 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     df['Past_burnedarea'] = 0
 
     logger.info(f'Unique sinister -> {df["nbsinister"].unique()}')
-
-    features_obligatory = ['fwi_mean', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily', 'saison', 'saison-encoding', 'mediterranean', 'cluster-encoder']
+    
+    features_obligatory = ['fwi_mean_non_normalized', 'nesterov_mean', 'month_non_encoder', 'nbsinisterDaily', 'cluster_encoder', 'burnedareaDaily', 'saison', 'saison-encoding', 'mediterranean', 'cluster-encoder']
+    df['fwi_mean_non_normalized'] = df['fwi_mean'].values
     columns = np.unique(ids_columns + weights_name_columns + list(np.unique(list(features_selected_kmeans) + list(features_name))) + features_obligatory + targets_columns)
     
     df = df[columns]
@@ -259,6 +261,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     # Preprocess
     train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(
                                                     df=df, scaling=scaling, train_departements=train_departements,
+                                                    test_departements=test_departements,
                                                     departements=departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
@@ -323,7 +326,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 #                                                                                                       #
 #########################################################################################################
 
-def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departements: list, ks: int,
+def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, test_departements: list, departements: list, ks: int,
                dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
                args: dict, cfg=None,
                save=True):
@@ -337,11 +340,17 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
     old_shape = df.shape
     df = remove_none_target(df)
     logger.info(f'Removing nan Target DataFrame shape : {old_shape} -> {df.shape}')
-
-    if args.dataset == 'firemen':
+    
+    """if args.dataset == 'firemen':
         old_shape = df.shape
         df = remove_bad_period(df, PERIODES_A_IGNORER, departements, 20)
         logger.info(f'Removing bad period DataFrame shape : {old_shape} -> {df.shape}')
+        
+    fig, ax = plt.subplots(3, 1, figsize=(15,5))
+        
+    df[(df['departement'] == 6) & (df['date'] >= allDates.index('2023-01-01')) & (df['date'] <= allDates.index('2023-12-31'))]['nbsinister'].plot(ax=ax[2])
+    
+    plt.show()"""
 
     """if args.sinister == 'firepoint':
         old_shape = df.shape
@@ -353,6 +362,7 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
     # Sort by date
     df = df.sort_values('date')
     trainCode = [name2int[departement] for departement in train_departements]
+    testCode = [name2int[departement] for departement in test_departements]
     
     #train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
     #val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
@@ -367,12 +377,12 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
 
     train_mask = (df['date'].isin([allDates.index(d) for d in all_train_dates])) & (df['departement'].isin(trainCode))
     val_mask = ((df['date'].isin([allDates.index(d) for d in all_val_dates]) | ((df['date'] >= allDates.index(all_val_dates[0]) - 20)  & (df['date'] < allDates.index(all_val_dates[0])))) & (df['departement'].isin(trainCode)))
-    test_mask = ((df['date'].isin([allDates.index(d) for d in all_test_dates]) | ((df['date'] >= allDates.index(all_test_dates[0]) - 20)  & (df['date'] < allDates.index(all_test_dates[0])))) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
+    test_mask = ((df['date'].isin([allDates.index(d) for d in all_test_dates]) | ((df['date'] >= allDates.index(all_test_dates[0]) - 20)  & (df['date'] < allDates.index(all_test_dates[0])))) & (df['departement'].isin(testCode)))
 
     train_dataset_unscale = df[train_mask].copy(deep=True).reset_index(drop=True).copy(deep=True)
     test_dataset_unscale = df[test_mask].copy(deep=True).reset_index(drop=True).copy(deep=True)
     val_dataset_unscale = df[val_mask].copy(deep=True).reset_index(drop=True).copy(deep=True)
-
+    
     val_mask_zero = val_dataset_unscale[((val_dataset_unscale['date'] >= allDates.index(all_val_dates[0]) - 20) & (test_dataset_unscale['date'] < allDates.index(all_val_dates[0])))].index
     test_mask_zero =  test_dataset_unscale[((test_dataset_unscale['date'] >= allDates.index(all_test_dates[0]) - 20)  & (test_dataset_unscale['date'] < allDates.index(all_test_dates[0])))].index
 
@@ -1042,12 +1052,13 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     res_temp[f'prediction_{target_name}_{horizon}'] = pred[:, 0]
     
     if predProba is not None:
+        print(predProba.shape)
         for c in range(predProba.shape[-1]):
             res_temp[f'prediction_{target_name}_{horizon}_C{c}'] = predProba[:, c]
             cols.append(f'prediction_{target_name}_{horizon}_C{c}')
 
     df_test = df_test.set_index(['graph_id', 'date']).join(res_temp.set_index(['graph_id', 'date'])[cols], on=['graph_id', 'date']).reset_index()
-    res = df_test[~df_test[cols].isna()].copy(deep=True)
+    res = df_test[~df_test[f'prediction_{target_name}_{horizon}'].isna()].copy(deep=True)
 
     ####################################### Sinister Evaluation ########################################
 
@@ -1664,6 +1675,9 @@ def test_dl_model(cfg,
 
         model_name, under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = name.split('_')
 
+        if target_name == 'DFE':
+            test_dataset_dep_ = test_dataset_dep_[test_dataset_dep_['DFE'] >= 0].reset_index(drop=True)
+        
         is_2D_model = model_name in models_2D
         if is_2D_model:
             if model_name in ['Zhang', 'ConvLSTM', 'Zhang3D']:
@@ -1723,8 +1737,8 @@ def test_dl_model(cfg,
         else:
             if not isinstance(model, ProtoFederatedLearning):
                 test_loader = model.create_test_loader(graphScale, test_dataset_dep_)
-                predTensor, _ = model._predict_test_loader(test_loader)
-                predTensorProba, YTensor = model._predict_test_loader(test_loader)
+                predTensor, YTensor = model._predict_test_loader(test_loader)
+                predTensorProba, _ = model._predict_test_loader(test_loader, prediction_type='Proba')
             else:
                 logger.info(test_dataset_dep_.columns)
                 predTensor, YTensor = model.predict(test_dataset_dep_, graphScale, True)
@@ -1733,8 +1747,8 @@ def test_dl_model(cfg,
             predTensor = predTensor.detach().cpu().numpy()
 
         print(y.shape, predTensor.shape)
-        predTensorAll, _, _ = filter_prediction(graphScale, test_dataset_dep_, predTensor, y, dir_train, cfg)
-        predTensorAllProba, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dep_, predTensorProba, y, dir_train, cfg)
+        predTensorAll, yAll, test_dataset_deptAll = filter_prediction(graphScale, test_dataset_dep_, predTensor, y, dir_train, cfg)
+        predTensorAllProba, _ , _ = filter_prediction(graphScale, test_dataset_dep_, predTensorProba, y, dir_train, cfg) if predTensorProba is not None else (None, None, None)
         print(predTensorAll.shape, yAll.shape, test_dataset_deptAll.shape)
         
         scale_unique = np.unique(y[:, scale_index])
@@ -1744,10 +1758,9 @@ def test_dl_model(cfg,
             res_horizon = None
             for H in range(horizon + 1):
                 logger.info(f"-------------- Horizon + {H} -----------------")
-                check_and_create_path(dir_output / f"H{H}")
                 mask = (yAll[:, scale_index, 0] == scale)
                 predTensor = predTensorAll[mask, -1 - (horizon - H)]
-                predTensorProba = predTensorAllProba[mask, -1 - (horizon - H)]
+                predTensorProba = predTensorAllProba[mask, -1 - (horizon - H)] if predTensorAllProba is not None else None
                 y = yAll[mask, :, -1 - (horizon - H)]
 
                 test_dataset_dept = test_dataset_deptAll[test_dataset_deptAll['scale'] == scale].copy(deep=True)

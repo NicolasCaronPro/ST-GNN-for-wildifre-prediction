@@ -267,7 +267,9 @@ def get_academic_zone(name, date):
 
 ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date', 'weight', 'scale', 'saison-encoding', 'mediterranean', 'cluster-encoder', 'area']
 
-targets_columns = ['time_intervention',
+targets_columns = [
+                    'DFE',
+                    'time_intervention',
                    'ressource',
                     'burned_area',
                    'nbsinister_id', 'nbsinister', 'risk']
@@ -297,6 +299,7 @@ weights_columns = ['proportion_on_zero_class',
                    'outlier_3_nbsinister',
                    'outlier_4_nbsinister',
                    'outlier_5_nbsinister',
+                   'weight'
                    ]
 
 id_index = ids_columns.index('id')
@@ -389,9 +392,9 @@ shape2D = {10: (24, 24),
           8 : (30,30),
           'departement' : (32,32)}
 
-jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2023)],[]) # French Jours fériés, used in features_*.py 
+jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) for k in range(2017,2025)],[]) # French Jours fériés, used in features_*.py 
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
-            in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2023)],[]) # French Veille Jours fériés, used in features_*.py 
+            in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2025)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
 device = torch.device("cpu") # The device on which we train each models

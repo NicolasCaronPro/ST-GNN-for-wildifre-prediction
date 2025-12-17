@@ -179,6 +179,102 @@ def create_larger_scale_bin(input, bin, influence, time, burned, ress):
 
     return binImageScale, influenceImageScale, timeScale, burnedScale, ressScale
 
+def load_dfe_for_alpes_maritimes(path):
+    # Charger toutes les feuilles
+    all_sheets = pd.read_excel(path / 'Analyse de la météo 2015-2025.xlsx', sheet_name=None)
+
+    def make_df(sheet_names, all_sheets):
+        """Concatène les feuilles demandées, en ajoutant la colonne sheet_name.
+        Ignore celles qui n'existent pas et prévient."""
+        missing = [s for s in sheet_names if s not in all_sheets]
+        if missing:
+            print(f"Attention: feuilles absentes -> {missing}")
+        frames = [all_sheets[s].assign(sheet_name=s) for s in sheet_names if s in all_sheets]
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    # ---- Sélectionne ici tes deux listes d'onglets ----
+    sheets_A = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2023']   # exemple
+    sheets_B = ['2024']   # exemple
+
+    # ---- Constructions des deux DataFrames ----
+    df = make_df(sheets_A, all_sheets)
+    df_2024_2025 = make_df(sheets_B, all_sheets)
+
+    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
+    df_2024_2025 = df_2024_2025[df_2024_2025['DFE'].isin(['F', 'L', 'M', 'T', 'S'])]
+    df_2024_2025.DFE.unique()
+
+    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
+    df_2024_2025 = df_2024_2025.rename({'production' : 'reseau'}, axis=1)
+    df_2024_2025 = df_2024_2025.rename({'Sech_expert' : 'secheresse expertisee'}, axis=1)
+    df_2024_2025 = df_2024_2025.rename({'Reserve' : 'reserve'}, axis=1)
+
+    # Dictionnaire de correspondance
+    mapping_dfe = {
+        'F': 1,  # faible
+        'L': 2,  # léger
+        'M': 3,  # modéré
+        'S': 4,  # sévère
+        'T': 5,  # très sévère
+        'E': 6   # extrême
+    }
+
+    # Encodage
+    df_2024_2025['DFE'] = df_2024_2025['DFE'].map(mapping_dfe)
+
+    def clean_date_column(df, col_name):
+        """
+        Convertit une colonne de dates mixtes (ex: '27/09/2024', '2025-06-16 00:00:00')
+        en format uniforme YYYY-MM-DD.
+        """
+        df[col_name] = pd.to_datetime(df[col_name], errors='coerce', dayfirst=True)
+        df[col_name] = df[col_name].dt.strftime('%Y-%m-%d')
+        return df
+
+    df_2024_2025['date'] = df_2024_2025['date_validite'].values
+    df_2024_2025 = clean_date_column(df_2024_2025, 'date')
+
+    df = df[~df['date'].isna()]
+    df = df[df['DFE'] > -999]
+
+    def change_date_format(df):
+        df['date'] = df['date'].astype(int)
+        df['date'] = df['date'].astype(str)
+
+        def inverse_split(x):
+            year = x[:4]
+            month = x[4:6]
+            day = x[6:]
+            return f'{year}-{month}-{day}'
+
+        df['date'] = df['date'].apply(lambda x : inverse_split(x))
+        return df
+
+    df = change_date_format(df)
+
+    def get_month(x):
+        return int(x.split('-')[1])
+
+    def get_year(x):
+        return int(x.split('-')[0])
+
+    df = pd.concat((df, df_2024_2025)).reset_index(drop=True)
+
+    df['month'] = df['date'].apply(lambda x : get_month(x))
+    df['year'] = df['date'].apply(lambda x : get_year(x))
+
+    def get_hist(df):
+        fig, ax = plt.subplots(1, figsize=(15,5))
+        df.hist(ax=ax)
+
+    get_hist(df['DFE'])
+
+    df_groupby = df.groupby(by=["num_zone", "date"])['DFE'].max().reset_index()
+    df_groupby['DFE'].plot()
+
+    df_am, df_pm = df[df['reseau'] == "AM"], df[df['reseau'] == "PM"]
+    return df_am
+
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
     end_date = dt.datetime.strptime(end, '%Y-%m-%d').date()
@@ -255,7 +351,8 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-allDates = find_dates_between('2015-01-01', '2026-01-01')
+#allDates = find_dates_between('2015-01-01', '2026-01-01')
+allDates = find_dates_between('2017-06-12', '2024-12-31')
 
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
@@ -518,13 +615,20 @@ def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
     """
     return df[(df['nbsinister'] != -1) & (~df['nbsinister'].isna())].reset_index(drop=True)
 
-def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks : int) -> pd.DataFrame:
+def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks: int) -> pd.DataFrame:
     global allDates, name2int
 
-    bad_dates = np.array([], dtype=int)
-    zeros_dates = np.array([], dtype=int)
+    # Dictionnaires : dept_int -> array d'indices de dates
+    bad_dates_by_dept = {}
+    zeros_dates_by_dept = {}
+
+    # Première passe : on construit les listes de dates par département
     for dept in departements:
-        period = period2ignore[name2int[dept]]['interventions']
+        dept_int = name2int[dept]
+        bad_dates_by_dept[dept_int] = np.array([], dtype=int)
+        zeros_dates_by_dept[dept_int] = np.array([], dtype=int)
+
+        period = period2ignore[dept_int]['interventions']
         if period != []:
             for per in period:
                 ds = per[0].strftime('%Y-%m-%d')
@@ -535,18 +639,39 @@ def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list,
                 if de > allDates[-1]:
                     de = allDates[-1]
 
+                # Si les dates ne sont pas dans allDates, on ignore cette période
                 if de not in allDates or ds not in allDates:
                     continue
 
                 ds_idx = allDates.index(ds) - ks
                 de_idx = allDates.index(de) - ks
-                bad_dates = np.concatenate((bad_dates, np.arange(start=ds_idx, stop=de_idx)))
-                zeros_dates = np.concatenate((zeros_dates , np.arange(start=de_idx, stop=de_idx + ks)))
-                zeros_dates = np.concatenate((zeros_dates , np.arange(start=ds_idx, stop=ds_idx + ks)))
 
+                # Période à supprimer pour CE département uniquement
+                bad_dates_by_dept[dept_int] = np.concatenate(
+                    (bad_dates_by_dept[dept_int], np.arange(start=ds_idx, stop=de_idx))
+                )
+
+                # Périodes autour mises à zéro pour CE département uniquement
+                zeros_dates_by_dept[dept_int] = np.concatenate(
+                    (
+                        zeros_dates_by_dept[dept_int],
+                        np.arange(start=de_idx, stop=de_idx + ks),
+                        np.arange(start=ds_idx, stop=ds_idx + ks),
+                    )
+                )
+
+    # Deuxième passe : on applique les masques par département
     for dept in departements:
-        df = df[~((df['departement'] == name2int[dept]) & (df['date'].isin(bad_dates)))]
-        df.loc[df[(df['departement'] == name2int[dept]) & (df['date'].isin(zeros_dates))].index, weights_columns] = 0
+        dept_int = name2int[dept]
+        bad_dates = bad_dates_by_dept[dept_int]
+        zeros_dates = zeros_dates_by_dept[dept_int]
+
+        if bad_dates.size > 0:
+            df = df[~((df['departement'] == dept_int) & (df['date'].isin(bad_dates)))]
+
+        if zeros_dates.size > 0:
+            idx = df[(df['departement'] == dept_int) & (df['date'].isin(zeros_dates))].index
+            df.loc[idx, weights_columns] = 0  # weights_columns supposé global
 
     return df.reset_index(drop=True)
 
@@ -705,7 +830,6 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int,
     if Y is not None:
         if horizon != 0:
             yts = Y[maskts].copy()
-            yts[:, weight_index] = 1
             mask_zeros = (yts[:, -1] == 0)
 
             p_keep = float(proportion_0_with_positive_weight)
@@ -932,7 +1056,6 @@ def construct_graph_with_time_series(graph, date : int,
 
         if Y is not None:
             yts = Y[maskts].copy()
-            yts[:, weight_index] = 1
             mask_zeros = (yts[:, -1] == 0)
 
             p_keep = float(proportion_0_with_positive_weight)
@@ -1015,7 +1138,7 @@ def construct_time_series(date : int,
 
     maskgraph = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     x = X[maskgraph]
-
+    
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date ) & (X[:,date_index] >= date - ks)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
@@ -1045,7 +1168,6 @@ def construct_time_series(date : int,
         
         if Y is not None:
             yts = Y[maskts].copy()
-            yts[:, weight_index] = 1
             mask_zeros = (yts[:, -1] == 0)
 
             p_keep = float(proportion_0_with_positive_weight)
@@ -5781,3 +5903,162 @@ def add_ic95_to_dict(
             d[out_key] = (lower, upper)
 
     return d
+
+import numpy as np
+import scipy.optimize as spo
+
+def egpd_trunc_discrete_weights(
+    X,
+    clusters=None,
+    bounds_sigma=(1e-6, np.inf),
+    bounds_kappa=(1e-3, 50.0),
+    bounds_xi=(-0.49, 1.0),
+    maxiter_nm=2000,
+    maxiter_lbfgs=1000,
+    normalize=True,
+    eps=1e-12,
+    temperature=1.0,
+    min_class_weighted=0,
+):
+    """
+    Fit une eGPD tronquée discrète sur X (et par cluster si demandé).
+    Gère:
+      - cluster contenant une seule classe -> poids=1
+      - optimisation échouée -> poids=1
+    """
+
+    X = np.asarray(X).reshape(-1).astype(int)
+    if X.size == 0:
+        raise ValueError("X is empty.")
+
+    if np.any(X < 0):
+        raise ValueError("X must contain labels >= 0.")
+
+    # ---- Fonction de fit pour un cluster Xc ---- #
+    def fit_one_cluster(Xc):
+        unique_vals = np.unique(Xc)
+        # Cas cluster dégénéré
+        if len(unique_vals) == 1:
+            # PMF = unité sur la seule classe
+            y = unique_vals[0]
+            pmf = np.zeros(y + 1, dtype=float)
+            pmf[y] = 1.0
+            params = (np.nan, np.nan, np.nan)
+            return pmf, params, True  # flagged "degenerated"
+
+        y_max = int(np.max(Xc))
+
+        # Helpers eGPD
+        def H(y, sigma, xi):
+            y = np.asarray(y, dtype=float)
+            if np.isclose(xi, 0.0):
+                return 1.0 - np.exp(-y / sigma)
+            t = 1.0 + xi * y / sigma
+            t = np.maximum(t, 1e-15)
+            return 1.0 - np.power(t, -1.0 / xi)
+
+        def F_plus(y, sigma, kappa, xi):
+            h = H(y, sigma, xi)
+            return np.power(np.clip(h, 1e-15, 1.0 - 1e-15), kappa)
+
+        def pmf_trunc_discrete(y_max, sigma, kappa, xi, eps=1e-15):
+            ys = np.arange(0, y_max + 2, dtype=float)
+            Fv = F_plus(ys, sigma, kappa, xi)
+            Z = max(Fv[-1], eps)
+            pmf = (Fv[1:] - Fv[:-1]) / Z
+            pmf = np.clip(pmf, eps, 1.0)
+            pmf /= pmf.sum()
+            return pmf
+
+        def nll_trunc_discrete(sigma, kappa, xi):
+            pmf = pmf_trunc_discrete(y_max, sigma, kappa, xi)
+            p = pmf[Xc]
+            if np.any(p <= 0) or not np.all(np.isfinite(p)):
+                return np.inf
+            return -np.sum(np.log(p))
+
+        # Bornes
+        s_lo, s_hi = bounds_sigma
+        if np.isinf(s_hi):
+            s_hi = max(10.0, 10.0 * y_max)
+        bounds = ((s_lo, s_hi), bounds_kappa, bounds_xi)
+
+        # Initialisation
+        sigma0 = max(1.0, 0.5 * max(1, y_max))
+        x0 = np.array([sigma0, 1.0, 0.1], float)
+
+        def obj(theta):
+            sigma, kappa, xi = theta
+            return nll_trunc_discrete(sigma, kappa, xi)
+
+        # Fit robustifié
+        try:
+            res_nm = spo.minimize(obj, x0, method="Nelder-Mead",
+                                  options={"maxiter": maxiter_nm})
+            start = res_nm.x if res_nm.success else x0
+            res = spo.minimize(obj, start, method="L-BFGS-B", bounds=bounds,
+                               options={"maxiter": maxiter_lbfgs})
+
+            if not res.success:
+                raise RuntimeError("LBFGS failed")
+
+            sigma_hat, kappa_hat, xi_hat = res.x
+            params = (float(sigma_hat), float(kappa_hat), float(xi_hat))
+            pmf = pmf_trunc_discrete(y_max, sigma_hat, kappa_hat, xi_hat)
+
+            if not np.all(np.isfinite(pmf)):
+                raise RuntimeError("invalid PMF")
+
+            return pmf, params, False
+
+        except Exception:  # cas fit impossible ou instable
+            # PMF uniforme fallback
+            pmf = np.ones(y_max + 1, float) / (y_max + 1)
+            params = (np.nan, np.nan, np.nan)
+            return pmf, params, True
+
+    # ------------------------------------------------------------------
+    # Cas sans clusters : fit global unique
+    # ------------------------------------------------------------------
+    if clusters is None:
+        pmf, params, failed = fit_one_cluster(X)
+        if failed:
+            weights = np.ones_like(X, float)
+        else:
+            weights = 1.0 / (pmf[X] + eps)
+        if normalize:
+            weights /= (weights.mean() + eps)
+        return weights, pmf, params
+
+    # ------------------------------------------------------------------
+    # Cas avec clusters
+    # ------------------------------------------------------------------
+    clusters = np.asarray(clusters).reshape(-1)
+    if clusters.shape != X.shape:
+        raise ValueError("clusters must match the shape of X")
+
+    weights = np.zeros_like(X, float)
+    pmfs = {}
+    params_dict = {}
+
+    for c in np.unique(clusters):
+        mask = (clusters == c)
+        Xc = X[mask]
+        pmf, params, failed = fit_one_cluster(Xc)
+        pmfs[c] = pmf
+        params_dict[c] = params
+            
+        if failed:
+            weights[mask] = 1.0
+        else:
+            weights[mask] = 1.0 / (pmf[Xc] + eps)
+            
+        mask_min = X <= min_class_weighted
+        weights[mask_min] = 1.0
+            
+    weights = weights / temperature
+
+    if normalize:
+        weights /= (weights.mean() + eps)
+
+    return weights

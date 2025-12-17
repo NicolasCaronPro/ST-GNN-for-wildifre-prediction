@@ -25,6 +25,38 @@ from scipy.spatial.distance import cdist
 from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 import re
+from scipy.optimize import minimize
+from pathlib import Path
+import torch
+from torch.utils.data import DataLoader
+import pandas as pd
+import matplotlib.pyplot as plt
+
+def iou_binary(B: np.ndarray, S: np.ndarray, eps: float = 1e-12) -> float:
+    """
+    IoU = |B ∩ S| / |B ∪ S| pour masques binaires.
+    B et S doivent être des bool ou 0/1.
+    """
+    B = B.astype(bool)
+    S = S.astype(bool)
+    inter = np.logical_and(B, S).sum()
+    union = np.logical_or(B, S).sum()
+    return float(inter / (union + eps))
+
+def to_binary_mask(x: np.ndarray) -> np.ndarray:
+    """
+    Convertit une sortie de segmentation en masque binaire.
+    - Si x est déjà bool/0-1, ok.
+    - Si x est un raster de labels (0=background, >0=cluster), on prend x > 0.
+    """
+    if x.dtype == bool:
+        return x
+    # Si masque 0/1
+    uniq = np.unique(x)
+    if set(uniq).issubset({0, 1}):
+        return x.astype(bool)
+    # Sinon, labels -> binaire
+    return (x > 0)
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -58,6 +90,7 @@ class GraphStructure():
         self.model = None # GNN model
         self.train_kmeans = None # Boolean to trace if we creating new scale
         self.scale = scale # current scale define by numUniqueNode // 6
+
         if geo is not None:
             self.oriLatitudes = geo.latitude # all original latitude of interest
             self.oriLongitude = geo.longitude # all original longitude of interest
@@ -83,8 +116,19 @@ class GraphStructure():
         self.train_departements = train_departements
         self.graph_method = graph_method
         self.susceptility_mapper = None
-        self.reduce = int(reduce) if reduce is not None else None
-        self.attempt = int(attempt) if attempt is not None else None
+        
+        # Gestion de reduce
+        if reduce == 'search':
+            self.reduce = 'search'
+        else:
+            self.reduce = int(reduce) if reduce is not None else None
+
+        # Gestion de attempt
+        if attempt == 'search':
+            self.attempt = 'search'
+        else:
+            self.attempt = int(attempt) if attempt is not None else None
+
         self.tol = float(tol) if tol is not None else None
         if self.base is not None:
             if 'watershed' in self.base:
@@ -99,7 +143,7 @@ class GraphStructure():
             vec_base = base.split('-')
         else:
             vec_base = [base]
-
+            
         self.train_kmeans = True
         node_already_predicted = 0
         self.numCluster = 0
@@ -109,7 +153,6 @@ class GraphStructure():
         
         self.ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
         self.graph_ids = np.full(self.oriLatitudes.shape[0], fill_value=np.nan)
-
         for dept in udept:
             mask = self.departements == dept
             logger.info(f'######################### {dept} ####################')
@@ -134,8 +177,10 @@ class GraphStructure():
                 elif 'companie' in vec_base:
                     self.create_geometry_with_companie(dept, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
                 elif 'zonemeteo' in vec_base:
-                    self.create_geometry_with_meteo_zone(dept, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
-
+                    res = self.create_geometry_with_meteo_zone(dept, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted)
+                    if res is None:
+                        self.create_geometry_with_watershed(dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date)
+                    
             current_cluster = np.nanmax(self.graph_ids[mask][~np.isnan(self.graph_ids[mask])]) + 1
             logger.info(f'{dept} Unique cluster : {np.unique(self.graph_ids[mask])}, {current_cluster}. {node_already_predicted}')
             node_already_predicted = current_cluster
@@ -330,8 +375,15 @@ class GraphStructure():
 
         logger.info(f'Cluster dispersion {self.dispersions}')
 
-    def my_watershed(self, dept, data, valid_mask, raster, path, vb, image_type):
-        reducor = Predictor(n_clusters=self.reduce)
+    def my_watershed(self, dept, data, valid_mask, raster, path, vb, image_type, reduce=None):
+        
+        # Si reduce n'est pas fourni, on utilise self.reduce (sauf si c'est 'search', auquel cas il faut le fournir)
+        if reduce is None:
+            if self.reduce == 'search':
+                raise ValueError("self.reduce est 'search', vous devez fournir une valeur explicite pour 'reduce'.")
+            reduce = self.reduce
+
+        reducor = Predictor(n_clusters=reduce)
         reducor.fit(data[valid_mask].reshape(-1,1))
         data[valid_mask] = reducor.predict(data[valid_mask].reshape(-1,1))
         data[valid_mask] = order_class(reducor, data[valid_mask])
@@ -382,24 +434,28 @@ class GraphStructure():
             
             dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
             dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
-            companie_geo = gpd.read_file(dir_geo / 'Zones_meteo.geojson')
             #pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'SECT_METEO', dir_output=Path(''))
             pred = read_object("zones_meteo.pkl", dir_geo)
+            if pred is None:
+                return None
             raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
             pred = resize_no_dim(pred, raster.shape[1], raster.shape[2])
             assert raster is not None
             raster = raster[0]
-            pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
+            pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph')
             self._save_feature_image(path, dept, 'pred_final', pred, raster)
+            return pred
 
     def create_geometry_with_watershed(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):
         
-        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
         dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
-        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
+        
         dir_target_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution
+        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
         raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
+        
         assert raster is not None
         raster = raster[0]
         pred = np.full(raster.shape, fill_value=np.nan)
@@ -411,6 +467,8 @@ class GraphStructure():
         mode = vec_base[1]
 
         data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+        data_bin, GT = self._process_base_data("nbsinister", dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+
         if data is None:
             logger.info(f'Can t find {vb}')
             exit(1)
@@ -419,14 +477,162 @@ class GraphStructure():
             self.max_target_value = np.nanmax(data)
         else:
             self.max_target_value = max(self.max_target_value, np.nanmax(data))
+            
         oridata = np.copy(data)
         
         self._save_feature_image(path, dept, 'sum', data, raster, 0, self.max_target_value)
 
-        pred = self.my_watershed(dept, data, valid_mask, raster, path, vb, 'pred')
+        # ---------------------------------------------------------------------
+        # OPTIMISATION NELDER-MEAD (si demandé)
+        # ---------------------------------------------------------------------
+        if self.attempt == 'search' and self.reduce == 'search':
+            logger.info("Starting Grid Search optimization for (a, r)...")
+
+            # Binaire de la vérité terrain
+            B_bin = to_binary_mask(data_bin)
+
+            # Historique pour le plot
+            history = []
+
+            # Calcul des tailles de clusters (logique extraite de create_cluster)
+            if 'degree' in self.base:
+                size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
+                max_cluster_size = int(size + (self.tol * size))
+                min_cluster_size = int(size - (self.tol * size))
+            else:
+                min_cluster_size = 1 + 3 * self.scale * (self.scale + 1)
+                max_cluster_size = (int)(min_cluster_size * 2.5)
+
+            best_score = -float('inf')
+            best_a = 2
+            best_r = 1
+
+            # Grid Search Loop
+            # attempt (r) : 1 à 10
+            # reduce (a) : 2 à 10
+            range_r = range(1, 11)
+            range_a = range(2, 11)
+
+            for a in range_a:
+                # 1) my_watershed avec 'a' (reduce)
+                # On travaille sur une copie de data pour ne pas écraser l'original
+                data_tmp = np.copy(oridata)
+                pred_ws = self.my_watershed(dept, data_tmp, valid_mask, raster, path, vb, 'optim_temp', reduce=a)
+                
+                for r in range_r:
+                    # 2) merge_adjacent_clusters avec 'r' (attempt)
+                    S_raw = merge_adjacent_clusters(pred_ws, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size,
+                                                    features=None, mode=mode, exclude_label=0, background=-1,
+                                                    nb_attempt=r)
+
+                    # 3) Calcul IoU
+                    S = to_binary_mask(np.asarray(S_raw))
+                    score = iou_binary(B_bin, S)
+                    
+                    # Sauvegarde historique
+                    history.append((a, r, score))
+
+                    # Mise à jour du meilleur score
+                    if score > best_score:
+                        best_score = score
+                        best_a = a
+                        best_r = r
+
+            logger.info(f"Grid Search finished. Best a={best_a}, Best r={best_r}, Best IoU={best_score}")
+
+            # -----------------------------------------------------------------
+            # PLOT DE L'OPTIMISATION
+            # -----------------------------------------------------------------
+            try:
+                # Création du dossier de sauvegarde
+                plot_dir = path / 'segmentation_optimization'
+                check_and_create_path(plot_dir)
+                
+                # Extraction des données
+                hist_a = np.array([h[0] for h in history])
+                hist_r = np.array([h[1] for h in history])
+                hist_score = np.array([h[2] for h in history])
+                
+                # -------------------------------------------------------------
+                # Plot 2D Contour (Heatmap style logic for grid)
+                # -------------------------------------------------------------
+                fig, ax = plt.subplots(figsize=(10, 8))
+                
+                # Contour plot (noir et blanc)
+                try:
+                    cntr = ax.tricontour(hist_a, hist_r, hist_score, levels=14, linewidths=0.5, colors='k')
+                    # ax.clabel(cntr, inline=True, fontsize=8)
+                    
+                    # On ajoute un contourf pour la couleur de fond (heatmap)
+                    # cntr_f = ax.tricontourf(hist_a, hist_r, hist_score, levels=14, cmap='viridis')
+                    # plt.colorbar(cntr_f, label='IoU Score')
+                except Exception as e_contour:
+                    logger.warning(f"Could not draw contours: {e_contour}")
+
+                # Points de la grille
+                ax.plot(hist_a, hist_r, 'k.', markersize=2, alpha=0.3, label='Grid Points')
+                
+                # Meilleur point (rouge star)
+                ax.plot(best_a, best_r, 'r*', markersize=15, label='Best')
+
+                ax.set_xlabel('Reduce (a)')
+                ax.set_ylabel('Attempt (r)')
+                ax.set_title(f'Grid Search Results (IoU)\nDept: {dept}, Scale: {self.scale}, Tol: {self.tol}')
+                ax.legend()
+                ax.grid(True, linestyle='--', alpha=0.3)
+                
+                # Nom du fichier 2D
+                plot_filename_2d = f"optimization_score_2d_{dept}_scale_{self.scale}_tol_{self.tol}.png"
+                plt.savefig(plot_dir / plot_filename_2d)
+                plt.close()
+                logger.info(f"Optimization 2D plot saved to {plot_dir / plot_filename_2d}")
+
+                # -------------------------------------------------------------
+                # Plot 3D
+                # -------------------------------------------------------------
+                fig = plt.figure(figsize=(10, 8))
+                ax = fig.add_subplot(111, projection='3d')
+                
+                # Surface plot logic requires grid data
+                # We can use trisurf for irregular or regular grid data
+                surf = ax.plot_trisurf(hist_a, hist_r, hist_score, cmap='viridis', linewidth=0.2)
+                
+                ax.set_xlabel('Reduce (a)')
+                ax.set_ylabel('Attempt (r)')
+                ax.set_zlabel('IoU Score')
+                ax.set_title(f'Grid Search Score 3D (IoU)\nDept: {dept}, Scale: {self.scale}, Tol: {self.tol}')
+                
+                fig.colorbar(surf, label='IoU Score')
+                
+                # Nom du fichier 3D
+                plot_filename_3d = f"optimization_score_3d_{dept}_scale_{self.scale}_tol_{self.tol}.png"
+                plt.savefig(plot_dir / plot_filename_3d)
+                plt.close()
+                logger.info(f"Optimization 3D plot saved to {plot_dir / plot_filename_3d}")
+
+            except Exception as e:
+                logger.error(f"Failed to create optimization plot: {e}")
+
+            # On fixe les valeurs pour la suite de l'exécution
+            final_reduce = best_a
+            final_attempt = best_r
+        else:
+            # Pas d'optimisation, on utilise les valeurs de self
+            final_reduce = self.reduce
+            final_attempt = self.attempt
+
+        # ---------------------------------------------------------------------
+        # EXECUTION FINALE (avec paramètres optimisés ou fixés)
+        # ---------------------------------------------------------------------
+        
+        # 1) my_watershed
+        # On repart de oridata propre
+        data = np.copy(oridata)
+        pred = self.my_watershed(dept, data, valid_mask, raster, path, vb, 'pred', reduce=final_reduce)
+        
         if GT is not None:
             self._save_feature_image(path, dept, 'gt_sum', GT, raster, 0, self.max_target_value)
-            pred_GT = self.my_watershed(dept, GT, valid_mask, raster, path, vb, 'gt')
+            pred_GT = self.my_watershed(dept, GT, valid_mask, raster, path, vb, 'gt', reduce=final_reduce)
 
         # Merge and split clusters
         umarker = np.unique(pred)
@@ -441,43 +647,8 @@ class GraphStructure():
         bin_data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
         assert bin_data is not None
 
-        if self.scale == -1:
-            best_fr = 0
-            best_scale = 0
-            frs = []
-            scales = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-            for scale in scales:
-                fr_scale, _ = self.create_cluster(pred, dept, path, scale, mode, bin_data, raster, valid_mask, mask, node_already_predicted)
-                frs.append(fr_scale)
-                if fr_scale > best_fr:
-                    best_fr = fr_scale
-                    best_scale = scale
-
-            check_and_create_path(path / 'scale_optimization')
-            plt.figure(figsize=(15,5))
-            plt.plot(scales, frs)
-            plt.xlabel('Scales')
-            plt.ylabel('Frequency ratio')
-            plt.savefig(path / 'scale_optimization' / f'{dept}_scale_optimization.png')
-            plt.close('all')
-            _, pred = self.create_cluster(pred, dept, path, best_scale, mode, bin_data, raster, valid_mask, 'pred')
-        else:
-            _, pred = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred')
-
-        if GT is not None:
-            _, pred_GT = self.create_cluster(pred_GT, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'gt')
-
-            iou = calculate_iou(pred_GT, pred)
-
-            logger.info(f'{dept} -> IoU : {iou}')
-            if MLFLOW:
-                existing_run = get_existing_run(f'segmentation_{dept}_{self.susceptility_mapper_name}')
-                if existing_run:
-                    mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-                else:
-                    mlflow.start_run(run_name=f'segmentation_{dept}_{self.susceptility_mapper_name}', nested=True)
-                mlflow.log_metric('IoU', iou)
-                mlflow.end_run()
+        # 2) create_cluster
+        _, pred = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred', attempt=final_attempt)
 
         # Process post-watershed results
         pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
@@ -499,9 +670,15 @@ class GraphStructure():
             # Calculer la dispersion (écart-type des distances)
             self.dispersions[cluster_id] = np.std(distances)
 
-        logger.info(f'Cluster dispersion {self.dispersions}')
+        #logger.info(f'Cluster dispersion {self.dispersions}')
 
-    def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, type):
+    def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, type, attempt=None, print=True):
+
+        # Gestion de attempt
+        if attempt is None:
+            if self.attempt == 'search':
+                raise ValueError("self.attempt est 'search', vous devez fournir une valeur explicite pour 'attempt'.")
+            attempt = self.attempt
 
         if 'degree' in self.base:
             size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
@@ -517,15 +694,20 @@ class GraphStructure():
             max_cluster_size = (int)(min_cluster_size * 2.5)
 
         if mode == 'size':
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, features=None, mode=mode, exclude_label=0, background=-1, nb_attempt=self.attempt)
+            
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size,
+            features=None, mode=mode, exclude_label=0, background=-1,
+            nb_attempt=attempt)
+
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
             self._save_feature_image(path, dept, 'pred_merge', pred, raster)
 
             logger.info(np.unique(pred))
-            logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
             mask_valid = np.isin(pred, valid_cluster)
-            logger.info(f'Number of fire inside regions {np.nansum(bin_data[mask_valid])}')
-            logger.info(f'Number of fire outside regions {np.nansum(bin_data[~mask_valid])}')
+            if print:
+                logger.info(f'{dept} : We found {len(valid_cluster)} to build geometry.')
+                logger.info(f'Number of fire inside regions {np.nansum(bin_data[mask_valid])}')
+                logger.info(f'Number of fire outside regions {np.nansum(bin_data[~mask_valid])}')
 
             valid_cluster = [val + 1 for val in valid_cluster]
             pred[valid_mask] += 1
@@ -537,7 +719,7 @@ class GraphStructure():
             self._save_feature_image(path, dept, f'{type}_split', pred, raster)
 
         elif mode == 'time_series_similarity':
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=self.attempt)
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=attempt)
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
             self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
@@ -555,7 +737,7 @@ class GraphStructure():
 
         elif mode == 'time_series_similarity_fast':
             pred[~valid_mask] = -1
-            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=self.nb_attempt)
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size, mode=mode, features=bin_data, exclude_label=0, background=-1, nb_attempt=attempt)
             valid_cluster = find_clusters(pred, math.inf, 0, -1)
             self._save_feature_image(path, dept, f'{type}_merge', pred, raster)
 
@@ -576,13 +758,15 @@ class GraphStructure():
         for cluster in valid_cluster:
             fr_cluster = frequency_ratio(bin_data_sum[~np.isnan(bin_data_sum)], np.argwhere((pred[~np.isnan(bin_data_sum)] == cluster)))
             sum_fr += fr_cluster
-            logger.info(f'{cluster} frequency ratio -> {fr_cluster}')
+            if print:
+                logger.info(f'{cluster} frequency ratio -> {fr_cluster}')
         
         if len(valid_cluster) == 0:
             sum_fr = 0
         else:
             sum_fr = sum_fr / len(valid_cluster)
-        logger.info(f'Mean fr {sum_fr}')
+        if print:
+            logger.info(f'Mean fr {sum_fr}')
 
         return sum_fr, pred
 
@@ -629,19 +813,21 @@ class GraphStructure():
         
         GT = None
 
+        print(vb)
+        
         if vb == 'risk':
             data = read_object(f'{dept}Influence.pkl', dir_target)
             if data is None or dept not in self.train_departements:
                 if data is not None:
                     GT = np.copy(data)
-                    GT = GT[:, :, :allDates.index(train_date)]
+                    GT = GT[:, :, [allDates.index(date) for date in train_date]]
                     GT = np.nansum(GT, axis=2)
                 data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
                 if data is None:
                     self.predict_susecptibility_map([dept], self.susecptibility_variables, dir_data, path / 'predict_map')
                     data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
             else:
-                data = data[:, :, :allDates.index(train_date)]
+                data = data[:, :, [allDates.index(date) for date in train_date]]
                 data = np.nansum(data, axis=2)
         elif vb == 'nbsinister':
             data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
@@ -651,7 +837,7 @@ class GraphStructure():
                     self.predict_susecptibility_map([dept], self.susecptibility_variables, dir_data, path / 'predict_map')
                     data = read_object(f'{dept}binScale0.pkl', path / 'predict_map')
             else:
-                data = data[:, :, :allDates.index(train_date)]
+                data = data[:, :, [allDates.index(date) for date in train_date]]
                 data = np.nansum(data, axis=2)
         elif vb == 'geometry':
             width, height = raster.shape[1], raster.shape[0]
@@ -784,7 +970,7 @@ class GraphStructure():
 
                 #save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}_node.pkl', path / 'raster')
                 #save_object(mask, f'{dept}rasterScale{self.scale}_{base}_{self.graph_method}.pkl', path / 'raster')
-           
+            
             unique_ids = np.unique(mask)
             unique_ids = unique_ids[~np.isnan(unique_ids)]
             plt.figure(figsize=(15, 5))
@@ -817,8 +1003,11 @@ class GraphStructure():
             influence = datacube['influence'].values
             time = datacube['time_intervention'].values
             burned = datacube['burned_area'].values
-            res = datacube['ressource'].values
-
+            try:
+                res = datacube['ressource'].values
+            except:
+                res = np.zeros_like(bin)
+            
             binImageScale, influenceImageScale, timeScale, burnedScale, ressourceScale = create_larger_scale_bin(mask, bin, influence, time, burned, res)
 
             # Ajouter chaque image comme DataArray dans le Dataset
@@ -826,12 +1015,50 @@ class GraphStructure():
             datacube['risk'] = xr.DataArray(influenceImageScale, dims=('latitude', 'longitude', 'date'))
             datacube['time_intervention'] = xr.DataArray(timeScale, dims=('latitude', 'longitude', 'date'))
             datacube['burned_area'] = xr.DataArray(burnedScale, dims=('latitude', 'longitude', 'date'))
+            datacube['burned_area_pix'] = xr.DataArray(burned, dims=('latitude', 'longitude', 'date'))
             datacube['ressource'] = xr.DataArray(ressourceScale, dims=('latitude', 'longitude', 'date'))
-
             datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
-            datacube = datacube.expand_dims(dim={'departement': [dept]})
+            if dept == 'departement-06-alpes-maritimes' and 'zonemeteo' in self.base:
+                dfe_df = load_dfe_for_alpes_maritimes(Path('/home/caron/Bureau/Fire-Caron-Risk-System/'))
+                def num_zone_2_graph_id(df):
+                    dico = {}
+                    graph_ids = np.sort(np.unique(mask[(~np.isnan(mask)) & (mask != 0)]))[1:]
+                    num_zone = [65,62,64,61,66,67,63]
+                    assert len(graph_ids) == len(num_zone)
+                    for ii, gi in enumerate(graph_ids):
+                        plt.imshow(mask == gi)
+                        #plt.title(f'Graph ID: {gi}, Num zone: {num_zone[ii]}')
+                        #plt.show()
+                        dico[num_zone[ii]] = gi
+                    
+                    df['graph_id'] = df['num_zone'].map(dico)
+                    return df
+                
+                dfe_df = num_zone_2_graph_id(dfe_df)
 
+                dfe_grid = np.zeros((mask.shape[0], mask.shape[1], len(datacube.date)), dtype=float)
+                dfe_lookup = dfe_df.set_index(['graph_id', 'date'])['DFE'].to_dict()
+                unique_ids = np.unique(mask[~np.isnan(mask)])
+                dc_dates = datacube.date.values
+
+                for t, date in enumerate(dc_dates):
+                    d_str = str(date)
+                    if 'T' in d_str:
+                        d_str = d_str.split('T')[0]
+                    
+                    for gid in unique_ids:
+                        if (gid, d_str) in dfe_lookup:
+                            dfe_grid[mask == gid, t] = dfe_lookup[(gid, d_str)]
+                
+                dfe_grid = dfe_grid - 1
+                datacube['DFE'] = xr.DataArray(dfe_grid, dims=('latitude', 'longitude', 'date'))
+                print('DFE values : ', np.unique(datacube['DFE'].values))
+            else:
+                datacube['DFE'] = 0
+
+            datacube = datacube.expand_dims(dim={'departement': [dept]})
+            
             #print(bin.shape)
             #print(datacube)
 
@@ -890,7 +1117,7 @@ class GraphStructure():
             mask2 = raster == node
             array[mask_node] = pred[mask2]
 
-       # Incorporate nan hexagone
+        # Incorporate nan hexagone
         if True in np.isnan(array[mask]):
 
             valid_mask = ~np.isnan(array[mask])

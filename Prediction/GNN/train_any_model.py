@@ -56,6 +56,7 @@ from GNN.dico_departements import *
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+from GNN.tools import allDates
 
 from tools import get_saison
 from features import is_mediterranean_dept
@@ -212,6 +213,7 @@ def main():
         print('burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns)
         
         if 'burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns:
+        #if True:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
@@ -221,6 +223,10 @@ def main():
         train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
         test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
+        
+        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
 
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)

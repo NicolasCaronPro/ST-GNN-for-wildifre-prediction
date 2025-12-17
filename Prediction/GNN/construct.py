@@ -64,14 +64,15 @@ def parse_string(s):
     
     # Initialiser le dictionnaire avec None
     result = {"base": base, "attempt": None, "reduce": None, "tol": None}
-    if base == "zonemeteo":
-        return result
 
     # Utiliser findall pour capturer toutes les balises présentes
     matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
 
+    print(matches)
+    
     for groups in matches:
         b, a, r, t = groups[1], groups[3], groups[5], groups[7]
+        print(b)
         if b:
             result["base"] = b
         if a:
@@ -86,7 +87,6 @@ def parse_string(s):
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
                     geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method):
     
-    train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
     print(dico_config)
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
@@ -114,7 +114,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     graphScale._create_sinister_region(
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
                                  sinister_encoding=sinister_encoding,
-                                 resolution=resolution, train_date=train_date)
+                                 resolution=resolution, train_date=train_dates)
     
     graphScale._create_nodes_list()
     graphScale._create_edges_list()
@@ -639,7 +639,8 @@ def init(args, dir_output, script):
 
     dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
-    geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+    geo = gpd.read_file(f'{root_graph}/regions/{sinister}/{dataset_name}/regions.geojson')
+    print(f'{root_graph}/regions/{sinister}/{dataset_name}/regions.geojson')
     geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
     minDate = '2017-06-12' # Starting point
@@ -703,7 +704,7 @@ def init(args, dir_output, script):
     train_departements = [dept for dept in train_departements if dept not in graphScale.drop_department] 
 
     ########################### Create points ################################
-    fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
+    fp = pd.read_csv(f'{root_graph}/sinister/{dataset_name}/{sinister}.csv', dtype=str)
     """if doPoint:
         
         logger.info('#####################################')
@@ -733,7 +734,7 @@ def init(args, dir_output, script):
         logger.info('#####################################')
         #encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
         encode_from_xarray('occurence', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
-        encode_from_xarray('burned_area', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('burned_area_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     ########################## Do Database ####################################
     if doDatabase:
@@ -1039,14 +1040,14 @@ def init(args, dir_output, script):
         df[fet] = df[fet].round(3)
         
     ############################# ADD areas ########################################
-    areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
+    #areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
     
     df['area'] = 0
     #for departement in df.departement.unique():
     #    df.loc[df[df['departement'] == departement].index, 'area'] = areas[name2int[departement]] 
 
     ############################## Save dataframe and features ###################################
-
+    
     df['saison'] = df['date'].apply(get_saison)
     df['saison-encoding'] = df['date'].apply(get_saison_encoding)
     df['mediterranean'] = df['departement'].apply(is_mediterranean_dept)

@@ -2374,6 +2374,7 @@ def get_loss_function(loss_name, **loss_params):
             "weightedcrossentropy":        lambda: WeightedCrossEntropyLoss(**loss_params),
             "weightedcrossentropy-2":      lambda: WeightedCrossEntropyLoss(**loss_params),
             "cdw":                         lambda: CDWCELoss(**loss_params),
+            "cewk":                         lambda: CEWKLoss(**loss_params),
             "mcewk":                       lambda: MCEAndWKLoss(**loss_params),
             "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
             "egpd":                        lambda: EGPDNLLLoss(),
@@ -2395,6 +2396,7 @@ def get_loss_function(loss_name, **loss_params):
             "odwk":                        lambda: OrdinalDiceLossAndWKLoss(**loss_params),
             "fdwk":                        lambda: ForegroundDiceLossAndWKLoss(**loss_params),
             "fdice":                       lambda: ForegroundDiceLoss(),
+            "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
             "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
         }
 
