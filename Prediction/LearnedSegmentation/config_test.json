@@ -1,0 +1,34 @@
+{
+    "train_departements": [
+        "departement-01-ain",
+        "departement-06-alpes-maritimes"
+    ],
+    "test_departements": [
+        "departement-06-alpes-maritimes"
+    ],
+    "train": true,
+    "test": true,
+    "new_test_departements": [],
+    "frequency": "full",
+    "pipeline_params": {
+        "scale": 0.3,
+        "tol": 0.3,
+        "attempt": 3,
+        "reduce": 5
+    },
+    "model_params": {
+        "type": "UNet",
+        "params": {
+            "n_channels": 0,
+            "out_channels": 1,
+            "conv_channels": [
+                16,
+                32,
+                64,
+                128
+            ],
+            "bilinear": false
+        }
+    },
+    "task_type": "binary"
+}

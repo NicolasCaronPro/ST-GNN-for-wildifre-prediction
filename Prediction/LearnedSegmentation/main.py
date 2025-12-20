@@ -5,6 +5,8 @@ import datetime
 import os
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 import json
+import logging
+import numpy as np
 
 # Add parent directory to path to import GNN modules
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -15,6 +17,7 @@ from load_data import DataLoader
 from train import Trainer
 from test import Tester
 from GNN.arborescence import root_target
+from GNN.construct import parse_string
 
 def main():
     parser = argparse.ArgumentParser(description="Learned Segmentation Pipeline")
@@ -27,17 +30,32 @@ def main():
     
     train_flag = config.get_train_flag()
     test_flag = config.get_test_flag()
-    
-    pipeline_params = config.get_pipeline_params()
+    # 1. Experiment Directory
+    model_params = config.get_model_params() # Keep this line to get model_params for later use
+    model_type = model_params.get('type', 'XGBRegressor') # Get model_type from model_params
     target_variable = config.get_target_variable()
+    target_type = config.get_target_type()
     
-    scale = pipeline_params.get('scale', 0)
-    tol = pipeline_params.get('tol', 0.3)
-    attempt = pipeline_params.get('attempt', 10)
-    reduce_param = pipeline_params.get('reduce', 100)
+    scale = config.get_scale()
+    assert scale is not None, "Scale must be specified in config"
     
+    graph_construct = config.get_graph_construct()
+    assert graph_construct is not None, "Graph construct must be specified in config"
+        
+    dico_config = parse_string(graph_construct)
+
+    tol = dico_config.get('tol') # Revert to original default
+    attempt = dico_config.get('attempt') # Revert to original default
+    reduce_param = dico_config.get('reduce') # Revert to original default variable name and default value
+    
+    assert attempt is not None, "Attempt must be specified in config"
+    assert reduce_param is not None, "Reduce must be specified in config"
+    assert tol is not None, "Tol must be specified in config"
+    
+    n_clusters_node = config.get_n_clusters_node()
+
     # Construct Experiment Directory
-    exp_dir_name = f"target_{target_variable}_scale_{scale}_tol_{tol}_attempt_{attempt}_reduce_{reduce_param}"
+    exp_dir_name = f"target_{target_variable}_{target_type}_scale_{scale}_tol_{tol}_attempt_{attempt}_reduce_{reduce_param}_ncluster_{n_clusters_node}"
     dir_experiment = Path.cwd() / 'Experiments' / exp_dir_name
     dir_experiment.mkdir(parents=True, exist_ok=True)
     
@@ -46,12 +64,12 @@ def main():
     current_run_dir = None
     model_save_path = None
     model_params = config.get_model_params()
-    model_type = model_params.get('type', 'XGBRegressor')
+    model_type = model_params.get('type', None)
+    assert model_type is not None, "Model type must be specified in config"
     model_filename = 'learned_segmentation_model.pth' if model_type == 'UNet' else 'learned_segmentation_model.pkl'
 
     loader = DataLoader(config)
     
-    # 2. Train Logic
     # 2. Train Logic
     current_run_dir = dir_experiment / model_type
     
@@ -63,29 +81,40 @@ def main():
         # Load Data
         print("Loading training data...")
         train_depts = config.get_train_departements()
-        X_train, y_train = loader.load_all_data(train_depts, fit_scaler=True, fit_encoder=True)
+        
+        # Fit Clusterer if needed (Global step before loading individual dept data)
+        target_type = config.get_target_type()
+        loader.launch_segmentation(train_depts)
+             
+        X_train, y_train, weights_train = loader.load_all_data(train_depts, load=True, fit_scaler=True)
+
+        loader.save_preprocessed_data(dir_experiment, X_train, y_train, weights_train)
         
         if X_train is None:
             print("ERROR: Failed to load training data.")
             return
 
-        # Save Preprocessed Data
-        loader.save_preprocessed_data(current_run_dir, X_train, y_train)
-        
         # Update model_params with data shape
         n_channels = X_train.shape[1]
         print(f"Detected {n_channels} input channels.")
         if 'params' not in model_params:
-            model_params['params'] = {}
+            raise ValueError("Model parameters must contain 'params' key.")
+
         model_params['params']['n_channels'] = n_channels
+
+        if model_params['params']['task_type'] == 'classification' or model_params['params']['task_type'] == 'binary':
+            y_train = y_train.astype(int)
         
         # Train
         print("Initializing trainer...")
         trainer = Trainer(model_params)
-        trainer.train(X_train, y_train)
+        trainer.train(X_train, y_train, weights=weights_train)
+        
+        # Plot Loss
+        trainer.plot_loss(current_run_dir / 'loss_plot.png')
         
         # Save Model
-        model_save_path = current_run_dir / model_filename
+        model_save_path = current_run_dir / f'{model_filename}_{model_params["params"]["task_type"]}.pth'
         trainer.save_model(model_save_path)
         
         # Save model params used for training
@@ -105,9 +134,6 @@ def main():
             print(f"ERROR: Model file not found in {current_run_dir}")
             return
              
-        # Load Preprocessed Data (to restore scaler/encoder state)
-        # We also need to know n_channels to instantiate the model for testing (if needed)
-        # Although Tester loads the model, if it's a state_dict, Tester needs to know architecture.
         # Let's load model_params from file if it exists
         if (current_run_dir / 'model_params.json').exists():
             with open(current_run_dir / 'model_params.json', 'r') as f:
@@ -130,35 +156,40 @@ def main():
     if test_flag:
         print("Loading test data...")
         test_depts = config.get_test_departements()
-        X_test, y_test = loader.load_all_data(test_depts, fit_scaler=False, fit_encoder=False)
-        
-        if X_test is not None:
-            print(f"Test data shape: X={X_test.shape}, y={y_test.shape}")
-            tester = Tester(model_save_path, model_params)
-            predictions = tester.test(X_test, y_test, compute_metrics=True)
-            
-            # Visualize
-            vis_path = current_run_dir / 'prediction_vis.png'
-            tester.visualize_prediction(predictions, y_test, vis_path)
-        else:
-            print("WARNING: No test data found or loaded.")
+
+        # Iterate over each test department
+        for dept in test_depts:
+            print(f"\nTesting department: {dept}")
+            # Load data for single department
+            X_test, y_test, weights_test = loader.load_all_data([dept], load=False, fit_scaler=False)
+            if X_test is not None:
+                print(f"Test data shape for {dept}: X={X_test.shape}, y={y_test.shape}")
+
+                if 'tester' not in locals():
+                     tester = Tester(model_save_path, model_params)
+                
+                predictions = tester.test(X_test, y_test, weights=weights_test, dept_name=dept, compute_metrics=True)
+                
+            else:
+                print(f"WARNING: No test data found or loaded for {dept}.")
             
         # New Test Departments
         new_test_depts = config.get_new_test_departements()
         if new_test_depts:
-            print(f"Loading new test data (no scoring) for: {new_test_depts}")
-            X_new, y_new = loader.load_all_data(new_test_depts, fit_scaler=False, fit_encoder=False, require_target=False)
+            print(f"\nLoading new test data (no scoring) for: {new_test_depts}")
             
-            if X_new is not None:
-                if 'tester' not in locals():
-                    tester = Tester(model_save_path, model_params)
+            for dept in new_test_depts:
+                print(f"\nTesting new department: {dept}")
+                X_new, y_new, weights_new = loader.load_all_data([dept], require_target=False, load=False, fit_scaler=False)
                 
-                predictions_new = tester.test(X_new, y_new, compute_metrics=False)
-                
-                vis_path_new = current_run_dir / 'prediction_vis_new.png'
-                tester.visualize_prediction(predictions_new, y_new, vis_path_new)
-            else:
-                print("WARNING: No new test data found or loaded.")
+                if X_new is not None:
+                    if 'tester' not in locals():
+                        tester = Tester(model_save_path, model_params)
+                    
+                    predictions_new = tester.test(X_new, y_new, weights=weights_new, dept_name=dept, compute_metrics=False)
+                    
+                else:
+                    print(f"WARNING: No new test data found or loaded for {dept}.")
 
 if __name__ == "__main__":
     main()

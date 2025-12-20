@@ -68,8 +68,6 @@ def parse_string(s):
     # Utiliser findall pour capturer toutes les balises présentes
     matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
 
-    print(matches)
-    
     for groups in matches:
         b, a, r, t = groups[1], groups[3], groups[5], groups[7]
         print(b)
@@ -84,14 +82,20 @@ def parse_string(s):
 
     return result
 
+from GNN.forecasting_models.pytorch.models_2D import UNet
+from sklearn.preprocessing import StandardScaler
+import torch
+
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
-                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method):
+                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method,
+                    susecptibility_variables=None, test_departements=None, n_clusters_node=3):
     
     dico_config = parse_string(graph_construct)
     print(dico_config)
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
-                                attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
+                                attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'], susecptibility_variables=susecptibility_variables,
+                                n_clusters_node=n_clusters_node)
 
     sucseptibility_map_model_config = {'type': 'Unet',
                                        'device': 'cuda',
@@ -99,6 +103,26 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                        'loss' : 'rmse',
                                        'name': 'mapper',
                                        'params' : None}
+    
+    
+    n_channels = 2
+    if susecptibility_variables is not None:
+        n_channels = len(susecptibility_variables)
+        
+    unet_model = UNet(n_channels=n_channels, out_channels=1, conv_channels=[16, 32, 64], bilinear=False, return_hidden=False, horizon=0, task_type='regression')
+    unet_model.to('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    graphScale.susceptility_mapper = unet_model
+    graphScale.mapper_config = sucseptibility_map_model_config
+    graphScale.susceptility_target = 'risk'
+    
+    # Initialize Scaler
+    scaler = StandardScaler()
+    # We need to fit it? Or just set it.
+    # If we don't fit it, transform will fail.
+    # Let's fit on dummy data.
+    scaler.fit(np.zeros((1, n_channels)))
+    graphScale.susceptibility_scaler = scaler
     
     variables_for_susecptibilty_and_clustering = ['population', 'foret',
                                                   #'bdroute',
@@ -126,7 +150,8 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             target='nbsinister', train_dates=train_dates,
                                             path=dir_output,
                                             root_data=rootDisk / 'csv',
-                                            root_target=root_target / sinister / dataset_name / sinister_encoding)
+                                            root_target=root_target / sinister / dataset_name / sinister_encoding,
+                                            test_departements=test_departements)
     
     #graphScale.find_closest_cluster(graphScale.departements.unique(), train_date, dir_output, rootDisk / 'csv')
 

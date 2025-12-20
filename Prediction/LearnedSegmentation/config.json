@@ -1,39 +1,98 @@
 {
     "train_departements": [
-        "departement-06-alpes-maritimes"  
+        "departement-01-ain",
+        "departement-03-allier",
+        "departement-04-alpes-de-haute-provence",
+        "departement-05-hautes-alpes",
+        "departement-06-alpes-maritimes",
+        "departement-07-ardeche",
+        "departement-09-ariege",
+        "departement-10-aube",
+        "departement-11-aude",
+        "departement-12-aveyron",
+        "departement-13-bouches-du-rhone",
+        "departement-15-cantal",
+        "departement-16-charente",
+        "departement-17-charente-maritime",
+        "departement-18-cher",
+        "departement-19-correze",
+        "departement-21-cote-d-or",
+        "departement-22-cotes-d-armor",
+        "departement-23-creuse",
+        "departement-24-dordogne",
+        "departement-25-doubs",
+        "departement-26-drome",
+        "departement-28-eure-et-loir",
+        "departement-30-gard",
+        "departement-31-haute-garonne",
+        "departement-32-gers",
+        "departement-34-herault",
+        "departement-35-ille-et-vilaine",
+        "departement-36-indre",
+        "departement-37-indre-et-loire",
+        "departement-38-isere",
+        "departement-39-jura",
+        "departement-40-landes",
+        "departement-41-loir-et-cher",
+        "departement-42-loire",
+        "departement-43-haute-loire",
+        "departement-45-loiret",
+        "departement-46-lot"
     ],
-    
     "test_departements": [
-        "departement-13-bouches-du-rhone"
+        "departement-83-var",
+        "departement-33-gironde",
+        "departement-29-finistere",
+        "departement-44-loire-atlantique"
     ],
     "train": true,
     "test": true,
-    "new_test_departements": ["departement-17-charente-maritime"],
+    "graph": false,
+    "load" : false,
+    "new_test_departements": [
+        "departement-59-nord",
+        "departement-62-pas-de-calais",
+        "departement-80-somme",
+        "departement-02-aisne",
+        "departement-60-oise",
+        "departement-76-seine-maritime",
+        "departement-08-ardennes",
+        "departement-51-marne",
+        "departement-27-eure",
+        "departement-14-calvados",
+        "departement-50-manche",
+        "departement-61-orne",
+        "departement-55-meuse",
+        "departement-54-meurthe-et-moselle",
+        "departement-57-moselle",
+        "departement-67-bas-rhin",
+        "departement-68-haut-rhin",
+        "departement-88-vosges",
+        "departement-90-territoire-de-belfort"
+    ],
+    "n_clusters_node": 10,
     "frequency": "full",
-    "pipeline_params": {
-        "scale": 0.3,
-        "tol": 0.3,
-        "attempt": 3,
-        "reduce": 5
-    },
     "model_params": {
         "type": "UNet",
         "params": {
             "n_channels": 0,
-            "out_channels": 1,
+            "out_channels": 11,
             "conv_channels": [
                 64,
                 128,
                 256
             ],
             "bilinear": false,
-            "task_type": "binary"
+            "task_type": "classification"
         },
-        "epochs": 10,
-        "batch_size": 1,
+        "epochs": 100,
+        "batch_size": 8,
         "learning_rate": 0.001,
-        "loss": "bceloss"
+        "loss": "weightedcrossentropy"
     },
     "target_variable": "risk",
-    "dataset_name" : "bdiff"
+    "target_type": "cluster",
+    "dataset_name": "bdiff",
+    "graphConstruct": "risk-size-watershed-degree-a3-r4-t0.3",
+    "scale": 3
 }

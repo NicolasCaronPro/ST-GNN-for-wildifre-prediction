@@ -73,9 +73,10 @@ class GraphStructure():
                  attempt : int,
                  reduce : int,
                  tol : float,
-                 graph_method : str = 'node'):
+                 graph_method : str = 'node',
+                 susecptibility_variables : list = None,
+                 n_clusters_node: int = 4):
         
-
         if geo is not None:
 
             for col in ['latitude', 'longitude', 'geometry', 'departement']:
@@ -116,6 +117,8 @@ class GraphStructure():
         self.train_departements = train_departements
         self.graph_method = graph_method
         self.susceptility_mapper = None
+        self.susecptibility_variables = susecptibility_variables if susecptibility_variables is not None else ['elevation', 'population']
+        self.n_clusters_node = n_clusters_node
         
         # Gestion de reduce
         if reduce == 'search':
@@ -469,6 +472,10 @@ class GraphStructure():
         data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
         data_bin, GT = self._process_base_data("nbsinister", dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
 
+        if data.ndim == 3:
+            data = np.nansum(data, axis=2)
+            data_bin = np.nansum(data_bin, axis=2)
+
         if data is None:
             logger.info(f'Can t find {vb}')
             exit(1)
@@ -650,30 +657,36 @@ class GraphStructure():
         # 2) create_cluster
         _, pred = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred', attempt=final_attempt)
 
-        # Process post-watershed results
-        pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
-        self._save_feature_image(path, dept, 'pred_final', pred, raster)
-        
-        # Analyse dispersion of fire regions
-        self.dispersions = {}
-        clusters = np.unique(pred[valid_mask])
-        for cluster_id in clusters:
-            # Extraire les pixels du cluster actuel
-            cluster_pixels = np.argwhere(pred == cluster_id)
+        try:
+            # Process post-watershed results
+            pred = self._post_process_result(pred, raster, mask, node_already_predicted, 'graph') 
+            self._save_feature_image(path, dept, 'pred_final', pred, raster)
             
-            # Calculer le centroïde du cluster
-            centroid = np.mean(cluster_pixels, axis=0)
-            
-            # Calculer la distance de chaque pixel au centroïde
-            distances = cdist(cluster_pixels, [centroid])
-            
-            # Calculer la dispersion (écart-type des distances)
-            self.dispersions[cluster_id] = np.std(distances)
+            # Analyse dispersion of fire regions
+            self.dispersions = {}
+            clusters = np.unique(pred[valid_mask])
+            for cluster_id in clusters:
+                # Extraire les pixels du cluster actuel
+                cluster_pixels = np.argwhere(pred == cluster_id)
+                
+                # Calculer le centroïde du cluster
+                centroid = np.mean(cluster_pixels, axis=0)
+                
+                # Calculer la distance de chaque pixel au centroïde
+                distances = cdist(cluster_pixels, [centroid])
+                
+                # Calculer la dispersion (écart-type des distances)
+                self.dispersions[cluster_id] = np.std(distances)
+        except:
+            return pred
 
         #logger.info(f'Cluster dispersion {self.dispersions}')
 
     def create_cluster(self, pred, dept, path, scale, mode, bin_data, raster, valid_mask, type, attempt=None, print=True):
 
+        if bin_data.ndim == 2:
+            bin_data = np.expand_dims(bin_data, axis=2)
+        
         # Gestion de attempt
         if attempt is None:
             if self.attempt == 'search':
@@ -681,10 +694,16 @@ class GraphStructure():
             attempt = self.attempt
 
         if 'degree' in self.base:
-            size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
-            max_cluster_size = int(size + (self.tol * size))
-            min_cluster_size = int(size - (self.tol * size))
-            s = float(f'0.{self.scale}')
+            if isinstance(self.scale, int) or isinstance(self.scale, str):
+                size = count_pixels_in_france_deg_square(deg_size=float(f'0.{self.scale}'))[-1]
+                max_cluster_size = int(size + (self.tol * size))
+                min_cluster_size = int(size - (self.tol * size))
+                s = float(f'0.{self.scale}')
+            else:
+                size = count_pixels_in_france_deg_square(deg_size=self.scale)[-1]
+                max_cluster_size = int(size + (self.tol * size))
+                min_cluster_size = int(size - (self.tol * size))
+                s = self.scale
             #size_up = count_pixels_in_france_deg_square(deg_size=s + 0.1)[-1]
             #size_down = count_pixels_in_france_deg_square(deg_size=s - 0.1)[-1]
             #max_cluster_size = min(max_cluster_size, size_up)
@@ -714,6 +733,18 @@ class GraphStructure():
             pred = split_large_clusters(pred, max_cluster_size, min_cluster_size, size, valid_cluster)
             valid_cluster = [val - 1 for val in valid_cluster]
             pred[valid_mask] -= 1
+            
+            pred = pred.astype(float)
+            self._save_feature_image(path, dept, f'{type}_split', pred, raster)
+        
+        elif mode == 'fireArea':
+            
+            pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size,
+            features=None, mode=mode, exclude_label=0, background=-1,
+            nb_attempt=attempt)
+
+            valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
+            self._save_feature_image(path, dept, 'pred_merge', pred, raster)
             
             pred = pred.astype(float)
             self._save_feature_image(path, dept, f'{type}_split', pred, raster)
@@ -813,8 +844,9 @@ class GraphStructure():
         
         GT = None
 
-        print(vb)
-        
+        if train_date is None:
+            train_date = allDates
+            
         if vb == 'risk':
             data = read_object(f'{dept}Influence.pkl', dir_target)
             if data is None or dept not in self.train_departements:
@@ -822,7 +854,6 @@ class GraphStructure():
                     GT = np.copy(data)
                     GT = GT[:, :, [allDates.index(date) for date in train_date]]
                     GT = np.nansum(GT, axis=2)
-                data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
                 if data is None:
                     self.predict_susecptibility_map([dept], self.susecptibility_variables, dir_data, path / 'predict_map')
                     data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
@@ -832,7 +863,6 @@ class GraphStructure():
         elif vb == 'nbsinister':
             data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
             if data is None or dept not in self.train_departements:
-                data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
                 if data is None:
                     self.predict_susecptibility_map([dept], self.susecptibility_variables, dir_data, path / 'predict_map')
                     data = read_object(f'{dept}binScale0.pkl', path / 'predict_map')
@@ -1773,6 +1803,9 @@ class GraphStructure():
     def predict_susecptibility_map(self, departements, variables, dir_data, dir_output):
         assert self.susceptility_mapper is not None
         assert self.sinister is not None
+        
+        import torch
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
         check_and_create_path(dir_output)
 
@@ -1816,7 +1849,7 @@ class GraphStructure():
                         X = X[np.newaxis, :, :, :]
                         X = self.susceptibility_scaler.transform(X.reshape(-1, X.shape[1])).reshape(X.shape)
                         X_tensor = torch.tensor(X, dtype=torch.float32, device=device)
-                        predictions = self.susceptility_mapper(X_tensor, None)
+                        predictions, _, _ = self.susceptility_mapper(X_tensor, None)
                         if torch.is_tensor(predictions):
                             predictions = predictions.detach().cpu().numpy()
                             print(predictions.shape)
@@ -2138,7 +2171,7 @@ class GraphStructure():
         vec = np.concatenate(vec, axis=0)
         
         ### Clustering
-        self.cluster_node_model = Predictor(n_clusters=3)
+        self.cluster_node_model = Predictor(n_clusters=self.n_clusters_node)
         self.knearestKneighbours = NearestNeighbors(n_neighbors=1).fit(vec)
 
         self.cluster_node_model.fit(np.asarray(vec_target).reshape(-1,1))
@@ -2173,7 +2206,7 @@ class GraphStructure():
 
         logger.info(f'Time series clustering {self.node_cluster}')
 
-    def _clusterize_node_with_time_series(self, departements, variables, target, train_dates, path, root_data, root_target):
+    def _clusterize_node_with_time_series(self, departements, variables, target, train_dates, path, root_data, root_target, test_departements=None):
         self.variables_for_cluster = variables
 
         dir_datacube = path / 'datacube'
@@ -2183,7 +2216,7 @@ class GraphStructure():
         self.values_per_node = {}
         self.node_cluster = {}
         target_per_node = {}
-
+        
         for dept in departements:
             if dept in self.drop_department:
                 continue
@@ -2202,7 +2235,7 @@ class GraphStructure():
             
             datacube_target = datacube_target.sel(date=train_dates)
 
-            target_values = datacube_target['nbsinister'].values[0]
+            target_values = datacube_target['occurence'].values[0]
             
             raster = datacube_target['area'].values[0]
 
@@ -2213,7 +2246,7 @@ class GraphStructure():
                 vec_node = []
                 mask_node = (raster == node)  # mask 2D
 
-                for var in variables:
+                """for var in variables:
                     if var in cems_variables:
                         # Variable dynamique avec 'time'
                         data = datacube_feature[var].sel(date=train_dates)
@@ -2266,7 +2299,7 @@ class GraphStructure():
                     elif var == 'corine':
                         for i, var2 in enumerate(corine_variable):
                             values = datacube_feature[var2].values
-                            vec_node.append(np.nanmean(values[mask_node]))
+                            vec_node.append(np.nanmean(values[mask_node]))"""
                 
                 target_node = np.nansum(target_values[mask_node], axis=0)
                 
@@ -2274,15 +2307,15 @@ class GraphStructure():
                 target_per_node[node] = target_node
                 vec_target.append(target_node)
 
-                vec.append(np.asarray(vec_node).reshape(1, -1))
-                self.values_per_node[node] = np.asarray(vec_node).reshape(1, -1)
+                #vec.append(np.asarray(vec_node).reshape(1, -1))
+                #self.values_per_node[node] = np.asarray(vec_node).reshape(1, -1)
 
-        vec = np.concatenate(vec, axis=0)
+        #vec = np.concatenate(vec, axis=0)
         vec_target = np.asarray(vec_target)
 
         ### Clustering
-        self.cluster_node_model = TimeSeriesKMeans(n_clusters=4, metric="dtw", max_iter=10, random_state=42)
-        self.knearestKneighbours = NearestNeighbors(n_neighbors=1).fit(vec)
+        self.cluster_node_model = TimeSeriesKMeans(n_clusters=self.n_clusters_node, metric="dtw", max_iter=10, random_state=42)
+        #self.knearestKneighbours = NearestNeighbors(n_neighbors=1).fit(vec)
 
         self.cluster_node_model.fit(vec_target)
         self.all_clusters = self.cluster_node_model.predict(vec_target)
@@ -2310,6 +2343,64 @@ class GraphStructure():
             datacube_target['time_series_clustering'] = xr.DataArray(time_series_image, dims=('latitude', 'longitude'))
             
             save_object(datacube_target, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', dir_datacube)
+        
+        if test_departements is None:
+            return
+        
+                # ----------------------------
+        # TEST: prédire les clusters sur la time series cible (nbsinister) par node
+        # ----------------------------
+        if test_departements is None:
+            return
+
+        for dept in test_departements:
+            dir_data = root_data / dept / 'raster' / self.resolution
+
+            datacube_target = read_object(
+                f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl',
+                dir_datacube
+            )
+            assert datacube_target is not None
+
+            # Important : même fenêtre temporelle que pour l'entraînement
+            datacube_target = datacube_target.sel(date=train_dates)
+
+            # target_values: (lat, lon, time) ou (time, lat, lon) selon ton datacube
+            # Dans ton code train tu fais: values[0] puis sum(mask, axis=0)
+            # -> on garde la même logique
+            target_values = datacube_target['occurence'].values[0]
+            
+            raster = datacube_target['area'].values[0]
+
+            time_series_image = np.full(raster.shape, fill_value=np.nan)
+
+            nodes = np.unique(raster)
+            nodes = nodes[~np.isnan(nodes)]
+
+            for node in nodes:
+                mask_node = (raster == node)
+
+                # Série temporelle agrégée sur les pixels du node
+                # Ton train faisait: np.nansum(target_values[mask_node], axis=0)
+                target_node = np.nansum(target_values[mask_node], axis=0)
+
+                # Sécurité: si série vide / tout NaN, on peut mettre NaN ou un cluster par défaut
+                if target_node.size == 0 or np.all(np.isnan(target_node)):
+                    cluster_id = np.nan
+                else:
+                    cluster_id = self.cluster_node_model.predict(target_node.reshape(1, -1))[0]
+
+                time_series_image[raster == node] = cluster_id
+
+            datacube_target['time_series_clustering'] = xr.DataArray(
+                time_series_image, dims=('latitude', 'longitude')
+            )
+            
+            save_object(
+                datacube_target,
+                f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl',
+                dir_datacube
+            )
 
         logger.info(f'Time series clustering {self.node_cluster}')
 

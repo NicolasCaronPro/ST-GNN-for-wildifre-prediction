@@ -89,11 +89,77 @@ class Tester:
             with open(self.model_path, 'rb') as f:
                 return pickle.load(f)
 
-    def test(self, X, y, compute_metrics=True):
+    def test(self, X, y, weights=None, dept_name="unknown", compute_metrics=True):
         print("Testing model...")
         
         if self.model_type == 'UNet':
-            return self._test_unet(X, y, compute_metrics)
+            # Convert to tensors
+            if not isinstance(X, torch.Tensor):
+                X = torch.tensor(X, dtype=torch.float32)
+            if not isinstance(y, torch.Tensor):
+                 if self.params.get('task_type') == 'classification':
+                    y = torch.tensor(y, dtype=torch.long)
+                    if len(y.shape) == 4 and y.shape[1] == 1:
+                        y = y.squeeze(1)
+                 else:
+                    y = torch.tensor(y, dtype=torch.float32)
+            
+            X = X.to(self.device)
+            y = y.to(self.device)
+            
+            self.model.eval()
+            
+            with torch.no_grad():
+                outputs, logits, hidden = self.model(X)
+                probs = outputs
+                if self.params.get('task_type') == 'regression':
+                    preds = outputs
+                else:
+                    preds = torch.argmax(outputs, dim=-1)
+                            
+            if compute_metrics:
+                if self.params.get('task_type') == 'regression':
+                    # Calculate MSE/MAE
+                    y_np = y.cpu().numpy().squeeze()
+                    preds_np = preds.cpu().numpy().squeeze()
+                    
+                    mse = np.mean((y_np - preds_np) ** 2)
+                    mae = np.mean(np.abs(y_np - preds_np))
+                    print(f"MSE: {mse}")
+                    print(f"MAE: {mae}")
+                else:
+                    # Calculate IoU
+                    y_np = y.cpu().numpy().squeeze()
+                    preds_np = preds.cpu().numpy().squeeze()
+                    
+                    # Flatten
+                    y_flat = y_np.flatten()
+                    preds_flat = preds_np.flatten()
+
+                    from sklearn.metrics import jaccard_score
+                    iou = jaccard_score(y_flat, preds_flat, average='macro')
+                    print(f"Mean IoU: {iou}")
+                
+            # Visualize first sample
+            pred_vis = preds[0].cpu().numpy()
+            target_vis = y[0].cpu().numpy()
+            
+            if weights is not None:
+                if isinstance(weights, torch.Tensor):
+                     weights_vis = weights[0].cpu().numpy()
+                else:
+                     weights_vis = weights[0]
+                # Handle shape (1, H, W) -> (H, W)
+                if len(weights_vis.shape) == 3:
+                    weights_vis = weights_vis[0]
+            else:
+                weights_vis = None
+                
+            vis_path = self.model_path.parent / f'prediction_vis_{dept_name}.png'
+            self.visualize_prediction(pred_vis, target_vis, vis_path, weights_vis)
+            
+            return preds.cpu().numpy()
+
         else:
             predictions = self.model.predict(X)
             if compute_metrics:
@@ -104,82 +170,72 @@ class Tester:
                 print(f"MAE: {mae}")
             return predictions
 
-    def _test_unet(self, X, y, compute_metrics=True):
-        if not isinstance(X, torch.Tensor):
-            X = torch.tensor(X, dtype=torch.float32)
-        if not isinstance(y, torch.Tensor):
-            y = torch.tensor(y, dtype=torch.float32)
+    def visualize_prediction(self, pred_vis, target_vis, save_path, weights_vis=None):
+        print(f"Visualizing prediction. Type: {type(pred_vis)}, Shape: {pred_vis.shape}")
+        if target_vis is not None:
+            print(f"Target Type: {type(target_vis)}, Shape: {target_vis.shape}")
             
-        X = X.to(self.device)
-        y = y.to(self.device)
-        
-        with torch.no_grad():
-            outputs, logits, hidden = self.model(X)
-            # Apply sigmoid for binary classification
-            probs = torch.sigmoid(logits)
-            preds = (probs > 0.5).float()
+        # Handle shapes (remove channel dim if present)
+        if len(pred_vis.shape) == 4:
+            pred_vis = pred_vis[0, 0]
+        elif len(pred_vis.shape) == 3:
+            pred_vis = pred_vis[0]
             
-        if compute_metrics:
-            # Calculate IoU
-            # y is (B, 1, H, W), preds is (B, 1, H, W)
-            y_np = y.cpu().numpy().squeeze()
-            preds_np = preds.cpu().numpy().squeeze()
-            
-            # Calculate IoU per sample
-            ious = []
-            if len(y_np.shape) == 2: # Single sample (H, W)
-                iou = iou_binary(preds_np, y_np)
-                ious.append(iou)
+        if target_vis is not None:
+            if len(target_vis.shape) == 4:
+                target_vis = target_vis[0, 0]
+            elif len(target_vis.shape) == 3:
+                target_vis = target_vis[0]
             else:
-                for i in range(y_np.shape[0]):
-                    iou = iou_binary(preds_np[i], y_np[i])
-                    ious.append(iou)
-            
-            mean_iou = np.mean(ious)
-            print(f"Mean IoU: {mean_iou}")
-        
-        return preds.cpu().numpy().squeeze()
-
-    def visualize_prediction(self, prediction, target, save_path):
-        # Prediction and target are 2D arrays (H, W)
-        # Or 3D (N, H, W)
-        
-        print(f"Visualizing prediction. Type: {type(prediction)}, Shape: {prediction.shape}")
-        if target is not None:
-             print(f"Target Type: {type(target)}, Shape: {target.shape}")
-             
-        # Handle prediction shape
-        if len(prediction.shape) == 4:
-            pred_vis = prediction[0, 0]
-        elif len(prediction.shape) == 3:
-            pred_vis = prediction[0]
-        else:
-            pred_vis = prediction
-            
-        # Handle target shape
-        if target is not None:
-            if len(target.shape) == 4:
-                target_vis = target[0, 0]
-            elif len(target.shape) == 3:
-                target_vis = target[0]
-            else:
-                target_vis = target
+                target_vis = target_vis
         else:
             target_vis = None
             
-        plt.figure(figsize=(10, 5))
+        plt.figure(figsize=(15, 5))
         
+        # Determine vmin/vmax based on task type
+        vmin = None
+        vmax = None
+        print(self.params.get('task_type'))
+        if self.params.get('task_type') == 'classification':
+            vmin = 0
+            vmax = np.max(target_vis)
+            
         if target_vis is not None:
-            plt.subplot(1, 2, 1)
+            plt.subplot(1, 3, 1)
             plt.title("Prediction")
-            plt.imshow(pred_vis, cmap='gray')
-            plt.subplot(1, 2, 2)
+            # Use 'jet' or 'tab10' for classification
+            if self.params.get('task_type') == 'classification':
+                cmap = 'jet'
+            else:
+                cmap = 'jet' if len(np.unique(pred_vis)) > 2 else 'gray'
+            plt.imshow(pred_vis, cmap=cmap, vmin=vmin, vmax=vmax)
+            plt.colorbar()
+            
+            plt.subplot(1, 3, 2)
             plt.title("Target")
-            plt.imshow(target_vis, cmap='gray')
+            if self.params.get('task_type') == 'classification':
+                cmap_target = 'jet'
+            else:
+                cmap_target = 'jet' if len(np.unique(target_vis)) > 2 else 'gray'
+            plt.imshow(target_vis, cmap=cmap_target, vmin=vmin, vmax=vmax)
+            plt.colorbar()
+            
+            if weights_vis is not None:
+                plt.subplot(1, 3, 3)
+                plt.title("Sample Weights")
+                plt.imshow(weights_vis, cmap='gray')
+                plt.colorbar()
+                
         else:
             plt.subplot(1, 1, 1)
             plt.title("Prediction")
-            plt.imshow(pred_vis, cmap='gray')
+            if self.params.get('task_type') == 'classification':
+                cmap = 'jet'
+            else:
+                cmap = 'jet' if len(np.unique(pred_vis)) > 2 else 'gray'
+            plt.imshow(pred_vis, cmap=cmap, vmin=vmin, vmax=vmax)
+            plt.colorbar()
             
         plt.savefig(save_path)
         print(f"Visualization saved to {save_path}")

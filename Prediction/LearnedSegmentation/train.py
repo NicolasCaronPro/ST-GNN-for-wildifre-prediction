@@ -61,6 +61,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from GNN.forecasting_models.sklearn.models import MyXGBRegressor, MyXGBClassifier
 from GNN.forecasting_models.pytorch.models_2D import UNet
 from GNN.train import get_loss_function
+from GNN.forecasting_models.pytorch.classification_loss import WeightedCrossEntropyLoss
 # Import other models if needed
 
 logger = logging.getLogger(__name__)
@@ -71,15 +72,17 @@ class Trainer:
         self.model_type = model_params.get('type', 'XGBRegressor')
         self.params = model_params.get('params', {})
         self.epochs = model_params.get('epochs', 10)
-        self.batch_size = model_params.get('batch_size', 1)
+        self.batch_size = model_params.get('batch_size', 8)
         self.learning_rate = model_params.get('learning_rate', 0.001)
         self.loss_name = model_params.get('loss', 'bceloss')
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = torch.device('cpu')
         
         self.model = self._initialize_model()
+        self.loss_history = []
 
     def _initialize_model(self):
-        logger.info(f"Initializing model: {self.model_type}")
+        logger.info(f"Initializing model: {self.model_type} with {self.loss_name}")
         if self.model_type == 'UNet':
             model = UNet(
                 n_channels=self.params['n_channels'],
@@ -97,37 +100,51 @@ class Trainer:
         else:
             raise ValueError(f"Unsupported model type: {self.model_type}")
 
-    def train(self, X, y):
+    def train(self, X, y, weights=None):
         logger.info(f"Training {self.model_type} model...")
         
         if self.model_type == 'UNet':
-            self._train_unet(X, y)
+            self._train_unet(X, y, weights)
         else:
             # Scikit-learn style models
             self.model.fit(X, y)
             
         logger.info("Training completed.")
 
-    def _train_unet(self, X, y):
+    def _train_unet(self, X, y, weights=None):
+
         # Convert to tensors if they are numpy arrays
         if not isinstance(X, torch.Tensor):
             X = torch.tensor(X, dtype=torch.float32)
         if not isinstance(y, torch.Tensor):
-            y = torch.tensor(y, dtype=torch.float32)
+            # If multi-class, y should be LongTensor and (B, H, W) or (B, 1, H, W)
+            if self.params.get('task_type') == 'classification':
+                y = torch.tensor(y, dtype=torch.long)
+                if len(y.shape) == 4 and y.shape[1] == 1:
+                    y = y.squeeze(1)
+            else:
+                y = torch.tensor(y, dtype=torch.float32)
+        
+        if weights is not None and not isinstance(weights, torch.Tensor):
+            weights = torch.tensor(weights, dtype=torch.float32)
             
         # Create DataLoader
-        dataset = TensorDataset(X, y)
+        if weights is not None:
+            dataset = TensorDataset(X, y, weights)
+        else:
+            dataset = TensorDataset(X, y)
+            
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         
         # Loss and Optimizer
-        # Use get_loss_function from GNN.train
-        # Note: get_loss_function might return a class instance or class?
-        # Based on GNN/train.py: return loss_factories[loss_name]() -> Instance
-        if self.loss_name == 'bceloss':
-            criterion = nn.BCELoss()
-        else:
-            criterion = get_loss_function(self.loss_name)
-        criterion = criterion.to(self.device)
+        loss_params = {
+            'num_classes': self.params.get('out_channels', 5)
+        }
+        criterion = get_loss_function(self.loss_name, **loss_params)
+        
+        # Move criterion to device if it's a module
+        if isinstance(criterion, nn.Module):
+            criterion = criterion.to(self.device)
         
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         
@@ -135,26 +152,36 @@ class Trainer:
         for epoch in range(self.epochs):
             running_loss = 0.0
             for i, data in enumerate(dataloader, 0):
-                inputs, labels = data
+                if weights is not None:
+                    inputs, labels, sample_weights = data
+                    sample_weights = sample_weights.to(self.device)
+                else:
+                    inputs, labels = data
+                    sample_weights = None
+                    
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
-                
+
                 optimizer.zero_grad()
                 
                 # Forward pass
-                # UNet forward returns: output, logits, hidden
                 outputs, logits, hidden = self.model(inputs)
+
+                B, H, W, O = logits.shape
                 
-                # Use outputs (probabilities) for BCELoss, or logits for BCEWithLogitsLoss
-                # Assuming BCELoss as per config
-                loss = criterion(outputs, labels)
+                logits = logits.reshape((H * W * B, O))
+                labels = labels.reshape((H * W * B))
+                sample_weights = sample_weights.reshape((H * W * B))
+
+                loss = criterion(logits, labels, sample_weights)
                 
-                # Backward pass
                 loss.backward()
                 optimizer.step()
                 
                 running_loss += loss.item()
                 
-            logger.info(f"Epoch {epoch+1}/{self.epochs}, Loss: {running_loss / len(dataloader)}")
+            epoch_loss = running_loss / len(dataloader)
+            self.loss_history.append(epoch_loss)
+            logger.info(f"Epoch {epoch+1}/{self.epochs}, Loss: {epoch_loss}")
 
     def save_model(self, path):
         path = Path(path)
@@ -176,3 +203,16 @@ class Trainer:
             score = self.model.score(X, y)
             logger.info(f"Model Score: {score}")
             return score
+
+    def plot_loss(self, save_path):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 5))
+        plt.plot(range(1, len(self.loss_history) + 1), self.loss_history, label='Training Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.title('Training Loss over Epochs')
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(save_path)
+        plt.close()
+        logger.info(f"Loss plot saved to {save_path}")
