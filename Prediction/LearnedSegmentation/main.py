@@ -128,7 +128,9 @@ def main():
              return
              
         print(f"Loading run from: {current_run_dir}")
-        model_save_path = current_run_dir / model_filename
+        model_save_path = current_run_dir / f'{model_filename}_{model_params["params"]["task_type"]}.pth'
+        if not model_save_path.exists():
+            model_save_path = current_run_dir / model_filename
         
         if not model_save_path.exists():
             print(f"ERROR: Model file not found in {current_run_dir}")
@@ -151,12 +153,41 @@ def main():
         if not (current_run_dir / 'scaler.pkl').exists():
              # If we didn't load preprocessed data above, do it now
              loader.load_preprocessed_data(current_run_dir)
+             
+             # Fallback to experiment directory if scaler not found in run directory
+             # Check if scaler is fitted (has mean_ attribute)
+             if not hasattr(loader.scaler, 'mean_') and (dir_experiment / 'scaler.pkl').exists():
+                 print(f"Loading scaler from experiment directory: {dir_experiment}")
+                 loader.load_preprocessed_data(dir_experiment)
 
     # 3. Test Logic
     if test_flag:
         print("Loading test data...")
         test_depts = config.get_test_departements()
 
+        # 3.1 Test on Training Set
+        print("\n--- Testing on Training Set ---")
+        train_depts = config.get_train_departements()
+        train_output_dir = current_run_dir / 'train'
+        train_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        for dept in train_depts:
+            print(f"\nTesting training department: {dept}")
+            X_train_test, y_train_test, weights_train_test = loader.load_all_data([dept], load=False, fit_scaler=False)
+            
+            if X_train_test is not None:
+                if 'tester' not in locals():
+                     tester = Tester(config, model_save_path, model_params)
+                
+                tester.test(X_train_test, y_train_test, weights=weights_train_test, dept_name=dept, compute_metrics=True, output_dir=train_output_dir)
+            else:
+                print(f"WARNING: No training data found or loaded for {dept} during testing phase.")
+
+        # 3.2 Test on Test Set
+        print("\n--- Testing on Test Set ---")
+        test_output_dir = current_run_dir / 'test'
+        test_output_dir.mkdir(parents=True, exist_ok=True)
+        
         # Iterate over each test department
         for dept in test_depts:
             print(f"\nTesting department: {dept}")
@@ -166,17 +197,22 @@ def main():
                 print(f"Test data shape for {dept}: X={X_test.shape}, y={y_test.shape}")
 
                 if 'tester' not in locals():
-                     tester = Tester(model_save_path, model_params)
+                     tester = Tester(config, model_save_path, model_params)
                 
-                predictions = tester.test(X_test, y_test, weights=weights_test, dept_name=dept, compute_metrics=True)
+                predictions = tester.test(X_test, y_test, weights=weights_test, dept_name=dept, compute_metrics=True, output_dir=test_output_dir)
                 
             else:
                 print(f"WARNING: No test data found or loaded for {dept}.")
+        
+        if 'tester' in locals():
+             tester.save_dataframe(current_run_dir / 'scores.csv')
             
         # New Test Departments
         new_test_depts = config.get_new_test_departements()
         if new_test_depts:
             print(f"\nLoading new test data (no scoring) for: {new_test_depts}")
+            new_test_output_dir = current_run_dir / 'new_test'
+            new_test_output_dir.mkdir(parents=True, exist_ok=True)
             
             for dept in new_test_depts:
                 print(f"\nTesting new department: {dept}")
@@ -184,9 +220,9 @@ def main():
                 
                 if X_new is not None:
                     if 'tester' not in locals():
-                        tester = Tester(model_save_path, model_params)
+                        tester = Tester(config, model_save_path, model_params)
                     
-                    predictions_new = tester.test(X_new, y_new, weights=weights_new, dept_name=dept, compute_metrics=False)
+                    predictions_new = tester.test(X_new, y_new, weights=weights_new, dept_name=dept, compute_metrics=False, output_dir=new_test_output_dir)
                     
                 else:
                     print(f"WARNING: No new test data found or loaded for {dept}.")

@@ -62,6 +62,7 @@ from GNN.forecasting_models.sklearn.models import MyXGBRegressor, MyXGBClassifie
 from GNN.forecasting_models.pytorch.models_2D import UNet
 from GNN.train import get_loss_function
 from GNN.forecasting_models.pytorch.classification_loss import WeightedCrossEntropyLoss
+from data_augmentation import DataAugmentor
 # Import other models if needed
 
 logger = logging.getLogger(__name__)
@@ -148,16 +149,30 @@ class Trainer:
         
         optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
         
+        # Data Augmentation
+        augmentor = None
+        if self.params.get('augmentation', False):
+            rotation_range = self.params.get('rotation_range', 15)
+            logger.info(f"Enabling data augmentation with rotation range {rotation_range}")
+            augmentor = DataAugmentor(rotation_range=rotation_range)
+        
         self.model.train()
         for epoch in range(self.epochs):
             running_loss = 0.0
             for i, data in enumerate(dataloader, 0):
                 if weights is not None:
                     inputs, labels, sample_weights = data
-                    sample_weights = sample_weights.to(self.device)
+                    # sample_weights = sample_weights.to(self.device) # Moved below
                 else:
                     inputs, labels = data
                     sample_weights = None
+                
+                # Apply Augmentation
+                if augmentor is not None:
+                    inputs, labels, sample_weights = augmentor(inputs, labels, sample_weights)
+                    
+                if sample_weights is not None:
+                    sample_weights = sample_weights.to(self.device)
                     
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
 
@@ -167,11 +182,22 @@ class Trainer:
                 outputs, logits, hidden = self.model(inputs)
 
                 B, H, W, O = logits.shape
-                
-                logits = logits.reshape((H * W * B, O))
-                labels = labels.reshape((H * W * B))
-                sample_weights = sample_weights.reshape((H * W * B))
+                #import matplotlib.pyplot as plt
+                #plt.imshow(outputs[0].detach().cpu().numpy())
+                #plt.show()
 
+                if O == 1:
+                    logits = logits.reshape((H * W * B)) 
+                else:
+                    logits = logits.reshape((H * W * B, O))
+
+                if self.params.get('task_type') == 'binary+regression':
+                    labels = labels.permute(0,2,3,1)
+                    labels = labels.reshape((H * W * B, 2))
+                else:
+                    labels = labels.reshape((H * W * B))
+                
+                sample_weights = sample_weights.reshape((H * W * B))
                 loss = criterion(logits, labels, sample_weights)
                 
                 loss.backward()

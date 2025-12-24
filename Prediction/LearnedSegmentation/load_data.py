@@ -207,7 +207,7 @@ class DataLoader:
         
         n_clusters_node = self.config.get_n_clusters_node()
  
-        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_cluster_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
+        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_{self.config.get_target_type()}_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
         doRaster = True
         doEdgesFeatures = False
         resolution = '2x2'
@@ -456,7 +456,7 @@ class DataLoader:
         n_clusters_node = self.config.get_n_clusters_node()
         
         # Load Datacube Target (which contains target)
-        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_cluster_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
+        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_{self.config.get_target_type()}_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
         datacube_target_path = dir_output / 'datacube' / f'datacube_target_{dept}_{scale}_{graph_construct}_{graph_method}.pkl'
         
         if not datacube_target_path.exists():
@@ -526,46 +526,95 @@ class DataLoader:
                     
         # Extract Target
         target_data = None
-        if 'time_series_clustering' in datacube_target:
-            target_data = datacube_target['time_series_clustering']
+        if self.config.get_target_type() == 'cluster':
+            if 'time_series_clustering' in datacube_target:
+                target_data = datacube_target['time_series_clustering']
 
-            if hasattr(target_data, 'values'):
-                target_data = target_data.values
-                
-            # Apply encoder
-            if hasattr(self, 'encoder'):
-                 original_shape = target_data.shape
-                 target_flat = target_data.flatten()
-                 # Handle NaNs (background)
-                 mask_valid = ~np.isnan(target_flat)
-                 target_encoded = np.zeros_like(target_flat, dtype=float) - 1 # Initialize with -1.0
-                
-                 if np.any(mask_valid):
-                      try:
-                          # CatBoostEncoder expects 2D input
-                          transformed = self.encoder.transform(target_flat[mask_valid].reshape(-1, 1))
-                          print(np.unique(transformed))
-                          # Apply Ordinal Encoder
-                          if self.ordinal_encoder is not None:
-                              transformed = self.ordinal_encoder.transform(transformed)
-                              # Shift by +1 so classes are 1, 2, 3, 4 (0 is background)
-                              transformed += 1
-                              
-                          if hasattr(transformed, 'values'):
-                              transformed = transformed.values
-                          target_encoded[mask_valid] = transformed.flatten()
-                      except ValueError:
-                          target_encoded[mask_valid] = -1
-                         
-                 # target_encoded[mask_valid] += 1 # Removed for regression
-                 target_encoded[~mask_valid] = 0
-                 target_data = target_encoded.reshape(original_shape)
+                if hasattr(target_data, 'values'):
+                    target_data = target_data.values
+                    
+                # Apply encoder
+                if hasattr(self, 'encoder'):
+                    original_shape = target_data.shape
+                    target_flat = target_data.flatten()
+                    # Handle NaNs (background)
+                    mask_valid = ~np.isnan(target_flat)
+                    target_encoded = np.zeros_like(target_flat, dtype=float) - 1 # Initialize with -1.0
+                    
+                    if np.any(mask_valid):
+                        try:
+                            # CatBoostEncoder expects 2D input
+                            transformed = self.encoder.transform(target_flat[mask_valid].reshape(-1, 1))
+                            print(np.unique(transformed))
+                            # Apply Ordinal Encoder
+                            if self.ordinal_encoder is not None:
+                                transformed = self.ordinal_encoder.transform(transformed)
+                                # Shift by +1 so classes are 1, 2, 3, 4 (0 is background)
+                                transformed += 1
+                                
+                            if hasattr(transformed, 'values'):
+                                transformed = transformed.values
+                            target_encoded[mask_valid] = transformed.flatten()
+                        except ValueError:
+                            target_encoded[mask_valid] = -1
+                            
+                    # target_encoded[mask_valid] += 1 # Removed for regression
+                    target_encoded[~mask_valid] = 0
+                    target_data = target_encoded.reshape(original_shape)
 
-                 if len(target_data.shape) == 3:
-                     target_data = target_data.squeeze(0)
-        else:
-            if require_target:
-                logger.warning(f"'time_series_clustering' not found in target datacube.")
+                    if len(target_data.shape) == 3:
+                        target_data = target_data.squeeze(0)
+
+        elif self.config.get_target_type() == 'risk':
+            if 'influence' in datacube_target:
+                target_data = datacube_target['influence']
+
+                if hasattr(target_data, 'values'):
+                    target_data = np.nansum(target_data.values, axis=-1)[0]
+
+        elif self.config.get_target_type() == 'occurence':
+            if 'occurence' in datacube_target:
+                target_data = datacube_target['occurence']
+                if hasattr(target_data, 'values'):
+                    target_data = np.nansum(target_data.values, axis=-1)[0]
+
+        elif self.config.get_target_type() == 'frontier':
+            if 'area' in datacube_target:
+                area_data = datacube_target['area']
+                if hasattr(area_data, 'values'):
+                    area_data = area_data.values
+                
+                # Assuming area_data is (H, W) or (1, H, W) or (H, W, 1)
+                # We need (H, W) for ids_to_boundary_mask
+                if len(area_data.shape) == 3:
+                     area_data = area_data.squeeze()
+                
+                # Handle NaNs in area (convert to specific ID or handle in mask)
+                # Here we assume area IDs are integers. NaNs might be present outside the department.
+                # We can fill NaNs with a unique ID to treat them as a separate zone (or background)
+                # But ids_to_boundary_mask expects int array.
+                
+                area_int = np.nan_to_num(area_data, nan=-1).astype(int)
+                
+                from LearnedSegmentation.frontier_utils import ids_to_boundary_mask
+                from scipy.ndimage import distance_transform_edt
+                
+                boundary_mask = ids_to_boundary_mask(area_int)
+                
+                # Compute distance to nearest boundary (where boundary_mask == 1)
+                # distance_transform_edt computes distance to nearest zero.
+                # So we invert the mask: 0 on boundary, 1 elsewhere.
+                inverted_mask = (boundary_mask == 0).astype(int)
+                distance_map = distance_transform_edt(inverted_mask)
+                
+                # Stack to (H, W, 2)
+                target_data = np.stack([boundary_mask, distance_map], axis=-1)
+
+                # target_data is now (H, W) uint8 (0 or 1)
+                # We might need to add channel dim if expected by downstream
+                # But load_data usually returns (H, W) for target, and it gets reshaped later if needed.
+            else:
+                logger.warning("Area not found in target datacube for frontier target.")
         
         # Extract Mask
         mask_outside = None
@@ -612,7 +661,9 @@ class DataLoader:
             # Extract y_image
             y_image = None
             if target_data is not None:
-                if len(target_data.shape) == 3:
+                if self.config.get_target_type() == 'frontier':
+                     y_image = target_data # (H, W, 2)
+                elif len(target_data.shape) == 3:
                      if indices is not None:
                          y_slice = target_data[:, :, indices]
                          # Mode along time axis
@@ -655,7 +706,7 @@ class DataLoader:
                 X_image = resize(X_image, target_shape, anti_aliasing=True, preserve_range=True)
                 
             if y_image is not None:
-                # resize expects (H, W)
+                # resize expects (H, W) or (H, W, C)
                 y_image = resize(y_image, target_shape, anti_aliasing=False, preserve_range=True, order=0) # order=0 for nearest neighbor (labels)
             
             # Apply Masking
@@ -669,7 +720,14 @@ class DataLoader:
             # User wants weights=0 where y=0, and presumably 1 otherwise.
             # y_image is (H, W)
             if y_image is not None:
-                weights = (y_image > 0).astype(np.float32)
+                if self.config.get_target_type() == 'frontier':
+                    # For frontier, we want to weight all valid pixels (inside department)
+                    if mask_outside is not None:
+                        weights = (~mask_outside).astype(np.float32)
+                    else:
+                        weights = np.ones(y_image.shape[:2], dtype=np.float32)
+                else:
+                    weights = (y_image > 0).astype(np.float32)
             else:
                 weights = None
                 
@@ -688,10 +746,14 @@ class DataLoader:
                 weights = np.expand_dims(weights, axis=0) # (1, H, W)
                 weights = np.expand_dims(weights, axis=0) # (1, 1, H, W)
             
-            # Prepare Target (B, 1, H, W)
+            # Prepare Target (B, C, H, W)
             if y_image is not None:
-                y_tensor = np.expand_dims(y_image, axis=0) # (1, H, W)
-                y_tensor = np.expand_dims(y_tensor, axis=0) # (1, 1, H, W)
+                if len(y_image.shape) == 3: # (H, W, C)
+                    y_tensor = np.transpose(y_image, (2, 0, 1)) # (C, H, W)
+                    y_tensor = np.expand_dims(y_tensor, axis=0) # (1, C, H, W)
+                else: # (H, W)
+                    y_tensor = np.expand_dims(y_image, axis=0) # (1, H, W)
+                    y_tensor = np.expand_dims(y_tensor, axis=0) # (1, 1, H, W)
             else:
                 y_tensor = None
             
@@ -721,7 +783,7 @@ class DataLoader:
         n_clusters_node = self.config.get_n_clusters_node()
         
         # Load Datacube Target (which contains target)
-        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_cluster_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
+        dir_output = Path.cwd() / Path('Experiments') / f'target_{self.target_variable}_{self.config.get_target_type()}_scale_{scale}_tol_{dico_config["tol"]}_attempt_{dico_config["attempt"]}_reduce_{dico_config["reduce"]}_ncluster_{n_clusters_node}'
 
         if load:
             if self.config.get_load_flag():
@@ -846,7 +908,7 @@ class DataLoader:
 
         if not (path / 'X.pkl').exists():
             logger.error(f"Preprocessed data not found in {path}")
-            return None, None
+            return None, None, None
             
         with open(path / 'X.pkl', 'rb') as f:
             X = pickle.load(f)
@@ -885,36 +947,27 @@ class DataLoader:
 
     def plot_segmentation_vs_clustering(self, dept, area, clustering, dir_output):
         import matplotlib.pyplot as plt
-        
-        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
-        
+
+        if clustering.ndim == 3:        
+            fig, axes = plt.subplots(1, clustering.shape[2] + 1, figsize=(12, 6))
+        else:
+            fig, axes = plt.subplots(1, 2, figsize=(12, 6))
+            clustering = np.expand_dims(clustering, 2)
+
         # Plot Area (Segmentation)
         if len(area.shape) == 3:
             area = area.squeeze(0)
         im1 = axes[0].imshow(area, cmap='jet')
         axes[0].set_title(f'{dept} - Segmentation (Area)')
         plt.colorbar(im1, ax=axes[0])
-        
-        # Plot Clustering
-        # Clustering might be (H, W, T) or (H, W)
-        if len(clustering.shape) == 3:
-            # Take the mode or mean or just the first time step?
-            # Clustering is usually static per pixel over time if it's structural?
-            # Or it changes?
-            # The user said "time_series_clustering", so it might be one cluster per pixel based on time series.
-            # If it's (H, W, 1) or (H, W), we can plot it.
-            if clustering.shape[2] == 1:
-                clustering_plot = clustering[:, :, 0]
-            else:
-                # If multiple time steps, maybe plot the most frequent cluster?
-                # Or just the first one for now.
-                clustering_plot = clustering[:, :, 0]
-        else:
-            clustering_plot = clustering
-            
-        im2 = axes[1].imshow(clustering_plot, cmap='jet')
-        axes[1].set_title(f'{dept} - Time Series Clustering')
-        plt.colorbar(im2, ax=axes[1])
+
+        for i in range(clustering.shape[2]):        
+            # Plot Clustering
+            clustering_plot = clustering[:, :, i]
+                
+            im2 = axes[i + 1].imshow(clustering_plot, cmap='jet')
+            axes[i + 1].set_title(f'{dept} - Time Series Clustering')
+            plt.colorbar(im2, ax=axes[i + 1])
         
         plt.tight_layout()
         plot_path = dir_output / f'{dept}_segmentation_vs_clustering.png'

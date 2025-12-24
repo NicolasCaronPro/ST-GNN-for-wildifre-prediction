@@ -14,6 +14,7 @@ from scipy.spatial.distance import cdist
 from sklearn.neighbors import KNeighborsRegressor
 from tslearn.clustering import TimeSeriesKMeans
 from sklearn.cluster import KMeans
+from skimage.transform import resize
 
 # Add parent directory to path to import GNN modules
 sys.path.append(str(Path(__file__).resolve().parent.parent))
@@ -67,10 +68,11 @@ sys.modules['dtwParallel'] = MagicMock()
 from GNN.tools import (
     read_object, save_object, check_and_create_path, relabel_clusters,
     count_pixels_in_france_deg_square, merge_adjacent_clusters, find_clusters,
-    split_large_clusters, frequency_ratio, order_class, allDates, iou_binary, to_binary_mask
+    split_large_clusters, frequency_ratio, order_class, allDates
 )
 from GNN.arborescence import rootDisk, root_target
 from GNN.weigh_predictor import Predictor
+from GNN.graph_structure import iou_binary, to_binary_mask
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +96,7 @@ class Segmentation:
         self.dispersions = {}
 
     def create_geometry_with_watershed(self, dept, vec_base, path, sinister, dataset_name,
-                                       sinister_encoding, resolution, mask, node_already_predicted, train_date, data, GT=None):
+                                       sinister_encoding, resolution, node_already_predicted, train_date, data, GT=None):
         
         dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
         
@@ -113,7 +115,11 @@ class Segmentation:
         mode = vec_base[1]
 
         # Load data_bin (nbsinister)
-        data_bin = self.process_input_data(dept, dir_target_bin, train_date)
+        data_bin = self.process_input_data('nbsinister', dept, None, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+
+        data = resize(data, raster.shape, anti_aliasing=False, preserve_range=True, order=0)
+
+        data[valid_mask & (np.isnan(data))] = 0
 
         if data.ndim == 3:
             data = np.nansum(data, axis=2)
@@ -245,6 +251,8 @@ class Segmentation:
         except Exception as e:
             logger.warning(f"Post-processing failed: {e}")
             return pred
+        
+        return pred
 
         #logger.info(f'Cluster dispersion {self.dispersions}')
 
