@@ -64,13 +64,14 @@ def parse_string(s):
     
     # Initialiser le dictionnaire avec None
     result = {"base": base, "attempt": None, "reduce": None, "tol": None}
+    if base == "zonemeteo":
+        return result
 
     # Utiliser findall pour capturer toutes les balises présentes
     matches = re.findall(r"(b(?P<base>[^-]+))|(a(?P<attempt>[^-]+))|(r(?P<reduce>[^-]+))|(t(?P<tol>[^-]+))", s)
 
     for groups in matches:
         b, a, r, t = groups[1], groups[3], groups[5], groups[7]
-        print(b)
         if b:
             result["base"] = b
         if a:
@@ -82,20 +83,15 @@ def parse_string(s):
 
     return result
 
-from GNN.forecasting_models.pytorch.models_2D import UNet
-from sklearn.preprocessing import StandardScaler
-import torch
-
 def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
-                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method,
-                    susecptibility_variables=None, test_departements=None, n_clusters_node=3):
+                    geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method):
     
+    train_date = train_dates[-1]
     dico_config = parse_string(graph_construct)
     print(dico_config)
     graphScale = GraphStructure(scale=scale, geo=geo, maxDist=maxDist, numNei=nmax, resolution=resolution, graph_construct=dico_config['base'], sinister=sinister,
                                 sinister_encoding=sinister_encoding, dataset_name=dataset_name, train_departements=train_departements, graph_method=graph_method,
-                                attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'], susecptibility_variables=susecptibility_variables,
-                                n_clusters_node=n_clusters_node)
+                                attempt=dico_config['attempt'], reduce=dico_config['reduce'], tol=dico_config['tol'])
 
     sucseptibility_map_model_config = {'type': 'Unet',
                                        'device': 'cuda',
@@ -103,26 +99,6 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                        'loss' : 'rmse',
                                        'name': 'mapper',
                                        'params' : None}
-    
-    
-    n_channels = 2
-    if susecptibility_variables is not None:
-        n_channels = len(susecptibility_variables)
-        
-    unet_model = UNet(n_channels=n_channels, out_channels=1, conv_channels=[16, 32, 64], bilinear=False, return_hidden=False, horizon=0, task_type='regression')
-    unet_model.to('cuda' if torch.cuda.is_available() else 'cpu')
-    
-    graphScale.susceptility_mapper = unet_model
-    graphScale.mapper_config = sucseptibility_map_model_config
-    graphScale.susceptility_target = 'risk'
-    
-    # Initialize Scaler
-    scaler = StandardScaler()
-    # We need to fit it? Or just set it.
-    # If we don't fit it, transform will fail.
-    # Let's fit on dummy data.
-    scaler.fit(np.zeros((1, n_channels)))
-    graphScale.susceptibility_scaler = scaler
     
     variables_for_susecptibilty_and_clustering = ['population', 'foret',
                                                   #'bdroute',
@@ -138,7 +114,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
     graphScale._create_sinister_region(
                                  path=dir_output, sinister=sinister, dataset_name=dataset_name,
                                  sinister_encoding=sinister_encoding,
-                                 resolution=resolution, train_date=train_dates)
+                                 resolution=resolution, train_date=train_date)
     
     graphScale._create_nodes_list()
     graphScale._create_edges_list()
@@ -150,8 +126,7 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             target='nbsinister', train_dates=train_dates,
                                             path=dir_output,
                                             root_data=rootDisk / 'csv',
-                                            root_target=root_target / sinister / dataset_name / sinister_encoding,
-                                            test_departements=test_departements)
+                                            root_target=root_target / sinister / dataset_name / sinister_encoding)
     
     #graphScale.find_closest_cluster(graphScale.departements.unique(), train_date, dir_output, rootDisk / 'csv')
 
@@ -664,8 +639,7 @@ def init(args, dir_output, script):
 
     dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
 
-    geo = gpd.read_file(f'{root_graph}/regions/{sinister}/{dataset_name}/regions.geojson')
-    print(f'{root_graph}/regions/{sinister}/{dataset_name}/regions.geojson')
+    geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
     geo = geo[geo['departement'].isin(departements)].reset_index(drop=True)
 
     minDate = '2017-06-12' # Starting point
@@ -729,7 +703,7 @@ def init(args, dir_output, script):
     train_departements = [dept for dept in train_departements if dept not in graphScale.drop_department] 
 
     ########################### Create points ################################
-    fp = pd.read_csv(f'{root_graph}/sinister/{dataset_name}/{sinister}.csv', dtype=str)
+    fp = pd.read_csv(f'sinister/{dataset_name}/{sinister}.csv', dtype=str)
     """if doPoint:
         
         logger.info('#####################################')
@@ -760,6 +734,8 @@ def init(args, dir_output, script):
         #encode(root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution, all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
         encode_from_xarray('occurence', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
         encode_from_xarray('burned_area_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('time_intervention_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('ressources_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     ########################## Do Database ####################################
     if doDatabase:
@@ -1072,7 +1048,7 @@ def init(args, dir_output, script):
     #    df.loc[df[df['departement'] == departement].index, 'area'] = areas[name2int[departement]] 
 
     ############################## Save dataframe and features ###################################
-    
+
     df['saison'] = df['date'].apply(get_saison)
     df['saison-encoding'] = df['date'].apply(get_saison_encoding)
     df['mediterranean'] = df['departement'].apply(is_mediterranean_dept)

@@ -152,12 +152,12 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return binImageScale, influenceImageScale"""
 
-def create_larger_scale_bin(input, bin, influence, time, burned, ress):
+def create_larger_scale_bin(input, bin, influence, time, burned, res):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)
     burnedScale = np.full(influence.shape, np.nan)
-    ressScale = np.full(influence.shape, np.nan)
+    resScale = np.full(influence.shape, np.nan)
     
     clusterID = np.unique(input)
 
@@ -169,111 +169,15 @@ def create_larger_scale_bin(input, bin, influence, time, burned, ress):
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
                 timeScale[mask, di] = np.nansum(time[mask, di])
                 burnedScale[mask, di] = np.nansum(burned[mask, di])
-                ressScale[mask, di] = np.nansum(ress[mask, di])
+                resScale[mask, di] = np.nansum(res[mask, di])
             else:
                 binImageScale[mask, di] = 0
                 influenceImageScale[mask, di] = 0
                 timeScale[mask, di] = 0
                 burnedScale[mask, di] = 0
-                ressScale[mask, di] = 0
+                resScale[mask, di] = 0
 
-    return binImageScale, influenceImageScale, timeScale, burnedScale, ressScale
-
-def load_dfe_for_alpes_maritimes(path):
-    # Charger toutes les feuilles
-    all_sheets = pd.read_excel(path / 'Analyse de la météo 2015-2025.xlsx', sheet_name=None)
-
-    def make_df(sheet_names, all_sheets):
-        """Concatène les feuilles demandées, en ajoutant la colonne sheet_name.
-        Ignore celles qui n'existent pas et prévient."""
-        missing = [s for s in sheet_names if s not in all_sheets]
-        if missing:
-            print(f"Attention: feuilles absentes -> {missing}")
-        frames = [all_sheets[s].assign(sheet_name=s) for s in sheet_names if s in all_sheets]
-        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
-    # ---- Sélectionne ici tes deux listes d'onglets ----
-    sheets_A = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2023']   # exemple
-    sheets_B = ['2024']   # exemple
-
-    # ---- Constructions des deux DataFrames ----
-    df = make_df(sheets_A, all_sheets)
-    df_2024_2025 = make_df(sheets_B, all_sheets)
-
-    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
-    df_2024_2025 = df_2024_2025[df_2024_2025['DFE'].isin(['F', 'L', 'M', 'T', 'S'])]
-    df_2024_2025.DFE.unique()
-
-    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
-    df_2024_2025 = df_2024_2025.rename({'production' : 'reseau'}, axis=1)
-    df_2024_2025 = df_2024_2025.rename({'Sech_expert' : 'secheresse expertisee'}, axis=1)
-    df_2024_2025 = df_2024_2025.rename({'Reserve' : 'reserve'}, axis=1)
-
-    # Dictionnaire de correspondance
-    mapping_dfe = {
-        'F': 1,  # faible
-        'L': 2,  # léger
-        'M': 3,  # modéré
-        'S': 4,  # sévère
-        'T': 5,  # très sévère
-        'E': 6   # extrême
-    }
-
-    # Encodage
-    df_2024_2025['DFE'] = df_2024_2025['DFE'].map(mapping_dfe)
-
-    def clean_date_column(df, col_name):
-        """
-        Convertit une colonne de dates mixtes (ex: '27/09/2024', '2025-06-16 00:00:00')
-        en format uniforme YYYY-MM-DD.
-        """
-        df[col_name] = pd.to_datetime(df[col_name], errors='coerce', dayfirst=True)
-        df[col_name] = df[col_name].dt.strftime('%Y-%m-%d')
-        return df
-
-    df_2024_2025['date'] = df_2024_2025['date_validite'].values
-    df_2024_2025 = clean_date_column(df_2024_2025, 'date')
-
-    df = df[~df['date'].isna()]
-    df = df[df['DFE'] > -999]
-
-    def change_date_format(df):
-        df['date'] = df['date'].astype(int)
-        df['date'] = df['date'].astype(str)
-
-        def inverse_split(x):
-            year = x[:4]
-            month = x[4:6]
-            day = x[6:]
-            return f'{year}-{month}-{day}'
-
-        df['date'] = df['date'].apply(lambda x : inverse_split(x))
-        return df
-
-    df = change_date_format(df)
-
-    def get_month(x):
-        return int(x.split('-')[1])
-
-    def get_year(x):
-        return int(x.split('-')[0])
-
-    df = pd.concat((df, df_2024_2025)).reset_index(drop=True)
-
-    df['month'] = df['date'].apply(lambda x : get_month(x))
-    df['year'] = df['date'].apply(lambda x : get_year(x))
-
-    def get_hist(df):
-        fig, ax = plt.subplots(1, figsize=(15,5))
-        df.hist(ax=ax)
-
-    get_hist(df['DFE'])
-
-    df_groupby = df.groupby(by=["num_zone", "date"])['DFE'].max().reset_index()
-    df_groupby['DFE'].plot()
-
-    df_am, df_pm = df[df['reseau'] == "AM"], df[df['reseau'] == "PM"]
-    return df_am
+    return binImageScale, influenceImageScale, timeScale, burnedScale, resScale
 
 def find_dates_between(start, end):
     start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
@@ -351,8 +255,7 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-#allDates = find_dates_between('2015-01-01', '2026-01-01')
-allDates = find_dates_between('2017-06-12', '2024-12-31')
+allDates = find_dates_between('2017-06-12', '2025-01-01')
 
 years = list(np.unique([d.split('-')[0] for d in allDates]))
 
@@ -615,20 +518,13 @@ def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
     """
     return df[(df['nbsinister'] != -1) & (~df['nbsinister'].isna())].reset_index(drop=True)
 
-def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks: int) -> pd.DataFrame:
+def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks : int) -> pd.DataFrame:
     global allDates, name2int
 
-    # Dictionnaires : dept_int -> array d'indices de dates
-    bad_dates_by_dept = {}
-    zeros_dates_by_dept = {}
-
-    # Première passe : on construit les listes de dates par département
+    bad_dates = np.array([], dtype=int)
+    zeros_dates = np.array([], dtype=int)
     for dept in departements:
-        dept_int = name2int[dept]
-        bad_dates_by_dept[dept_int] = np.array([], dtype=int)
-        zeros_dates_by_dept[dept_int] = np.array([], dtype=int)
-
-        period = period2ignore[dept_int]['interventions']
+        period = period2ignore[name2int[dept]]['interventions']
         if period != []:
             for per in period:
                 ds = per[0].strftime('%Y-%m-%d')
@@ -639,39 +535,18 @@ def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list,
                 if de > allDates[-1]:
                     de = allDates[-1]
 
-                # Si les dates ne sont pas dans allDates, on ignore cette période
                 if de not in allDates or ds not in allDates:
                     continue
 
                 ds_idx = allDates.index(ds) - ks
                 de_idx = allDates.index(de) - ks
+                bad_dates = np.concatenate((bad_dates, np.arange(start=ds_idx, stop=de_idx)))
+                zeros_dates = np.concatenate((zeros_dates , np.arange(start=de_idx, stop=de_idx + ks)))
+                zeros_dates = np.concatenate((zeros_dates , np.arange(start=ds_idx, stop=ds_idx + ks)))
 
-                # Période à supprimer pour CE département uniquement
-                bad_dates_by_dept[dept_int] = np.concatenate(
-                    (bad_dates_by_dept[dept_int], np.arange(start=ds_idx, stop=de_idx))
-                )
-
-                # Périodes autour mises à zéro pour CE département uniquement
-                zeros_dates_by_dept[dept_int] = np.concatenate(
-                    (
-                        zeros_dates_by_dept[dept_int],
-                        np.arange(start=de_idx, stop=de_idx + ks),
-                        np.arange(start=ds_idx, stop=ds_idx + ks),
-                    )
-                )
-
-    # Deuxième passe : on applique les masques par département
     for dept in departements:
-        dept_int = name2int[dept]
-        bad_dates = bad_dates_by_dept[dept_int]
-        zeros_dates = zeros_dates_by_dept[dept_int]
-
-        if bad_dates.size > 0:
-            df = df[~((df['departement'] == dept_int) & (df['date'].isin(bad_dates)))]
-
-        if zeros_dates.size > 0:
-            idx = df[(df['departement'] == dept_int) & (df['date'].isin(zeros_dates))].index
-            df.loc[idx, weights_columns] = 0  # weights_columns supposé global
+        df = df[~((df['departement'] == name2int[dept]) & (df['date'].isin(bad_dates)))]
+        df.loc[df[(df['departement'] == name2int[dept]) & (df['date'].isin(zeros_dates))].index, weights_columns] = 0
 
     return df.reset_index(drop=True)
 
@@ -787,7 +662,7 @@ def generate_subgraph(graph, minNumber : int, maxNumber : int, nodes : np.array)
                     
         return newSubNode
 
-def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int, proportion_0_with_positive_weight: float):
+def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int):
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and temporal edges
@@ -828,19 +703,8 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int,
         x = np.concatenate((x, xts))
 
     if Y is not None:
-        if horizon != 0:
-            yts = Y[maskts].copy()
-            mask_zeros = (yts[:, -1] == 0)
-
-            p_keep = float(proportion_0_with_positive_weight)
-            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
-
-            zeros_idx = np.flatnonzero(mask_zeros)
-            if zeros_idx.size:
-                r = np.random.rand(zeros_idx.size)
-                drop_idx = zeros_idx[r < p_drop]
-                yts[drop_idx, weight_index] = 0
-
+        if ks != 0:
+            yts = Y[maskts]
             y = np.concatenate((y, yts))
 
     else:
@@ -912,6 +776,30 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int,
 
     return x[:, start_features:], y, edges
 
+import random
+import numpy as np
+import warnings
+
+def astype_with_watch(arr, dtype=np.float32, name="cur_array"):
+    # capture tous les warnings émis pendant le cast
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")  # ne pas filtrer
+        out = arr.astype(dtype)
+
+    # si un warning est apparu (ex: np.ComplexWarning, RuntimeWarning…)
+    for warn in w:
+        if issubclass(warn.category, (np.ComplexWarning, RuntimeWarning, UserWarning, Warning)):
+            print(f"[WARN] {warn.category.__name__}: {warn.message}")
+            print(f"[WARN] {name} avant cast (dtype={arr.dtype}):\n{arr}")
+            break  # afficher une seule fois par cast
+    return out
+
+def is_below_threshold(threshold: float = 0.35) -> bool:
+    """Génère une probabilité uniforme dans [0,1) et renvoie True si elle est < threshold."""
+    p = random.random()  # probabilité ~ U(0,1)
+    print(p)
+    return p < threshold
+
 def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, horizon:int) -> np.array:
 
     uniqueNodes = np.unique(array[:, id_index])
@@ -960,8 +848,10 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
         
         # Extraire les données dans l'intervalle de date
         cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date + horizon)]
+        #cur_array = astype_with_watch(cur_array, np.float32, name="cur_array")
+        
         cur_array = cur_array.astype(np.float32)
-
+        
         """new_data = np.copy(cur_array)
         for band in range(len(ids_columns), cur_array.shape[1]):
             y = cur_array[:, band]
@@ -1003,7 +893,7 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
 
 def construct_graph_with_time_series(graph, date : int,
                                      X : np.array, Y : np.array,
-                                     ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight) -> np.array:
+                                     ks :int, horizon:int, start_features : int) -> np.array:
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and time series X
@@ -1055,18 +945,7 @@ def construct_graph_with_time_series(graph, date : int,
             x = np.concatenate((x, xts))
 
         if Y is not None:
-            yts = Y[maskts].copy()
-            mask_zeros = (yts[:, -1] == 0)
-
-            p_keep = float(proportion_0_with_positive_weight)
-            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
-
-            zeros_idx = np.flatnonzero(mask_zeros)
-            if zeros_idx.size:
-                r = np.random.rand(zeros_idx.size)
-                drop_idx = zeros_idx[r < p_drop]
-                yts[drop_idx, weight_index] = 0
-
+            yts = Y[maskts]
             y = np.concatenate((y, yts))
 
     def get_unique_pair_indices(array, graph_id_index, date_index):
@@ -1126,7 +1005,7 @@ def construct_graph_with_time_series(graph, date : int,
 
 def construct_time_series(date : int,
                             X : np.array, Y : np.array,
-                            ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight : float) -> np.array:
+                            ks :int, horizon:int, start_features : int) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -1138,7 +1017,7 @@ def construct_time_series(date : int,
 
     maskgraph = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     x = X[maskgraph]
-    
+
     if ks != 0:
         maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date ) & (X[:,date_index] >= date - ks)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
@@ -1155,8 +1034,9 @@ def construct_time_series(date : int,
             yts = Y[maskts]
             yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
-
-    if horizon !=0:
+    
+    horizon = int(horizon)
+    if horizon != 0:
         maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] > date ) & (X[:,date_index] <= date + horizon)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
         
@@ -1167,18 +1047,7 @@ def construct_time_series(date : int,
         x = np.concatenate((x, xts))
         
         if Y is not None:
-            yts = Y[maskts].copy()
-            mask_zeros = (yts[:, -1] == 0)
-
-            p_keep = float(proportion_0_with_positive_weight)
-            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
-
-            zeros_idx = np.flatnonzero(mask_zeros)
-            if zeros_idx.size:
-                r = np.random.rand(zeros_idx.size)
-                drop_idx = zeros_idx[r < p_drop]
-                yts[drop_idx, weight_index] = 0
-
+            yts = Y[maskts]
             y = np.concatenate((y, yts))
 
     x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
@@ -1715,9 +1584,6 @@ def kendall_coefficient(y_true, y_pred, mask=None, tolerance=0):
     - Le coefficient de Kendall (float).
     """
 
-    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
-    ranks_ytrue = rankdata(y_true, method='average')
-
     if mask is None:
         return kendalltau(y_pred, y_true)[0]
     
@@ -1736,9 +1602,6 @@ def pearson_coefficient(y_true, y_pred, mask=None, tolerance=0):
     Retourne :
     - Le coefficient de Pearson (float).
     """
-
-    ranksy_pred = rankdata_with_tolerance(y_pred, tolerance=tolerance)
-    ranks_ytrue = rankdata(y_true, method='average')
 
     if mask is None:
         return pearsonr(y_pred, y_true)[0]
@@ -2940,7 +2803,7 @@ def get_features_name_list(scale, features, methods):
             features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
         elif var == 'region_class':
             features_name += [var]
-        elif var == 'Past_risk' or var == 'Past_bunredarea':
+        elif var == 'Past_risk' or var == 'Past_burnedarea':
             features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
@@ -4115,34 +3978,34 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         graph_scores = {
-            f"iou_wildfire_or_pred_{i}": iou_wildfire_or_pred_graph,
-            f"iou_wildfire_and_pred_{i}": iou_wildfire_and_pred_graph,
-            f"iou_no_overestimation_{i}": iou_no_overestimation,
-            f"iou_{i}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
-            f"rec_bin_{i}": rec_bin,
-            f"prec_bin_{i}": prec_bin,
-            f"f1_bin_{i}": f1_bin,
+            f"iou_wildfire_or_pred_{i}_{g_id}": iou_wildfire_or_pred_graph,
+            f"iou_wildfire_and_pred_{i}_{g_id}": iou_wildfire_and_pred_graph,
+            f"iou_no_overestimation_{i}_{g_id}": iou_no_overestimation,
+            f"iou_{i}_{g_id}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
+            f"rec_bin_{i}_{g_id}": rec_bin,
+            f"prec_bin_{i}_{g_id}": prec_bin,
+            f"f1_bin_{i}_{g_id}": f1_bin,
 
-            f"rec_macro_{i}": rec_macro,
-            f"prec_macro_{i}": prec_macro,
-            f"f1_macro_{i}": f1_macro,
+            f"rec_macro_{i}_{g_id}": rec_macro,
+            f"prec_macro_{i}_{g_id}": prec_macro,
+            f"f1_macro_{i}_{g_id}": f1_macro,
 
-            f"auoc_{i}": auoc,
+            f"auoc_{i}_{g_id}": auoc,
 
             # Ajout du Dice coefficient pour chaque itération
-            f"dice_coefficient_{i}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
+            f"dice_coefficient_{i}_{g_id}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
 
-            f"over_bad_prediction_local_{i}": over_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
-            f"under_bad_prediction_local_{i}": under_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
-            f"bad_prediction_local_{i}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph if union_graph > 0 else np.nan,
+            f"over_bad_prediction_local_{i}_{g_id}": over_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
+            f"under_bad_prediction_local_{i}_{g_id}": under_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
+            f"bad_prediction_local_{i}_{g_id}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph if union_graph > 0 else np.nan,
 
-            f"over_bad_prediction_global_{i}": over_prediction_zeros_graph / union if union_graph > 0 else np.nan,
-            f"under_bad_prediction_global_{i}": under_prediction_zeros_graph / union if union_graph > 0 else np.nan,
-            f"bad_prediction_global_{i}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union if union_graph > 0 else np.nan,
+            f"over_bad_prediction_global_{i}_{g_id}": over_prediction_zeros_graph / union if union_graph > 0 else np.nan,
+            f"under_bad_prediction_global_{i}_{g_id}": under_prediction_zeros_graph / union if union_graph > 0 else np.nan,
+            f"bad_prediction_global_{i}_{g_id}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union if union_graph > 0 else np.nan,
         }
         if np.any(y_true_fire_graph > 0):
-            iou_scores.append(graph_scores[f'iou_{i}'])
-            f1_scores.append(graph_scores[f'f1_bin_{i}'])
+            iou_scores.append(graph_scores[f'iou_{i}_{g_id}'])
+            f1_scores.append(graph_scores[f'f1_bin_{i}_{g_id}'])
             precision_scores.append(prec_bin)
             recall_scores.append(rec_bin)
 
@@ -4540,6 +4403,10 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             f"iou_wildfire_or_pred_elt_sup_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_sup_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_sup_{unique_value}": iou_no_overestimation,
+            
+            f"rec_bin_elt_sup_{unique_value}": rec_bin,
+            f"prec_bin_elt_sup_{unique_value}": prec_bin,
+            f"f1_bin_elt_sup_{unique_value}": f1_bin,
             
             f"rec_macro_elt_sup_{unique_value}": rec_macro,
             f"prec_macro_elt_sup_{unique_value}": prec_macro,
@@ -5904,6 +5771,100 @@ def add_ic95_to_dict(
 
     return d
 
+import warnings
+import geopandas as gpd
+from shapely.ops import unary_union
+from shapely.geometry import Polygon, MultiPolygon
+from pyproj import Geod
+
+def _geodesic_area_km2(geom, geod: Geod) -> float:
+    """Surface géodésique (km²) d'un Polygon/MultiPolygon en WGS84."""
+    if geom is None or geom.is_empty:
+        return 0.0
+
+    def ring_area(ring):
+        lons, lats = zip(*ring.coords)
+        area_m2, _ = geod.polygon_area_perimeter(lons, lats)[:2]
+        return abs(area_m2)  # m² (positive)
+
+    if isinstance(geom, Polygon):
+        area = ring_area(geom.exterior)
+        for hole in geom.interiors:
+            area -= ring_area(hole)
+        return max(area, 0.0) / 1_000_000.0  # km²
+
+    if isinstance(geom, MultiPolygon):
+        return sum(_geodesic_area_km2(part, geod) for part in geom.geoms)
+
+    return 0.0
+
+
+def _geodesic_area_m2(geom, geod: Geod) -> float:
+    """Surface géodésique (m²) d'un Polygon/MultiPolygon en WGS84."""
+    if geom is None or geom.is_empty:
+        return 0.0
+
+    def ring_area(ring) -> float:
+        lons, lats = zip(*ring.coords)
+        area_m2, _ = geod.polygon_area_perimeter(lons, lats)[:2]
+        return abs(area_m2)  # m² (positive)
+
+    if isinstance(geom, Polygon):
+        area = ring_area(geom.exterior)
+        for hole in geom.interiors:
+            area -= ring_area(hole)
+        return max(area, 0.0)  # m²
+
+    if isinstance(geom, MultiPolygon):
+        return sum(_geodesic_area_m2(part, geod) for part in geom.geoms)
+
+    return 0.0
+
+def compute_department_areas_km2_dict_wgs84_union(
+    geojson_or_gdf,
+    dept_col: str,
+    fix_invalid: bool = True,
+) -> dict:
+    """
+    Retourne {dept: area_km2} depuis un GeoJSON EPSG:4326 contenant
+    plusieurs polygones par département, en appliquant un unary_union
+    *par département* avant calcul d'aire géodésique (WGS84).
+    """
+    # 1) Charger
+    if isinstance(geojson_or_gdf, gpd.GeoDataFrame):
+        gdf = geojson_or_gdf.copy()
+    else:
+        gdf = gpd.read_file(geojson_or_gdf)
+
+    if dept_col not in gdf.columns:
+        raise ValueError(f"Column '{dept_col}' not found in GeoDataFrame.")
+
+    # 2) Vérifier CRS = EPSG:4326
+    if gdf.crs is None:
+        warnings.warn("Input has no CRS; assuming EPSG:4326 (WGS84).")
+        gdf = gdf.set_crs("EPSG:4326")
+    elif str(gdf.crs).upper() not in ("EPSG:4326", "WGS 84", "OGC:CRS84"):
+        raise ValueError(f"Expected EPSG:4326 (WGS84). Found '{gdf.crs}'. Convert to EPSG:4326.")
+
+    # 3) Optionnel: réparer les géométries invalides
+    if fix_invalid:
+        gdf["geometry"] = gdf.geometry.buffer(0)
+
+    # 4) Unary union par département (combine tous les polygones d'un même dept)
+    unions = (
+        gdf.groupby(dept_col, dropna=False)["geometry"]
+           .apply(lambda geoms: unary_union(list(geoms)))
+           .reset_index()
+    )
+    unions_gdf = gpd.GeoDataFrame(unions, geometry="geometry", crs="EPSG:4326")
+
+    # 5) Aire géodésique WGS84 (km²)
+    geod = Geod(ellps="WGS84")
+    unions_gdf["area_km2"] = unions_gdf.geometry.apply(lambda g: _geodesic_area_m2(g, geod))
+
+    # 6) Retour dict
+    return dict(zip(unions_gdf[dept_col].tolist(), unions_gdf["area_km2"].tolist()))
+
 import numpy as np
 import scipy.optimize as spo
 
@@ -5915,10 +5876,8 @@ def egpd_trunc_discrete_weights(
     bounds_xi=(-0.49, 1.0),
     maxiter_nm=2000,
     maxiter_lbfgs=1000,
-    normalize=True,
+    normalize=False,
     eps=1e-12,
-    temperature=1.0,
-    min_class_weighted=0,
 ):
     """
     Fit une eGPD tronquée discrète sur X (et par cluster si demandé).
@@ -6047,16 +6006,11 @@ def egpd_trunc_discrete_weights(
         pmf, params, failed = fit_one_cluster(Xc)
         pmfs[c] = pmf
         params_dict[c] = params
-            
+
         if failed:
             weights[mask] = 1.0
         else:
             weights[mask] = 1.0 / (pmf[Xc] + eps)
-            
-        mask_min = X <= min_class_weighted
-        weights[mask_min] = 1.0
-            
-    weights = weights / temperature
 
     if normalize:
         weights /= (weights.mean() + eps)

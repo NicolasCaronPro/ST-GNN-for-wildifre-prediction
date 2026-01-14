@@ -1218,20 +1218,16 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     evaluate = {'name' : [], 'spearman' : [], 'kendall' : [], 'pearson' : [], 'ss' : []}
     
     classifier = ['egpd', 'kmeans', 'gm']
-    class_risk_dict = {
-                        'egpd' : eGPDRisk(),
+    class_risk_dict = {'egpd' : eGPDRisk(),
                        'kmeans': KMeansRiskZerosHandle(n_clusters), 
-                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)
-                       }
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
     
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
 
-    targets = ['nbsinister', 'time_intervention', 'ressource', 'burned_area', 'burnedareaRoot']
-
+    targets = ['nbsinister', 'burned_area', 'burnedareaRoot', 'time_intervention', 'ressource']
+    
     for cls, col, tar in itertools.product(classifier, group_col, targets):
-        
-        print(f'{cls}, {col}, {tar}')
         
         #if f'{tar}-{cls}-{n_clusters}-Class-{col}' in train_dataset_.columns and cls != 'egpd':
         if False:
@@ -1254,30 +1250,27 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         val_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(val_dataset_[tar].values,  val_dataset_[tar].values, val_dataset_[col_name].values)
         test_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(test_dataset_[tar].values,  test_dataset_[tar].values, test_dataset_[col_name].values)
         
-        
-        
         res[obj2.name] = obj2
         
         new_cols.append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
 
         ######################################################################################
 
-        if np.unique(train_dataset_[tar].values).shape[0] > 1:
-            spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
-            pears = pearson_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
-            kend = kendall_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
-            ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
-            evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
-            evaluate['spearman'].append(spearm)
-            evaluate['pearson'].append(pears)
-            evaluate['kendall'].append(kend)
-            evaluate['ss'].append(ss)
+        """spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        pears = pearson_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        kend = kendall_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        print(np.unique(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values))
+        ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
+        evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
+        evaluate['spearman'].append(spearm)
+        evaluate['pearson'].append(pears)
+        evaluate['kendall'].append(kend)
+        evaluate['ss'].append(ss)"""
         
-    df_evaluate = pd.DataFrame.from_dict(evaluate)
+    """df_evaluate = pd.DataFrame.from_dict(evaluate)
     df_evaluate.sort_values(by='ss', inplace=True, ascending=False)
     logger.info(df_evaluate.head())
-    print(dir_post_process)
-    df_evaluate.to_csv(dir_post_process / 'risk_clustering_evaluation.csv', index=False)
+    df_evaluate.to_csv('risk_clustering_evaluation.csv', index=False)"""
 
     ###############################################################################
 

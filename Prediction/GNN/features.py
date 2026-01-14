@@ -364,11 +364,6 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             elif dataset_name == 'bdiff' or dataset_name == 'bdiff_small':
                 end_date =  allDates[-1]
                 start_date = '2017-06-12'
-            
-            elif dataset_name == 'AlpesMaritimes':
-                start_date = '2018-01-01'
-                end_date = allDates[-1]
-            
             elif dataset_name == 'georisques':
                 end_date =  allDates[-1]
                 start_date = '2017-06-12'
@@ -445,8 +440,7 @@ def get_sub_nodes_ground_truth_from_xarray(graph,
             ds_avg['nbsinister_id'] = ds_avg['nbsinister']
             ds_avg['weight'] = 1
             
-            results_by_departement[departement] = ds_avg            
-            
+            results_by_departement[departement] = ds_avg
             print(np.unique(ds_avg['date'].values))
         return results_by_departement
 
@@ -983,8 +977,8 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
 
     res = []
 
-    def save_values(array, band, id_, mask, var_name=None):
-        
+    def save_values(array, band, id_, mask):
+
         values = array[mask]
         if len(values) == 0 or np.all(np.isnan(values)):
             return  # Rien à faire
@@ -1099,6 +1093,30 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
     encoder_ba_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
     encoder_ba_calendar = read_object(f'encoder_calendar_{name_expe}_BA.pkl', dir_encoder)
     encoder_ba_geo = read_object(f'encoder_geo_{name_expe}_BA.pkl', dir_encoder)
+
+    encoder_T_landcover = read_object(f'encoder_landcover_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_osmnx = read_object(f'encoder_osmnx_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_foret = read_object(f'encoder_foret_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_argile = read_object(f'encoder_argile_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_cosia = read_object(f'encoder_cosia_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_corine = read_object(f'encoder_corine_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_bdroute = read_object(f'encoder_route_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_calendar = read_object(f'encoder_calendar_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_geo = read_object(f'encoder_geo_{name_expe}_T.pkl', dir_encoder)
+
+    encoder_R_landcover = read_object(f'encoder_landcover_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_osmnx = read_object(f'encoder_osmnx_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_foret = read_object(f'encoder_foret_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_argile = read_object(f'encoder_argile_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_cosia = read_object(f'encoder_cosia_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_corine = read_object(f'encoder_corine_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_bdroute = read_object(f'encoder_route_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_calendar = read_object(f'encoder_calendar_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_geo = read_object(f'encoder_geo_{name_expe}_R.pkl', dir_encoder)
 
     res = []
 
@@ -1250,51 +1268,63 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
             if 'foret_encoder' in features:
                 save_values_with_encoding(datacube_feature['forest_landcover'].values, 'foret_encoder', id, areas == id, encoder_foret)
                 save_values_with_encoding(datacube_feature['forest_landcover'].values, 'forest_landcover_BA', id, areas == id, encoder_ba_foret)
+                save_values_with_encoding(datacube_feature['forest_landcover'].values, 'forest_landcover_T', id, areas == id, encoder_T_foret)
+                save_values_with_encoding(datacube_feature['forest_landcover'].values, 'forest_landcover_R', id, areas == id, encoder_R_foret)
 
             if 'highway_encoder' in features:
                 save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_encoder', id, areas == id, encoder_osmnx)
                 save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_landcover_BA', id, areas == id, encoder_ba_osmnx)
+                save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_landcover_T', id, areas == id, encoder_T_osmnx)
+                save_values_with_encoding(datacube_feature['highway_landcover'].values, 'highway_landcover_R', id, areas == id, encoder_R_osmnx)
 
             if 'argile_encoder' in features:
                 save_values_with_encoding(datacube_feature['argile'].values, 'argile_encoder', id, areas == id, encoder_argile)
                 save_values_with_encoding(datacube_feature['argile'].values, 'argile_BA', id, areas == id, encoder_ba_argile)
+                save_values_with_encoding(datacube_feature['argile'].values, 'argile_T', id, areas == id, encoder_T_argile)
+                save_values_with_encoding(datacube_feature['argile'].values, 'argile_R', id, areas == id, encoder_R_argile)
 
             if 'cosia_encoder' in features:
                 save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder', id, areas == id, encoder_cosia)
-                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_landcover_BA', id, areas == id, encoder_ba_cosia)
+                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder_BA', id, areas == id, encoder_ba_cosia)
+                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder_T', id, areas == id, encoder_T_cosia)
+                save_values_with_encoding(datacube_feature['cosia_landcover'].values, 'cosia_encoder_R', id, areas == id, encoder_R_cosia)
 
             if 'corine_encoder' in features:
                 save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder', id, areas == id, encoder_corine)
-                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_landcover_BA', id, areas == id, encoder_ba_corine)
+                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder_BA', id, areas == id, encoder_ba_corine)
+                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder_T', id, areas == id, encoder_T_corine)
+                save_values_with_encoding(datacube_feature['corine_landcover'].values, 'corine_encoder_R', id, areas == id, encoder_R_corine)
                 
             if 'bdroute_encoder' in features:
                 save_values_with_encoding(datacube_feature['route_landcover'].values, 'bdroute_encoder', id, areas == id, encoder_bdroute)
-                save_values_with_encoding(datacube_feature['route_landcover'].values, 'route_landcover_BA', id, areas == id, encoder_ba_bdroute)
+                save_values_with_encoding(datacube_feature['route_landcover'].values, 'route_encoder_BA', id, areas == id, encoder_ba_bdroute)
+                save_values_with_encoding(datacube_feature['route_landcover'].values, 'route_encoder_T', id, areas == id, encoder_T_bdroute)
+                save_values_with_encoding(datacube_feature['route_landcover'].values, 'route_encoder_R', id, areas == id, encoder_R_bdroute)
 
             if 'id_encoder' in features:
                 save_value_with_encoding(areas, 'id_encoder', id, areas == id, encoder_id)
                 save_value_with_encoding(areas, 'id_encoder_BA', id, areas == id, encoder_ba_id)
+                save_value_with_encoding(areas, 'id_encoder_T', id, areas == id, encoder_T_id)
+                save_value_with_encoding(areas, 'id_encoder_R', id, areas == id, encoder_R_id)
 
-            if 'id_encoder' in features:
+            """if 'id_encoder' in features:
                 value = encoder_id.transform([id]).values[0][0]
                 shape = (datacube.loc[dict(departement=departement)].sizes['id'], datacube.loc[dict(departement=departement)].sizes['date'])
                 values = np.full(shape, value)
-                datacube.loc[dict(departement=departement)]['id_encoder'] = (('id', 'date'), values)
+                datacube.loc[dict(departement=departement)]['id_encoder'] = (('id', 'date'), values)"""
                 
             if 'cluster_encoder' in features:
                 if 'cluster_encoder' not in datacube.data_vars:
                     #datacube['cluster_encoder'] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), np.nan))
                     values = datacube['time_series_clustering'].values
                     datacube['cluster_encoder'] = (('departement', 'id', 'date'), encoder_cluster.transform(values.reshape(-1,1)).values.reshape(values.shape))
-                #cluster = datacube.sel(id=id)['time_series_clustering'].values[0]
-                #value = encoder_cluster.transform([cluster]).values[0][0]
-                #shape = (datacube.loc[dict(departement=departement)].sizes['id'], datacube.loc[dict(departement=departement)].sizes['date'])
-                #values = np.full(shape, value)
-                #datacube.loc[dict(departement=departement)]['cluster_encoder'] = (('id', 'date'), values)
+                    datacube['cluster_encoder_BA'] = (('departement', 'id', 'date'), encoder_cluster.transform(values.reshape(-1,1)).values.reshape(values.shape))
+                    datacube['cluster_encoder_T'] = (('departement', 'id', 'date'), encoder_cluster.transform(values.reshape(-1,1)).values.reshape(values.shape))
+                    datacube['cluster_encoder_R'] = (('departement', 'id', 'date'), encoder_cluster.transform(values.reshape(-1,1)).values.reshape(values.shape))
 
             if 'sentinel' in features:
                 for var in sentinel_variables:
-                    save_values(datacube_feature[var].values, var, id, areas == id, var_name=var)
+                    save_values(datacube_feature[var].values, var, id, areas == id)
 
             if 'dynamicWorld' in features:
                 for var in dynamic_world_variables:
@@ -1316,7 +1346,7 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
             if 'nappes' in features:
                 for var in sentinel_variables:
                     save_values(datacube[var].values, var, id, areas == id)
-        
+
         check_and_create_path(path / 'log')
         # Ajouter dimensions contextuelles
         res.append(datacube.to_dataframe().reset_index())
@@ -1330,396 +1360,305 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
     
     return res, features_name
 
-def get_sub_nodes_feature_with_geodataframe(
-    graph,
-    subNode: np.array,
-    features: list,
-    path: Path,
-    geo: gpd.GeoDataFrame,
-    dates: np.array,
-    departement: str,
-    resolution: str,
-    name_expe: str,
-) -> np.array:
+def get_sub_nodes_feature_with_geodataframe(graph, subNode: np.array,
+                        features : list,
+                        path : Path,
+                        geo : gpd.GeoDataFrame,
+                        dates : np.array,
+                        departement : str,
+                        resolution : str) -> np.array:
+    
     assert graph.nodes is not None
 
     methods = METHODS_SPATIAL
 
     features_name, newShape = get_features_name_list(graph.scale, features, methods)
 
-    def save_values(array, band, indexNode, mask) -> None:
-        indexVar = features_name.index(f"{band}_mean")
+    def save_values(array, band, indexNode, mask):
+
+        indexVar = features_name.index(f'{band}_mean')
 
         if False not in np.unique(np.isnan(array[mask])):
             return
-
-        values = array[mask].reshape(-1, 1)
-        if graph.scale == "departement" or graph.scale > 0:
+        
+        values = array[mask].reshape(-1,1)
+        if graph.scale > 0:
             for imet, metstr in enumerate(methods):
-                if metstr == "mean":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmean(values), 3)
-                elif metstr == "min":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmin(values), 3)
-                elif metstr == "max":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmax(values), 3)
-                elif metstr == "std":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanstd(values), 3)
-                elif metstr == "sum":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nansum(values), 3)
-                elif metstr == "grad":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.gradient(values), 3)
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(values), 3)
                 else:
-                    raise ValueError(f"Unknow {metstr}")
+                    raise ValueError(f'Unknow {metstr}')
         else:
             X[indexNode, indexVar] = np.nanmean(values)
 
-    def save_value(array, band, indexNode, mask) -> None:
+    def save_value(array, band, indexNode, mask):
         if False not in np.unique(np.isnan(array[mask])):
             return
-
-        indexVar = features_name.index(f"{band}")
+        
+        indexVar = features_name.index(f'{band}')
 
         X[indexNode[:, 0], indexVar] = np.nanmean(array[mask])
 
-    def save_value_with_encoding(array, band, indexNode, mask, encoder) -> None:
-        values = array[mask].reshape(-1, 1)
+    def save_values_with_encoding(array, band, indexNode, mask, encoder):
+        values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
-        indexVar = features_name.index(f"{band}_mean")
-        if graph.scale == "departement" or graph.scale > 0:
+        indexVar = features_name.index(f'{band}_mean')
+        if graph.scale > 0:
             for imet, metstr in enumerate(methods):
-                if metstr == "mean":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmean(encode_values), 3)
-                elif metstr == "min":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmin(encode_values), 3)
-                elif metstr == "max":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanmax(encode_values), 3)
-                elif metstr == "std":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nanstd(encode_values), 3)
-                elif metstr == "sum":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.nansum(encode_values), 3)
-                elif metstr == "grad":
-                    X[indexNode[:, 0], indexVar + imet] = round(np.gradient(encode_values), 3)
+                if metstr == 'mean':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmean(encode_values), 3)
+                elif metstr == 'min':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmin(encode_values), 3)
+                elif metstr == 'max':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanmax(encode_values), 3)
+                elif metstr == 'std':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nanstd(encode_values), 3)
+                elif metstr == 'sum':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.nansum(encode_values), 3)
+                elif metstr == 'grad':
+                    X[indexNode[:, 0], indexVar+imet] = round(np.gradient(encode_values), 3)
                 else:
-                    raise ValueError(f"Unknow {metstr}")
+                    raise ValueError(f'Unknow {metstr}')
         else:
             X[indexNode[:, 0], indexVar] = np.nanmean(encode_values)
 
     X = np.full((subNode.shape[0], newShape), np.nan, dtype=float)
 
-    X[:, : subNode.shape[1]] = subNode
-    dir_encoder = path / "Encoder"
+    X[:,:subNode.shape[1]] = subNode
+    dir_encoder = path / 'Encoder'
 
-    encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
-    encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
-    encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
-    encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
-    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
-    encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
-    encoder_corine = read_object(f'encoder_corine_{name_expe}.pkl', dir_encoder)
-    encoder_bdroute = read_object(f'encoder_route_{name_expe}.pkl', dir_encoder)
-    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
-    encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
-    encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
+    encoder_landcover = read_object('encoder_landcover.pkl', dir_encoder)
+    encoder_osmnx = read_object('encoder_osmnx.pkl', dir_encoder)
+    encoder_foret = read_object('encoder_foret.pkl', dir_encoder)
+    encoder_argile = read_object('encoder_argile.pkl', dir_encoder)
+    encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
+    encoder_cosia = read_object('encoder_cosia.pkl', dir_encoder)
+    encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_encoder)
 
-    if "Calendar" in features:
+    if 'Calendar' in features:
         size_calendar = len(calendar_variables)
-        encoder_calendar = read_object("encoder_calendar.pkl", dir_encoder)
+        encoder_calendar = read_object('encoder_calendar.pkl', dir_encoder)
+        
+    if 'Geo' in features:
+        encoder_geo = read_object('encoder_geo.pkl', dir_encoder)
 
-    if "Geo" in features:
-        encoder_geo = read_object("encoder_geo.pkl", dir_encoder)
+    dir_mask = path / 'raster'
+    logger.info(f'Shape of X {X.shape}, {np.unique(X[:,3])}')
 
-    dir_mask = path / "raster"
-    logger.info(f"Shape of X {X.shape}, {np.unique(X[:, 3])}")
-
-    name = f"{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl"
+    name = f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl'
     mask = read_object(name, dir_mask)
 
-    name_graph = f"{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl"
+    name_graph = f'{departement}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl'
     mask_graph = read_object(name_graph, dir_mask)
-
-    nodeDepartementMask = np.argwhere(subNode[:, departement_index] == name2int[departement])
+    
+    nodeDepartementMask = np.argwhere(subNode[:,departement_index] == name2int[departement])
     nodeDepartement = subNode[nodeDepartementMask].reshape(-1, subNode.shape[1])
-    logger.debug(
-        "Unique mask values for %s: raster=%s, nodes=%s",
-        departement,
-        np.unique(mask),
-        np.unique(nodeDepartement[:, id_index]),
-    )
-    logger.debug(
-        "Unique graph mask values for %s: raster=%s, graph nodes=%s",
-        departement,
-        np.unique(mask_graph),
-        np.unique(nodeDepartement[:, graph_id_index]),
-    )
+    print(np.unique(mask), np.unique(nodeDepartement[:, id_index]))
+    print(np.unique(mask_graph), np.unique(nodeDepartement[:, graph_id_index]))
 
-    logger.debug("GeoDataFrame columns for %s: %s", departement, list(geo.columns))
+    print(geo.columns)
 
-    logger.info("Calendar")
-    if "Calendar" in features:
-        unDate = np.unique(subNode[:, date_index]).astype(int)
+    logger.info('Calendar')
+    if 'Calendar' in features:
+        unDate = np.unique(subNode[:,4]).astype(int)
         band = calendar_variables[0]
         for unDate in unDate:
             date = dates[unDate]
-            ddate = dt.datetime.strptime(date, "%Y-%m-%d")
-            index = np.argwhere(subNode[:, date_index] == unDate)
-            X[index, features_name.index(band)] = int(date.split("-")[1])  # month
-            X[index, features_name.index(band) + 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday)  # dayofyear
-            X[index, features_name.index(band) + 2] = ddate.weekday()  # dayofweek
-            X[index, features_name.index(band) + 3] = ddate.weekday() >= 5  # isweekend
-            X[index, features_name.index(band) + 4] = pendant_couvrefeux(ddate)  # couvrefeux
-            X[index, features_name.index(band) + 5] = (
-                1 if (
-                        dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
-                        or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
-                    ) else 0
-            )  # confinement
-            X[index, features_name.index(band) + 6] = (
-                1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0
-            )  # ramadan
-            X[index, features_name.index(band) + 7] = 1 if ddate in jours_feries else 0  # bankHolidays
-            X[index, features_name.index(band) + 8] = 1 if ddate in veille_jours_feries else 0  # bankHolidaysEve
-            X[index, features_name.index(band) + 9] = (
-                1
-                if vacances_scolaire.is_holiday_for_zone(
-                    ddate.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)
-                )
-                else 0
-            )  # holidays
-            X[index, features_name.index(band) + 10] = (
-                1
-                if vacances_scolaire.is_holiday_for_zone(
-                    ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)
-                )
-                else 0
-            ) or (
-                1
-                if vacances_scolaire.is_holiday_for_zone(
-                    ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)
-                )
-                else 0
-            )  # holidaysBorder
+            ddate = dt.datetime.strptime(date, '%Y-%m-%d')
+            index = np.argwhere((subNode[:,4] == unDate))
+            X[index, features_name.index(band)] = int(date.split('-')[1]) # month
+            X[index, features_name.index(band) + 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
+            X[index, features_name.index(band) + 2] = ddate.weekday() # dayofweek
+            X[index, features_name.index(band) + 3] = ddate.weekday() >= 5 # isweekend
+            X[index, features_name.index(band) + 4] = pendant_couvrefeux(ddate) # couvrefeux
+            X[index, features_name.index(band) + 5] = (1 if dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11) else 0) or 1 if dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15) else 0# confinement
+            X[index, features_name.index(band) + 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
+            X[index, features_name.index(band) + 7] = 1 if ddate in jours_feries else 0 # bankHolidays
+            X[index, features_name.index(band) + 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
+            X[index, features_name.index(band) + 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 # holidays
+            X[index, features_name.index(band) + 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0 ) \
+                or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)) else 0) # holidaysBorder
 
             stop_calendar = 11
-
-            X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = np.round(
-                encoder_calendar.transform(
-                    np.moveaxis(
-                        X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2
-                    ).reshape(-1, stop_calendar)
-                ).values.reshape(-1, 1, stop_calendar),
-                3,
-            )
+            
+            X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = \
+                    np.round(encoder_calendar.transform(np.moveaxis(X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2).reshape(-1, stop_calendar)).values.reshape(-1, 1, stop_calendar), 3)
 
             for ir in range(stop_calendar, size_calendar):
                 var_ir = calendar_variables[ir]
-                if var_ir == "calendar_mean":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_max":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_min":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_sum":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
+                if var_ir == 'calendar_mean':
+                    X[index, features_name.index(band) + ir] = round(np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                elif var_ir == 'calendar_max':
+                    X[index, features_name.index(band) + ir] = round(np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                elif var_ir == 'calendar_min':
+                    X[index, features_name.index(band) + ir] = round(np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
+                elif var_ir == 'calendar_sum':
+                    X[index, features_name.index(band) + ir] = round(np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3)
                 else:
-                    logger.info(f"Unknow operation {var_ir}")
+                    logger.info(f'Unknow operation {var_ir}')
                     exit(1)
     ### Geo spatial
-    logger.info("Geo")
-    if "Geo" in features:
-        X[:, features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[
-            0
-        ]  # departement
+    logger.info('Geo')
+    if 'Geo' in features:
+        X[:, features_name.index(geo_variables[0])] = encoder_geo.transform([name2int[departement]]).values[0] # departement
 
-    logger.info("Meteorological")
+    logger.info('Meteorological')
     array = None
     ### Meteo
-    for _i, var in enumerate(cems_variables):
-        logger.info(var)
-        if 'precipitationIndex' in var:
-            n = int(var[-1])
-            array = calculate_precipitation_index_image_full(geo['prec24h'].values, A=0.1657, n=n)
-            for id in maskNode:
-                save_values(array, var, index, maskNode)
-                
-            del array
+    for i, var in enumerate(cems_variables):
+        if var not in features:
             continue
+        logger.info(var)
+        name = var +'raw.pkl'
         for node in subNode:
-            maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
-            index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+            maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+            index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
             save_values(geo[var].values, var, index, maskNode)
 
     del array
 
-    logger.info("Air Quality")
-    if "air" in features:
-        for _i, var in enumerate(air_variables):
+    logger.info('Air Quality')
+    if 'air' in features:
+        for i, var in enumerate(air_variables):
             logger.info(var)
-            name = var + "raw.pkl"
+            name = var +'raw.pkl'
             for node in subNode:
-                maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
-                index = np.argwhere(
-                    (subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index])
-                )
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
                 save_value(geo[var].values, var, index, maskNode)
 
-    logger.info("Population elevation Highway Sentinel Foret")
+    logger.info('Population elevation Highway Sentinel Foret')
 
-    unode = np.unique(subNode[:, id_index])
+    unode = np.unique(subNode[:,0])
     for node in unode:
-        maskNode = geo[(geo["id"] == node) & (geo["date"] == 0)].index
-        index = np.argwhere(subNode[:, id_index] == node)
-        if "population" in features:
-            save_values(geo["population"].values, "population", index, maskNode)
+        maskNode = geo[(geo['id'] == node) & (geo['date'] == 0)].index
+        index = np.argwhere(subNode[:,0] == node)
+        if 'population' in features:
+            save_values(geo['population'].values, 'population', index, maskNode)
 
-        if "elevation" in features:
-            save_values(geo["elevation"].values, "elevation", index, maskNode)
+        if 'elevation' in features:
+            save_values(geo['elevation'].values, 'elevation', index, maskNode)
 
-        if "highway" in features:
+        if 'highway' in features:   
             for var in osmnx_variables:
                 save_values(geo[osmnxint2str[var]].values, osmnxint2str[var], index, maskNode)
 
-        if "foret" in features:
+        if 'foret' in features:
             for var in foret_variables:
                 save_values(geo[foretint2str[var]].values, foretint2str[var], index, maskNode)
 
-        if "cosia" in features:
-            for _i, var in enumerate(cosia_variables):
-                save_values(geo["cosia"].values, var, index, maskNode)
-            
-        if "corine" in features:
-            for _i, var in enumerate(corine_variable):
-                save_values(geo["cosia"].values, var, index, maskNode)
-                
-        if "corine" in features:
-            for _i, var in enumerate(corine_variable):
-                save_values(geo["cosia"].values, var, index, maskNode)
-                
-        if 'bdroute' in features:
-                for var in bdroute_variables:
-                    save_values(geo['bdroute'].values, var, index, maskNode)
+        if 'cosia' in features:
+            for i, var in enumerate(cosia_variables):
+                save_values(geo['cosia'].values, var, index, maskNode)
 
-        if "foret_encoder" in features:
+        if 'foret_encoder' in features:
             try:
-                save_value_with_encoding(geo["foret_encoder"].values, "foret_encoder", index, maskNode, encoder_foret)
-            except Exception:
+                save_values_with_encoding(geo['foret_encoder'].values, 'foret_encoder', index, maskNode, encoder_foret)
+            except Exception as e:
                 exit(1)
 
-        if "highway_encoder" in features:
-            save_value_with_encoding(geo["highway_encoder"].values, "highway_encoder", index, maskNode, encoder_osmnx)
-
-        if "argile_encoder" in features:
-            save_value_with_encoding(geo["argile_encoder"].values, "argile_encoder", index, maskNode, encoder_argile)
-
-        if "cosia_encoder" in features:
-            save_value_with_encoding(geo["cosia_encoder"].values, "cosia_encoder", index, maskNode, encoder_cosia)
-            
-        if "corine_encoder" in features:
-            save_value_with_encoding(geo["corine_encoder"].values, "corine_encoder", index, maskNode, encoder_corine)
+        if 'highway_encoder' in features:
+            save_values_with_encoding(geo['highway_encoder'].values, 'highway_encoder', index, maskNode, encoder_osmnx)
         
-        if "bdroute_encoder" in features:
-            save_value_with_encoding(geo["bdroute_encoder"].values, "bdroute_encoder", index, maskNode, encoder_bdroute)
+        if 'argile_encoder' in features:
+            save_values_with_encoding(geo['argile_encoder'].values, 'argile_encoder', index, maskNode, encoder_argile)
 
-        if "id_encoder" in features:
-            save_value_with_encoding(geo["id"].values, "id_encoder", index, maskNode, encoder_id)
+        if 'cosia_encoder' in features:
+            save_values_with_encoding(geo['cosia_encoder'].values, 'cosia_encoder', index, maskNode, encoder_cosia)
 
-    logger.info("Sentinel Dynamic World")
+        if 'id_encoder' in features:
+            save_values_with_encoding(geo['id'].values, 'id_encoder', index, maskNode, encoder_id)
+
+    logger.info('Sentinel Dynamic World')
     for node in subNode:
-        maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
+        maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
 
-        index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
+        index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[date_index]))
 
-        if "sentinel" in features:
+        if 'sentinel' in features:
             for band, var in enumerate(sentinel_variables):
                 save_values(geo[var].values, var, index, maskNode)
+        
+        if 'landcover' in features:
+            if 'landcover_encoder' in landcover_variables:
+                save_values_with_encoding(geo['landcover_encoder'].values, 'landcover_encoder', index, maskNode, encoder_landcover)
 
-        if "landcover" in features:
-            if "landcover_encoder" in landcover_variables:
-                save_value_with_encoding(
-                    geo["landcover_encoder"].values, "landcover_encoder", index, maskNode, encoder_landcover
-                )
-
-        if "dynamicWorld" in features:
+        if 'dynamicWorld' in features:
             for band, var in enumerate(dynamic_world_variables):
                 save_values(geo[var].values, var, index, maskNode)
 
-    logger.info("Historical")
-    if "Historical" in features:
-        name = departement + "pastInfluence.pkl"
-        arrayInfluence = read_object(name, Path(__file__).absolute().parent.resolve() / "log" / resolution)
+    logger.info('Historical')
+    if 'Historical' in features:
+        name = departement+'pastInfluence.pkl'
+        arrayInfluence = read_object(name, Path(__file__).absolute().parent.resolve()/ 'log' / resolution)
         if arrayInfluence is not None:
             for node in subNode:
-                index = np.argwhere(
-                    (subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index])
-                )
-                maskNode = mask == node[id_index]
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = mask == node[0]
 
-                save_values(arrayInfluence[:, :, int(node[date_index] - 1)], historical_variables[0], index, maskNode)
+                save_values(arrayInfluence[:,:, int(node[4] - 1)], historical_variables[0], index, maskNode)
             del arrayInfluence
 
-    logger.info("AutoRegressionReg")
-    if "AutoRegressionReg" in features:
+    logger.info('AutoRegressionReg')
+    if 'AutoRegressionReg' in features:
         for node in subNode:
-            index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
-            if node[date_index] - 1 < 0:
+            index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+            if node[4] - 1 < 0:
                 continue
 
             for var in auto_regression_variable_reg:
-                step = int(var.split("-")[-1])
-                maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index] - step)].index
+                step = int(var.split('-')[-1])
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4] - step)].index
 
-                save_value(geo["AutoRegressionReg"].values, f"AutoRegressionReg-{var}", index, maskNode)
+                save_value(geo[f'AutoRegressionReg'].values, f'AutoRegressionReg_{var}', index, maskNode)
 
-    logger.info("AutoRegressionBin")
-    if "AutoRegressionBin" in features:
+    logger.info('AutoRegressionBin')
+    if 'AutoRegressionBin' in features:
         for node in subNode:
-            index = np.argwhere((subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index]))
-            maskNode = mask == node[id_index]
-            if node[date_index] - 1 < 0:
+            index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+            maskNode = mask == node[0]
+            if node[4] - 1 < 0:
                 continue
-
+            
             for var in auto_regression_variable_bin:
-                step = int(var.split("-")[-1])
-                maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index] - step)].index
-                save_value(geo["AutoRegressionBin"].values, f"AutoRegressionBin-{var}", index, maskNode)
-
-    logger.info("Vigicrues")
-    if "vigicrues" in features:
+                step = int(var.split('-')[-1])
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[4] - step)].index
+                save_value(geo[f'AutoRegressionBin'].values, f'AutoRegressionBin_{var}', index, maskNode)
+ 
+    logger.info('Vigicrues')
+    if 'vigicrues' in features:
         for var in vigicrues_variables:
             for node in subNode:
-                index = np.argwhere(
-                    (subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index])
-                )
-                maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
-                save_values(geo[var].values, var, index, maskNode)
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
+                save_values(geo[var].values, var, index, maskNode)[4]
 
-    logger.info("nappes")
-    if "nappes" in features:
+    logger.info('nappes')
+    if 'nappes' in features:
         for var in nappes_variables:
             for node in subNode:
-                index = np.argwhere(
-                    (subNode[:, id_index] == node[id_index]) & (subNode[:, date_index] == node[date_index])
-                )
-                maskNode = geo[(geo["id"] == node[id_index]) & (geo["date"] == node[date_index])].index
+                index = np.argwhere((subNode[:,0] == node[0]) & (subNode[:,4] == node[4]))
+                maskNode = geo[(geo['id'] == node[0]) & (geo['date'] == node[date_index])].index
                 save_values(geo[var].values, var, index, maskNode)
 
-    logger.info("Cluster encoder")
+    logger.info('Cluster encoder')
     assert encoder_cluster is not None
-    if "cluster_encoder" in features:
+    if 'cluster_encoder' in features:
         ugraph = np.unique(nodeDepartement[:, graph_id_index])
         for graphid in ugraph:
-            index = np.argwhere(subNode[:, graph_id_index] == graphid)
-            X[index, features_name.index("cluster_encoder")] = encoder_cluster.transform(
-                [graph.node_cluster[graphid]]
-            ).values[0]
-            # X[index, features_name.index('cluster_encoder')] = 0
+            index = np.argwhere((subNode[:,graph_id_index] == graphid))
+            X[index, features_name.index('cluster_encoder')] = encoder_cluster.transform([graph.node_cluster[graphid]]).values[0]
+            #X[index, features_name.index('cluster_encoder')] = 0
 
     return X, features_name
 
@@ -2349,9 +2288,9 @@ def is_mediterranean_dept(dept_code):
         83,  # Var
         84,  # Vaucluse
         100, # Corse 2A 
-        101, # Corse 2B
+        101, # Corse 2B 
     }
-    
+
     return 1 if dept_code in mediterranean_depts else 0
 
 from typing import List, Tuple

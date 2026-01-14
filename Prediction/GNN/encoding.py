@@ -23,14 +23,13 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
 
         if dep in graph.drop_department:
             continue
-        
+
         dir_data = rootDisk / 'csv' / dep /  'raster' / resolution
-        
+
         datacube_target = read_object(f'datacube_target_{dep}_{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir_output / '..' / 'datacube')
         datacube_feature = read_object(f'datacube.pkl', dir_data)
 
         tar = datacube_target[target].values[0]
-        print(dep, tar.shape)
         tar = tar[:,:,trainDate]
         gt += list(tar[~np.isnan(tar)])
 
@@ -157,6 +156,10 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
 
     if target == 'burned_area_pix':
         suffix = '_BA'
+    elif target == 'time_intervention_pix':
+        suffix = '_T'
+    elif target == 'ressource_pix':
+        suffix = '_R'
     else:
         suffix = ''
 

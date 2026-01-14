@@ -29,6 +29,8 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_distrib2classTraining,
     wrapped_train_deep_learning_2D,
     wrapped_train_deep_learning_distallation,
+    wrapped_train_deep_learning_1D_federatedProx,
+    wrapped_train_deep_learning_1D_federatedfltg,
     test_fire_index_model
 )
 
@@ -47,8 +49,7 @@ from GNN.config import (
 from GNN.tools import (check_and_create_path, get_features_name_list,
                        read_object, save_object, get_features_selected_for_time_series_for_2D,
                        get_features_name_lists_2D, get_saison_encoding,
-                       #compute_department_areas_km2_dict_wgs84_union
-                       )
+                       compute_department_areas_km2_dict_wgs84_union)
 
 from GNN.discretization import post_process_model, get_post_process_model
 from GNN.features import add_past_risk, shift_target
@@ -56,7 +57,6 @@ from GNN.dico_departements import *
 import numpy as np
 import pandas as pd
 import geopandas as gpd
-from GNN.tools import allDates
 
 from tools import get_saison
 from features import is_mediterranean_dept
@@ -114,10 +114,6 @@ def main():
             cfg,
             cfg,
         )
-
-        dir_post_process = dir_output / 'post_process'
-
-        features_selected = np.arange(len(features_selected_str))
         
         train_dataset['burnedarea'] = train_dataset['burned_area'].values
         val_dataset['burnedarea'] = val_dataset['burned_area'].values
@@ -126,6 +122,10 @@ def main():
         train_dataset['burnedareaRoot'] = train_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         val_dataset['burnedareaRoot'] = val_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+
+        dir_post_process = dir_output / 'post_process'
+
+        features_selected = np.arange(len(features_selected_str))
 
         post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
 
@@ -161,9 +161,14 @@ def main():
             "burnedarea",
         )
 
+        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+
         save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
         save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
         save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+        
     else:
         prefix = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
         graphScale = read_object(f"graph_{cfg.scale}_{cfg.graphConstruct}_{cfg.graph_method}.pkl", dir_output)
@@ -182,38 +187,47 @@ def main():
         val_dataset['burnedareaRoot'] = val_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         
-        train_dataset['area'] = 0
-        val_dataset['area'] = 0
-        test_dataset['area'] = 0
         #if 'area' not in train_dataset.columns:
-        #if True:
-        #    geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
-        #    areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
+        if True:
+            geo = gpd.read_file(f'regions/{sinister}/{dataset_name}/regions.geojson')
+            areas = compute_department_areas_km2_dict_wgs84_union(geo, 'departement')
                         
-        #    print(areas)
+            print(areas)
 
-        #    train_dataset['area'] = 0.0
-        #    for departement in train_dataset.departement.unique():
-        #        train_dataset.loc[train_dataset[train_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
-        #        val_dataset.loc[val_dataset[val_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
-        #        test_dataset.loc[test_dataset[test_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+            train_dataset['area'] = 0.0
+            for departement in train_dataset.departement.unique():
+                train_dataset.loc[train_dataset[train_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+                val_dataset.loc[val_dataset[val_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+                test_dataset.loc[test_dataset[test_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
 
         train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
         val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
         test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
 
-        train_dataset['saison-mediterranean'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
-        val_dataset['saison-mediterranean'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
-        test_dataset['saison-mediterranean'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
+        train_dataset['saison-mediterranean'] = train_dataset['saison'] + '-' + train_dataset['mediterranean'].astype(str)
+        val_dataset['saison-mediterranean'] = val_dataset['saison'] + '-' + val_dataset['mediterranean'].astype(str)
+        test_dataset['saison-mediterranean'] = test_dataset['saison'] + '-' + test_dataset['mediterranean'].astype(str)
 
         train_dataset['saison-cluster-encoder'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
         val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
         test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
 
-        print('burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns)
-        
-        if 'burnedareaRoot-kmeans-5-Class-Dept' not in train_dataset.columns:
-        #if True:
+        if 'time_intervention-kmeans-5-Class-Dept' not in train_dataset.columns:
+            train_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
+            val_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
+            test_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
+        else:
+            train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+            val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+            test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+
+        if 'ressource' not in train_dataset.columns:
+            train_dataset['ressource'] = 0
+            val_dataset['ressource'] = 0
+            test_dataset['ressource'] = 0
+
+        if 'burnedareaRoot-egpd-5-Class-Dept' not in train_dataset.columns:
+        #if False:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
@@ -223,10 +237,6 @@ def main():
         train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
         test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
-        
-        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
 
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
@@ -495,6 +505,57 @@ def main():
                     params["federated_cluster"] = m.get("federated_cluster", "department")
                     params["aggregation_method"] = m.get('aggregation_method', "median")
                     wrapped_train_deep_learning_1D_moonfederated(params)
+
+                elif cfg.training_mode == "proxfederated":
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
+                        "client_n_run": m.get("client_n_run", 1),
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
+                        "prox_value" : m.get('prox_value', 1.0),
+                        "names" : m.get('names'),
+                        "dir_output" : dir_output,
+                        "global_epochs" : cfg.hyperparameters['global_epochs'],
+                        "patience_count_global" : cfg.hyperparameters['patience_count_global'],
+                        "patience_count_local" : cfg.hyperparameters['PATIENCE_CNT'],
+                        "use_log" : m.get('use_log', True)
+                    }
+                    )
+                    assert params['names'] is not None and len(params['names']) > 0
+                    params["federated_cluster"] = m.get("federated_cluster", "department")
+                    params["aggregation_method"] = m.get('aggregation_method', "median")
+                    wrapped_train_deep_learning_1D_federatedProx(params)
+                
+                elif cfg.training_mode == "fltgfederated":
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "min_epochs": m.get('min_epochs', 1),
+                        "client_n_run": m.get("client_n_run", 1),
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
+                        "temperature" : m.get('temperature', 1.0),
+                        "tau" : m.get('tau', 2),
+                        "dir_output" : dir_output,
+                        "global_epochs" : cfg.hyperparameters['global_epochs'],
+                        "patience_count_global" : cfg.hyperparameters['patience_count_global'],
+                        "patience_count_local" : cfg.hyperparameters['PATIENCE_CNT'],
+                        "use_log" : m.get('use_log', True)
+                    }
+                    )
+                    params["federated_cluster"] = m.get("federated_cluster", "department")
+                    params["aggregation_method"] = m.get('aggregation_method', "median")
+                    wrapped_train_deep_learning_1D_federatedfltg(params)
                 
                 elif cfg.training_mode == "alafederated":
                     params.update(
@@ -703,6 +764,8 @@ def main():
                     params['teacher_name'] = m.get('teacher', None)
                     params['teacher_loss'] = m.get('teacher_loss', None)
                     params['alpha'] = m.get('alpha', None)
+                    params['beta'] = m.get('beta', None)
+                    params['gamma'] = m.get('gamma', None)
                     params['temperature'] = m.get('temperature', None)
                     params['distillation_training_mode'] = m.get('distillation_training_mode', None)
                     assert params['teacher_name'] is not None
@@ -748,7 +811,25 @@ def main():
                     dl_model_names.append(test_name)
             
             elif cfg.training_mode == 'distillation':
-                test_name = f"{m['type']}-{m.get('distillation_training_mode', None)}-{m.get('temperature', None)}-{m.get('alpha', None)}-{m.get('teacher', None)}_{info}"
+                
+                distillation_training_mode = m.get('distillation_training_mode', None)
+                temperature = m.get('temperature', None)
+                alpha = m.get('alpha', None)
+                beta = m.get('beta', None)
+                gamma = m.get('gamma', None)
+
+                if distillation_training_mode == 'normal':
+                    hyper_params = f'T{temperature}-A{alpha}'
+                elif distillation_training_mode == 'Confidence':
+                    hyper_params = f'T{temperature}-A{alpha}-B{beta}'
+                elif distillation_training_mode == 'RelationMLP' or distillation_training_mode == 'RelationATT':
+                    hyper_params = f'T{temperature}-A{alpha}-B{beta}'
+                elif distillation_training_mode == 'MATTKD':
+                    hyper_params = f'T{temperature}-A{alpha}-B{beta}'
+                elif distillation_training_mode == "AdaptativeMLP":
+                    hyper_params = f'T{temperature}-A{alpha}-B{beta}-G{gamma}'
+
+                test_name = f"{m['type']}-{distillation_training_mode}-{hyper_params}-{m.get('teacher', None)}_{info}"
                 dl_model_names.append(test_name)
 
             elif cfg.training_mode == 'federated':
@@ -840,10 +921,12 @@ def main():
                     (df_metrics, pd.DataFrame.from_dict(metrics, orient="index").reset_index())
                 )
         
+        tdetp = [name2int[dept] for dept in cfg.test_departments]
+        
         if stat_model_names:
             metrics, _, _, _ = test_fire_index_model(
-                cfg, graphScale, test_dataset.copy(deep=True),
-                                test_dataset_unscale.copy(deep=True),
+                cfg, graphScale, test_dataset[test_dataset['departement'].isin(tdetp)].copy(deep=True),
+                                test_dataset_unscale[test_dataset_unscale['departement'].isin(tdept)].copy(deep=True),
                                     "all",
                                     prefix,
                                     stat_model_names,
@@ -862,7 +945,7 @@ def main():
                     (df_metrics, pd.DataFrame.from_dict(metrics, orient="index").reset_index())
                 ) 
 
-        if cfg.doTestDepartement:
+        if cfg.doTestdepartement:
             for dept in cfg.test_departments:
                 test_dataset_dept = test_dataset[
                     test_dataset["departement"] == name2int[dept]

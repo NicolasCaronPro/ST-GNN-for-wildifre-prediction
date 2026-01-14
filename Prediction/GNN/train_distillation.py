@@ -258,6 +258,7 @@ if name_exp.find('voting') != -1:
             #('NetMLP', 3.0, 'normal', 'filter-catboost-soft-weight-10', 'softmax' ,'search_full_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_kldivloss', 5),
             #('GRU', 3.0, 0.5, 'normal', 'filter-catboost-soft-weight-12', 'softmax' ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ('GRU', 'search', 'search', 'normal', 'filter-catboost-soft-weight-14', 'softmax' ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
+            #('StudentMLP', 5.0, 0.5, 'AdatativeMLP', 'filter-catboost-soft-weight-14', 'softmax', 'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             #('GRU', '6.0', '0.5', 'normal', 'filter-catboost-soft-weight-14', 'softmax' ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             #('GRU', 3.0, 0.5, 'normal', 'filter-catboost-soft-weight-10', 'softmax' ,'search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_classification_weightedcrossentropy', 5),
             ]

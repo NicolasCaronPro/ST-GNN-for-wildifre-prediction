@@ -2380,7 +2380,7 @@ def get_loss_function(loss_name, **loss_params):
             "egpd":                        lambda: EGPDNLLLoss(),
             "degpd":                       lambda: dEGPDLossTrunc(),
             "pdegpd":                      lambda: PredictdEGPDLossTruncMostProbable(),
-            "pdegpd2":                      lambda: PredictdEGPDLossTrunc2(),
+            "bulkTail":                      lambda : PredictdBulkTailEGPD(),
             "pdegpdCluster":               lambda : PredictdEGPDLossTruncClusterIDs(**loss_params),
             "degpdCluster":                lambda: dEGPDLossTruncClusterIDs(**loss_params),
             "egpdRoot":                    lambda: EGPDNLLLossSqrt(**loss_params),
@@ -2397,7 +2397,8 @@ def get_loss_function(loss_name, **loss_params):
             "fdwk":                        lambda: ForegroundDiceLossAndWKLoss(**loss_params),
             "fdice":                       lambda: ForegroundDiceLoss(),
             "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
-            "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
+            "flwk":                        lambda: FocalLossAndWKLoss(**loss_params),
+            "fl":                          lambda: FocalLoss(**loss_params),
         }
 
     try:
@@ -2428,7 +2429,6 @@ def apply_pca(X, pca, pca_number, features_selected):
     new_X[:, :6] = X[:, :6]
     new_X[:, 6:] = res
     return new_X
-
 
 ############################### LOGISTIC #############################
 
@@ -2797,9 +2797,10 @@ def define_voting_dl_models(mt, kdays, horizon, out_channels, run, loss='weighte
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
-    for aggregation in ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']:
+    filters = ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']
+    for aggregation in filters:
         for nb_clusters in ['1', '3', '5', 'Specialized']:
-            if aggregation == 'gaussian' and (nb_clusters == '3' or nb_clusters == '5'):
+            """if aggregation == 'gaussian' and (nb_clusters == '3' or nb_clusters == '5'):
                 continue
             elif aggregation == 'cubic' and nb_clusters == '3':
                 continue
@@ -2810,7 +2811,7 @@ def define_voting_dl_models(mt, kdays, horizon, out_channels, run, loss='weighte
             elif aggregation == 'quartic' and (nb_clusters == '3' or nb_clusters == '5'):
                 continue
             elif aggregation == 'mean' and (nb_clusters == '1' or nb_clusters == '3' or nb_clusters == '5'):
-                continue
+                continue"""
             model = create_model_config(mt, m4_undersampling, 'one', 'kmeans', aggregation, '5', nb_clusters, loss, 'classification')
             models.append(model)
 
