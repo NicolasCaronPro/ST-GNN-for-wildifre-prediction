@@ -1381,8 +1381,8 @@ def create_test_val_dataset(graph,
     XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, horizon, ks, use_temporal_as_edges, graph_mesh is None)
-
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
     if len(XsTe) == 0:
@@ -2764,7 +2764,7 @@ class Training():
             for par in params:
                 name = par[0]
                 value = par[1]
-                dict_params[name] = copy.deepcopy(value.detach().cpu().numpy())
+                dict_params[name] = deepcopy(value.detach().cpu().numpy())
             
             self.criterion_params.append(dict_params)
 
@@ -2827,7 +2827,7 @@ class Training():
             res[i] = len(df_train[(df_train[self.target_name] == cl) & (df_train['weight'] > 0)])
         
         return self.compute_global_alpha(res)
-
+    
     def compute_global_alpha(self, global_hist):
         freq = global_hist / global_hist.sum()
         alpha = 1 / np.sqrt(freq)

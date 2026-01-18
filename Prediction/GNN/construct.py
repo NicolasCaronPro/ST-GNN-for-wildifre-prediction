@@ -735,7 +735,7 @@ def init(args, dir_output, script):
         encode_from_xarray('occurence', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
         encode_from_xarray('burned_area_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
         encode_from_xarray('time_intervention_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
-        encode_from_xarray('ressources_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
+        encode_from_xarray('ressource_pix', all_train_dates, name_exp, train_departements, dir_output / 'Encoder', resolution, graphScale)
 
     ########################## Do Database ####################################
     if doDatabase:

@@ -34,6 +34,8 @@ from GNN.dataloader import (
     test_fire_index_model
 )
 
+from GNN.features import remove_correlated_feature
+
 from GNN.statistical_model import Statistical_Model
 
 from GNN.train import wrapped_train_sklearn_api_model, wrapped_train_sklearn_api_voting_model, define_voting_dl_models
@@ -336,6 +338,9 @@ def main():
     stat_model_names = []
 
     for i, m in enumerate(cfg.get("models", [])):
+
+        features_name = remove_correlated_feature(train_dataset, cfg.scale, features_selected, name_exp, graphScale, dir_output, logger, METHODS_SPATIAL_TRAIN)
+
         if m.get("type") != "fwi":
             info = (
                 f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_{m.get('horizon', 0)}"

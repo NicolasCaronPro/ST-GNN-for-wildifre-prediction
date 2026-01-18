@@ -30,6 +30,12 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
         datacube_feature = read_object(f'datacube.pkl', dir_data)
 
         tar = datacube_target[target].values[0]
+
+        if np.nansum(tar) == 0:
+            continue
+        else:
+            print(f'Use {dep} for encoding {target}')
+
         tar = tar[:,:,trainDate]
         gt += list(tar[~np.isnan(tar)])
 

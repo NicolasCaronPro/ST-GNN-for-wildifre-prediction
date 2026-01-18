@@ -1043,6 +1043,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     
     cols = [f'prediction_{target_name}_{horizon}']
     res_temp[f'prediction_{target_name}_{horizon}'] = pred[:, 0]
+
+    if isinstance(predProba, torch.Tensor):
+        predProba = predProba.detach().cpu().numpy()
     
     if predProba is not None:
         print(predProba.shape)
@@ -1245,7 +1248,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         # 1. Estimate Linear Delta (with FE)
         # Y ~ score + C(num_zone) + C(date)
         
-        q10, q90 = df_stats["score"].quantile([0.1, 0.9])
+        #q10, q90 = df_stats["score"].quantile([0.05, 0.95])
+        q10 = np.min(df_stats['score'])
+        q90 = np.max(df_stats['score'])
         spread = float(q90 - q10)
         
         formula = "Y ~ score + C(num_zone) + C(date)"
@@ -1278,13 +1283,93 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         plt.title(f"{target_name} - Linear Fit\nY = {a_simple:.3f} + {b_simple:.3f} * score | R2 = {r2_simple:.3f}")
         plt.xlabel(f"Prediction ({pred_col})")
         plt.ylabel("Observed nbsinister")
-        
+
         plot_path = dir_output / f"{name}_linear_fit.png"
         plt.savefig(plot_path)
         plt.close()
         
+        # Prepare data for statsmodels
+        df_stats = res.copy()
+        target_col = target_name.split('-')[0]
+
+        if target_col == 'timeintervention':
+            target_col = 'time_intervention'
+            
+        pred_col = f'prediction_{target_name}_{horizon}'
+        
+        # Rename for formula
+        df_stats = df_stats.rename(columns={target_col: 'Y', pred_col: 'score', 'graph_id': 'num_zone'})
+
+        # Safety: score bounds (important with splines)
+        df_stats["score"] = pd.to_numeric(df_stats["score"], errors="coerce")
+        df_stats["Y"] = pd.to_numeric(df_stats["Y"], errors="coerce")
+        df_stats = df_stats.dropna(subset=["score", "Y", "num_zone", "date"])
+
+        # If your scores are ordinal 0..4, this prevents patsy knot issues
+        SCORE_LB, SCORE_UB = 0.0, 4.0
+        df_stats["score"] = df_stats["score"].clip(SCORE_LB, SCORE_UB)
+
+        # -----------------------------
+        # 1) Estimate Spline Delta (with FE)
+        # -----------------------------
+        q10, q90 = df_stats["score"].quantile([0.05, 0.95])
+
+        # Spline + fixed effects
+        df_spline = 5
+        formula = (
+            f"Y ~ bs(score, df={df_spline}, degree=3, include_intercept=False, "
+            f"lower_bound={SCORE_LB}, upper_bound={SCORE_UB}) "
+            f"+ C(num_zone) + C(date)"
+        )
+        fit = smf.ols(formula, data=df_stats).fit(cov_type="HC1")
+
+        # Counterfactual predictions for delta
+        df_low = df_stats.copy()
+        df_high = df_stats.copy()
+        df_low["score"] = float(q10)
+        df_high["score"] = float(q90)
+
+        mu_low = float(fit.predict(df_low).mean())
+        mu_high = float(fit.predict(df_high).mean())
+        delta = float(mu_high - mu_low)
+
+        metrics["spline_df"] = df_spline
+        metrics["spline_delta"] = delta
+        metrics["spline_q10"] = float(q10)
+        metrics["spline_q90"] = float(q90)
+
+        logger.info(
+            f"Spline Fit (df={df_spline}): delta={delta:.4f} "
+            f"(q10={q10:.2f}, q90={q90:.2f})"
+        )
+
+        # -----------------------------
+        # 2) Plot spline effect curve (partial dependence style)
+        #    E[Y | score=s] averaged over observed (zone,date)
+        # -----------------------------
+        grid = np.linspace(SCORE_LB, SCORE_UB, 81)
+        template = df_stats[["score", "num_zone", "date"]].copy()
+
+        preds = []
+        for s in grid:
+            tmp = template.copy()
+            tmp["score"] = float(s)
+            preds.append(float(fit.predict(tmp).mean()))
+        preds = np.array(preds)
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(grid, preds, linewidth=2)
+        plt.xlim(SCORE_LB, SCORE_UB)
+        plt.xlabel(f"Prediction ({pred_col})")
+        plt.ylabel(f"E[{target_col}] estimée")
+        plt.title(f"{target_name} - Spline Effect (df={df_spline})")
+
+        plot_path = dir_output / f"{name}_spline_effect.png"
+        plt.savefig(plot_path)
+        plt.close()
+        
     except Exception as e:
-        logger.error(f"Failed to run linear fit analysis: {e}")
+        logger.error(f"Failed to run fit analysis: {e}")
 
     ########################################## Gte normalized score ####################################
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
@@ -2262,7 +2347,7 @@ def wrapped_train_deep_learning_1D(params):
                                     name=f'{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
-                                    device=torch.device("cpu"),
+                                    device=params['device'],
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
@@ -3053,7 +3138,7 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                     name=f'SplitTraining-{federated_cluster}-{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
-                                    device=torch.device("cpu"),
+                                    device=params['device'],
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
@@ -3169,7 +3254,7 @@ def wrapped_train_deep_learning_1D_unique(params):
                                     name=f'unique-{cluster}-{model}_{infos}',
                                     task_type=task_type,
                                     loss=loss,
-                                    device=torch.device("cpu"),
+                                    device=params['device'],
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,

@@ -728,7 +728,7 @@ class Model_Torch(SplitTraining):
                             except ValueError:
                                 logger.info(f'{self.under_sampling} with undefined factor, set to 0.3 -> {0.3 * len(y[y == 0])}')
                                 best_tp = 0.3
-
+                                
                         nb = int(best_tp * len(y[y == 0]))
                         print(best_tp, nb, y[y == 0].shape)
                         df_combined = self.split_dataset(df_train, nb, reset=False)

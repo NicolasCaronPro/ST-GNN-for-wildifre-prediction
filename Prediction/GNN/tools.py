@@ -2767,6 +2767,10 @@ def get_features_name_list(scale, features, methods):
     for var in features:
         if var == 'Calendar':
             features_name += calendar_variables
+            features_name += [f'{cal}_T' for cal in calendar_variables]
+            features_name += [f'{cal}_R' for cal in calendar_variables]
+            features_name += [f'{cal}_ba' for cal in calendar_variables]
+            
         elif var == 'air':
             features_name += air_variables
         elif var in landcover_variables:
