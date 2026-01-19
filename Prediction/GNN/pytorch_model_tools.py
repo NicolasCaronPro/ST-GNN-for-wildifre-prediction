@@ -1,7 +1,6 @@
 from numpy import dtype
 import numpy as np
 import random
-from sympy import false
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
 import torch
@@ -2852,7 +2851,7 @@ class Training():
         check_and_create_path(self.dir_log)
 
         loss_params = {}
-        if self.loss in ['flwk']:
+        if 'fl' in self.loss: # Use focal loss
             if hasattr(self, "class_freq"):
                 loss_params = {'alpha' : self.class_freq}
             else:
@@ -2862,6 +2861,7 @@ class Training():
 
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
 
+        # Models that hanlde static and temporal features differently
         if self.model_name in ['SepGRUGNN']:
             if custom_model_params is None:
                 custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
@@ -2888,7 +2888,7 @@ class Training():
         val_loss_list = []
         train_loss_list = []
         epochs_list = []
-
+        
         #if (self.dir_log / 'best.pt').is_file():
         if False:
             self._load_model_from_path(self.dir_log / 'best.pt', self.model)

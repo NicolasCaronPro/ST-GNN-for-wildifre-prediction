@@ -1205,37 +1205,55 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
 
             # --- Étape 4 : applique les 4 encodeurs à TOUTES les variables
             encoders = {
-                "_ba": encoder_ba_calendar,
-                "_T": encoder_T_calendar,
-                "_R": encoder_R_calendar,
+                "ba": encoder_ba_calendar,
+                "T": encoder_T_calendar,
+                "R": encoder_R_calendar,
                 "": encoder_calendar,  # default : pas de suffixe dans le nom
             }
 
             for enc_tag, encoder in encoders.items():
 
-                # Encodage
-                calendar_encoded = encoder.transform(calendar_flat).values.reshape(n_date, -1)
+                print(enc_tag)
+
+                # --- Étape 4 : encodage
+                calendar_encoded = (
+                    encoder
+                    .transform(calendar_flat)
+                    .values
+                )
+
+                # Remplacement des NaN par 0
+                calendar_encoded = np.nan_to_num(calendar_encoded, nan=0.0)
+
+                # Reshape final
+                calendar_encoded = calendar_encoded.reshape(n_date, -1)
 
                 # Suffixe de nommage (pas de suffixe pour l'encodeur par défaut)
                 suffix = f"_{enc_tag}" if enc_tag else ""
 
                 # --- Étape 5 : injection variable par variable (avec suffixe)
                 for i, var in enumerate(calendar_vars_raw):
-                    datacube[f"{var}{suffix}"] = (("id", "date"), expand_to_2d(calendar_encoded[:, i]))
+                    datacube[f"{var}{suffix}"] = (
+                        ("id", "date"),
+                        expand_to_2d(calendar_encoded[:, i])
+                    )
 
                 # --- Étape 6 : features agrégées (par encodeur)
                 datacube[f"calendar_mean{suffix}"] = (
                     ("id", "date"),
                     expand_to_2d(np.round(np.mean(calendar_encoded, axis=1), 3))
                 )
+                
                 datacube[f"calendar_min{suffix}"] = (
                     ("id", "date"),
                     expand_to_2d(np.round(np.min(calendar_encoded, axis=1), 3))
                 )
+
                 datacube[f"calendar_max{suffix}"] = (
                     ("id", "date"),
                     expand_to_2d(np.round(np.max(calendar_encoded, axis=1), 3))
                 )
+
                 datacube[f"calendar_sum{suffix}"] = (
                     ("id", "date"),
                     expand_to_2d(np.round(np.sum(calendar_encoded, axis=1), 3))

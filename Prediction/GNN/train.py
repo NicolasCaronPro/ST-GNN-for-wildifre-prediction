@@ -2340,7 +2340,7 @@ def get_loss_function(loss_name, **loss_params):
             if key == 'id':
                 if val == 'departement':
                     loss_params[key] = departement_index
-                if val == 'cluster':
+                elif val == 'cluster':
                     loss_params[key] = cluster_encoder_index
                 elif val == 'node':
                     loss_params[key] = graph_id_index
@@ -2353,7 +2353,7 @@ def get_loss_function(loss_name, **loss_params):
                 elif val == 'area':
                     loss_params[key] = area_index
                 else:
-                    raise ValueError(f'Unknown value of id {key}')
+                    raise ValueError(f'Unknown value of id {val}')
             else:
                 loss_params[key] = val
 
@@ -2399,6 +2399,7 @@ def get_loss_function(loss_name, **loss_params):
             "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
             "flwk":                        lambda: FocalLossAndWKLoss(**loss_params),
             "fl":                          lambda: FocalLoss(**loss_params),
+            "flwki":                          lambda: FocalWKInversionLoss(**loss_params),
         }
 
     try:
