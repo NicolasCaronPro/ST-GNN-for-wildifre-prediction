@@ -5392,7 +5392,9 @@ def get_static_temporal_idx(features):
             static_idx.append(i)
             continue
         
-        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' in fet or fet in calendar_variables or 'AutoRegression' in fet or fet in air_variables:
+        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' \
+        in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' \
+        in fet or 'calendar' in fet or 'AutoRegression' in fet or fet in air_variables:
             temporal_idx.append(i)
             continue
         
