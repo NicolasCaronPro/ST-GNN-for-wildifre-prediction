@@ -226,7 +226,7 @@ def main():
             val_dataset['ressource'] = 0
             test_dataset['ressource'] = 0
 
-        if 'burnedareaRoot-egpd-5-Class-Dept' not in train_dataset.columns:
+        if 'nbsinister-quantile-5-Class-Dept' not in train_dataset.columns:
         #if False:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
@@ -336,7 +336,7 @@ def main():
     stat_model_names = []
 
     for i, m in enumerate(cfg.get("models", [])):
-
+        
         #features_name = remove_correlated_feature(train_dataset, cfg.scale, features_selected, name_exp, graphScale, dir_output, logger, METHODS_SPATIAL_TRAIN)
 
         if m.get("type") != "fwi":

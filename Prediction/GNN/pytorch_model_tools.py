@@ -2568,7 +2568,7 @@ class Training():
         graphs = None
 
         if inputs.shape[0] == 1:
-            return 0
+            return 0, 0
 
         band = -1
         
@@ -2628,7 +2628,12 @@ class Training():
             hidden_past.append(hidden)
             output_past.append(output)
             
-            loss = self.calculate_loss(criterion, logits, target, weights, labels)
+            loss_res = self.calculate_loss(criterion, logits, target, weights, labels)
+
+            if isinstance(loss_res, dict):
+                loss = loss_res['total_loss']
+            else:
+                loss = loss_res
             
             if self.student_train: # distallation traning
                 loss = self.model_distillation_loss(loss, inputs_horizon, labels, target, logits, hidden)
@@ -2693,7 +2698,7 @@ class Training():
             else:
                 total_loss += loss
 
-        return total_loss
+        return total_loss, loss_res
 
     def launch_train_loader(self, loader, criterion, optimizer, do_update):
 
@@ -2709,7 +2714,7 @@ class Training():
         
         for i, data in enumerate(loader, 0):
 
-            loss = self.launch_batch(data, criterion, 'train', do_update)
+            loss, loss_res = self.launch_batch(data, criterion, 'train', do_update)
 
             if isinstance(loss, int):
                 continue
@@ -2720,8 +2725,17 @@ class Training():
             
             if 'res_loss' in locals():
                 res_loss += loss.item()
+                if isinstance(loss_res, dict):
+                    for key in loss_res:
+                        if key in res_loss_dict:
+                            res_loss_dict[key] += loss_res[key]
+                        else:
+                            res_loss_dict[key] = loss_res[key]
+                else:
+                    res_loss_dict['l'] = loss_res
             else:
                 res_loss = loss.item()
+                res_loss_dict = {'l': loss_res}
 
             if self.ALATraining:
                 # Mises à jour SANS autograd
@@ -2767,7 +2781,7 @@ class Training():
             
             self.criterion_params.append(dict_params)
 
-        return res_loss
+        return res_loss, res_loss_dict
 
     def launch_val_test_loader(self, loader, criterion, teacher=None):
 
@@ -2778,12 +2792,25 @@ class Training():
 
         total_loss = 0.0
 
+        total_loss_dict = {}
+
         with torch.no_grad():
 
             for i, data in enumerate(loader, 0):
-                loss = self.launch_batch(data, criterion, 'val', do_update=False)
+                loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=False)
 
                 total_loss += loss.item()
+
+                if isinstance(loss_res, dict):
+                    for key in loss_res:
+                        if key not in total_loss_dict:
+                            total_loss_dict[key] = 0
+                        total_loss_dict[key] += loss_res[key].item()
+                else:
+                    if 'l' not in total_loss_dict:
+                        total_loss_dict['l'] = loss_res
+                    else:
+                        total_loss_dict['l'] += loss_res
             
         if 'learnable-area' in self.loss:
             if hasattr(self, 'area_parameters_log'):
@@ -2792,7 +2819,7 @@ class Training():
                 self.area_parameters_log = []
                 self.area_parameters_log.append(self.area_parameters)
 
-        return total_loss
+        return total_loss, total_loss_dict
     
     def make_model(self, graph, custom_model_params):
         model, params = make_model(self.model_name, len(self.features_name), len(self.features_name),
@@ -2810,14 +2837,15 @@ class Training():
 
     def func_epoch(self, train_loader, val_loader, optimizer, criterion, do_update):
 
-        train_loss = self.launch_train_loader(train_loader, criterion, optimizer, do_update)
+        train_loss, train_loss_dict = self.launch_train_loader(train_loader, criterion, optimizer, do_update)
 
         if val_loader is not None:
-            val_loss = self.launch_val_test_loader(val_loader, criterion)
+            val_loss, val_loss_dict = self.launch_val_test_loader(val_loader, criterion)
         else:
             val_loss = train_loss.item()
+            val_loss_dict = train_loss_dict
 
-        return val_loss, train_loss
+        return val_loss, train_loss, val_loss_dict, train_loss_dict
 
     def get_class_freq(self, df_train):
         uclass = np.sort(df_train[self.target_name].unique())
@@ -2860,18 +2888,16 @@ class Training():
         criterion = self.get_loss(self.loss, loss_params)
 
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+        
+        new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
 
-        # Models that hanlde static and temporal features differently
-        if self.model_name in ['SepGRUGNN']:
-            if custom_model_params is None:
-                custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
-            else:
-                custom_model_params.update({'static_idx': static_idx, 'temporal_idx' : temporal_idx})
-        elif self.model_name in ['TFN']:
-            if custom_model_params is None:
-                custom_model_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx, 'd_static' : len(static_idx)}
-            else:
-                custom_model_params.update({'static_idx': static_idx, 'temporal_idx' : temporal_idx})
+        if self.model_name == 'TFN':
+            new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx, 'd_static' : len(static_idx)}
+                
+        if custom_model_params is None:
+            custom_model_params = new_params
+        else:
+            custom_model_params.update(new_params)
 
         if new_model or self.model is None:
             self.model, _ = self.make_model(graph, custom_model_params)
@@ -2888,6 +2914,8 @@ class Training():
         val_loss_list = []
         train_loss_list = []
         epochs_list = []
+        val_loss_dict_list = []
+        train_loss_dict_list = []
         
         #if (self.dir_log / 'best.pt').is_file():
         if False:
@@ -2896,11 +2924,13 @@ class Training():
             for epoch in tqdm(range(epochs), disable=not verbose):
                 # Expose current epoch to subroutines for logging
                 self._current_epoch = epoch
-                val_loss, train_loss = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
+                val_loss, train_loss, val_loss_dict, train_loss_dict = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
                                                     optimizer=optimizer, criterion=criterion, do_update=epoch < min_epochs)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
+                val_loss_dict_list.append(val_loss_dict)
+                train_loss_dict_list.append(train_loss_dict)
                 epochs_list.append(epoch)
                 if val_loss < BEST_VAL_LOSS and epoch > min_epochs:
                     BEST_VAL_LOSS = val_loss
@@ -2928,12 +2958,24 @@ class Training():
             save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
             plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-        
+            try:
+                plot_train_val_loss(epochs_list, train_loss_dict_list, val_loss_dict_list, self.dir_log)
+            except:
+                pass
+
+        self.train_loss_dict_list = train_loss_dict_list
+        self.val_loss_dict_list = val_loss_dict_list
+        self.train_loss_list = train_loss_list
+        self.val_loss_list = val_loss_list
+        self.epochs_list = epochs_list
+
         self.best_epoch = best_epoch
         if best_epoch == 0:
-            print(val_loss)
-            print(train_loss)
+            print('WARNING: Best epoch is 0')
+            print('Val loss', val_loss)
+            print('Train loss', train_loss)
         logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
+
         ##################################### VAL #################################################
         test_output_, y_ = self._predict_test_loader(self.val_loader, output_pdf='test', calibrate=True)
         test_output_ = test_output_.detach().cpu().numpy()

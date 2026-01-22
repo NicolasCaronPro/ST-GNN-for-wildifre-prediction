@@ -2144,38 +2144,73 @@ def func_epoch(model, train_loader, val_loader, features,
     return val_loss, train_loss
 
 def plot_train_val_loss(epochs, train_loss_list, val_loss_list, dir_output):
-    # Création de la figure et des axes
-    plt.figure(figsize=(10, 6))
 
-    # Tracé de la courbe de val_loss
-    plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
+    if isinstance(train_loss_list[0], dict):
+        
+        keys = train_loss_list[0].keys()
+        
+        for key in keys:
 
-    # Ajout de la légende
-    plt.legend()
+            # Extraction des valeurs pour chaque epoch
+            train_values = [float(epoch_dict[key]) for epoch_dict in train_loss_list]
+            val_values = [float(epoch_dict[key]) for epoch_dict in val_loss_list]
 
-    # Ajout des labels des axes
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+            # ======================
+            # Validation Loss
+            # ======================
+            plt.figure(figsize=(10, 6))
+            plt.plot(epochs, val_values, label='Validation Loss', color='blue')
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.title(f'Validation Loss ({key}) over Epochs')
+            plt.legend()
+            plt.savefig(dir_output / f'{key}_Validation.png')
+            plt.close()
 
-    # Ajout d'un titre
-    plt.title('Validation Loss over Epochs')
-    plt.savefig(dir_output / 'Validation.png')
-    plt.close('all')
+            # ======================
+            # Training Loss
+            # ======================
+            plt.figure(figsize=(10, 6))
+            plt.plot(epochs, train_values, label='Training Loss', color='red')
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.title(f'Training Loss ({key}) over Epochs')
+            plt.legend()
+            plt.savefig(dir_output / f'{key}_Training.png')
+            plt.close()
+    else:
+        # Création de la figure et des axes
+        plt.figure(figsize=(10, 6))
 
-    # Tracé de la courbe de train_loss
-    plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
+        # Tracé de la courbe de val_loss
+        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
 
-    # Ajout de la légende
-    plt.legend()
+        # Ajout de la légende
+        plt.legend()
 
-    # Ajout des labels des axes
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
+        # Ajout des labels des axes
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
 
-    # Ajout d'un titre
-    plt.title('Training Loss over Epochs')
-    plt.savefig(dir_output / 'Training.png')
-    plt.close('all')
+        # Ajout d'un titre
+        plt.title('Validation Loss over Epochs')
+        plt.savefig(dir_output / 'Validation.png')
+        plt.close('all')
+
+        # Tracé de la courbe de train_loss
+        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
+
+        # Ajout de la légende
+        plt.legend()
+
+        # Ajout des labels des axes
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+
+        # Ajout d'un titre
+        plt.title('Training Loss over Epochs')
+        plt.savefig(dir_output / 'Training.png')
+        plt.close('all')
 
 def train(params):
     """

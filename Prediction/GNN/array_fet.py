@@ -41,7 +41,7 @@ landcover_variables = [
 
 cluster_encoder = ['cluster_encoder', 'cluster_encoder_BA', 'cluster_encoder_T', 'cluster_encoder_R', 'id_encoder', 'id_encoder_BA', 'id_encoder_T', 'id_encoder_R']
 
-calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend', 'couvrefeux', 'confinement',
+calendar_variables = ['month', 'dayofyear', 'dayofweek', 'isweekend',
                     'ramadan', 'bankHolidays', 'bankHolidaysEve', 'holidays', 'holidaysBorder',
                     'calendar_mean', 'calendar_min', 'calendar_max', 'calendar_sum']
 

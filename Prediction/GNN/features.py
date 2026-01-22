@@ -1162,13 +1162,13 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
                 'dayofyear': dates.dayofyear,
                 'dayofweek': dates.dayofweek,
                 'isweekend': (dates.dayofweek >= 5).astype(int),
-                'couvrefeux': np.array([pendant_couvrefeux(d) for d in dates], dtype=int),
-                'confinement': np.array([
-                    1 if (
-                        dt.datetime(2020, 3, 17, 12) <= d <= dt.datetime(2020, 5, 11)
-                        or dt.datetime(2020, 10, 30) <= d <= dt.datetime(2020, 12, 15)
-                    ) else 0 for d in dates
-                ], dtype=int),
+                #'couvrefeux': np.array([pendant_couvrefeux(d) for d in dates], dtype=int),
+                #'confinement': np.array([
+                #    1 if (
+                #        dt.datetime(2020, 3, 17, 12) <= d <= dt.datetime(2020, 5, 11)
+                #        or dt.datetime(2020, 10, 30) <= d <= dt.datetime(2020, 12, 15)
+                #    ) else 0 for d in dates
+                #], dtype=int),
                 'ramadan': np.array([
                     1 if convertdate.islamic.from_gregorian(d.year, d.month, d.day)[1] == 9 else 0 for d in dates
                 ], dtype=int),
@@ -1212,8 +1212,6 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
             }
 
             for enc_tag, encoder in encoders.items():
-
-                print(enc_tag)
 
                 # --- Étape 4 : encodage
                 calendar_encoded = (

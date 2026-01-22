@@ -1202,7 +1202,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     mask_unknowed_sample = (res[col_class_1] == 0) & (res[col_class_2] > 0)
     metrics['unknow_sample_proportion'] = y_true[mask_unknowed_sample].shape[0] / y_true.shape[0]
 
-    iou_dict = calculate_signal_scores(np.asarray(y_pred), y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
+    iou_dict = calculate_signal_scores(np.asarray(y_pred), y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values, res['departement'].values)
 
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
     for key, value in iou_dict.items():
@@ -1215,7 +1215,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         ):
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
-    iou_dict = calculate_signal_scores(y_pred, res[col_class_2].values, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
+    iou_dict = calculate_signal_scores(y_pred, res[col_class_2].values, res['nbsinister'].values, res['graph_id'].values, res['saison'].values, res['departement'].values)
     for key, value in iou_dict.items():
         metric_key = f'{key}_risk'  # Ajouter un suffixe basé sur col_for_dict
         metrics[metric_key] = round(value, 3)  # Ajouter au dictionnaire des métriques        
@@ -1225,7 +1225,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     y_pred_ez = np.copy(y_pred)
     y_pred_ez = np.round(y_pred_ez).astype(int)
     y_pred_ez[mask_unknowed_sample] = 0
-    iou_dict = calculate_signal_scores(y_pred_ez, y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values)
+    iou_dict = calculate_signal_scores(y_pred_ez, y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values, res['departement'].values)
 
     ####################################### Linear Fit Analysis ########################################
     try:
@@ -1578,7 +1578,7 @@ def test_sklearn_api_model(cfg,
             
         model_dir = dir_train / name_exp / Path('check_'+scaling + '/' + prefix_train + '/baseline/' + read_name + '/')
         model = read_object(read_name+'.pkl', model_dir)
-        quantile = name.find('quantile') != -1
+        quantile = False
 
         if model is None:
             continue
@@ -1669,9 +1669,8 @@ def test_sklearn_api_model(cfg,
         res['model'] = name
         save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name)
 
-        if not isinstance(model, ModelVoting): 
+        if not isinstance(model, ModelVoting) and 'best_tp' in model.metrics: 
             metrics[run].update(summarize_metrics_at_best_tp(model, run, metrics))
-            logger.info(f'Run metrics : {metrics}')
 
         #res_dept['model'] = name
 

@@ -3,7 +3,7 @@ from GNN.features_2D import *
 def encode_from_xarray(target, trainDates, expe, train_departements, dir_output, resolution, graph):
     check_and_create_path(dir_output)
     print(f'Create encoder for categorical features using {train_departements}, at expe {expe}')
-    stop_calendar = 11
+    stop_calendar = 9
     trainDate = np.asarray([allDates.index(date) for date in trainDates])
     foret = []
     cosia = []
@@ -104,18 +104,18 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
             calendar[i, 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday) # dayofyear
             calendar[i, 2] = ddate.weekday() # dayofweek
             calendar[i, 3] = ddate.weekday() >= 5 # isweekend
-            calendar[i, 4] = pendant_couvrefeux(ddate) # couvrefeux
+            #calendar[i, 4] = pendant_couvrefeux(ddate) # couvrefeux
 
-            calendar[i, 5] = 1 if (
-                dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
-                or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
-            ) else 0
+            #calendar[i, 5] = 1 if (
+            #    dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
+            #    or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
+            #) else 0
             
-            calendar[i, 6] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
-            calendar[i, 7] = 1 if ddate in jours_feries else 0 # bankHolidays
-            calendar[i, 8] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
-            calendar[i, 9] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 # holidays
-            calendar[i, 10] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 ) \
+            calendar[i, 4] = 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0 # ramadan
+            calendar[i, 5] = 1 if ddate in jours_feries else 0 # bankHolidays
+            calendar[i, 6] = 1 if ddate in veille_jours_feries else 0 # bankHolidaysEve
+            calendar[i, 7] = 1 if vacances_scolaire.is_holiday_for_zone(ddate.date(), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 # holidays
+            calendar[i, 8] = (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0 ) \
                 or (1 if vacances_scolaire.is_holiday_for_zone(ddate.date() - dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[dep])], ddate)) else 0) # holidaysBorder
             
             i += 1

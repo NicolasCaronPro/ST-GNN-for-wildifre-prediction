@@ -52,6 +52,53 @@ class KMeansRisk:
         kmeans_labels = self.model.predict(X)
         return np.vectorize(self.label_map.get)(kmeans_labels)
     
+class QuantileRiskZerosHandle:
+    """
+    Classe utilisant des quantiles pour identifier les classes de risque,
+    en traitant explicitement les zéros comme la classe 0.
+    """
+
+    def __init__(self, n_clusters, quantiles=(0.5, 0.8, 0.95)):
+        self.n_clusters = n_clusters - 1
+        self.quantiles = tuple(quantiles)
+        q_str = "_".join(str(q).replace(".", "") for q in self.quantiles)
+        self.name = f"QuantileRisk_{n_clusters}_{q_str}"
+        self.thresholds_ = None
+
+    def fit(self, X, y=None):
+        X = np.asarray(X).reshape(-1)
+        X_val = X[X > 0]
+
+        if np.unique(X_val).shape[0] == 0:
+            self.thresholds_ = None
+            return
+
+        q = self.quantiles
+        if self.n_clusters == 1:
+            q = (q[-1],)
+        elif self.n_clusters == 2:
+            q = (q[0], q[-1])
+        elif self.n_clusters >= 3:
+            q = q[:3]
+
+        self.thresholds_ = np.unique(np.quantile(X_val, q))
+
+    def predict(self, X):
+        X = np.asarray(X).reshape(-1)
+        res = np.zeros_like(X, dtype=float)
+
+        if self.thresholds_ is None or len(self.thresholds_) == 0:
+            return res.reshape(-1)
+
+        X_val = X[X > 0]
+        if X_val.size == 0:
+            return res.reshape(-1)
+
+        bins = np.concatenate(([0.0], self.thresholds_, [np.inf]))
+        res[X > 0] = np.digitize(X_val, bins, right=True)
+        return res.reshape(-1)
+
+    
 class KMeansRiskZerosHandle:
     """
     Classe utilisant KMeans pour identifier les classes de risque.
@@ -1217,10 +1264,11 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     evaluate = {'name' : [], 'spearman' : [], 'kendall' : [], 'pearson' : [], 'ss' : []}
     
-    classifier = ['egpd', 'kmeans', 'gm']
+    classifier = ['egpd', 'kmeans', 'gm', 'quantile']
     class_risk_dict = {'egpd' : eGPDRisk(),
                        'kmeans': KMeansRiskZerosHandle(n_clusters), 
-                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters)}
     
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}

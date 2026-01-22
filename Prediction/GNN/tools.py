@@ -36,7 +36,8 @@ if is_pc:
     from copy import copy, deepcopy
     from geocube.api.core import make_geocube
     from geocube.rasterize import rasterize_points_griddata
-    #from osgeo import gdal, ogr
+
+    # from osgeo import gdal, ogr
     from pathlib import Path
     from scipy import ndimage as ndi
     from scipy.interpolate import griddata
@@ -45,8 +46,20 @@ if is_pc:
     from skimage import img_as_float
     from skimage import measure, segmentation, morphology
     from skimage import transform
-    from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
+    from sklearn.metrics import (
+        f1_score,
+        recall_score,
+        precision_score,
+        accuracy_score,
+        balanced_accuracy_score,
+        mean_absolute_error,
+        precision_recall_curve,
+        roc_auc_score,
+        precision_score,
+        recall_score,
+        auc,
+        average_precision_score,
+    )
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from dtaidistance import dtw
@@ -54,10 +67,11 @@ if is_pc:
     from dtwParallel import dtw_functions
     from scipy.spatial import distance as d
     import cv2
+
     # Suppress FutureWarning messages
-    warnings.simplefilter(action='ignore', category=pd.errors.PerformanceWarning)
-    warnings.simplefilter(action='ignore', category=UserWarning)
-    warnings.simplefilter(action='ignore', category=pd.errors.SettingWithCopyWarning)
+    warnings.simplefilter(action="ignore", category=pd.errors.PerformanceWarning)
+    warnings.simplefilter(action="ignore", category=UserWarning)
+    warnings.simplefilter(action="ignore", category=pd.errors.SettingWithCopyWarning)
 else:
     import datetime as dt
     import geopandas as gpd
@@ -65,15 +79,18 @@ else:
     from matplotlib.dates import datestr2num
     import matplotlib.pyplot as plt
     import numpy as np
-    #import osmnx as ox
+
+    # import osmnx as ox
     import pickle
-    #import plotly.express as px
-    #import plotly.io as pio
+
+    # import plotly.express as px
+    # import plotly.io as pio
     import random
-    #import rasterio
-    #import rasterio.features
-    #import rasterio.warp
-    #from regex import D
+
+    # import rasterio
+    # import rasterio.features
+    # import rasterio.warp
+    # from regex import D
     import scipy.interpolate
     import scipy.stats
     import sys
@@ -83,11 +100,13 @@ else:
     from category_encoders import TargetEncoder, CatBoostEncoder
     from collections import Counter
     from copy import copy
-    #from geocube.api.core import make_geocube
-    #from geocube.rasterize import rasterize_points_griddata
+
+    # from geocube.api.core import make_geocube
+    # from geocube.rasterize import rasterize_points_griddata
     from GNN.config import *
     from lifelines.utils import concordance_index
-    #from osgeo import gdal, ogr
+
+    # from osgeo import gdal, ogr
     from pathlib import Path
     from scipy import ndimage as ndi
     from scipy.interpolate import griddata
@@ -96,8 +115,20 @@ else:
     from skimage import img_as_float
     from skimage import measure, segmentation, morphology
     from skimage import transform
-    from sklearn.metrics import f1_score, recall_score, precision_score, accuracy_score, balanced_accuracy_score, \
-        mean_absolute_error, precision_recall_curve, roc_auc_score, precision_score, recall_score, auc, average_precision_score
+    from sklearn.metrics import (
+        f1_score,
+        recall_score,
+        precision_score,
+        accuracy_score,
+        balanced_accuracy_score,
+        mean_absolute_error,
+        precision_recall_curve,
+        roc_auc_score,
+        precision_score,
+        recall_score,
+        auc,
+        average_precision_score,
+    )
     from sklearn.preprocessing import RobustScaler, MinMaxScaler, StandardScaler
     from sklearn.preprocessing import normalize
     from sklearn.svm import SVR
@@ -110,20 +141,24 @@ else:
 
 random.seed(42)
 
+
 def create_larger_scale_image(input, proba, bin, raster):
     probaImageScale = np.full(proba.shape, np.nan)
     binImageScale = np.full(proba.shape, np.nan)
-    
+
     clusterID = np.unique(input)
     for di in range(bin.shape[-1]):
         for id in clusterID:
             mask = np.argwhere(input == id)
-            ones = np.ones(proba[mask[:,0], mask[:,1], di].shape)
-            probaImageScale[mask[:,0], mask[:,1], di] = 1 - np.prod(ones - proba[mask[:,0], mask[:,1], di])
-            unique_ids_in_mask = np.unique(raster[bin[mask[:,0], mask[:,1], di]])
-            binImageScale[mask[:,0], mask[:,1], di] = np.sum()
+            ones = np.ones(proba[mask[:, 0], mask[:, 1], di].shape)
+            probaImageScale[mask[:, 0], mask[:, 1], di] = 1 - np.prod(
+                ones - proba[mask[:, 0], mask[:, 1], di]
+            )
+            unique_ids_in_mask = np.unique(raster[bin[mask[:, 0], mask[:, 1], di]])
+            binImageScale[mask[:, 0], mask[:, 1], di] = np.sum()
 
     return None, binImageScale
+
 
 """def create_larger_scale_bin(input, bin, influence, raster):
     binImageScale = np.full(bin.shape, np.nan)
@@ -152,18 +187,19 @@ def create_larger_scale_image(input, proba, bin, raster):
 
     return binImageScale, influenceImageScale"""
 
+
 def create_larger_scale_bin(input, bin, influence, time, burned, res):
     binImageScale = np.full(bin.shape, np.nan)
     influenceImageScale = np.full(influence.shape, np.nan)
     timeScale = np.full(influence.shape, np.nan)
     burnedScale = np.full(influence.shape, np.nan)
     resScale = np.full(influence.shape, np.nan)
-    
+
     clusterID = np.unique(input)
 
     for di in range(bin.shape[-1]):
         for id in clusterID:
-            mask = (input == id)
+            mask = input == id
             if np.any(bin[mask, di] > 0):
                 binImageScale[mask, di] = np.nansum(bin[mask, di])
                 influenceImageScale[mask, di] = np.nansum(influence[mask, di])
@@ -179,17 +215,19 @@ def create_larger_scale_bin(input, bin, influence, time, burned, res):
 
     return binImageScale, influenceImageScale, timeScale, burnedScale, resScale
 
+
 def find_dates_between(start, end):
-    start_date = dt.datetime.strptime(start, '%Y-%m-%d').date()
-    end_date = dt.datetime.strptime(end, '%Y-%m-%d').date()
+    start_date = dt.datetime.strptime(start, "%Y-%m-%d").date()
+    end_date = dt.datetime.strptime(end, "%Y-%m-%d").date()
 
     delta = dt.timedelta(days=1)
     date = start_date
     res = []
     while date < end_date:
-            res.append(date.strftime("%Y-%m-%d"))
-            date += delta
+        res.append(date.strftime("%Y-%m-%d"))
+        date += delta
     return res
+
 
 def defines_train_dates(cfg):
     """Return train/val/test dates based on years provided in the config."""
@@ -200,7 +238,7 @@ def defines_train_dates(cfg):
             start = f"{y}-01-01"
             end = f"{y}-12-31"
             if y == 2017:
-                start = '2017-06-12'
+                start = "2017-06-12"
             dates += find_dates_between(start, end)
         return dates
 
@@ -210,73 +248,80 @@ def defines_train_dates(cfg):
 
     return all_train_dates, all_val_dates, all_test_dates
 
+
 def defines_train_dates_from_exp(expe):
     """Backward compatible behaviour based on experiment name."""
-    if 'normal' in expe or 'voting' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
-        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'year-1' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2017-12-31')
-        all_val_dates = find_dates_between('2018-01-01', '2018-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'year-2' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2018-12-31')
-        all_val_dates = find_dates_between('2019-01-01', '2019-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'year-3' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2019-12-31')
-        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'year-4' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
-        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'year-5' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
-        all_val_dates = find_dates_between('2022-01-01', '2022-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif '2022' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2021-12-31')
-        all_val_dates = find_dates_between('2023-01-01', '2024-06-29')
-        all_test_dates = find_dates_between('2022-01-01', '2022-12-31')
-    elif 'no2022' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
-        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
-    elif 'default' in expe:
-        all_train_dates = find_dates_between('2017-06-12', '2020-12-31')
-        all_train_dates += find_dates_between('2022-01-01', '2022-12-31')
-        all_val_dates = find_dates_between('2021-01-01', '2021-12-31')
-        all_test_dates = find_dates_between('2023-01-01', '2024-06-29')
+    if "normal" in expe or "voting" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2021-12-31")
+        all_val_dates = find_dates_between("2022-01-01", "2022-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "year-1" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2017-12-31")
+        all_val_dates = find_dates_between("2018-01-01", "2018-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "year-2" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2018-12-31")
+        all_val_dates = find_dates_between("2019-01-01", "2019-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "year-3" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2019-12-31")
+        all_val_dates = find_dates_between("2021-01-01", "2021-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "year-4" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2020-12-31")
+        all_val_dates = find_dates_between("2022-01-01", "2022-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "year-5" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2021-12-31")
+        all_val_dates = find_dates_between("2022-01-01", "2022-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "2022" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2021-12-31")
+        all_val_dates = find_dates_between("2023-01-01", "2024-06-29")
+        all_test_dates = find_dates_between("2022-01-01", "2022-12-31")
+    elif "no2022" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2020-12-31")
+        all_val_dates = find_dates_between("2021-01-01", "2021-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
+    elif "default" in expe:
+        all_train_dates = find_dates_between("2017-06-12", "2020-12-31")
+        all_train_dates += find_dates_between("2022-01-01", "2022-12-31")
+        all_val_dates = find_dates_between("2021-01-01", "2021-12-31")
+        all_test_dates = find_dates_between("2023-01-01", "2024-06-29")
     else:
         all_train_dates = []
         all_val_dates = []
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-allDates = find_dates_between('2017-06-12', '2025-01-01')
 
-years = list(np.unique([d.split('-')[0] for d in allDates]))
+allDates = find_dates_between("2017-06-12", "2025-01-01")
 
-def save_object(obj, filename: str, path : Path):
+years = list(np.unique([d.split("-")[0] for d in allDates]))
+
+
+def save_object(obj, filename: str, path: Path):
     check_and_create_path(path)
-    with open(path / filename, 'wb') as outp:  # Overwrites any existing file.
+    with open(path / filename, "wb") as outp:  # Overwrites any existing file.
         pickle.dump(obj, outp, pickle.HIGHEST_PROTOCOL)
 
-def save_object_torch(obj, filename : str, path : Path):
+
+def save_object_torch(obj, filename: str, path: Path):
     check_and_create_path(path)
-    torch.save(obj, path/filename)
+    torch.save(obj, path / filename)
 
-def read_object(filename: str, path : Path):
+
+def read_object(filename: str, path: Path):
     if not (path / filename).is_file():
-        logger.info(f'{path / filename} not found')
+        logger.info(f"{path / filename} not found")
         return None
-    return pickle.load(open(path / filename, 'rb'))
+    return pickle.load(open(path / filename, "rb"))
 
-def read_object_torch(filename: str, path : Path):
-    return torch.load(open(path / filename, 'rb'))
-        
+
+def read_object_torch(filename: str, path: Path):
+    return torch.load(open(path / filename, "rb"))
+
+
 def check_and_create_path(path: Path):
     """
     Creer un dossier s'il n'existe pas
@@ -288,8 +333,10 @@ def check_and_create_path(path: Path):
     if not path.exists():
         path.touch()
 
-def haversine(p1, p2, unit = 'kilometer'):
+
+def haversine(p1, p2, unit="kilometer"):
     import math
+
     # Coordinates in decimal degrees (e.g. 2.89078, 12.79797)
     lon1 = p1[0]
     lat1 = p1[1]
@@ -303,7 +350,10 @@ def haversine(p1, p2, unit = 'kilometer'):
     delta_phi = math.radians(lat2 - lat1)
     delta_lambda = math.radians(lon2 - lon1)
 
-    a = math.sin(delta_phi / 2.0) ** 2 + math.cos(phi_1) * math.cos(phi_2) * math.sin(delta_lambda / 2.0) ** 2
+    a = (
+        math.sin(delta_phi / 2.0) ** 2
+        + math.cos(phi_1) * math.cos(phi_2) * math.sin(delta_lambda / 2.0) ** 2
+    )
 
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
@@ -312,12 +362,13 @@ def haversine(p1, p2, unit = 'kilometer'):
     meters = round(meters)
     km = round(km, 3)
 
-    if unit == 'kilometer':
+    if unit == "kilometer":
         return km
-    elif unit == 'meters':
+    elif unit == "meters":
         return meters
     else:
         return math.inf
+
 
 def read_tif(name):
     """
@@ -334,18 +385,29 @@ def read_tif(name):
         src.close()
     return dt, lons, lats
 
+
 def funcSlope(e1, e2, p1, p2):
     distance = haversine(p1, p2) * 1000
     return ((e1 - e2) * 100) / distance
 
-def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution_lon=0.0002694945852352859, resolution_lat=0.0002694945852326214):
+
+def myFunctionDistanceDugrandCercle(
+    outputShape,
+    earth_radius=6371.0,
+    resolution_lon=0.0002694945852352859,
+    resolution_lat=0.0002694945852326214,
+):
     half_rows = outputShape[0] // 2
     half_cols = outputShape[1] // 2
 
     # Créer une grille de coordonnées géographiques avec les résolutions souhaitées
-    latitudes = np.linspace(-half_rows * resolution_lat, half_rows * resolution_lat, outputShape[0])
-    longitudes = np.linspace(-half_cols * resolution_lon, half_cols * resolution_lon, outputShape[1])
-    latitudes, longitudes = np.meshgrid(latitudes, longitudes, indexing='ij')
+    latitudes = np.linspace(
+        -half_rows * resolution_lat, half_rows * resolution_lat, outputShape[0]
+    )
+    longitudes = np.linspace(
+        -half_cols * resolution_lon, half_cols * resolution_lon, outputShape[1]
+    )
+    latitudes, longitudes = np.meshgrid(latitudes, longitudes, indexing="ij")
 
     # Coordonnées du point central
     center_lat = latitudes[outputShape[0] // 2, outputShape[1] // 2]
@@ -359,26 +421,40 @@ def myFunctionDistanceDugrandCercle(outputShape, earth_radius=6371.0, resolution
     # Calculer la distance du grand cercle entre chaque point et le point central
     delta_lon = longitudes_rad - np.radians(center_lon)
     delta_lat = latitudes_rad - np.radians(center_lat)
-    a = np.sin(delta_lat/2)**2 + np.cos(latitudes_rad) * np.cos(np.radians(center_lat)) * np.sin(delta_lon/2)**2
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1-a))
+    a = (
+        np.sin(delta_lat / 2) ** 2
+        + np.cos(latitudes_rad)
+        * np.cos(np.radians(center_lat))
+        * np.sin(delta_lon / 2) ** 2
+    )
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
     distances = earth_radius * c
 
     return distances
 
-def influence_index(raster, mask, dimS, mode, dim=(90,150)):
+
+def influence_index(raster, mask, dimS, mode, dim=(90, 150)):
 
     res = {}
     dimX, dimY = dimS
     res = np.full(raster.shape, np.nan)
-    if mode == 'laplace':
-        kernel = myFunctionDistanceDugrandCercle(dim, resolution_lon=dimY, resolution_lat=dimX) + 1
+    if mode == "laplace":
+        kernel = (
+            myFunctionDistanceDugrandCercle(
+                dim, resolution_lon=dimY, resolution_lat=dimX
+            )
+            + 1
+        )
         kernel = 1 / kernel
-        kernel = normalize(kernel, norm='l2')
+        kernel = normalize(kernel, norm="l2")
     else:
-        kernel = np.full(dim, 1/(dim[0]*dim[1]), dtype=float)
+        kernel = np.full(dim, 1 / (dim[0] * dim[1]), dtype=float)
 
-    res[mask[:,0], mask[:,1]] = (scipy_fft_conv(raster, kernel, mode='same')[mask[:,0], mask[:,1]])
+    res[mask[:, 0], mask[:, 1]] = scipy_fft_conv(raster, kernel, mode="same")[
+        mask[:, 0], mask[:, 1]
+    ]
     return res
+
 
 def stat(c1, c2, clustered, osmnx, bands):
     mask1 = clustered == c1
@@ -402,13 +478,13 @@ def stat(c1, c2, clustered, osmnx, bands):
 
     if box.shape[0] == 0:
         return np.zeros(len(bands))
- 
-    indexXmin = np.argwhere(mask13 == 1)[:,0].min()
-    indexXmax = np.argwhere(mask13 == 1)[:,0].max()
-    indexYmin = np.argwhere(mask13 == 1)[:,1].min()
-    indexYmax = np.argwhere(mask13 == 1)[:,1].max()
 
-    cropOsmnx = osmnx[indexXmin: indexXmax, indexYmin:indexYmax].astype(int)
+    indexXmin = np.argwhere(mask13 == 1)[:, 0].min()
+    indexXmax = np.argwhere(mask13 == 1)[:, 0].max()
+    indexYmin = np.argwhere(mask13 == 1)[:, 1].min()
+    indexYmax = np.argwhere(mask13 == 1)[:, 1].max()
+
+    cropOsmnx = osmnx[indexXmin:indexXmax, indexYmin:indexYmax].astype(int)
 
     res = []
 
@@ -417,15 +493,19 @@ def stat(c1, c2, clustered, osmnx, bands):
         res.append(val)
     return np.asarray(res)
 
-def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal = np.nan):
+
+def rasterization(
+    ori, lats, longs, column, dir_output, outputname="ori", defVal=np.nan
+):
     from osgeo import gdal, ogr
+
     check_and_create_path(dir_output)
 
-    ori.to_file(dir_output.as_posix() + '/' + outputname+'.geojson', driver="GeoJSON")
-    
+    ori.to_file(dir_output.as_posix() + "/" + outputname + ".geojson", driver="GeoJSON")
+
     # paths du geojson d'entree et du raster tif de sortie
-    input_geojson = dir_output.as_posix() + '/' + outputname+'.geojson'
-    output_raster = dir_output.as_posix() + '/' + outputname+'.tif'
+    input_geojson = dir_output.as_posix() + "/" + outputname + ".geojson"
+    output_raster = dir_output.as_posix() + "/" + outputname + ".tif"
 
     # Si on veut rasteriser en fonction de la valeur d'un attribut du vecteur, mettre son nom ici
     attribute_name = column
@@ -437,10 +517,10 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     else:
         pixel_size_x = abs(longs[0][0] - longs[0][1])
         pixel_size_y = abs(lats[0][0] - lats[1][0])
-        logger.info(f'px {pixel_size_x}, py {pixel_size_y}')
-        
+        logger.info(f"px {pixel_size_x}, py {pixel_size_y}")
+
     source_ds = ogr.Open(input_geojson)
- 
+
     source_layer = source_ds.GetLayer()
 
     # On obtient l'étendue du raster
@@ -449,18 +529,20 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     # On calcule le nombre de pixels
     width = int((x_max - x_min) / pixel_size_x)
     height = int((y_max - y_min) / pixel_size_y)
-    
+
     # Oncrée un nouveau raster dataset et on passe de "coordonnées image" (pixels) à des coordonnées goréférencées
-    driver = gdal.GetDriverByName('GTiff')
+    driver = gdal.GetDriverByName("GTiff")
     output_ds = driver.Create(output_raster, width, height, 1, gdal.GDT_Float32)
     output_ds.GetRasterBand(1).Fill(defVal)
     output_ds.SetGeoTransform([x_min, pixel_size_x, 0, y_max, 0, -pixel_size_y])
     output_ds.SetProjection(source_layer.GetSpatialRef().ExportToWkt())
 
-    if attribute_name != '' :
+    if attribute_name != "":
         # On  rasterise en fonction de l'attribut donné
-        gdal.RasterizeLayer(output_ds, [1], source_layer, options=["ATTRIBUTE=" + attribute_name])
-    else :
+        gdal.RasterizeLayer(
+            output_ds, [1], source_layer, options=["ATTRIBUTE=" + attribute_name]
+        )
+    else:
         # On  rasterise. Le raster prend la valeur 1 là où il y a un vecteur
         gdal.RasterizeLayer(output_ds, [1], source_layer)
 
@@ -468,8 +550,10 @@ def rasterization(ori, lats, longs, column, dir_output, outputname='ori', defVal
     source_ds = None
     return read_tif(output_raster)
 
+
 import pandas as pd
 import numpy as np
+
 
 def remove_nan_nodes_np(arr: np.array, target: np.array) -> np.ndarray:
     """
@@ -478,6 +562,7 @@ def remove_nan_nodes_np(arr: np.array, target: np.array) -> np.ndarray:
     if target is None:
         return arr[~np.isnan(arr).any(axis=1)], None
     return arr[~np.isnan(arr).any(axis=1)], target[~np.isnan(arr).any(axis=1)]
+
 
 def remove_none_target_np(arr: np.array, target: int) -> np.ndarray:
     """
@@ -488,6 +573,7 @@ def remove_none_target_np(arr: np.array, target: int) -> np.ndarray:
     if arr is None:
         return None, target[mask]
     return arr[mask], target[mask]
+
 
 def remove_nan_nodes(df: pd.DataFrame, features_name: list) -> pd.DataFrame:
     """
@@ -509,26 +595,32 @@ def remove_nan_nodes(df: pd.DataFrame, features_name: list) -> pd.DataFrame:
 
     # Supprimer les lignes contenant des NaN et réinitialiser les index
     cleaned_df = df.dropna(subset=features_name).reset_index(drop=True)
-    
+
     return cleaned_df
+
 
 def remove_none_target(df: pd.DataFrame) -> pd.DataFrame:
     """
     Remove rows where the target column has -1 or NaN values.
     """
-    return df[(df['nbsinister'] != -1) & (~df['nbsinister'].isna())].reset_index(drop=True)
+    return df[(df["nbsinister"] != -1) & (~df["nbsinister"].isna())].reset_index(
+        drop=True
+    )
 
-def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list, ks : int) -> pd.DataFrame:
+
+def remove_bad_period(
+    df: pd.DataFrame, period2ignore: dict, departements: list, ks: int
+) -> pd.DataFrame:
     global allDates, name2int
 
     bad_dates = np.array([], dtype=int)
     zeros_dates = np.array([], dtype=int)
     for dept in departements:
-        period = period2ignore[name2int[dept]]['interventions']
+        period = period2ignore[name2int[dept]]["interventions"]
         if period != []:
             for per in period:
-                ds = per[0].strftime('%Y-%m-%d')
-                de = per[1].strftime('%Y-%m-%d')
+                ds = per[0].strftime("%Y-%m-%d")
+                de = per[1].strftime("%Y-%m-%d")
 
                 if ds < allDates[0]:
                     ds = allDates[0]
@@ -540,88 +632,128 @@ def remove_bad_period(df: pd.DataFrame, period2ignore: dict, departements: list,
 
                 ds_idx = allDates.index(ds) - ks
                 de_idx = allDates.index(de) - ks
-                bad_dates = np.concatenate((bad_dates, np.arange(start=ds_idx, stop=de_idx)))
-                zeros_dates = np.concatenate((zeros_dates , np.arange(start=de_idx, stop=de_idx + ks)))
-                zeros_dates = np.concatenate((zeros_dates , np.arange(start=ds_idx, stop=ds_idx + ks)))
+                bad_dates = np.concatenate(
+                    (bad_dates, np.arange(start=ds_idx, stop=de_idx))
+                )
+                zeros_dates = np.concatenate(
+                    (zeros_dates, np.arange(start=de_idx, stop=de_idx + ks))
+                )
+                zeros_dates = np.concatenate(
+                    (zeros_dates, np.arange(start=ds_idx, stop=ds_idx + ks))
+                )
 
     for dept in departements:
-        df = df[~((df['departement'] == name2int[dept]) & (df['date'].isin(bad_dates)))]
-        df.loc[df[(df['departement'] == name2int[dept]) & (df['date'].isin(zeros_dates))].index, weights_columns] = 0
+        df = df[~((df["departement"] == name2int[dept]) & (df["date"].isin(bad_dates)))]
+        df.loc[
+            df[
+                (df["departement"] == name2int[dept]) & (df["date"].isin(zeros_dates))
+            ].index,
+            weights_columns,
+        ] = 0
 
     return df.reset_index(drop=True)
 
-def remove_non_fire_season(df: pd.DataFrame, SAISON_FEUX: dict, departements: list, ks : int) -> pd.DataFrame:
+
+def remove_non_fire_season(
+    df: pd.DataFrame, SAISON_FEUX: dict, departements: list, ks: int
+) -> pd.DataFrame:
     global allDates, name2int, years
 
     valid_indices = np.array([], dtype=int)
     zeros_dates = np.array([], dtype=int)
     for dept in departements:
-        jour_debut = SAISON_FEUX[name2int[dept]]['jour_debut']
-        mois_debut = SAISON_FEUX[name2int[dept]]['mois_debut']
-        jour_fin = SAISON_FEUX[name2int[dept]]['jour_fin']
-        mois_fin = SAISON_FEUX[name2int[dept]]['mois_fin']
+        jour_debut = SAISON_FEUX[name2int[dept]]["jour_debut"]
+        mois_debut = SAISON_FEUX[name2int[dept]]["mois_debut"]
+        jour_fin = SAISON_FEUX[name2int[dept]]["jour_fin"]
+        mois_fin = SAISON_FEUX[name2int[dept]]["mois_fin"]
 
         for year in years:
-            date_debut = f'{year}-{mois_debut}-{jour_debut}'
-            date_fin = f'{year}-{mois_fin}-{jour_fin}'
+            date_debut = f"{year}-{mois_debut}-{jour_debut}"
+            date_fin = f"{year}-{mois_fin}-{jour_fin}"
 
             if date_debut < allDates[0]:
                 date_debut = allDates[0]
             if date_fin > allDates[-1]:
                 date_fin = allDates[-1]
-                
+
             if date_debut not in allDates or date_fin not in allDates:
                 continue
-            
+
             start_idx = allDates.index(date_debut) - ks
             end_idx = allDates.index(date_fin) - ks
 
-            valid_indices = np.concatenate((valid_indices, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx) & (df['date'] < end_idx)].index))
-            #zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= end_idx) & (df['date'] < end_idx + ks)].index))
-            zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= start_idx - ks) & (df['date'] < start_idx)].index))
+            valid_indices = np.concatenate(
+                (
+                    valid_indices,
+                    df[
+                        (df["departement"] == name2int[dept])
+                        & (df["date"] >= start_idx)
+                        & (df["date"] < end_idx)
+                    ].index,
+                )
+            )
+            # zeros_dates = np.concatenate((zeros_dates, df[(df['departement'] == name2int[dept]) & (df['date'] >= end_idx) & (df['date'] < end_idx + ks)].index))
+            zeros_dates = np.concatenate(
+                (
+                    zeros_dates,
+                    df[
+                        (df["departement"] == name2int[dept])
+                        & (df["date"] >= start_idx - ks)
+                        & (df["date"] < start_idx)
+                    ].index,
+                )
+            )
 
-    df.loc[zeros_dates, 'weight'] = 0
-    #df = df.loc[valid_indices]
+    df.loc[zeros_dates, "weight"] = 0
+    # df = df.loc[valid_indices]
 
     return df.reset_index(drop=True)
 
+
 def add_k_temporal_node(k_days: int, nodes: np.array) -> np.array:
 
-    logger.info(f'Add {k_days} temporal nodes')
+    logger.info(f"Add {k_days} temporal nodes")
 
     ori = np.empty((nodes.shape[0], 2))
-    ori[:,0] = nodes[:,id_index]
-    ori[:,1] = nodes[:,date_index]
+    ori[:, 0] = nodes[:, id_index]
+    ori[:, 1] = nodes[:, date_index]
 
     newSubNode = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
-    newSubNode[:,:nodes.shape[1]] = nodes
+    newSubNode[:, : nodes.shape[1]] = nodes
 
     if k_days == 0:
         return newSubNode
 
     array = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
-    array[:,:nodes.shape[1]] = nodes
-    for k in range(1, k_days+1):
-        array[:,date_index] = nodes[:,date_index] - k
+    array[:, : nodes.shape[1]] = nodes
+    for k in range(1, k_days + 1):
+        array[:, date_index] = nodes[:, date_index] - k
         newSubNode = np.concatenate((newSubNode, array))
 
-    indexToDel = np.argwhere(newSubNode[:,date_index] < 0)
+    indexToDel = np.argwhere(newSubNode[:, date_index] < 0)
     newSubNode = np.delete(newSubNode, indexToDel, axis=0)
 
     return np.unique(newSubNode, axis=0)
 
-def add_new_random_nodes_from_nei(nei : np.array,
-                  newSubNode : np.array,
-                  node : np.array,
-                  minNumber : int,
-                  maxNumber : int,
-                  graph_nodes : np.array,
-                  nodes : np.array):
-           
-    maskNode = np.argwhere((np.isin(newSubNode[:,id_index], nei)) & (newSubNode[:,4] == node[date_index]))
+
+def add_new_random_nodes_from_nei(
+    nei: np.array,
+    newSubNode: np.array,
+    node: np.array,
+    minNumber: int,
+    maxNumber: int,
+    graph_nodes: np.array,
+    nodes: np.array,
+):
+
+    maskNode = np.argwhere(
+        (np.isin(newSubNode[:, id_index], nei)) & (newSubNode[:, 4] == node[date_index])
+    )
     # Check for current nei in dataset
     if maskNode.shape[0] > 0:
-        nei = np.delete(nei, np.argwhere(np.isin(nei, newSubNode[maskNode][:, id_index])))
+        nei = np.delete(
+            nei, np.argwhere(np.isin(nei, newSubNode[maskNode][:, id_index]))
+        )
 
     maxNumber = min(nei.shape[0], maxNumber)
     minNumber = min(nei.shape[0], minNumber)
@@ -634,35 +766,41 @@ def add_new_random_nodes_from_nei(nei : np.array,
 
     nei = np.random.choice(nei, number_of_new_nodes, replace=False)
     new_nodes = np.full((number_of_new_nodes, nodes.shape[1]), -1.0)
-    new_nodes[:,:weight_index] = graph_nodes[np.isin(graph_nodes[:,0], nei)]
-    new_nodes[:,date_index] = node[date_index]
+    new_nodes[:, :weight_index] = graph_nodes[np.isin(graph_nodes[:, 0], nei)]
+    new_nodes[:, date_index] = node[date_index]
 
     newSubNode = np.concatenate((newSubNode, new_nodes))
     return newSubNode
 
-def generate_subgraph(graph, minNumber : int, maxNumber : int, nodes : np.array) -> np.array:
-        """
-        Generate a sub graph dataset from the corresponding nodes using self.edges. 
-        nodes is a numpy array [id, lat, lon, dep, date]
-        output a numpy arrat [id, lat, lon, dep, date, graphId] with graphId a unique ID for each graph.
-        """
-        assert maxNumber <= graph.numNei
-        if maxNumber == 0:
-            return nodes
 
-        logger.info('Generate sub graph')
-        newSubNode = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
-        newSubNode[:,:5] = nodes
+def generate_subgraph(
+    graph, minNumber: int, maxNumber: int, nodes: np.array
+) -> np.array:
+    """
+    Generate a sub graph dataset from the corresponding nodes using self.edges.
+    nodes is a numpy array [id, lat, lon, dep, date]
+    output a numpy arrat [id, lat, lon, dep, date, graphId] with graphId a unique ID for each graph.
+    """
+    assert maxNumber <= graph.numNei
+    if maxNumber == 0:
+        return nodes
 
-        for i, node in enumerate(nodes):
-            nei = graph.edges[1][np.argwhere(graph.edges[0] == node[0])].reshape(-1)
-            if nei.shape[0] != 0:
-                if maxNumber != 0:
-                    newSubNode = add_new_random_nodes_from_nei(nei, newSubNode, node, minNumber, maxNumber, graph.nodes, nodes)
-                    
-        return newSubNode
+    logger.info("Generate sub graph")
+    newSubNode = np.full((nodes.shape[0], nodes.shape[1]), -1, dtype=nodes.dtype)
+    newSubNode[:, :5] = nodes
 
-def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int):
+    for i, node in enumerate(nodes):
+        nei = graph.edges[1][np.argwhere(graph.edges[0] == node[0])].reshape(-1)
+        if nei.shape[0] != 0:
+            if maxNumber != 0:
+                newSubNode = add_new_random_nodes_from_nei(
+                    nei, newSubNode, node, minNumber, maxNumber, graph.nodes, nodes
+                )
+
+    return newSubNode
+
+
+def construct_graph_set(graph, date, X, Y, ks, horizon: int, start_features: int):
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and temporal edges
@@ -672,14 +810,23 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
     ks : size of the time series
     """
 
-    mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    mask = np.argwhere((X[:, date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     x = X[mask]
     node_with_weight = np.unique(x[:, id_index])
 
     connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
 
     if ks != 0:
-        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+        maskts = np.argwhere(
+            (
+                (
+                    np.isin(X[:, id_index], x[:, id_index])
+                    | np.isin(X[:, id_index], connection)
+                )
+                & (X[:, date_index] <= date)
+                & (X[:, date_index] >= date - ks)
+            )
+        )[:, 0]
         if maskts.shape[0] == 0:
             return None, None, None
         xts = X[maskts]
@@ -696,7 +843,16 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
         y = None
 
     if horizon != 0:
-        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
+        maskts = np.argwhere(
+            (
+                (
+                    np.isin(X[:, id_index], x[:, id_index])
+                    | np.isin(X[:, id_index], connection)
+                )
+                & (X[:, date_index] > date)
+                & (X[:, date_index] <= date + horizon)
+            )
+        )[:, 0]
         if maskts.shape[0] == 0:
             return None, None, None
         xts = X[maskts]
@@ -711,17 +867,25 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
         y = None
 
     # Graph indexing
-    ind = np.lexsort((x[:,id_index], x[:,date_index]))
+    ind = np.lexsort((x[:, id_index], x[:, date_index]))
     x = x[ind]
     if Y is not None:
         y = y[ind]
-    
-    # Get graph specific spatial and temporal edges 
-    maskgraph = np.argwhere((np.isin(graph.edges[0], np.unique(node_with_weight))) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
-    maskTemp = np.argwhere((np.isin(graph.temporalEdges[0], date)) & (np.isin(graph.temporalEdges[1], np.unique(x[:,date_index]))))[:, 0]
+
+    # Get graph specific spatial and temporal edges
+    maskgraph = np.argwhere(
+        (np.isin(graph.edges[0], np.unique(node_with_weight)))
+        & (np.isin(graph.edges[1], np.unique(x[:, id_index])))
+    )[:, 0]
+    maskTemp = np.argwhere(
+        (np.isin(graph.temporalEdges[0], date))
+        & (np.isin(graph.temporalEdges[1], np.unique(x[:, date_index])))
+    )[:, 0]
 
     spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
-    temporalEdges = np.asarray([graph.temporalEdges[0][maskTemp], graph.temporalEdges[1][maskTemp]])
+    temporalEdges = np.asarray(
+        [graph.temporalEdges[0][maskTemp], graph.temporalEdges[1][maskTemp]]
+    )
 
     edges = []
     target = []
@@ -729,41 +893,100 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
     src = []
     time_delta = []
 
-    if spatialEdges.shape[1] != 0  or temporalEdges.shape[1] != 0:
+    if spatialEdges.shape[1] != 0 or temporalEdges.shape[1] != 0:
         for i, node in enumerate(x):
             # Spatial edges
             if spatialEdges.shape[1] != 0:
-                spatialNodes = x[np.argwhere((x[:,date_index] == node[date_index]))]
+                spatialNodes = x[np.argwhere((x[:, date_index] == node[date_index]))]
                 spatialNodes = spatialNodes.reshape(-1, spatialNodes.shape[-1])
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
+                spatial = spatialEdges[1][
+                    (np.isin(spatialEdges[1], spatialNodes[:, id_index]))
+                    & (spatialEdges[0] == node[id_index])
+                ]
                 for sp in spatial:
-                    if (i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]) not in seen_edges:
+                    if (
+                        i,
+                        np.argwhere(
+                            (x[:, date_index] == node[date_index])
+                            & (x[:, id_index] == sp)
+                        )[0][0],
+                    ) not in seen_edges:
                         src.append(i)
-                        target.append(np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0])
+                        target.append(
+                            np.argwhere(
+                                (x[:, date_index] == node[date_index])
+                                & (x[:, id_index] == sp)
+                            )[0][0]
+                        )
                         time_delta.append(0)
-                        seen_edges.append((i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]))
+                        seen_edges.append(
+                            (
+                                i,
+                                np.argwhere(
+                                    (x[:, date_index] == node[date_index])
+                                    & (x[:, id_index] == sp)
+                                )[0][0],
+                            )
+                        )
 
             # temporal edges
             if temporalEdges.shape[1] != 0:
-                temporalNodes = x[np.argwhere((x[:,id_index] == node[id_index]))]
+                temporalNodes = x[np.argwhere((x[:, id_index] == node[id_index]))]
                 temporalNodes = temporalNodes.reshape(-1, temporalNodes.shape[-1])
-                temporal = temporalEdges[1][(np.isin(temporalEdges[1], temporalNodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
+                temporal = temporalEdges[1][
+                    (np.isin(temporalEdges[1], temporalNodes[:, date_index]))
+                    & (temporalEdges[0] == node[date_index])
+                ]
                 for tm in temporal:
-                    if (i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]) not in seen_edges:
+                    if (
+                        i,
+                        np.argwhere(
+                            (x[:, date_index] == tm)
+                            & (x[:, id_index] == node[id_index])
+                        )[0][0],
+                    ) not in seen_edges:
                         src.append(i)
-                        target.append(np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0])
+                        target.append(
+                            np.argwhere(
+                                (x[:, date_index] == tm)
+                                & (x[:, id_index] == node[id_index])
+                            )[0][0]
+                        )
                         time_delta.append(abs(node[date_index] - tm))
-                        seen_edges.append((i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]))
+                        seen_edges.append(
+                            (
+                                i,
+                                np.argwhere(
+                                    (x[:, date_index] == tm)
+                                    & (x[:, id_index] == node[id_index])
+                                )[0][0],
+                            )
+                        )
 
             # Spatio-temporal edges
-            if temporalEdges.shape[1] != 0  and spatialEdges.shape[1] != 0:
-                nodes = x[(np.argwhere((x[:,date_index] != node[date_index]) & (x[:,id_index]  != node[id_index])))]
+            if temporalEdges.shape[1] != 0 and spatialEdges.shape[1] != 0:
+                nodes = x[
+                    (
+                        np.argwhere(
+                            (x[:, date_index] != node[date_index])
+                            & (x[:, id_index] != node[id_index])
+                        )
+                    )
+                ]
                 nodes = nodes.reshape(-1, nodes.shape[-1])
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], nodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
-                temporal = temporalEdges[1][(np.isin(temporalEdges[1], nodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
+                spatial = spatialEdges[1][
+                    (np.isin(spatialEdges[1], nodes[:, id_index]))
+                    & (spatialEdges[0] == node[id_index])
+                ]
+                temporal = temporalEdges[1][
+                    (np.isin(temporalEdges[1], nodes[:, date_index]))
+                    & (temporalEdges[0] == node[date_index])
+                ]
                 for sp in spatial:
                     for tm in temporal:
-                        arg = np.argwhere((x[:,id_index] == sp) & (x[:,date_index] == tm))
+                        arg = np.argwhere(
+                            (x[:, id_index] == sp) & (x[:, date_index] == tm)
+                        )
                         if arg.shape[0] == 0:
                             continue
                         if (i, arg[0][0]) not in seen_edges:
@@ -776,9 +999,11 @@ def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int)
 
     return x[:, start_features:], y, edges
 
+
 import random
 import numpy as np
 import warnings
+
 
 def astype_with_watch(arr, dtype=np.float32, name="cur_array"):
     # capture tous les warnings émis pendant le cast
@@ -788,11 +1013,14 @@ def astype_with_watch(arr, dtype=np.float32, name="cur_array"):
 
     # si un warning est apparu (ex: np.ComplexWarning, RuntimeWarning…)
     for warn in w:
-        if issubclass(warn.category, (np.ComplexWarning, RuntimeWarning, UserWarning, Warning)):
+        if issubclass(
+            warn.category, (np.ComplexWarning, RuntimeWarning, UserWarning, Warning)
+        ):
             print(f"[WARN] {warn.category.__name__}: {warn.message}")
             print(f"[WARN] {name} avant cast (dtype={arr.dtype}):\n{arr}")
             break  # afficher une seule fois par cast
     return out
+
 
 def is_below_threshold(threshold: float = 0.35) -> bool:
     """Génère une probabilité uniforme dans [0,1) et renvoie True si elle est < threshold."""
@@ -800,7 +1028,10 @@ def is_below_threshold(threshold: float = 0.35) -> bool:
     print(p)
     return p < threshold
 
-def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, horizon:int) -> np.array:
+
+def concat_temporal_graph_into_time_series(
+    array: np.array, ks: int, date: int, horizon: int
+) -> np.array:
 
     uniqueNodes = np.unique(array[:, id_index])
     res = []
@@ -838,20 +1069,29 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
                     x = arrayNode[:, date_index]
                     y = arrayNode[:, band]
                     if len(x) > 1:  # Vérifier si interpolation possible
-                        f = scipy.interpolate.interp1d(x, y, kind='nearest', bounds_error=False, fill_value='extrapolate')
+                        f = scipy.interpolate.interp1d(
+                            x,
+                            y,
+                            kind="nearest",
+                            bounds_error=False,
+                            fill_value="extrapolate",
+                        )
                         new_data[:, band] = f(ud)
                     else:
                         new_data[:, band] = 0  # ou une autre valeur par défaut
 
                 arrayNode = np.vstack([arrayNode, new_data])
                 arrayNode = arrayNode[np.argsort(arrayNode[:, date_index])]
-        
+
         # Extraire les données dans l'intervalle de date
-        cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date + horizon)]
-        #cur_array = astype_with_watch(cur_array, np.float32, name="cur_array")
-        
+        cur_array = arrayNode[
+            (arrayNode[:, date_index] >= date_limit_min)
+            & (arrayNode[:, date_index] <= date + horizon)
+        ]
+        # cur_array = astype_with_watch(cur_array, np.float32, name="cur_array")
+
         cur_array = cur_array.astype(np.float32)
-        
+
         """new_data = np.copy(cur_array)
         for band in range(len(ids_columns), cur_array.shape[1]):
             y = cur_array[:, band]
@@ -881,8 +1121,8 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
 
         print("\nIndices overflow:")
         print(np.where(is_inf)[0])"""
-        
-        res.append(cur_array[:ks + horizon + 1])
+
+        res.append(cur_array[: ks + horizon + 1])
 
     if len(res) == 0:
         return np.empty((0, ks))
@@ -891,9 +1131,16 @@ def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, 
     res = np.moveaxis(res, 1, 2)
     return res
 
-def construct_graph_with_time_series(graph, date : int,
-                                     X : np.array, Y : np.array,
-                                     ks :int, horizon:int, start_features : int) -> np.array:
+
+def construct_graph_with_time_series(
+    graph,
+    date: int,
+    X: np.array,
+    Y: np.array,
+    ks: int,
+    horizon: int,
+    start_features: int,
+) -> np.array:
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and time series X
@@ -903,16 +1150,27 @@ def construct_graph_with_time_series(graph, date : int,
     ks : size of the time series
     """
 
-    mask = np.argwhere((X[:,date_index] == date))[:, 0]
+    mask = np.argwhere((X[:, date_index] == date))[:, 0]
 
     x = X[mask]
     if graph.edges is not None:
-        connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
+        connection = graph.edges[1][
+            np.argwhere(np.isin(graph.edges[0], x[:, id_index]))
+        ]
     else:
         connection = []
 
-    maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
-    
+    maskts = np.argwhere(
+        (
+            (
+                np.isin(X[:, id_index], x[:, id_index])
+                | np.isin(X[:, id_index], connection)
+            )
+            & (X[:, date_index] <= date)
+            & (X[:, date_index] >= date - ks)
+        )
+    )[:, 0]
+
     if maskts.shape[0] == 0:
         return None, None, None
 
@@ -926,15 +1184,24 @@ def construct_graph_with_time_series(graph, date : int,
         y = Y[mask]
         if maskts.shape[0] != 0:
             yts = Y[maskts]
-            yts[:,weight_index] = 0
+            yts[:, weight_index] = 0
             y = np.concatenate((y, yts))
 
     else:
         y = None
 
     if horizon != 0:
-        maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
-    
+        maskts = np.argwhere(
+            (
+                (
+                    np.isin(X[:, id_index], x[:, id_index])
+                    | np.isin(X[:, id_index], connection)
+                )
+                & (X[:, date_index] > date)
+                & (X[:, date_index] <= date + horizon)
+            )
+        )[:, 0]
+
         if maskts.shape[0] == 0:
             return None, None, None
 
@@ -965,7 +1232,9 @@ def construct_graph_with_time_series(graph, date : int,
                 unique_indices.append(i)
         return unique_indices
 
-    unique_indices = get_unique_pair_indices(y, graph_id_index=id_index, date_index=date_index)
+    unique_indices = get_unique_pair_indices(
+        y, graph_id_index=id_index, date_index=date_index
+    )
     x = x[unique_indices]
     if Y is not None:
         y = y[unique_indices]
@@ -974,13 +1243,13 @@ def construct_graph_with_time_series(graph, date : int,
     x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
     if x is None:
         return None, None, None
-    
+
     if Y is not None:
         y = concat_temporal_graph_into_time_series(y, ks, date, horizon)
 
     # Get graph specific spatial
-    #maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
-    #spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    # maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    # spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
     if graph.edges is not None:
         spatialEdges = graph.edges
 
@@ -989,23 +1258,34 @@ def construct_graph_with_time_series(graph, date : int,
         src = []
 
         for i, node in enumerate(x):
-            spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
+            spatialNodes = x[
+                np.argwhere((x[:, date_index, -1] == node[date_index][-1]))
+            ][:, :, 0, 0]
             if spatialEdges.shape[1] != 0:
-                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[id_index][0])]
+                spatial = spatialEdges[1][
+                    (np.isin(spatialEdges[1], spatialNodes[:, 0]))
+                    & (spatialEdges[0] == node[id_index][0])
+                ]
                 for sp in spatial:
                     src.append(i)
-                    target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
-            #src.append(i)
-            #target.append(i)
-            
+                    target.append(
+                        np.argwhere(
+                            (x[:, date_index, -1] == node[date_index][-1])
+                            & (x[:, id_index, 0] == sp)
+                        )[0][0]
+                    )
+            # src.append(i)
+            # target.append(i)
+
         edges = np.row_stack((src, target)).astype(int)
     else:
         edges = []
     return x[:, start_features:], y, edges
 
-def construct_time_series(date : int,
-                            X : np.array, Y : np.array,
-                            ks :int, horizon:int, start_features : int) -> np.array:
+
+def construct_time_series(
+    date: int, X: np.array, Y: np.array, ks: int, horizon: int, start_features: int
+) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -1015,37 +1295,49 @@ def construct_time_series(date : int,
     ks : size of the time series
     """
 
-    maskgraph = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    maskgraph = np.argwhere((X[:, date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     x = X[maskgraph]
 
     if ks != 0:
-        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date ) & (X[:,date_index] >= date - ks)))[:, 0]
+        maskts = np.argwhere(
+            (
+                np.isin(X[:, id_index], x[:, id_index])
+                & (X[:, date_index] < date)
+                & (X[:, date_index] >= date - ks)
+            )
+        )[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
-        
+
         if maskts.shape[0] == 0:
             return None, None
-    
+
         xts = X[maskts]
         x = np.concatenate((x, xts))
-        
+
     if Y is not None:
         y = Y[maskgraph]
         if ks != 0:
             yts = Y[maskts]
-            yts[:,weight_index] = 0
+            yts[:, weight_index] = 0
             y = np.concatenate((y, yts))
-    
+
     horizon = int(horizon)
     if horizon != 0:
-        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] > date ) & (X[:,date_index] <= date + horizon)))[:, 0]
+        maskts = np.argwhere(
+            (
+                np.isin(X[:, id_index], x[:, id_index])
+                & (X[:, date_index] > date)
+                & (X[:, date_index] <= date + horizon)
+            )
+        )[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
-        
+
         if maskts.shape[0] == 0:
             return None, None
-    
+
         xts = X[maskts]
         x = np.concatenate((x, xts))
-        
+
         if Y is not None:
             yts = Y[maskts]
             y = np.concatenate((y, yts))
@@ -1058,8 +1350,9 @@ def construct_time_series(date : int,
     else:
         y = None
 
-    x =  x[:, start_features:]
+    x = x[:, start_features:]
     return x, y
+
 
 def order_class(predictor, pred, min_values=0):
     res = np.zeros(pred[~np.isnan(pred)].shape[0], dtype=int)
@@ -1073,32 +1366,43 @@ def order_class(predictor, pred, min_values=0):
         res[mask] = c
     return res + min_values
 
-def array2image(X : np.array, dir_mask : Path, scale : int, departement: str, method : str, band : int, dir_output : Path, name : str):
+
+def array2image(
+    X: np.array,
+    dir_mask: Path,
+    scale: int,
+    departement: str,
+    method: str,
+    band: int,
+    dir_output: Path,
+    name: str,
+):
 
     if method not in METHODS:
-        logger.info(f'Methods must be {METHODS}, {method} isn t')
+        logger.info(f"Methods must be {METHODS}, {method} isn t")
         exit(1)
-    name_mask = departement+'rasterScale'+str(scale)+'.pkl'
+    name_mask = departement + "rasterScale" + str(scale) + ".pkl"
     mask = read_object(name_mask, dir_mask)
     res = np.full(mask.shape, fill_value=np.nan)
 
-    unodes = np.unique(X[:,id_index])
+    unodes = np.unique(X[:, id_index])
     for node in unodes:
         index = mask == node
-        if method == 'sum':
+        if method == "sum":
             func = np.nansum
-        elif method == 'mean':
+        elif method == "mean":
             func = np.nanmean
-        elif method == 'max':
+        elif method == "max":
             func = np.nanmax
-        elif method == 'min':
+        elif method == "min":
             func = np.nanmin
-        res[index] = func(X[X[:, 0] == node][:,band])
+        res[index] = func(X[X[:, 0] == node][:, band])
 
     save_object(res, name, dir_output)
     return res
 
-def weighted_rmse_loss(input, target, weights = None):
+
+def weighted_rmse_loss(input, target, weights=None):
     if not torch.is_tensor(input):
         input = torch.tensor(input, dtype=torch.float32)
     if not torch.is_tensor(target):
@@ -1111,38 +1415,37 @@ def weighted_rmse_loss(input, target, weights = None):
 
     return torch.sqrt((weights * (input - target) ** 2).sum() / weights.sum())
 
-def log_sum_exp(x):
-    if not torch.is_tensor(input):
-        input = torch.tensor(input, dtype=torch.float32)
-    if not torch.is_tensor(target):
-        target = torch.tensor(target, dtype=torch.float32)
 
-    if weights is None:
-        return torch.sqrt(((input - target) ** 2).mean())
-    if not torch.is_tensor(weights):
-        weights = torch.tensor(weights, dtype=torch.float32)
+def log_sum_exp(x):
+
     b, _ = torch.max(x, 1)
     # b.size() = [N, ], unsqueeze() required
     y = b + torch.log(torch.exp(x - b.unsqueeze(dim=1).expand_as(x)).sum(1))
     # y.size() = [N, ], no need to squeeze()
     return y
 
+
 def class_select(logits, target):
     # in numpy, this would be logits[:, target].
     batch_size, num_classes = logits.size()
     if target.is_cuda:
         device = target.data.get_device()
-        one_hot_mask = torch.autograd.Variable(torch.arange(0, num_classes)
-                                               .long()
-                                               .repeat(batch_size, 1)
-                                               .cuda(device)
-                                               .eq(target.data.repeat(num_classes, 1).t()))
+        one_hot_mask = torch.autograd.Variable(
+            torch.arange(0, num_classes)
+            .long()
+            .repeat(batch_size, 1)
+            .cuda(device)
+            .eq(target.data.repeat(num_classes, 1).t())
+        )
     else:
-        one_hot_mask = torch.autograd.Variable(torch.arange(0, num_classes)
-                                               .long()
-                                               .repeat(batch_size, 1)
-                                               .eq(target.data.repeat(num_classes, 1).t()))
+        one_hot_mask = torch.autograd.Variable(
+            torch.arange(0, num_classes)
+            .long()
+            .repeat(batch_size, 1)
+            .eq(target.data.repeat(num_classes, 1).t())
+        )
     return logits.masked_select(one_hot_mask)
+
 
 def weighted_cross_entropy(logits, target, weight=None):
     assert logits.dim() == 2
@@ -1159,8 +1462,10 @@ def weighted_cross_entropy(logits, target, weight=None):
         return loss.sum() / weight.sum()
     return loss.mean()
 
+
 def np_groupby(x, index):
-    return np.split(x, np.where(np.diff(x[:,index]))[0]+1)
+    return np.split(x, np.where(np.diff(x[:, index]))[0] + 1)
+
 
 def tolerance_from_std(data, factor=0.01):
     std_dev = np.std(data)
@@ -1168,29 +1473,34 @@ def tolerance_from_std(data, factor=0.01):
     tolerance = std_dev * factor
     return tolerance
 
-def add_metrics(methods : list, i : int,
-                ypred : torch.tensor,
-                ytrue : torch.tensor,
-                testd_departement : list,
-                target : str,
-                graph,
-                model : Model,
-                dir : Path) -> dict:
-    
-    datesoftest = np.unique(ytrue[:, ids_columns.index('date')]).astype(int)
-    years = np.unique([allDates[di].split('-')[0] for di in datesoftest])
+
+def add_metrics(
+    methods: list,
+    i: int,
+    ypred: torch.tensor,
+    ytrue: torch.tensor,
+    testd_departement: list,
+    target: str,
+    graph,
+    model: Model,
+    dir: Path,
+) -> dict:
+
+    datesoftest = np.unique(ytrue[:, ids_columns.index("date")]).astype(int)
+    years = np.unique([allDates[di].split("-")[0] for di in datesoftest])
     seasons = generate_season_dict(years)
 
-    modes = ['temporal',
-             #'spatial',
-             #'spatio-temporal'
-             ]
-    
-    if target == 'binary':
+    modes = [
+        "temporal",
+        #'spatial',
+        #'spatio-temporal'
+    ]
+
+    if target == "binary":
         tolerance = 0
-    elif target ==' nbsinister':
+    elif target == " nbsinister":
         tolerance = 0
-    elif target == 'risk':
+    elif target == "risk":
         tolerance = 0
     else:
         tolerance = 0
@@ -1198,27 +1508,53 @@ def add_metrics(methods : list, i : int,
     top = 1
     res = {}
     for mode in modes:
-        if mode == 'temporal':
+        if mode == "temporal":
             ytrue_mode = np.copy(ytrue)
             ypred_mode = np.copy(ypred)
 
-        elif mode == 'spatial':
-            if graph.scale == 'departement':
+        elif mode == "spatial":
+            if graph.scale == "departement":
                 continue
             dir_target = root_target
-            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir / 'raster')
+            raster = read_object(
+                f"{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl",
+                dir / "raster",
+            )
             assert raster is not None
 
-            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir / 'raster')
+            raster_graph = read_object(
+                f"{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl",
+                dir / "raster",
+            )
             assert raster_graph is not None
 
-            target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
+            target_values = read_object(
+                f"{testd_departement[0]}binScale0.pkl",
+                dir_target
+                / graph.sinister
+                / graph.dataset_name
+                / graph.sinister_encoding
+                / "bin"
+                / graph.resolution,
+            )
             assert target_values is not None
-            target_values = target_values[:, :, int(ytrue[0, date_index]):int(ytrue[-1, date_index])] 
+            target_values = target_values[
+                :, :, int(ytrue[0, date_index]) : int(ytrue[-1, date_index])
+            ]
             target_values = np.nansum(target_values, axis=2)
 
-            ytrue_mode = np.full((target_values.shape[0], target_values.shape[1], ytrue.shape[1]), fill_value=np.nan)
-            ypred_mode = np.full((target_values.shape[0], ypred_modetarget_values.shape[1], ypred.shape[1]), fill_value=np.nan)
+            ytrue_mode = np.full(
+                (target_values.shape[0], target_values.shape[1], ytrue.shape[1]),
+                fill_value=np.nan,
+            )
+            ypred_mode = np.full(
+                (
+                    target_values.shape[0],
+                    ypred_modetarget_values.shape[1],
+                    ypred.shape[1],
+                ),
+                fill_value=np.nan,
+            )
             unodes = np.unique(raster)
             unodes = unodes[~np.isnan(unodes)]
             for node in unodes:
@@ -1229,7 +1565,9 @@ def add_metrics(methods : list, i : int,
                 ytrue_mode[mask_node, graph_id_index] = raster_graph[mask_node]
                 ytrue_mode[mask_node, id_index] = node
                 ytrue_mode[mask_node, longitude_index:-3] = 1
-                ytrue_mode[mask_node, departement_index] = name2int[testd_departement[0]]
+                ytrue_mode[mask_node, departement_index] = name2int[
+                    testd_departement[0]
+                ]
 
                 ypred_mode[mask_node, 0] = np.nansum(ypred[ytrue[:, 0] == node, 0])
                 ypred_mode[mask_node, -1] = 1
@@ -1239,39 +1577,77 @@ def add_metrics(methods : list, i : int,
             ypred_mode = ypred_mode[~np.isnan(ytrue_mode[:, -1])]
             ytrue_mode = ytrue_mode[~np.isnan(ytrue_mode[:, -1])]
         else:
-            if graph.scale == 'departement':
+            if graph.scale == "departement":
                 continue
             dir_target = root_target
-            
-            raster = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl', dir / 'raster')
+
+            raster = read_object(
+                f"{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}_node.pkl",
+                dir / "raster",
+            )
             assert raster is not None
 
-            raster_graph = read_object(f'{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl', dir / 'raster')
+            raster_graph = read_object(
+                f"{testd_departement[0]}rasterScale{graph.scale}_{graph.base}_{graph.graph_method}.pkl",
+                dir / "raster",
+            )
             assert raster_graph is not None
 
-            target_values = read_object(f'{testd_departement[0]}binScale0.pkl', dir_target / graph.sinister / graph.dataset_name / graph.sinister_encoding / 'bin' / graph.resolution)
+            target_values = read_object(
+                f"{testd_departement[0]}binScale0.pkl",
+                dir_target
+                / graph.sinister
+                / graph.dataset_name
+                / graph.sinister_encoding
+                / "bin"
+                / graph.resolution,
+            )
             assert target_values is not None
 
             udates = np.unique(ytrue[:, date_index]).astype(int)
             target_values = target_values[:, :, udates]
 
-            ytrue_mode = np.full((udates.shape[0], target_values.shape[0], target_values.shape[1], ytrue.shape[1]), fill_value=np.nan)
-            ypred_mode = np.full((udates.shape[0], target_values.shape[0], target_values.shape[1], ypred.shape[1]), fill_value=np.nan)
+            ytrue_mode = np.full(
+                (
+                    udates.shape[0],
+                    target_values.shape[0],
+                    target_values.shape[1],
+                    ytrue.shape[1],
+                ),
+                fill_value=np.nan,
+            )
+            ypred_mode = np.full(
+                (
+                    udates.shape[0],
+                    target_values.shape[0],
+                    target_values.shape[1],
+                    ypred.shape[1],
+                ),
+                fill_value=np.nan,
+            )
             unodes = np.unique(raster)
             unodes = unodes[~np.isnan(unodes)]
             for node in unodes:
                 mask_node = raster == node
-                ytrue_mode[:, mask_node, -1] = np.moveaxis(target_values[mask_node], 0, 1)
-                ytrue_mode[:, mask_node, -2] = np.moveaxis(target_values[mask_node], 0, 1)
+                ytrue_mode[:, mask_node, -1] = np.moveaxis(
+                    target_values[mask_node], 0, 1
+                )
+                ytrue_mode[:, mask_node, -2] = np.moveaxis(
+                    target_values[mask_node], 0, 1
+                )
                 ytrue_mode[:, mask_node, -3] = 1
                 ytrue_mode[:, mask_node, id_index] = node
                 ytrue_mode[:, mask_node, graph_index] = raster_graph[mask_node]
                 ytrue_mode[:, mask_node, longitude_index:-3] = 1
-                ytrue_mode[:, mask_node, departement_index] = name2int[testd_departement[0]]
+                ytrue_mode[:, mask_node, departement_index] = name2int[
+                    testd_departement[0]
+                ]
 
                 for d in udates:
                     mask_date = udates == d
-                    ypred_mode[mask_date, mask_node, 0] = ypred[(ytrue[:, id_index] == node) & (ytrue[:, date_index] == d), 0]
+                    ypred_mode[mask_date, mask_node, 0] = ypred[
+                        (ytrue[:, id_index] == node) & (ytrue[:, date_index] == d), 0
+                    ]
                     ypred_mode[mask_date, mask_node, -1] = 1
                     ytrue_mode[mask_date, mask_node, date_index] = d
 
@@ -1284,67 +1660,91 @@ def add_metrics(methods : list, i : int,
         ysum = np.empty((uids.shape[0], 2))
         ysum[:, graph_id_index] = uids
         for id in uids:
-            ysum[np.argwhere(ysum[:, graph_id_index] == id)[:, 0], 1] = np.sum(ytrue_mode[np.argwhere(ytrue_mode[:, graph_id_index] == id)[:, 0], -2])
-        
-        ind = np.lexsort([ysum[:,1]])
+            ysum[np.argwhere(ysum[:, graph_id_index] == id)[:, 0], 1] = np.sum(
+                ytrue_mode[np.argwhere(ytrue_mode[:, graph_id_index] == id)[:, 0], -2]
+            )
+
+        ind = np.lexsort([ysum[:, 1]])
         ymax = np.flip(ytrue_mode[ind, 0])[:top]
         mask_top = np.argwhere(np.isin(ytrue_mode[:, 0], ymax))[:, 0]
 
         for name, met, met_type in methods:
-            oname = f'{mode}_{name}'
+            oname = f"{mode}_{name}"
             band = -1
-            if target == 'nbsinister' or target == 'binary' or target == 'indice':
+            if target == "nbsinister" or target == "binary" or target == "indice":
                 band = -2
 
-            if met_type == 'proba':
+            if met_type == "proba":
 
-                mett = met(ypred_mode[:,0], ytrue_mode[:,band], ytrue_mode[:, weight_index])
-                
+                mett = met(
+                    ypred_mode[:, 0], ytrue_mode[:, band], ytrue_mode[:, weight_index]
+                )
+
                 if torch.is_tensor(mett):
                     mett = np.mean(mett.detach().cpu().numpy())
 
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ypred_mode[mask, 0], ytrue_mode[mask,band], ytrue_mode[mask, weight_index])
+                    mett = met(
+                        ypred_mode[mask, 0],
+                        ytrue_mode[mask, band],
+                        ytrue_mode[mask, weight_index],
+                    )
                     if torch.is_tensor(mett):
                         mett = np.mean(mett.detach().cpu().numpy())
 
-                    res[oname+'_'+season] = mett
+                    res[oname + "_" + season] = mett
 
-                mett = met(ypred_mode[mask_top, 0], ytrue_mode[mask_top,band], ytrue_mode[mask_top, weight_index])
+                mett = met(
+                    ypred_mode[mask_top, 0],
+                    ytrue_mode[mask_top, band],
+                    ytrue_mode[mask_top, weight_index],
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster'] = mett
+                res[oname + "_top_" + str(top) + "_cluster"] = mett
 
-            elif met_type == 'cal':
-                mett = met(ytrue_mode, ypred_mode[:,1], target, ytrue[:, weight_index])
+            elif met_type == "cal":
+                mett = met(ytrue_mode, ypred_mode[:, 1], target, ytrue[:, weight_index])
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, :], ypred_mode[:,1], target, ytrue_mode[:, weight_index], mask)
+                    mett = met(
+                        ytrue_mode[:, :],
+                        ypred_mode[:, 1],
+                        target,
+                        ytrue_mode[:, weight_index],
+                        mask,
+                    )
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
-                    res[oname+'_'+season] = mett
+                    res[oname + "_" + season] = mett
 
-                mett = met(ytrue_mode, ypred_mode[:,1], target, None, None)
+                mett = met(ytrue_mode, ypred_mode[:, 1], target, None, None)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                
-                res[oname+'_unweighted'] = mett
+
+                res[oname + "_unweighted"] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
                     mett = met(ytrue_mode[:], ypred_mode[:, 1], target, None, mask)
@@ -1352,44 +1752,62 @@ def add_metrics(methods : list, i : int,
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
-                    res[oname+'_unweighted_'+season] = mett
+                    res[oname + "_unweighted_" + season] = mett
 
                 mett = met(ytrue_mode[:], ypred_mode[:, 1], target, None, mask_top)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster_unweighted'] = mett
+                res[oname + "_top_" + str(top) + "_cluster_unweighted"] = mett
 
-                mett = met(ytrue_mode[:], ypred_mode[:, 1], target, ytrue_mode[:, weight_index], mask_top)
+                mett = met(
+                    ytrue_mode[:],
+                    ypred_mode[:, 1],
+                    target,
+                    ytrue_mode[:, weight_index],
+                    mask_top,
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster'] = mett
+                res[oname + "_top_" + str(top) + "_cluster"] = mett
 
-            elif met_type == 'bin':
+            elif met_type == "bin":
 
-                mett = met(ytrue_mode, ypred_mode[:,0], target, ytrue_mode[:, weight_index])
+                mett = met(
+                    ytrue_mode, ypred_mode[:, 0], target, ytrue_mode[:, weight_index]
+                )
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, :], ypred_mode[:,0], target, ytrue_mode[:, weight_index], mask)
+                    mett = met(
+                        ytrue_mode[:, :],
+                        ypred_mode[:, 0],
+                        target,
+                        ytrue_mode[:, weight_index],
+                        mask,
+                    )
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
-                    res[oname+'_'+season] = mett
+                    res[oname + "_" + season] = mett
 
-                mett = met(ytrue_mode, ypred_mode[:,0], target, None, None)
+                mett = met(ytrue_mode, ypred_mode[:, 0], target, None, None)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                
-                res[oname+'_unweighted'] = mett
+
+                res[oname + "_unweighted"] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
                     mett = met(ytrue_mode[:], ypred_mode[:, 0], target, None, mask)
@@ -1397,96 +1815,162 @@ def add_metrics(methods : list, i : int,
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
-                    res[oname+'_unweighted_'+season] = mett
+                    res[oname + "_unweighted_" + season] = mett
 
                 mett = met(ytrue_mode[:], ypred_mode[:, 0], target, None, mask_top)
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[name+'_top_'+str(top)+'_cluster_unweighted'] = mett
+                res[name + "_top_" + str(top) + "_cluster_unweighted"] = mett
 
-                mett = met(ytrue_mode[:], ypred_mode[:, 0], target, ytrue_mode[:, weight_index], mask_top)
+                mett = met(
+                    ytrue_mode[:],
+                    ypred_mode[:, 0],
+                    target,
+                    ytrue_mode[:, weight_index],
+                    mask_top,
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster'] = mett
+                res[oname + "_top_" + str(top) + "_cluster"] = mett
 
-            elif met_type == 'class':
-                mett = met(ypred_mode, ytrue_mode, dir, weights=ytrue_mode[:, weight_index], top=None)
+            elif met_type == "class":
+                mett = met(
+                    ypred_mode,
+                    ytrue_mode,
+                    dir,
+                    weights=ytrue_mode[:, weight_index],
+                    top=None,
+                )
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ypred_mode[mask], ytrue_mode[mask], dir, weights=ytrue_mode[mask, weight_index], top=None)
-                    res[oname+'_'+season] = mett
+                    mett = met(
+                        ypred_mode[mask],
+                        ytrue_mode[mask],
+                        dir,
+                        weights=ytrue_mode[mask, weight_index],
+                        top=None,
+                    )
+                    res[oname + "_" + season] = mett
 
                 mett = met(ypred_mode, ytrue_mode, dir, weights=None, top=10)
-                res[oname+'top10'] = mett
+                res[oname + "top10"] = mett
 
-                mett = met(ypred_mode[mask_top], ytrue_mode[mask_top], dir, weights=ytrue_mode[mask_top, weight_index], top=None)
+                mett = met(
+                    ypred_mode[mask_top],
+                    ytrue_mode[mask_top],
+                    dir,
+                    weights=ytrue_mode[mask_top, weight_index],
+                    top=None,
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster'] = mett
+                res[oname + "_top_" + str(top) + "_cluster"] = mett
 
-                mett = met(ypred_mode[mask_top], ytrue_mode[mask_top], dir, weights=None, top=None)
+                mett = met(
+                    ypred_mode[mask_top],
+                    ytrue_mode[mask_top],
+                    dir,
+                    weights=None,
+                    top=None,
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[oname+'_top_'+str(top)+'_cluster_unweighted'] = mett
+                res[oname + "_top_" + str(top) + "_cluster_unweighted"] = mett
 
-            elif met_type == 'correlation':
-                mett = met(ytrue_mode[:, -2], ypred_mode[:,0], tolerance=tolerance)
+            elif met_type == "correlation":
+                mett = met(ytrue_mode[:, -2], ypred_mode[:, 0], tolerance=tolerance)
 
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
                 res[oname] = mett
 
                 for season, datesIndex in seasons.items():
-                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[:,0]
+                    mask = np.argwhere(np.isin(ytrue_mode[:, date_index], datesIndex))[
+                        :, 0
+                    ]
                     if mask.shape[0] == 0:
                         continue
-                    mett = met(ytrue_mode[:, -2], ypred_mode[:,0], mask,  tolerance=tolerance)
+                    mett = met(
+                        ytrue_mode[:, -2], ypred_mode[:, 0], mask, tolerance=tolerance
+                    )
                     if torch.is_tensor(mett):
                         mett = mett.detach().cpu().numpy()
 
-                    res[oname+'_'+season] = mett
+                    res[oname + "_" + season] = mett
 
-                mett = met(ytrue_mode[:, -2], ypred_mode[:, 0], mask_top,  tolerance=tolerance)
+                mett = met(
+                    ytrue_mode[:, -2], ypred_mode[:, 0], mask_top, tolerance=tolerance
+                )
                 if torch.is_tensor(mett):
                     mett = mett.detach().cpu().numpy()
-                res[name+'_top_'+str(top)+'_cluster'] = mett
+                res[name + "_top_" + str(top) + "_cluster"] = mett
 
-            logger.info(f'{oname, res[oname]}')
+            logger.info(f"{oname, res[oname]}")
 
     return res
 
-def create_predictor(ypred : np.array, modelName : str, nameDep : str, dir_predictor, target_name : str, graph, departement_scale):
+
+def create_predictor(
+    ypred: np.array,
+    modelName: str,
+    nameDep: str,
+    dir_predictor,
+    target_name: str,
+    graph,
+    departement_scale,
+):
     scale = graph.scale
-    predictor = read_object(nameDep+'Predictor'+modelName+str(scale)+'.pkl', dir_predictor)
-    predictor = Predictor(min(5, np.unique(ypred[:,0]).shape[0]), name=nameDep+'Binary', binary=target_name == 'binary')
-    predictor.fit(np.unique(ypred[:,0]))
+    predictor = read_object(
+        nameDep + "Predictor" + modelName + str(scale) + ".pkl", dir_predictor
+    )
+    predictor = Predictor(
+        min(5, np.unique(ypred[:, 0]).shape[0]),
+        name=nameDep + "Binary",
+        binary=target_name == "binary",
+    )
+    predictor.fit(np.unique(ypred[:, 0]))
 
     if departement_scale:
-        logger.info(f'Create {nameDep}Predictor{modelName}Departement.pkl')
-        save_object(predictor, f'{nameDep}Predictor{modelName}Departement.pkl', dir_predictor)
+        logger.info(f"Create {nameDep}Predictor{modelName}Departement.pkl")
+        save_object(
+            predictor, f"{nameDep}Predictor{modelName}Departement.pkl", dir_predictor
+        )
     else:
-        logger.info(f'Create {nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl')
-        save_object(predictor, f'{nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl', dir_predictor)
+        logger.info(
+            f"Create {nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl"
+        )
+        save_object(
+            predictor,
+            f"{nameDep}Predictor{modelName}{scale}_{graph.base}_{graph.graph_method}.pkl",
+            dir_predictor,
+        )
 
-def my_mean_absolute_error(input, target, weights = None):
+
+def my_mean_absolute_error(input, target, weights=None):
     return mean_absolute_error(y_true=target, y_pred=input, sample_weight=weights)
 
-def standard_deviation(inputs, target, weights = None):
+
+def standard_deviation(inputs, target, weights=None):
     return np.std(inputs)
 
+
 def log_factorial(x):
-  return torch.lgamma(x + 1)
+    return torch.lgamma(x + 1)
+
 
 def factorial(x):
     if not torch.is_tensor(x):
         input = torch.tensor(x, dtype=torch.float32)
     return torch.exp(log_factorial(x))
 
-def poisson_loss(input, target, weights = None):
+
+def poisson_loss(input, target, weights=None):
     if not torch.is_tensor(input):
         input = torch.tensor(input, dtype=torch.float32)
     if not torch.is_tensor(target):
@@ -1497,31 +1981,44 @@ def poisson_loss(input, target, weights = None):
     if not torch.is_tensor(weights):
         weights = torch.tensor(weights, dtype=torch.float32)
     if weights is None:
-        return torch.exp(input) - target*torch.log(input) + torch.log(factorial(target))
+        return (
+            torch.exp(input) - target * torch.log(input) + torch.log(factorial(target))
+        )
     else:
-        return ((torch.exp(input) - target*torch.log(input) + torch.log(factorial(target))) * weights).sum() / weights.sum()
-    
-def quantile_prediction_error(Y : np.array, ypred : np.array, target : str, weights = None, mask : np.array = None):
-    
+        return (
+            (
+                torch.exp(input)
+                - target * torch.log(input)
+                + torch.log(factorial(target))
+            )
+            * weights
+        ).sum() / weights.sum()
+
+
+def quantile_prediction_error(
+    Y: np.array, ypred: np.array, target: str, weights=None, mask: np.array = None
+):
+
     if mask is None:
         mask = np.arange(ypred.shape[0])
 
-    ytrue = Y[mask,-2]
+    ytrue = Y[mask, -2]
     ypred = ypred[mask]
 
     linear = np.linspace(start=0, stop=1, num=5)
 
     res = {}
 
-    quantiles = [(0, linear[0]),
-                 (1, linear[1]),
-                 (2, linear[2]),
-                 (3, linear[3]),
-                 (4, linear[4]),
-                 ]
-    
+    quantiles = [
+        (0, linear[0]),
+        (1, linear[1]),
+        (2, linear[2]),
+        (3, linear[3]),
+        (4, linear[4]),
+    ]
+
     error = []
-    for (cl, expected) in quantiles:
+    for cl, expected in quantiles:
         nf = (ytrue[ypred == cl] > 0).astype(int)
         if nf.shape[0] == 0:
             continue
@@ -1531,12 +2028,15 @@ def quantile_prediction_error(Y : np.array, ypred : np.array, target : str, weig
         res[cl] = abs((expected - number_of_fire))
     if len(error) == 0:
         return math.inf
-    
-    res['mean'] = np.nanmean(error)
-    
+
+    res["mean"] = np.nanmean(error)
+
     return res
 
-def frequency_class_error(Y : np.array, ypred : np.array, target : str, weights = None, mask : np.array = None):
+
+def frequency_class_error(
+    Y: np.array, ypred: np.array, target: str, weights=None, mask: np.array = None
+):
     if mask is None:
         mask = np.arange(ypred.shape[0])
 
@@ -1545,69 +2045,74 @@ def frequency_class_error(Y : np.array, ypred : np.array, target : str, weights 
 
     res = {}
 
-    quantiles = [(0, ytrue[ytrue[:, -3] == 0].shape[0] / ytrue.shape[0]),
-                 (1, ytrue[ytrue[:, -3] == 1].shape[0] / ytrue.shape[0]),
-                 (2, ytrue[ytrue[:, -3] == 2].shape[0] / ytrue.shape[0]),
-                 (3, ytrue[ytrue[:, -3] == 3].shape[0] / ytrue.shape[0]),
-                 (4, ytrue[ytrue[:, -3] == 4].shape[0] / ytrue.shape[0]),
-                 ]
-    
+    quantiles = [
+        (0, ytrue[ytrue[:, -3] == 0].shape[0] / ytrue.shape[0]),
+        (1, ytrue[ytrue[:, -3] == 1].shape[0] / ytrue.shape[0]),
+        (2, ytrue[ytrue[:, -3] == 2].shape[0] / ytrue.shape[0]),
+        (3, ytrue[ytrue[:, -3] == 3].shape[0] / ytrue.shape[0]),
+        (4, ytrue[ytrue[:, -3] == 4].shape[0] / ytrue.shape[0]),
+    ]
+
     error = []
-    for (cl, expected) in quantiles:
+    for cl, expected in quantiles:
         fre = ypred[ypred == cl].shape[0] / ytrue.shape[0]
         error.append(abs((expected - fre)))
         res[cl] = abs((expected - fre))
     if len(error) == 0:
         return math.inf
-    
-    res['mean'] = np.nanmean(error)
-    
+
+    res["mean"] = np.nanmean(error)
+
     return res
 
+
 # Les fonctions pour calculer les coefficients de corrélation
-def rankdata_with_tolerance(data, tolerance=1e-5, method='average'):
+def rankdata_with_tolerance(data, tolerance=1e-5, method="average"):
     data_rounded = np.round(data / tolerance) * tolerance
-    
+
     ranks = rankdata(data_rounded, method=method)
     return ranks
+
 
 def kendall_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
     Calcule le coefficient de Kendall en utilisant un masque optionnel.
-    
+
     Paramètres :
     - y_true: Valeurs réelles (np.ndarray).
     - y_pred: Valeurs prédites (np.ndarray).
     - mask: Masque optionnel (np.ndarray de booléens). Si None, pas de masque appliqué.
-    
+
     Retourne :
     - Le coefficient de Kendall (float).
     """
 
     if mask is None:
         return kendalltau(y_pred, y_true)[0]
-    
+
     mask = mask.reshape(-1)
     return kendalltau(y_pred[mask], y_true[mask])[0]
+
 
 def pearson_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
     Calcule le coefficient de Pearson en utilisant un masque optionnel.
-    
+
     Paramètres :
     - y_true: Valeurs réelles (np.ndarray).
     - y_pred: Valeurs prédites (np.ndarray).
     - mask: Masque optionnel (np.ndarray de booléens). Si None, pas de masque appliqué.
-    
+
     Retourne :
     - Le coefficient de Pearson (float).
     """
 
     if mask is None:
         return pearsonr(y_pred, y_true)[0]
-    
+
     mask = mask.reshape(-1)
     return pearsonr(y_pred[mask], y_true[mask])[0]
+
 
 def spearman_coefficient(y_true, y_pred, mask=None, tolerance=0):
     """
@@ -1617,20 +2122,21 @@ def spearman_coefficient(y_true, y_pred, mask=None, tolerance=0):
     - y_true: Valeurs réelles (np.ndarray).
     - y_pred: Valeurs prédites (np.ndarray).
     - mask: Masque optionnel (np.ndarray de booléens). Si None, pas de masque appliqué.
-    
+
     Retourne :
     - Le coefficient de Spearman (float).
     """
-    
+
     if mask is None:
         return spearmanr(y_pred, y_true)[0]
-    
+
     mask = mask.reshape(-1)
     return spearmanr(y_pred[mask], y_true[mask])[0]
 
+
 def mae_per_class_recall(y_true, y_pred, classes):
     """
-    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute
     distance between the true and predicted values, considering recall perspective.
 
     Parameters:
@@ -1644,30 +2150,31 @@ def mae_per_class_recall(y_true, y_pred, classes):
     """
     # Dictionnaire pour stocker la MAE par classe
     mae_by_class = {}
-    
+
     mae_values = []  # Stocker les MAE pour le calcul de la moyenne
-    
+
     for cls in classes:
         # Masquer les valeurs pour la classe en cours
-        mask = (y_true == cls)
+        mask = y_true == cls
         if not np.any(mask):  # Vérifie si la classe est présente
             continue
-        
+
         # Calcul de la MAE pour la classe
         mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
-        
+
         # Ajouter la MAE pour cette classe
         mae_by_class[cls] = round(mae, 2)
         mae_values.append(mae)
-    
+
     # Calculer la moyenne des MAE et l'ajouter au dictionnaire
-    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
-    
+    mae_by_class["mean_mae"] = round(np.mean(mae_values), 2) if mae_values else math.inf
+
     return mae_by_class
+
 
 def mae_per_class_pre(y_true, y_pred, classes):
     """
-    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute
     distance between the true and predicted values, considering precision perspective.
 
     Parameters:
@@ -1681,30 +2188,31 @@ def mae_per_class_pre(y_true, y_pred, classes):
     """
     # Dictionnaire pour stocker la MAE par classe
     mae_by_class = {}
-    
+
     mae_values = []  # Stocker les MAE pour le calcul de la moyenne
-    
+
     for cls in classes:
         # Masquer les valeurs pour la classe en cours
-        mask = (y_pred == cls)
+        mask = y_pred == cls
         if not np.any(mask):  # Vérifie si la classe est présente
             continue
-        
+
         # Calcul de la MAE pour la classe
         mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
-        
+
         # Ajouter la MAE pour cette classe
         mae_by_class[cls] = round(mae, 2)
         mae_values.append(mae)
-    
+
     # Calculer la moyenne des MAE et l'ajouter au dictionnaire
-    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
-    
+    mae_by_class["mean_mae"] = round(np.mean(mae_values), 2) if mae_values else math.inf
+
     return mae_by_class
+
 
 def mae_per_class(y_true, y_pred, classes):
     """
-    Calculate the Mean Absolute Error (MAE) for each class based on the absolute 
+    Calculate the Mean Absolute Error (MAE) for each class based on the absolute
     distance between the true and predicted values, considering precision perspective.
 
     Parameters:
@@ -1718,28 +2226,35 @@ def mae_per_class(y_true, y_pred, classes):
     """
     # Dictionnaire pour stocker la MAE par classe
     mae_by_class = {}
-    
+
     mae_values = []  # Stocker les MAE pour le calcul de la moyenne
-    
+
     for cls in classes:
         # Masquer les valeurs pour la classe en cours
         mask = (y_pred == cls) | (y_true == cls)
         if not np.any(mask):  # Vérifie si la classe est présente
             continue
-        
+
         # Calcul de la MAE pour la classe
         mae = np.mean(np.abs(y_true[mask] - y_pred[mask]))
-        
+
         # Ajouter la MAE pour cette classe
         mae_by_class[cls] = round(mae, 2)
         mae_values.append(mae)
-    
+
     # Calculer la moyenne des MAE et l'ajouter au dictionnaire
-    mae_by_class['mean_mae'] = round(np.mean(mae_values), 2) if mae_values else math.inf
-    
+    mae_by_class["mean_mae"] = round(np.mean(mae_values), 2) if mae_values else math.inf
+
     return mae_by_class
 
-def my_roc_auc(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+
+def my_roc_auc(
+    Y: np.array,
+    ypred: np.array,
+    target: str,
+    weights: np.array = None,
+    mask: np.array = None,
+):
     """
     Calcule l'AUC-ROC sur une gamme de seuils et retourne le meilleur score avec les métriques associées.
 
@@ -1756,18 +2271,20 @@ def my_roc_auc(Y: np.array, ypred: np.array, target: str, weights: np.array = No
     """
     if mask is None:
         mask = np.arange(ypred.shape[0])
-    
+
     # Extraction des labels binaires et des valeurs continues selon le type de cible
-    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
-    
+    ytrue = (
+        Y[:, -2] > 0
+    )  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+
     # Détermination du maximum pour le calcul du seuil
-    if target != 'binary':
-        ypred = MinMaxScaler().fit_transform(ypred.reshape(-1,1))
+    if target != "binary":
+        ypred = MinMaxScaler().fit_transform(ypred.reshape(-1, 1))
 
     # Filtrage des données par masque
     ypredNumpy = ypred[mask]
     ytrueNumpy = ytrue[mask]
-    
+
     if weights is not None:
         weightsNumpy = weights[mask]
     else:
@@ -1781,12 +2298,19 @@ def my_roc_auc(Y: np.array, ypred: np.array, target: str, weights: np.array = No
 
     # Retourne les résultats
     res = {
-        'auc_roc': bestAUC,
+        "auc_roc": bestAUC,
     }
-    
+
     return res
 
-def my_auc_pr(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+
+def my_auc_pr(
+    Y: np.array,
+    ypred: np.array,
+    target: str,
+    weights: np.array = None,
+    mask: np.array = None,
+):
     """
     Calcule l'AUC-PR (Precision-Recall) et retourne un dictionnaire avec AUC-PR, précision, rappel, et seuil optimal.
 
@@ -1807,40 +2331,51 @@ def my_auc_pr(Y: np.array, ypred: np.array, target: str, weights: np.array = Non
     """
     if mask is None:
         mask = np.arange(ypred.shape[0])
-    
+
     # Extraction des labels binaires
-    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+    ytrue = (
+        Y[:, -2] > 0
+    )  # On suppose que les labels binaires sont dans l'avant-dernière colonne
 
     # Filtrage des données par masque
     ypredNumpy = ypred[mask]
     ytrueNumpy = ytrue[mask]
-    
+
     if weights is not None:
         weightsNumpy = weights[mask]
     else:
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
     # Calcul de la courbe Precision-Recall
-    precision, recall, thresholds = precision_recall_curve(ytrueNumpy, ypredNumpy, sample_weight=weightsNumpy)
+    precision, recall, thresholds = precision_recall_curve(
+        ytrueNumpy, ypredNumpy, sample_weight=weightsNumpy
+    )
     auc_pr = auc(recall, precision)
 
     # Calcul du meilleur seuil (où la précision et le rappel sont les meilleurs)
     best_threshold = thresholds[np.argmax(precision + recall)]
-    
+
     # Retourne les résultats sous forme de dictionnaire
     res = {
-        'auc_pr': auc_pr,
-        'precision': precision[np.argmax(precision + recall)],
-        'recall': recall[np.argmax(precision + recall)],
-        'threshold': best_threshold
+        "auc_pr": auc_pr,
+        "precision": precision[np.argmax(precision + recall)],
+        "recall": recall[np.argmax(precision + recall)],
+        "threshold": best_threshold,
     }
-    
+
     return res
 
-def my_f1_score(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None):
+
+def my_f1_score(
+    Y: np.array,
+    ypred: np.array,
+    target: str,
+    weights: np.array = None,
+    mask: np.array = None,
+):
     """
     Calcule le F1 score en utilisant le seuil optimal trouvé par la fonction my_auc_pr.
-    
+
     Paramètres:
     - Y : np.array
         Les vraies étiquettes binaires.
@@ -1860,34 +2395,41 @@ def my_f1_score(Y: np.array, ypred: np.array, target: str, weights: np.array = N
         mask = np.arange(ypred.shape[0])
 
     # Extraction des labels binaires
-    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+    ytrue = (
+        Y[:, -2] > 0
+    )  # On suppose que les labels binaires sont dans l'avant-dernière colonne
 
     # Calcul de l'AUC-PR et du seuil optimal
     auc_pr_results = my_auc_pr(Y, ypred, target, weights, mask)
-    best_threshold = auc_pr_results['threshold']  # Seuil optimal trouvé par AUC-PR
-    
-    f1_scores = 2 * (auc_pr_results['precision'] * auc_pr_results['recall']) / (auc_pr_results['precision'] + auc_pr_results['recall'])
-    
+    best_threshold = auc_pr_results["threshold"]  # Seuil optimal trouvé par AUC-PR
+
+    f1_scores = (
+        2
+        * (auc_pr_results["precision"] * auc_pr_results["recall"])
+        / (auc_pr_results["precision"] + auc_pr_results["recall"])
+    )
+
     # Résultats
     res = {
-        'f1': f1_scores,
-        'precision': auc_pr_results['precision'],
-        'recall': auc_pr_results['recall'],
-        'threshold': best_threshold,
-        'auc_pr': auc_pr_results['auc_pr']
+        "f1": f1_scores,
+        "precision": auc_pr_results["precision"],
+        "recall": auc_pr_results["recall"],
+        "threshold": best_threshold,
+        "auc_pr": auc_pr_results["auc_pr"],
     }
 
     return res
 
-def class_risk(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
+
+def class_risk(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
         ytrue = ytrue.detach().cpu().numpy().astype(float)
-    
+
     res = {}
-        
-    uniqueClass = [0,1,2,3,4]
+
+    uniqueClass = [0, 1, 2, 3, 4]
 
     nbsinisteriny = []
     nbsinisterinpred = []
@@ -1898,7 +2440,7 @@ def class_risk(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
             nbsinisteriny.append(0)
         else:
             nbsinisteriny.append(frequency_ratio(ytrue[:, -2], mask2))
-        
+
         mask2 = np.argwhere(ypred == cls)[:, 0]
         if mask2.shape[0] == 0:
             nbsinisterinpred.append(0)
@@ -1907,11 +2449,14 @@ def class_risk(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
 
         res[cls] = abs(nbsinisteriny[-1] - nbsinisterinpred[-1])
 
-    res['mean'] = np.mean(np.abs(np.asarray(nbsinisteriny) - np.asarray(nbsinisterinpred)))
+    res["mean"] = np.mean(
+        np.abs(np.asarray(nbsinisteriny) - np.asarray(nbsinisterinpred))
+    )
 
     return res
 
-def class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
+
+def class_accuracy(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1927,31 +2472,42 @@ def class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
 
     yweights = weightsNumpy.reshape(-1)
     res = accuracy_score(ytrue[:, -3], ypred[:, -1], sample_weight=yweights)
-            
+
     return res
 
-def binary_accuracy(Y: np.array, ypred: np.array, target: str, weights: np.array = None, mask: np.array = None) -> dict:
+
+def binary_accuracy(
+    Y: np.array,
+    ypred: np.array,
+    target: str,
+    weights: np.array = None,
+    mask: np.array = None,
+) -> dict:
     if mask is None:
         mask = np.arange(ypred.shape[0])
-    
-    ytrue = Y[:, -2] > 0  # On suppose que les labels binaires sont dans l'avant-dernière colonne
-    ytrueReg = Y[:, -1]   # On suppose que les cibles de régression sont dans la dernière colonne
+
+    ytrue = (
+        Y[:, -2] > 0
+    )  # On suppose que les labels binaires sont dans l'avant-dernière colonne
+    ytrueReg = Y[
+        :, -1
+    ]  # On suppose que les cibles de régression sont dans la dernière colonne
 
     bounds = np.linspace(0.01, 0.90, 10)  # Seuils de 0.01 à 0.99 par pas de 0.01
 
     res = {}
 
-    if target in ['binary']:
+    if target in ["binary"]:
         maxi = 1.0
-    elif target == 'nbsinister':
+    elif target == "nbsinister":
         maxi = np.nanmax(ytrue)
-    elif target == 'risk':
+    elif target == "risk":
         maxi = np.nanmax(ytrueReg)
     else:
         maxi = np.nanmax(ypred)
 
     bestScore = 0.0
-    
+
     ypredNumpy = ypred[mask]
     ytrueNumpy = ytrue[mask]
     ytrueRegNumpy = ytrueReg[mask]
@@ -1962,7 +2518,7 @@ def binary_accuracy(Y: np.array, ypred: np.array, target: str, weights: np.array
         weightsNumpy = np.ones(ytrueNumpy.shape[0])
 
     for bound in bounds:
-        if target in ['binary', 'nbsinister', 'indice']:
+        if target in ["binary", "nbsinister", "indice"]:
             yBinPred = (ypredNumpy > bound * maxi).astype(int)
         else:
             yBinPred = (ytrueRegNumpy > bound * maxi).astype(int)
@@ -1972,16 +2528,17 @@ def binary_accuracy(Y: np.array, ypred: np.array, target: str, weights: np.array
             bestScore = f1
             bestBound = bound
 
-    if 'bestBound' not in locals():
+    if "bestBound" not in locals():
         bestBound = bounds[0]
         yBinPred = (ypredNumpy > bestBound * maxi).astype(int)
         bestScore = accuracy_score(ytrueNumpy, yBinPred, sample_weight=weightsNumpy)
 
-    res['accuracy'] = bestScore
-            
+    res["accuracy"] = bestScore
+
     return res
 
-def balanced_class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
+
+def balanced_class_accuracy(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -1998,10 +2555,11 @@ def balanced_class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) 
     yweights = weightsNumpy.reshape(-1)
 
     res = balanced_accuracy_score(ytrue[:, -3], ypred[:, -1], sample_weight=yweights)
-            
+
     return res
 
-def class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
+
+def class_accuracy(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -2018,10 +2576,18 @@ def class_accuracy(ypred, ytrue, dir : Path, weights = None, top=None) -> dict:
     yweights = weightsNumpy.reshape(-1)
 
     res = accuracy_score(ytrue[:, -3], ypred[:, -1], sample_weight=yweights)
-            
+
     return res
 
-def my_concordance_index(event_times, nb_event, predicted_scores, event_observed, tol_tied=0.0, max_survival_times=None):
+
+def my_concordance_index(
+    event_times,
+    nb_event,
+    predicted_scores,
+    event_observed,
+    tol_tied=0.0,
+    max_survival_times=None,
+):
     """
     Calculates the Concordance Index (C-index) from the actual survival times, predicted scores,
     a variable indicating if the event was observed (1) or censored (0),
@@ -2037,7 +2603,7 @@ def my_concordance_index(event_times, nb_event, predicted_scores, event_observed
     :param max_survival_times: Array with the same shape as event_times; times greater than their corresponding values are considered equal
     :return: The three C-indexes: for survival times, for number of events, and combined
     """
-    
+
     n = len(event_times)
     assert len(predicted_scores) == n
     assert len(event_observed) == n
@@ -2051,27 +2617,33 @@ def my_concordance_index(event_times, nb_event, predicted_scores, event_observed
         ]
     else:
         adjusted_event_times = event_times.copy()
-    
+
     num_comparable_pairs_time = 0  # Comparable pairs for survival times
     num_concordant_pairs_time = 0  # Concordant pairs for survival times
-    num_tied_pairs_time = 0        # Pairs with identical predicted scores for survival times (with tolerance)
-    
+    num_tied_pairs_time = (
+        0  # Pairs with identical predicted scores for survival times (with tolerance)
+    )
+
     num_comparable_pairs_event = 0  # Comparable pairs for the number of events
     num_concordant_pairs_event = 0  # Concordant pairs for the number of events
-    num_tied_pairs_event = 0        # Pairs with identical predicted scores for the number of events (with tolerance)
+    num_tied_pairs_event = 0  # Pairs with identical predicted scores for the number of events (with tolerance)
 
     # Compare all pairs (i, j)
     for i in range(n):
         for j in range(i + 1, n):
             # Comparison of adjusted survival times
             if adjusted_event_times[i] != adjusted_event_times[j]:
-                if event_observed[i] == 1 or event_observed[j] == 1:  # Comparable if at least one event is observed
+                if (
+                    event_observed[i] == 1 or event_observed[j] == 1
+                ):  # Comparable if at least one event is observed
                     num_comparable_pairs_time += 1
-                    
+
                     if adjusted_event_times[i] < adjusted_event_times[j]:
                         if predicted_scores[i] > predicted_scores[j]:
                             num_concordant_pairs_time += 1
-                        elif abs(predicted_scores[i] - predicted_scores[j]) <= tol_tied:  # Tolerance on equality
+                        elif (
+                            abs(predicted_scores[i] - predicted_scores[j]) <= tol_tied
+                        ):  # Tolerance on equality
                             num_tied_pairs_time += 1
                     elif adjusted_event_times[j] < adjusted_event_times[i]:
                         if predicted_scores[j] > predicted_scores[i]:
@@ -2081,9 +2653,11 @@ def my_concordance_index(event_times, nb_event, predicted_scores, event_observed
 
             # Comparison of the number of events
             if nb_event[i] != nb_event[j]:
-                if event_observed[i] == 1 or event_observed[j] == 1: # Comparable if at least one event is observed
+                if (
+                    event_observed[i] == 1 or event_observed[j] == 1
+                ):  # Comparable if at least one event is observed
                     num_comparable_pairs_event += 1
-                    
+
                     if nb_event[i] > nb_event[j]:
                         if predicted_scores[i] > predicted_scores[j]:
                             num_concordant_pairs_event += 1
@@ -2099,26 +2673,33 @@ def my_concordance_index(event_times, nb_event, predicted_scores, event_observed
     if num_comparable_pairs_time == 0:
         c_index_time = 0
     else:
-        c_index_time = (num_concordant_pairs_time + 0.5 * num_tied_pairs_time) / num_comparable_pairs_time
-    
+        c_index_time = (
+            num_concordant_pairs_time + 0.5 * num_tied_pairs_time
+        ) / num_comparable_pairs_time
+
     # Calculation of C-index for the number of events
     if num_comparable_pairs_event == 0:
         c_index_event = 0
     else:
-        c_index_event = (num_concordant_pairs_event + 0.5 * num_tied_pairs_event) / num_comparable_pairs_event
+        c_index_event = (
+            num_concordant_pairs_event + 0.5 * num_tied_pairs_event
+        ) / num_comparable_pairs_event
 
     # Total concordant, tied, and comparable pairs
     total_concordant_pairs = num_concordant_pairs_time + num_concordant_pairs_event
     total_tied_pairs = num_tied_pairs_time + num_tied_pairs_event
     total_comparable_pairs = num_comparable_pairs_time + num_comparable_pairs_event
-    
+
     # Calculation of the combined C-index
     if total_comparable_pairs == 0:
         c_index_combined = 0
     else:
-        c_index_combined = (total_concordant_pairs + 0.5 * total_tied_pairs) / total_comparable_pairs
-    
+        c_index_combined = (
+            total_concordant_pairs + 0.5 * total_tied_pairs
+        ) / total_comparable_pairs
+
     return c_index_time, c_index_event, c_index_combined
+
 
 def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Convertir ypred et ytrue en numpy si ce sont des tenseurs PyTorch
@@ -2142,7 +2723,7 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     max_survival_times = np.empty(ytrue.shape[0])
     for i, node in enumerate(ytrue):
         date = allDates[int(node[4])]
-        month = date.split('-')[1]
+        month = date.split("-")[1]
         max_survival_times[i] = 30
         """if month in ['10','11','12','01']:
             max_survival_times[i] = 3
@@ -2153,48 +2734,68 @@ def c_index(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
 
     # Calcul du C-index with a minimum of 0
     y_events = np.ones(ytrue.shape[0])
-    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 0],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 0],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 1
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 1] = 1
-    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 0],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 1] = 1
+    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 0],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 2
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 2] = 1
-    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 0],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 2] = 1
+    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 0],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 3
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 3] = 1
-    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 0],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
-    return {'c_index_time_0': c_index_time_zero,'c_index_event_0': c_index_event_zero, 'c_index_combined_0' : c_index_combined_zero,
-            'c_index_time_1': c_index_time_one, 'c_index_event_1': c_index_event_one, 'c_index_combined_1' : c_index_combined_one,
-            'c_index_time_2': c_index_time_two, 'c_index_event_2': c_index_event_two, 'c_index_combined_2' : c_index_combined_two,
-            'c_index_time_3': c_index_time_three,'c_index_event_3': c_index_event_three, 'c_index_combined_3' : c_index_combined_three
-            }
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 3] = 1
+    c_index_time_three, c_index_event_three, c_index_combined_three = (
+        my_concordance_index(
+            ytrue[:, days_until_next_event_index],
+            ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+            ypred[:, 0],
+            y_events,
+            max_survival_times=max_survival_times,
+            tol_tied=1e-8,
+        )
+    )
+
+    return {
+        "c_index_time_0": c_index_time_zero,
+        "c_index_event_0": c_index_event_zero,
+        "c_index_combined_0": c_index_combined_zero,
+        "c_index_time_1": c_index_time_one,
+        "c_index_event_1": c_index_event_one,
+        "c_index_combined_1": c_index_combined_one,
+        "c_index_time_2": c_index_time_two,
+        "c_index_event_2": c_index_event_two,
+        "c_index_combined_2": c_index_combined_two,
+        "c_index_time_3": c_index_time_three,
+        "c_index_event_3": c_index_event_three,
+        "c_index_combined_3": c_index_combined_three,
+    }
+
 
 def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     # Convertir ypred et ytrue en numpy si ce sont des tenseurs PyTorch
@@ -2218,7 +2819,7 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
     max_survival_times = np.empty(ytrue.shape[0])
     for i, node in enumerate(ytrue):
         date = allDates[int(node[4])]
-        month = date.split('-')[1]
+        month = date.split("-")[1]
         max_survival_times[i] = 15
         """if month in ['10','11','12','01']:
             max_survival_times[i] = 3
@@ -2227,59 +2828,78 @@ def c_index_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
         elif month in ['06', '07', '08', '09']:
             max_survival_times[i] = 7"""
 
-     # Calcul du C-index with a minimum of 0
+    # Calcul du C-index with a minimum of 0
     y_events = np.ones(ytrue.shape[0])
-    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 1],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    c_index_time_zero, c_index_event_zero, c_index_combined_zero = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 1],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 1
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 1] = 1
-    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 1],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 1] = 1
+    c_index_time_one, c_index_event_one, c_index_combined_one = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 1],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 2
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 2] = 2
-    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 1],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 2] = 2
+    c_index_time_two, c_index_event_two, c_index_combined_two = my_concordance_index(
+        ytrue[:, days_until_next_event_index],
+        ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+        ypred[:, 1],
+        y_events,
+        max_survival_times=max_survival_times,
+        tol_tied=1e-8,
+    )
+
     # Calcul du C-index with a minimum of 3
     y_events = np.zeros(ytrue.shape[0])
-    y_events[ytrue[:, (ids_columns + targets_columns).index('nbsinister')] >= 3] = 3
-    c_index_time_three, c_index_event_three, c_index_combined_three = my_concordance_index(ytrue[:, days_until_next_event_index],
-                                                                         ytrue[:, (ids_columns + targets_columns).index('nbsinister')],
-                                                                         ypred[:, 1],
-                                                                         y_events,
-                                                                         max_survival_times=max_survival_times,
-                                                                         tol_tied=1e-8)
-    
-    return {'c_index_time_0': c_index_time_zero,'c_index_event_0': c_index_event_zero, 'c_index_combined_0' : c_index_combined_zero,
-            'c_index_time_1': c_index_time_one, 'c_index_event_1': c_index_event_one, 'c_index_combined_1' : c_index_combined_one,
-            'c_index_time_2': c_index_time_two, 'c_index_event_2': c_index_event_two, 'c_index_combined_2' : c_index_combined_two,
-            'c_index_time_3': c_index_time_three,'c_index_event_3': c_index_event_three, 'c_index_combined_3' : c_index_combined_three
-            }
+    y_events[ytrue[:, (ids_columns + targets_columns).index("nbsinister")] >= 3] = 3
+    c_index_time_three, c_index_event_three, c_index_combined_three = (
+        my_concordance_index(
+            ytrue[:, days_until_next_event_index],
+            ytrue[:, (ids_columns + targets_columns).index("nbsinister")],
+            ypred[:, 1],
+            y_events,
+            max_survival_times=max_survival_times,
+            tol_tied=1e-8,
+        )
+    )
+
+    return {
+        "c_index_time_0": c_index_time_zero,
+        "c_index_event_0": c_index_event_zero,
+        "c_index_combined_0": c_index_combined_zero,
+        "c_index_time_1": c_index_time_one,
+        "c_index_event_1": c_index_event_one,
+        "c_index_combined_1": c_index_combined_one,
+        "c_index_time_2": c_index_time_two,
+        "c_index_event_2": c_index_event_two,
+        "c_index_combined_2": c_index_combined_two,
+        "c_index_time_3": c_index_time_three,
+        "c_index_event_3": c_index_event_three,
+        "c_index_combined_3": c_index_combined_three,
+    }
 
 
-def calibrated_error(ypred, ytrue, dir, weights = None, top = None) -> dict:
+def calibrated_error(ypred, ytrue, dir, weights=None, top=None) -> dict:
 
     pass
 
-def mean_absolute_error_class(ypred, ytrue,
-                              dir : Path, weights = None, top = None) -> dict:
-    
+
+def mean_absolute_error_class(ypred, ytrue, dir: Path, weights=None, top=None) -> dict:
+
     if torch.is_tensor(ypred):
         ypred = ypred.detach().cpu().numpy().astype(float)
     if torch.is_tensor(ytrue):
@@ -2296,8 +2916,8 @@ def mean_absolute_error_class(ypred, ytrue,
     yweights = weightsNumpy.reshape(-1)
 
     if top is not None:
-        minBound = np.nanmax(ytrue[:,-1]) * (1 - top/100)
-        mask2 = (ytrue[:,-1] > minBound)
+        minBound = np.nanmax(ytrue[:, -1]) * (1 - top / 100)
+        mask2 = ytrue[:, -1] > minBound
         ytrueclass = ytrue[:, -3][mask2]
         ypredclass = ypred[:, -1][mask2]
         yweights = None
@@ -2312,37 +2932,39 @@ def mean_absolute_error_class(ypred, ytrue,
 
     return res
 
+
 def mode_filter(image, kernel_size=3):
     # Assurez-vous que le kernel_size est impair pour avoir un centre
     assert kernel_size % 2 == 1, "Le kernel_size doit être impair"
-    
+
     # Obtenir le padding pour le centre du kernel
     pad_width = kernel_size // 2
-    
+
     # Padding de l'image pour gérer les bords
-    padded_image = np.pad(image, pad_width=pad_width, mode='edge')
-    
+    padded_image = np.pad(image, pad_width=pad_width, mode="edge")
+
     # Image de sortie
     filtered_image = np.zeros_like(image)
-    
+
     # Parcourir chaque pixel de l'image
     for i in range(image.shape[0]):
         for j in range(image.shape[1]):
             # Extraire la fenêtre locale
-            local_window = padded_image[i:i + kernel_size, j:j + kernel_size]
+            local_window = padded_image[i : i + kernel_size, j : j + kernel_size]
             local_window = local_window[local_window != -1]
             # Trouver la valeur la plus fréquente dans la fenêtre
             counter_res = Counter(local_window.flatten()).most_common(1)
-            #if len(counter_res) == 0:
+            # if len(counter_res) == 0:
             #    continue
             most_common_value = Counter(local_window.flatten()).most_common(1)[0][0]
             if most_common_value == -1:
                 continue
-            
+
             # Assigner cette valeur au pixel central
             filtered_image[i, j] = most_common_value
-    
+
     return filtered_image
+
 
 def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
     """
@@ -2361,7 +2983,7 @@ def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
     km_per_deg_lat = 111.32
 
     # Longueur d’un degré de longitude dépendant de la latitude
-    #km_per_deg_lon = 111.32 * math.cos(math.radians(lat_deg))
+    # km_per_deg_lon = 111.32 * math.cos(math.radians(lat_deg))
     km_per_deg_lon = 111.32
 
     # Dimensions du carré en km
@@ -2375,10 +2997,20 @@ def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
 
     return n_rows, n_cols, total_pixels
 
-def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_size=math.inf, exclude_label=None, background=-1, features=None, nb_attempt=3):
+
+def merge_adjacent_clusters(
+    image,
+    mode="size",
+    min_cluster_size=0,
+    max_cluster_size=math.inf,
+    exclude_label=None,
+    background=-1,
+    features=None,
+    nb_attempt=3,
+):
     """
     Fusionne les clusters adjacents dans une image en fonction de critères définis.
-    
+
     Paramètres :
     - image : Image labellisée contenant des clusters.
     - mode : Critère de fusion ('size', 'time_series_similarity', 'time_series_similarity_fast').
@@ -2426,7 +3058,7 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
             continue
 
         # Si le label a déjà été modifié, passer au suivant
-        #if label in changed_labels:
+        # if label in changed_labels:
         #    i += 1
         #    continue
 
@@ -2442,23 +3074,32 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                 # Trouver les voisins du cluster actuel
                 mask_label = dilated_image == label
                 mask_label_ori = res == label
-                neighbors = segmentation.find_boundaries(mask_label, connectivity=1, mode='outer', background=background)
+                neighbors = segmentation.find_boundaries(
+                    mask_label, connectivity=1, mode="outer", background=background
+                )
                 neighbor_labels = np.unique(dilated_image[neighbors])
                 # Exclure les labels indésirables
-                neighbor_labels = neighbor_labels[(neighbor_labels != exclude_label) & (neighbor_labels != background) & (neighbor_labels != label)]
+                neighbor_labels = neighbor_labels[
+                    (neighbor_labels != exclude_label)
+                    & (neighbor_labels != background)
+                    & (neighbor_labels != label)
+                ]
                 dilate = True
                 changed_labels.append(label)
 
                 if len(neighbor_labels) > 0:
                     # Trier les voisins par taille
                     neighbors_size = sorted(
-                        [[neighbor_label, np.sum(res == neighbor_label)] for neighbor_label in neighbor_labels],
-                        key=lambda x: x[1]  # trie par la somme (ordre croissant)
+                        [
+                            [neighbor_label, np.sum(res == neighbor_label)]
+                            for neighbor_label in neighbor_labels
+                        ],
+                        key=lambda x: x[1],  # trie par la somme (ordre croissant)
                     )
 
                     best_neighbor = None
 
-                    if mode == 'size':
+                    if mode == "size":
                         # Mode basé sur la taille des clusters
                         max_neighbor_size = -math.inf
                         for nei, neighbor in enumerate(neighbors_size):
@@ -2473,11 +3114,13 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                                     dilate = False
                                     res[mask_label_ori] = neighbor[0]
                                     dilated_image[mask_label] = neighbor[0]
-                                    logger.info(f'Use neighbord label {label} -> {neighbor[0]}')
+                                    logger.info(
+                                        f"Use neighbord label {label} -> {neighbor[0]}"
+                                    )
                                     label = neighbor[0]
                                     find_neighbor = True
                                     break
-                                
+
                                 best_neighbor = neighbor[0]
                                 max_neighbor_size = neighbor_size
                                 break
@@ -2487,10 +3130,12 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                                 best_neighbor = neighbor[0]
                                 max_neighbor_size = neighbor_size
 
-                    elif mode == 'timeSeriesSimilarity':
+                    elif mode == "timeSeriesSimilarity":
                         # Mode basé sur la similarité de séries temporelles (DTW)
                         assert features is not None
-                        time_series_data = np.nansum(features[dilated_image == label], axis=0).reshape(-1, 1)
+                        time_series_data = np.nansum(
+                            features[dilated_image == label], axis=0
+                        ).reshape(-1, 1)
                         best_neighbord = None
                         min_dst = math.inf  # Cherche à minimiser la distance
                         dst_thresh = 1000
@@ -2499,8 +3144,12 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                             if neighbor[0] == label:
                                 continue
 
-                            time_series_data_neighbor = np.nansum(features[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
-                            distance = dtw.distance(time_series_data, time_series_data_neighbor)
+                            time_series_data_neighbor = np.nansum(
+                                features[dilated_image == neighbor[0]], axis=0
+                            ).reshape(-1, 1)
+                            distance = dtw.distance(
+                                time_series_data, time_series_data_neighbor
+                            )
 
                             if distance < min_dst and distance < dst_thresh:
                                 best_neighbord = neighbor[0]
@@ -2509,22 +3158,30 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                         if best_neighbord is not None:
                             dilate = False
                             res[mask_label_ori] = best_neighbord
-                            logger.info(f'label {label} -> {best_neighbord}')
+                            logger.info(f"label {label} -> {best_neighbord}")
                             changed_labels.append(label)
                             label = best_neighbord
                             find_neighbor = True
 
-                    elif mode == 'time_series_similarity_fast':
+                    elif mode == "time_series_similarity_fast":
                         # Mode basé sur une version rapide de DTW
                         assert features is not None
-                        time_series_data = np.nansum(features[dilated_image == label], axis=0).reshape(-1, 1)
+                        time_series_data = np.nansum(
+                            features[dilated_image == label], axis=0
+                        ).reshape(-1, 1)
                         best_neighbord = None
                         min_simi = math.inf  # Cherche à minimiser la similarité
                         dst_thresh = 100
 
                         for neighbor in neighbors_size:
-                            time_series_data_neighbor = np.nansum(features[dilated_image == neighbor[0]], axis=0).reshape(-1, 1)
-                            _, simi = dtw_functions.dtw(time_series_data, time_series_data_neighbor, local_dissimilarity=d.euclidean)
+                            time_series_data_neighbor = np.nansum(
+                                features[dilated_image == neighbor[0]], axis=0
+                            ).reshape(-1, 1)
+                            _, simi = dtw_functions.dtw(
+                                time_series_data,
+                                time_series_data_neighbor,
+                                local_dissimilarity=d.euclidean,
+                            )
 
                             if simi < min_simi and simi < dst_thresh:
                                 best_neighbord = neighbor[0]
@@ -2536,18 +3193,32 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                             changed_labels.append(label)
                             label = best_neighbord
                             find_neighbor = True
-                    
-                    elif mode == 'BrayCurtis':
+
+                    elif mode == "BrayCurtis":
                         assert features is not None
-                        best_neighbor, max_neighbor_size, find_neighbor, dilate = find_neighbor_by_BrayCurtis_similarity(res, features, label, min_cluster_size, max_cluster_size, mask_label_ori, dilated_image, mask_label, neighbor_labels)
-                
+                        best_neighbor, max_neighbor_size, find_neighbor, dilate = (
+                            find_neighbor_by_BrayCurtis_similarity(
+                                res,
+                                features,
+                                label,
+                                min_cluster_size,
+                                max_cluster_size,
+                                mask_label_ori,
+                                dilated_image,
+                                mask_label,
+                                neighbor_labels,
+                            )
+                        )
+
                     # Si aucun voisin ne satisfait les critères, utiliser le plus grand
                     if not find_neighbor and best_neighbor is not None:
                         if max_neighbor_size < max_cluster_size:
                             res[mask_label] = best_neighbor
                             dilated_image[mask_label] = best_neighbor
                             dilate = False
-                            logger.info(f'Use biggest neighbord label {label} -> {best_neighbor}')
+                            logger.info(
+                                f"Use biggest neighbord label {label} -> {best_neighbor}"
+                            )
                             label = best_neighbor
                             find_neighbor = True
                             # Si la taille après fusion dépasse la taille maximal, appliquer l'érosion (peut être ne pas fusionner)
@@ -2555,7 +3226,9 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
                                 mask_label = dilated_image == label
                                 ones = np.argwhere(mask_label == 1).shape[0]
                                 while ones > max_cluster_size:
-                                    mask_label = morphology.erosion(mask_label, morphology.disk(3))
+                                    mask_label = morphology.erosion(
+                                        mask_label, morphology.disk(3)
+                                    )
                                     ones = np.argwhere(mask_label == 1).shape[0]
 
                 # Si aucun voisin trouvé, dilater la région
@@ -2566,24 +3239,26 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
 
                 if not dilate:
                     break
-                
+
             # Si aucun voisin trouvé après nb_attempt, supprimer ou conserver la région
             if not find_neighbor:
                 if ones < min_cluster_size:
                     mask_label = dilated_image == label
-                    ones = np.argwhere(mask_label == 1).shape[0] 
+                    ones = np.argwhere(mask_label == 1).shape[0]
                     # Si l'objet dilaté ne vérifie pas la condition minimum
                     if ones < min_cluster_size:
                         res[mask_label] = 0
-                        logger.info(f'Remove label {region.label}')
+                        logger.info(f"Remove label {region.label}")
                     else:
                         # Si l'objet dilaté ne vérifie pas la condition maximum
                         while ones > max_cluster_size:
-                            mask_label = morphology.erosion(mask_label, morphology.square(3))
+                            mask_label = morphology.erosion(
+                                mask_label, morphology.square(3)
+                            )
                             ones = np.argwhere(mask_label == 1).shape[0]
-                        
+
                         res[mask_label] = region.label
-                        logger.info(f'Keep label dilated {region.label}')
+                        logger.info(f"Keep label dilated {region.label}")
                         fix_label.append(region.label)
 
             # Mettre à jour les régions pour tenir compte des changements
@@ -2603,22 +3278,24 @@ def merge_adjacent_clusters(image, mode='size', min_cluster_size=0, max_cluster_
             res[mask_before_erosion & ~mask_label] = 0
 
             # Si le cluster est assez grand, on le conserve tel quel
-            logger.info(f'Keep label {region.label}')
+            logger.info(f"Keep label {region.label}")
 
         i += 1
 
     return res
 
-def variance_threshold(df,th):
-    var_thres=VarianceThreshold(threshold=th)
+
+def variance_threshold(df, th):
+    var_thres = VarianceThreshold(threshold=th)
     var_thres.fit(df)
     new_cols = var_thres.get_support()
-    return df.iloc[:,new_cols]
+    return df.iloc[:, new_cols]
+
 
 def find_clusters(image, threshold, clusters_to_ignore=None, background=0):
     """
     Traverse the clusters in an image and return the clusters whose size is greater than a given threshold.
-    
+
     :param image: np.array, 2D image with values representing the clusters
     :param threshold: int, minimum size of the cluster to be considered
     :param background: int, value representing the background (default: 0)
@@ -2627,36 +3304,39 @@ def find_clusters(image, threshold, clusters_to_ignore=None, background=0):
     """
     # Initialize the list of valid clusters to return
     valid_clusters = []
-    
+
     # If no clusters to ignore are provided, initialize with an empty list
     if clusters_to_ignore is None:
         clusters_to_ignore = []
-    
+
     # Create a mask where the background is ignored
     mask = image != background
-    
+
     # Label the clusters in the image
     cluster_ids = np.unique(image[mask])
     cluster_ids = cluster_ids[~np.isnan(cluster_ids)]
-    
+
     # Traverse each cluster and check its size
     for cluster_id in cluster_ids:
         # Skip the cluster if it's in the ignore list
         if cluster_id == clusters_to_ignore:
             continue
-        
+
         # Calculate the size of the cluster
         cluster_size = np.sum(image == cluster_id)
-        
+
         # If the cluster size exceeds the threshold, add it to the list
         if cluster_size > threshold:
             valid_clusters.append(cluster_id)
-    
+
     return valid_clusters
 
-def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, background):
+
+def split_large_clusters(
+    image, size_threshold, min_cluster_size, wanted_size, background
+):
     labeled_image = np.copy(image)
-    
+
     regions = measure.regionprops(labeled_image)
     new_labeled_image = np.copy(labeled_image)
     changes_made = False
@@ -2669,7 +3349,7 @@ def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, b
 
         if original_size > size_threshold:
             minr, minc, maxr, maxc = region.bbox
-            region_mask = (labeled_image[minr:maxr, minc:maxc] == region.label)
+            region_mask = labeled_image[minr:maxr, minc:maxc] == region.label
             coords = np.column_stack(np.nonzero(region_mask))
 
             if len(coords) > 1:
@@ -2685,7 +3365,7 @@ def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, b
                 original_diff = abs(original_size - wanted_size)
                 split_diff = abs(size_1 - wanted_size) + abs(size_2 - wanted_size)
 
-                #if split_diff < original_diff and size_1 >= min_cluster_size and size_2 >= min_cluster_size:
+                # if split_diff < original_diff and size_1 >= min_cluster_size and size_2 >= min_cluster_size:
                 if split_diff < original_diff:
                     # Appliquer le split
                     new_label_1 = new_labeled_image.max() + 1
@@ -2694,8 +3374,12 @@ def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, b
 
                     new_region = np.where(region_mask, full_region, 0)
                     # On assigne en place dans la région uniquement là où le masque est actif
-                    new_region[region_mask] = np.where(labels == 0, new_label_1, new_label_2)
-                    new_labeled_image[minr:maxr, minc:maxc][region_mask] = new_region[region_mask]
+                    new_region[region_mask] = np.where(
+                        labels == 0, new_label_1, new_label_2
+                    )
+                    new_labeled_image[minr:maxr, minc:maxc][region_mask] = new_region[
+                        region_mask
+                    ]
 
                     changes_made = True
 
@@ -2707,6 +3391,7 @@ def split_large_clusters(image, size_threshold, min_cluster_size, wanted_size, b
 
     return new_labeled_image
 
+
 def most_frequent_neighbor(image, mask, i, j, non_cluster):
     """
     Retourne la valeur la plus fréquente des voisins d'un pixel, en tenant compte d'un masque.
@@ -2717,16 +3402,21 @@ def most_frequent_neighbor(image, mask, i, j, non_cluster):
             if di == 0 and dj == 0:
                 continue
             ni, nj = i + di, j + dj
-            if 0 <= ni < image.shape[0] and 0 <= nj < image.shape[1] and not mask[ni, nj]:
+            if (
+                0 <= ni < image.shape[0]
+                and 0 <= nj < image.shape[1]
+                and not mask[ni, nj]
+            ):
                 if non_cluster is not None:
                     if len(image[ni, nj][image[ni, nj] != non_cluster]) > 0:
                         neighbors.append(image[ni, nj][image[ni, nj] != non_cluster][0])
-                else: 
+                else:
                     neighbors.append(image[ni, nj])
     if neighbors:
         return Counter(neighbors).most_common(1)[0][0]
     else:
         return image[i, j]  # En cas d'absence de voisins valides
+
 
 def merge_small_clusters(image, min_size, non_cluster=None):
     """
@@ -2741,13 +3431,16 @@ def merge_small_clusters(image, min_size, non_cluster=None):
             continue
         if count < min_size:
             # Trouver tous les pixels appartenant au cluster
-            mask = (image == cluster_id)
+            mask = image == cluster_id
             for i in range(image.shape[0]):
                 for j in range(image.shape[1]):
                     if mask[i, j]:
-                        output_image[i, j] = most_frequent_neighbor(output_image, mask, i, j, non_cluster)
-    
+                        output_image[i, j] = most_frequent_neighbor(
+                            output_image, mask, i, j, non_cluster
+                        )
+
     return output_image
+
 
 def relabel_clusters(cluster_labels, started):
     """
@@ -2760,226 +3453,276 @@ def relabel_clusters(cluster_labels, started):
         relabeled_image[cluster_labels == cl] = ncl + started
     return relabeled_image
 
+
 def get_features_name_list(scale, features, methods):
     features_name = []
     if scale == 0:
-        methods = ['mean']
+        methods = ["mean"]
     for var in features:
-        if var == 'Calendar':
+        if var == "Calendar":
             features_name += calendar_variables
-            features_name += [f'{cal}_T' for cal in calendar_variables]
-            features_name += [f'{cal}_R' for cal in calendar_variables]
-            features_name += [f'{cal}_ba' for cal in calendar_variables]
-            
-        elif var == 'air':
+            features_name += [f"{cal}_T" for cal in calendar_variables]
+            features_name += [f"{cal}_R" for cal in calendar_variables]
+            features_name += [f"{cal}_ba" for cal in calendar_variables]
+
+        elif var == "air":
             features_name += air_variables
         elif var in landcover_variables:
-            features_name += [f'{var}_{met}' for met in methods]
-        elif var == 'sentinel':
-            features_name += [f'{v}_{met}' for v in sentinel_variables for met in methods]
+            features_name += [f"{var}_{met}" for met in methods]
+        elif var == "sentinel":
+            features_name += [
+                f"{v}_{met}" for v in sentinel_variables for met in methods
+            ]
         elif var == "foret":
-            features_name += [f'{foretint2str[v]}_{met}' for v in foret_variables for met in methods]
-        elif var == 'dynamicWorld':
-            features_name += [f'{v}_{met}' for v in dynamic_world_variables for met in methods]
-        elif var == 'cosia':
-            features_name += [f'{v}_{met}' for v in cosia_variables for met in methods]
-        elif var == 'corine':
-            features_name += [f'{v}_{met}' for v in corine_variable for met in methods]
-        elif var == 'bdroute':
-            features_name += [f'{v}_{met}' for v in bdroute_variables for met in methods]
-        elif var == 'highway':
-            features_name += [f'{osmnxint2str[v]}_{met}' for v in osmnx_variables for met in methods]
-        elif var == 'Geo':
+            features_name += [
+                f"{foretint2str[v]}_{met}" for v in foret_variables for met in methods
+            ]
+        elif var == "dynamicWorld":
+            features_name += [
+                f"{v}_{met}" for v in dynamic_world_variables for met in methods
+            ]
+        elif var == "cosia":
+            features_name += [f"{v}_{met}" for v in cosia_variables for met in methods]
+        elif var == "corine":
+            features_name += [f"{v}_{met}" for v in corine_variable for met in methods]
+        elif var == "bdroute":
+            features_name += [
+                f"{v}_{met}" for v in bdroute_variables for met in methods
+            ]
+        elif var == "highway":
+            features_name += [
+                f"{osmnxint2str[v]}_{met}" for v in osmnx_variables for met in methods
+            ]
+        elif var == "Geo":
             features_name += geo_variables
-        elif var == 'vigicrues':
-            features_name += [f'{v}_{met}' for v in vigicrues_variables for met in methods]
-        elif var == 'nappes':
-            features_name += [f'{v}_{met}' for v in nappes_variables for met in methods]
-        elif var == 'Historical':
-            features_name += [f'{v}' for v in historical_variables]
-        elif var == 'AutoRegressionReg':
-            features_name += [f'AutoRegressionReg-{v}' for v in auto_regression_variable_reg]
-        elif var == 'AutoRegressionBin':
-            features_name +=  [f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin]
-        elif var == 'elevation':
-            features_name += [f'{v}_{met}' for v in elevation_variables for met in methods]
-        elif var == 'population':
-            features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
-        elif var == 'region_class':
+        elif var == "vigicrues":
+            features_name += [
+                f"{v}_{met}" for v in vigicrues_variables for met in methods
+            ]
+        elif var == "nappes":
+            features_name += [f"{v}_{met}" for v in nappes_variables for met in methods]
+        elif var == "Historical":
+            features_name += [f"{v}" for v in historical_variables]
+        elif var == "AutoRegressionReg":
+            features_name += [
+                f"AutoRegressionReg-{v}" for v in auto_regression_variable_reg
+            ]
+        elif var == "AutoRegressionBin":
+            features_name += [
+                f"AutoRegressionBin-{v}" for v in auto_regression_variable_bin
+            ]
+        elif var == "elevation":
+            features_name += [
+                f"{v}_{met}" for v in elevation_variables for met in methods
+            ]
+        elif var == "population":
+            features_name += [
+                f"{v}_{met}" for v in population_variabes for met in methods
+            ]
+        elif var == "region_class":
             features_name += [var]
-        elif var == 'Past_risk' or var == 'Past_burnedarea':
+        elif var == "Past_risk" or var == "Past_burnedarea":
             features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
-        elif var == 'temporal_prediction' or var == 'spatial_prediction':
+        elif var == "temporal_prediction" or var == "spatial_prediction":
             features_name += [var]
-        elif var.find('frequencyratio') != -1:
+        elif var.find("frequencyratio") != -1:
             features_name += [var]
         elif var in cluster_encoder:
             features_name += [var]
-        elif var == 'Past_risk' or var == 'Past_burnedarea':
+        elif var == "Past_risk" or var == "Past_burnedarea":
             features_name += [var]
         else:
-            features_name += [f'{var}_{met}' for met in methods]
-            
+            features_name += [f"{var}_{met}" for met in methods]
+
     return features_name, len(features_name)
+
 
 def get_features_name_list_old(scale, features, methods):
     features_name = []
     if scale == 0:
-        methods = ['mean']
+        methods = ["mean"]
     for var in features:
-        if var == 'Calendar':
+        if var == "Calendar":
             features_name += calendar_variables
-        elif var == 'air':
+        elif var == "air":
             features_name += air_variables
-        elif var in landcover_variables or var == 'id_encoder':
-            features_name += [f'{var}_{met}' for met in methods]
-        elif var == 'sentinel':
-            features_name += [f'{v}_{met}' for v in sentinel_variables for met in methods]
+        elif var in landcover_variables or var == "id_encoder":
+            features_name += [f"{var}_{met}" for met in methods]
+        elif var == "sentinel":
+            features_name += [
+                f"{v}_{met}" for v in sentinel_variables for met in methods
+            ]
         elif var == "foret":
-            features_name += [f'{foretint2str[v]}_{met}' for v in foret_variables for met in methods]
-        elif var == 'dynamicWorld':
-            features_name += [f'{v}_{met}' for v in dynamic_world_variables for met in methods]
-        elif var == 'cosia':
-            features_name += [f'{v}_{met}' for v in cosia_variables for met in methods]
-        elif var == 'highway':
-            features_name += [f'{osmnxint2str[v]}_{met}' for v in osmnx_variables for met in methods]
-        elif var == 'Geo':
+            features_name += [
+                f"{foretint2str[v]}_{met}" for v in foret_variables for met in methods
+            ]
+        elif var == "dynamicWorld":
+            features_name += [
+                f"{v}_{met}" for v in dynamic_world_variables for met in methods
+            ]
+        elif var == "cosia":
+            features_name += [f"{v}_{met}" for v in cosia_variables for met in methods]
+        elif var == "highway":
+            features_name += [
+                f"{osmnxint2str[v]}_{met}" for v in osmnx_variables for met in methods
+            ]
+        elif var == "Geo":
             features_name += geo_variables
-        elif var == 'vigicrues':
-            features_name += [f'{v}_{met}' for v in vigicrues_variables for met in methods]
-        elif var == 'nappes':
-            features_name += [f'{v}_{met}' for v in nappes_variables for met in methods]
-        elif var == 'Historical':
-            features_name += [f'{v}' for v in historical_variables]
-        elif var == 'AutoRegressionReg':
-            features_name += [f'AutoRegressionReg-{v}' for v in auto_regression_variable_reg]
-        elif var == 'AutoRegressionBin':
-            features_name +=  [f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin]
-        elif var == 'elevation':
-            features_name += [f'{v}_{met}' for v in elevation_variables for met in methods]
-        elif var == 'population':
-            features_name += [f'{v}_{met}' for v in population_variabes for met in methods]
-        elif var == 'region_class':
+        elif var == "vigicrues":
+            features_name += [
+                f"{v}_{met}" for v in vigicrues_variables for met in methods
+            ]
+        elif var == "nappes":
+            features_name += [f"{v}_{met}" for v in nappes_variables for met in methods]
+        elif var == "Historical":
+            features_name += [f"{v}" for v in historical_variables]
+        elif var == "AutoRegressionReg":
+            features_name += [
+                f"AutoRegressionReg-{v}" for v in auto_regression_variable_reg
+            ]
+        elif var == "AutoRegressionBin":
+            features_name += [
+                f"AutoRegressionBin-{v}" for v in auto_regression_variable_bin
+            ]
+        elif var == "elevation":
+            features_name += [
+                f"{v}_{met}" for v in elevation_variables for met in methods
+            ]
+        elif var == "population":
+            features_name += [
+                f"{v}_{met}" for v in population_variabes for met in methods
+            ]
+        elif var == "region_class":
             features_name += [var]
-        elif var == 'Past_risk' or var == 'Past_burnedarea':
+        elif var == "Past_risk" or var == "Past_burnedarea":
             features_name += [var]
         elif var in varying_time_variables_name:
             features_name += [var]
-        elif var == 'temporal_prediction' or var == 'spatial_prediction':
+        elif var == "temporal_prediction" or var == "spatial_prediction":
             features_name += [var]
-        elif var.find('frequencyratio') != -1:
+        elif var.find("frequencyratio") != -1:
             features_name += [var]
-        elif var in cluster_encoder and var != 'id_encoder':
+        elif var in cluster_encoder and var != "id_encoder":
             features_name += [var]
         else:
-            features_name += [f'{var}_{met}' for met in methods]
+            features_name += [f"{var}_{met}" for met in methods]
 
     return features_name, len(features_name)
+
 
 def get_features_name_lists_2D(shape, features):
 
     features_name = []
     for var in features:
-        if var == 'Calendar':
+        if var == "Calendar":
             features_name.extend(calendar_variables)
-        elif var == 'air':
+        elif var == "air":
             features_name.extend(air_variables)
         elif var in landcover_variables:
             features_name.extend([var])
-        elif var == 'sentinel':
+        elif var == "sentinel":
             features_name.extend(sentinel_variables)
         elif var == "foret":
             features_name.extend([foretint2str[fv] for fv in foret_variables])
-        elif var == 'dynamicWorld':
+        elif var == "dynamicWorld":
             features_name.extend(dynamic_world_variables)
-        elif var == 'cosia':
+        elif var == "cosia":
             features_name.extend(cosia_variables)
-        elif var == 'corine':
+        elif var == "corine":
             features_name.extend(corine_variable)
-        elif var == 'bdroute':
+        elif var == "bdroute":
             features_name.extend(bdroute_variables)
-        elif var == 'highway':
+        elif var == "highway":
             features_name.extend([osmnxint2str[fv] for fv in osmnx_variables])
-        elif var == 'Geo':
+        elif var == "Geo":
             features_name.extend(geo_variables)
-        elif var == 'vigicrues':
+        elif var == "vigicrues":
             features_name.extend(vigicrues_variables)
-        elif var == 'nappes':
+        elif var == "nappes":
             features_name.extend(nappes_variables)
-        elif var == 'Historical':
+        elif var == "Historical":
             features_name.extend(historical_variables)
-        elif var == 'elevation':
+        elif var == "elevation":
             features_name.extend(elevation_variables)
-        elif var == 'population':
+        elif var == "population":
             features_name.extend(population_variabes)
-        elif var == 'AutoRegressionReg':
-            features_name.extend([f'AutoRegressionReg-{v}' for v in auto_regression_variable_reg])
-        elif var == 'AutoRegressionBin':
-            features_name.extend([f'AutoRegressionBin-{v}' for v in auto_regression_variable_bin])
+        elif var == "AutoRegressionReg":
+            features_name.extend(
+                [f"AutoRegressionReg-{v}" for v in auto_regression_variable_reg]
+            )
+        elif var == "AutoRegressionBin":
+            features_name.extend(
+                [f"AutoRegressionBin-{v}" for v in auto_regression_variable_bin]
+            )
         elif var in cluster_encoder:
             features_name.extend([var])
-        elif var == 'Past_risk' or var == 'Past_burnedarea':
+        elif var == "Past_risk" or var == "Past_burnedarea":
             features_name.extend([var])
         elif True in [tv in var for tv in varying_time_variables]:
-            k = var.split('_')[-1]
-            if 'Calendar' in var:
-                features_name.extend([f'{v}_{k}' for v in calendar_variables])
-            elif 'air' in var:
-                features_name.extend([f'{v}_{k}' for v in air_variables])
+            k = var.split("_")[-1]
+            if "Calendar" in var:
+                features_name.extend([f"{v}_{k}" for v in calendar_variables])
+            elif "air" in var:
+                features_name.extend([f"{v}_{k}" for v in air_variables])
             else:
                 features_name.extend([var])
-        elif var == 'temporal_prediction' or var == 'spatial_prediction':
+        elif var == "temporal_prediction" or var == "spatial_prediction":
             features_name.extend([var])
         else:
             features_name.extend([var])
 
     return features_name, len(features_name)
 
-def min_max_scaler(array : np.array, array_train: np.array, concat : bool) -> np.array:
+
+def min_max_scaler(array: np.array, array_train: np.array, concat: bool) -> np.array:
     if concat:
         Xt = np.concatenate((array, array_train))
     else:
         Xt = array_train
     scaler = MinMaxScaler()
-    scaler.fit(Xt.reshape(-1,1))
-    res = scaler.transform(array.reshape(-1,1))
+    scaler.fit(Xt.reshape(-1, 1))
+    res = scaler.transform(array.reshape(-1, 1))
     return res.reshape(array.shape)
 
-def standard_scaler(array: np.array, array_train: np.array, concat : bool) -> np.array:
+
+def standard_scaler(array: np.array, array_train: np.array, concat: bool) -> np.array:
     if concat:
         Xt = np.concatenate((array, array_train))
     else:
         Xt = array_train
     scaler = StandardScaler()
     if len(Xt.shape) == 1:
-        scaler.fit(Xt.reshape(-1,1))
+        scaler.fit(Xt.reshape(-1, 1))
     else:
         scaler.fit(Xt)
     if len(array.shape) == 1:
-        res = scaler.transform(array.reshape(-1,1))
+        res = scaler.transform(array.reshape(-1, 1))
     else:
         res = scaler.transform(array)
     return res.reshape(array.shape)
 
-def robust_scaler(array : np.array, array_train: np.array, concat : bool) -> np.array:
+
+def robust_scaler(array: np.array, array_train: np.array, concat: bool) -> np.array:
     if concat:
         Xt = np.concatenate((array, array_train))
     else:
         Xt = array_train
     scaler = RobustScaler()
-    scaler.fit(Xt.reshape(-1,1))
-    res = scaler.transform(array.reshape(-1,1))
+    scaler.fit(Xt.reshape(-1, 1))
+    res = scaler.transform(array.reshape(-1, 1))
     return res.reshape(array.shape)
 
+
 def interpolate_gridd(var, grid, newx, newy):
-    x = grid['longitude'].values
+    x = grid["longitude"].values
     y = grid["latitude"].values
     points = np.zeros((y.shape[0], 2))
-    points[:,0] = x
-    points[:,1] = y
-    return griddata(points, grid[var].values, (newx, newy), method='linear')
+    points[:, 0] = x
+    points[:, 1] = y
+    return griddata(points, grid[var].values, (newx, newy), method="linear")
+
 
 def resize(input_image, height, width, dim):
     """
@@ -2989,14 +3732,22 @@ def resize(input_image, height, width, dim):
     img = transform.resize(img, (dim, height, width))
     return np.asarray(img)
 
+
 def resize_no_dim(input_image, height, width):
     """
     Resize the input_image into heigh, with, dim
     """
     img = img_as_float(input_image)
-    img = transform.resize(img, (height, width), mode='constant', order=0,
-                 preserve_range=True, anti_aliasing=True)
+    img = transform.resize(
+        img,
+        (height, width),
+        mode="constant",
+        order=0,
+        preserve_range=True,
+        anti_aliasing=True,
+    )
     return np.asarray(img)
+
 
 def create_geocube(df, variables, reslons, reslats):
     """
@@ -3007,165 +3758,185 @@ def create_geocube(df, variables, reslons, reslats):
         measurements=variables,
         resolution=(reslons, reslats),
         rasterize_function=rasterize_points_griddata,
-        fill = 0
+        fill=0,
     )
     return geo_grid
 
+
 def pendant_couvrefeux(date):
     # Fonction testant si une date tombe dans une période de confinement
-    if ((dt.datetime(2020, 12, 15) <= date <= dt.datetime(2021, 1, 2)) 
-        and (date.hour >= 20 or date.hour <= 6)):
+    if (dt.datetime(2020, 12, 15) <= date <= dt.datetime(2021, 1, 2)) and (
+        date.hour >= 20 or date.hour <= 6
+    ):
         return 1
-    elif ((dt.datetime(2021, 1, 2) <= date <= dt.datetime(2021, 3, 20))
-        and (date.hour >= 18 or date.hour <= 6)):
-            return 1
-    elif ((dt.datetime(2021, 3, 20) <= date <= dt.datetime(2021, 5, 19))
-        and (date.hour >= 19 or date.hour <= 6)):
-            return 1
-    elif ((dt.datetime(2021, 5, 19) <= date <= dt.datetime(2021, 6, 9))
-        and (date.hour >= 21 or date.hour <= 6)):
-            return 1
-    elif ((dt.datetime(2021, 6, 9) <= date <= dt.datetime(2021, 6, 30))
-        and (date.hour >= 23 or date.hour <= 6)):
-            return 1
+    elif (dt.datetime(2021, 1, 2) <= date <= dt.datetime(2021, 3, 20)) and (
+        date.hour >= 18 or date.hour <= 6
+    ):
+        return 1
+    elif (dt.datetime(2021, 3, 20) <= date <= dt.datetime(2021, 5, 19)) and (
+        date.hour >= 19 or date.hour <= 6
+    ):
+        return 1
+    elif (dt.datetime(2021, 5, 19) <= date <= dt.datetime(2021, 6, 9)) and (
+        date.hour >= 21 or date.hour <= 6
+    ):
+        return 1
+    elif (dt.datetime(2021, 6, 9) <= date <= dt.datetime(2021, 6, 30)) and (
+        date.hour >= 23 or date.hour <= 6
+    ):
+        return 1
     return 0
 
+
 def target_encoding(features_name, Xset, x_train, y_train, variableType, size):
-    logger.info(f'Target Encoding')
-    enc = TargetEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(x_train, y_train[:, -1])
+    logger.info(f"Target Encoding")
+    enc = TargetEncoder(
+        cols=np.arange(
+            features_name.index(variableType), features_name.index(variableType) + size
+        )
+    ).fit(x_train, y_train[:, -1])
     Xset = enc.transform(Xset).values
     return Xset
 
+
 def catboost_encoding(features_name, Xset, x_train, y_train, variableType, size):
-    logger.info(f'Catboost Encoding')
-    enc = CatBoostEncoder(cols=np.arange(features_name.index(variableType), features_name.index(variableType) + size)).fit(x_train, y_train[:, -1])
+    logger.info(f"Catboost Encoding")
+    enc = CatBoostEncoder(
+        cols=np.arange(
+            features_name.index(variableType), features_name.index(variableType) + size
+        )
+    ).fit(x_train, y_train[:, -1])
     Xset = enc.transform(Xset).values
     return Xset
+
 
 def log_features(features, features_name):
     if len(features.shape) > 1:
         for fet_index, nb in features:
-            logger.info(f'{fet_index, features_name[fet_index]} {nb}')
+            logger.info(f"{fet_index, features_name[fet_index]} {nb}")
     else:
         for fet_index in features:
-                logger.info(f'{fet_index, features_name[fet_index]}')
+            logger.info(f"{fet_index, features_name[fet_index]}")
 
-def create_feature_map(features : np.array, features_name : dict, dir_output : Path):
-    with open(dir_output / 'feature_map.text', 'w') as file:
+
+def create_feature_map(features: np.array, features_name: dict, dir_output: Path):
+    with open(dir_output / "feature_map.text", "w") as file:
         for fet_index in features:
-            file.write(f'{features_name[fet_index]} q\n')
+            file.write(f"{features_name[fet_index]} q\n")
         file.close()
     return
 
+
 def calculate_feature_range(fet, scale, methods):
-    coef = len(methods) if (scale == 'departement') or (scale > 0) else 1
-    if fet == 'Calendar':
+    coef = len(methods) if (scale == "departement") or (scale > 0) else 1
+    if fet == "Calendar":
         variables = calendar_variables
         maxi = len(calendar_variables)
-        methods = ['raw']
+        methods = ["raw"]
         start = calendar_variables[0]
-    elif fet == 'air':
+    elif fet == "air":
         variables = air_variables
         maxi = len(air_variables)
-        methods = ['raw']
+        methods = ["raw"]
         start = air_variables[0]
-    elif fet == 'sentinel':
+    elif fet == "sentinel":
         variables = sentinel_variables
         maxi = coef * len(sentinel_variables)
         methods = methods
-        start = f'{sentinel_variables[0]}_mean'
-    elif fet == 'Geo':
+        start = f"{sentinel_variables[0]}_mean"
+    elif fet == "Geo":
         variables = geo_variables
         maxi = len(geo_variables)
-        methods = ['raw']
-        start = f'{geo_variables[0]}'
-    elif fet == 'foret':
+        methods = ["raw"]
+        start = f"{geo_variables[0]}"
+    elif fet == "foret":
         variables = foret_variables
         maxi = coef * len(foret_variables)
         methods = methods
-        start = f'{foretint2str[foret_variables[0]]}_mean'
-    elif fet == 'highway':
+        start = f"{foretint2str[foret_variables[0]]}_mean"
+    elif fet == "highway":
         variables = osmnx_variables
         maxi = coef * len(osmnx_variables)
         methods = methods
-        start = f'{osmnxint2str[osmnx_variables[0]]}_mean'
+        start = f"{osmnxint2str[osmnx_variables[0]]}_mean"
     elif fet in landcover_variables:
         variables = [fet]
         maxi = coef
         methods = methods
-        start = f'{fet}_mean'
-    elif fet == 'dynamicWorld':
+        start = f"{fet}_mean"
+    elif fet == "dynamicWorld":
         variables = dynamic_world_variables
         maxi = coef * len(dynamic_world_variables)
         methods = methods
-        start = f'{dynamic_world_variables[0]}_mean'
-    elif fet == 'cosia':
+        start = f"{dynamic_world_variables[0]}_mean"
+    elif fet == "cosia":
         variables = cosia_variables
         maxi = coef * len(cosia_variables)
         methods = methods
-        start = f'{cosia_variables[0]}_mean'
-    elif fet == 'vigicrues':
+        start = f"{cosia_variables[0]}_mean"
+    elif fet == "vigicrues":
         variables = vigicrues_variables
         maxi = coef * len(vigicrues_variables)
         methods = methods
-        start = f'{vigicrues_variables[0]}_mean'
-    elif fet == 'elevation':
+        start = f"{vigicrues_variables[0]}_mean"
+    elif fet == "elevation":
         variables = elevation_variables
         maxi = coef * len(elevation_variables)
         methods = methods
-        start = f'{elevation_variables[0]}_mean'
-    elif fet == 'cluster_encoder':
+        start = f"{elevation_variables[0]}_mean"
+    elif fet == "cluster_encoder":
         variables = [fet]
         maxi = coef
         methods = methods
-        start = f'cluster_encoder'
-    elif fet == 'population':
+        start = f"cluster_encoder"
+    elif fet == "population":
         variables = population_variabes
         maxi = coef * len(population_variabes)
         methods = methods
-        start = f'{population_variabes[0]}_mean'
-    elif fet == 'nappes':
+        start = f"{population_variabes[0]}_mean"
+    elif fet == "nappes":
         variables = nappes_variables
         maxi = coef * len(nappes_variables)
         methods = methods
-        start = f'{nappes_variables[0]}_mean'
-    elif fet == 'Historical':
+        start = f"{nappes_variables[0]}_mean"
+    elif fet == "Historical":
         variables = historical_variables
         maxi = len(historical_variables)
         methods = methods
-        start = f'{historical_variables[0]}_mean'
-    elif fet == 'AutoRegressionReg':
+        start = f"{historical_variables[0]}_mean"
+    elif fet == "AutoRegressionReg":
         variables = auto_regression_variable_reg
         maxi = len(auto_regression_variable_reg)
-        methods = ['raw']
-        start = f'AutoRegressionReg-{auto_regression_variable_reg[0]}'
-    elif fet == 'AutoRegressionBin':
+        methods = ["raw"]
+        start = f"AutoRegressionReg-{auto_regression_variable_reg[0]}"
+    elif fet == "AutoRegressionBin":
         variables = auto_regression_variable_bin
         maxi = len(auto_regression_variable_bin)
-        methods = ['raw']
-        start = f'AutoRegressionBin-{auto_regression_variable_bin[0]}'
-    elif fet.find('pca') != -1:
+        methods = ["raw"]
+        start = f"AutoRegressionBin-{auto_regression_variable_bin[0]}"
+    elif fet.find("pca") != -1:
         variables = [fet]
         maxi = 1
-        methods = ['raw']
-        start = f'{fet}'
-    elif fet == 'temporal_prediction' or fet == 'spatial_prediction':
+        methods = ["raw"]
+        start = f"{fet}"
+    elif fet == "temporal_prediction" or fet == "spatial_prediction":
         variables = [fet]
         maxi = 1
-        methods = ['raw']
-        start = f'{fet}'
+        methods = ["raw"]
+        start = f"{fet}"
     elif fet in cems_variables:
         variables = [fet]
         maxi = coef
         methods = methods
-        start = f'{fet}_mean'
+        start = f"{fet}_mean"
     else:
         variables = [fet]
         maxi = 1
-        methods = ['raw']
-        start = f'{fet}'
+        methods = ["raw"]
+        start = f"{fet}"
 
     return start, maxi, methods, variables
+
 
 def select_train_features(train_features, scale, features_name):
     # Select train features
@@ -3175,18 +3946,24 @@ def select_train_features(train_features, scale, features_name):
         train_fet_num.append(features_name.index(fet))
     return train_fet_num
 
+
 def features_selection(doFet, df, dir_output, features_name, NbFeatures, target):
     check_and_create_path(dir_output)
 
-    if not doFet and (dir_output / 'features_importance.pkl').is_file():
-        features_importance = read_object(f'features_importance.pkl', dir_output)
+    if not doFet and (dir_output / "features_importance.pkl").is_file():
+        features_importance = read_object(f"features_importance.pkl", dir_output)
         assert features_importance is not None
     else:
-        df_weight = df[df['weight'] > 0]
+        df_weight = df[df["weight"] > 0]
         df_weight = df_weight.dropna(subset=features_name)
-        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=len(features_name))
-        save_object(features_importance, f'features_importance.pkl', dir_output)
-    
+        features_importance = get_features(
+            df_weight[features_name + [target]],
+            features_name,
+            target=target,
+            num_feats=len(features_name),
+        )
+        save_object(features_importance, f"features_importance.pkl", dir_output)
+
     features_importance = np.asarray(features_importance)
 
     # Séparer les caractéristiques et les valeurs
@@ -3194,66 +3971,82 @@ def features_selection(doFet, df, dir_output, features_name, NbFeatures, target)
 
     # Tracer le graphique
     plt.figure(figsize=(15, 8))
-    plt.bar(features, values, color='skyblue')
+    plt.bar(features, values, color="skyblue")
 
     # Ajouter des labels et le titre
-    plt.xlabel('Valeur')
-    plt.ylabel('Caractéristique')
-    plt.title('Visualisation des caractéristiques et de leurs valeurs')
+    plt.xlabel("Valeur")
+    plt.ylabel("Caractéristique")
+    plt.title("Visualisation des caractéristiques et de leurs valeurs")
 
     # Afficher le graphique
     plt.tight_layout()
-    plt.savefig(dir_output / 'features_importance.png')
-    plt.close('all')
+    plt.savefig(dir_output / "features_importance.png")
+    plt.close("all")
 
     logger.info(features_importance)
-    features_selected = features_importance[:,0]
+    features_selected = features_importance[:, 0]
     return features_selected
 
     print(features_name, NbFeatures)
-    if NbFeatures == len(features_name) or NbFeatures == 'all':
-        df_weight = df[df['weight'] > 0]
-        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=int(NbFeatures))
+    if NbFeatures == len(features_name) or NbFeatures == "all":
+        df_weight = df[df["weight"] > 0]
+        features_importance = get_features(
+            df_weight[features_name + [target]],
+            features_name,
+            target=target,
+            num_feats=int(NbFeatures),
+        )
         features_selected = features_name
         return features_selected
-    
+
     if doFet:
-        df_weight = df[df['weight'] > 0]
-        features_importance = get_features(df_weight[features_name + [target]], features_name, target=target, num_feats=int(NbFeatures))
+        df_weight = df[df["weight"] > 0]
+        features_importance = get_features(
+            df_weight[features_name + [target]],
+            features_name,
+            target=target,
+            num_feats=int(NbFeatures),
+        )
         features_importance = np.asarray(features_importance)
 
-        save_object(features_importance, f'features_importance_{NbFeatures}.pkl', dir_output)
+        save_object(
+            features_importance, f"features_importance_{NbFeatures}.pkl", dir_output
+        )
     else:
         logger.info(dir_output)
-        features_importance = read_object(f'features_importance_{NbFeatures}.pkl', dir_output)
+        features_importance = read_object(
+            f"features_importance_{NbFeatures}.pkl", dir_output
+        )
 
     logger.info(features_importance)
-    features_selected = features_importance[:,0]
-    
+    features_selected = features_importance[:, 0]
+
     return features_selected
+
 
 def shapiro_wilk(ypred, ytrue, dir_output, outputname):
     diff = ytrue - ypred
     swtest = scipy.stats.shapiro(diff)
     try:
-        logger.info(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
+        logger.info(f"Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}")
         plt.hist(diff)
-        plt.title(f'Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}')
-        plt.savefig(dir_output / f'{outputname}.png')
-        plt.close('all')
+        plt.title(f"Test statistic : {swtest.statistic}, pvalue {swtest.pvalue}")
+        plt.savefig(dir_output / f"{outputname}.png")
+        plt.close("all")
     except Exception as e:
         logger.info(e)
 
+
 def select_n_points(X, Y, dir, nbpoints):
-    cls = [0,1,2,3,4]
-    oldWeights = Y[:, ids_columns.index('weight')]
-    X[:, ids_columns.index('weight')] = 0
-    Y[:, ids_columns.index('weight')] = 0
-    udept = np.uniuqe(X[:,3])
+    cls = [0, 1, 2, 3, 4]
+    oldWeights = Y[:, ids_columns.index("weight")]
+    X[:, ids_columns.index("weight")] = 0
+    Y[:, ids_columns.index("weight")] = 0
+    udept = np.uniuqe(X[:, 3])
     for dept in udept:
         mask = np.argwhere(X[:, 3] == dept)
-        dir_predictor = root_graph / dir / 'influenceClustering'
-        predictor = read_object(int2name[dept]+'Predictor.pkl', dir_predictor)
+        dir_predictor = root_graph / dir / "influenceClustering"
+        predictor = read_object(int2name[dept] + "Predictor.pkl", dir_predictor)
         classs = predictor.predict(X[mask, -1])
         for cs in cls:
             maskc = np.argwhere(classs == cs)
@@ -3263,6 +4056,7 @@ def select_n_points(X, Y, dir, nbpoints):
 
     return X, Y
 
+
 def check_class(influence, bin, predictor):
     influenceValues = influence[~np.isnan(influence)]
     binValus = influence[~np.isnan(influence)]
@@ -3271,44 +4065,70 @@ def check_class(influence, bin, predictor):
     cls = np.unique(classs)
     for cl in cls:
         mask = classs == cl
-        logger.info(f'class {cl}, {np.nanmean(binValus[mask]), np.nanmean(influenceValues[mask])}')
+        logger.info(
+            f"class {cl}, {np.nanmean(binValus[mask]), np.nanmean(influenceValues[mask])}"
+        )
+
 
 def change_dict_key(d, old_key, new_key, default_value=None):
     d[new_key] = d.pop(old_key, default_value)
 
-def plot_kmeans_class_for_inference(df, date_limit, features_selected, dir_break_point, dir_log, sinister):
-    y_dates = np.unique([date_limit - dt.timedelta(days=df.date.values.max() - k) for k in df.date.values])
-    unodes = df.id.unique() 
 
-    check_and_create_path(dir_log / 'kmeans_feature')
+def plot_kmeans_class_for_inference(
+    df, date_limit, features_selected, dir_break_point, dir_log, sinister
+):
+    y_dates = np.unique(
+        [
+            date_limit - dt.timedelta(days=df.date.values.max() - k)
+            for k in df.date.values
+        ]
+    )
+    unodes = df.id.unique()
+
+    check_and_create_path(dir_log / "kmeans_feature")
     for fet in features_selected:
-        logger.info(f'############## {fet} #################')
+        logger.info(f"############## {fet} #################")
 
-        fig, axs = plt.subplots(unodes.shape[0], figsize=(15,10))
-        
+        fig, axs = plt.subplots(unodes.shape[0], figsize=(15, 10))
+
         for i, node in enumerate(unodes):
-            values = df[df['id'] == node][fet].values
-            predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
+            values = df[df["id"] == node][fet].values
+            predictor = read_object(f"{fet}.pkl", dir_break_point / fet)
             predclass = order_class(predictor, predictor.predict(values))
             ax1 = axs[i]
-            ax1.set_title(f'{node}')
-            ax1.plot(y_dates, predclass, c='b', label=f'{fet}')
-            ax1.set_xlabel('Date')
-            ax1.set_ylabel('Class')
+            ax1.set_title(f"{node}")
+            ax1.plot(y_dates, predclass, c="b", label=f"{fet}")
+            ax1.set_xlabel("Date")
+            ax1.set_ylabel("Class")
             ax1.set_ylim([0, 4])
 
             ax2 = ax1.twinx()
 
-            ax2.plot(y_dates, df[df['id'] == node]['AutoRegressionBin-B-1'].shift(1), label=f'{sinister}', c='r')
-            ax2.set_ylabel(f'Number of {sinister}', color='r')
+            ax2.plot(
+                y_dates,
+                df[df["id"] == node]["AutoRegressionBin-B-1"].shift(1),
+                label=f"{sinister}",
+                c="r",
+            )
+            ax2.set_ylabel(f"Number of {sinister}", color="r")
             ax2.set_ylim([0, 4])
-            
+
         plt.legend()
         plt.tight_layout()
-        plt.savefig(dir_log / 'kmeans_feature' / f'{fet}_{date_limit}.png')
-        plt.close('all')
+        plt.savefig(dir_log / "kmeans_feature" / f"{fet}_{date_limit}.png")
+        plt.close("all")
 
-def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path, target: str, tresh: float, features_selected, new_val: int, shifts: list, mask_df):
+
+def apply_kmeans_class_on_target(
+    dataframe: pd.DataFrame,
+    dir_break_point: Path,
+    target: str,
+    tresh: float,
+    features_selected,
+    new_val: int,
+    shifts: list,
+    mask_df,
+):
     """
     Applies KMeans classes on the target column based on thresholds and optionally considers shifts.
 
@@ -3320,11 +4140,11 @@ def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path,
         features_selected (list): List of selected features.
         new_val (int): Value to assign for low correlation classes.
         shifts (list): List of integer shifts to apply on the target column.
-        
+
     Returns:
         pd.DataFrame: Modified DataFrame with updated target column.
     """
-    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
+    dico_correlation = read_object("break_point_dict.pkl", dir_break_point)
 
     if mask_df is None:
         df = dataframe.copy(deep=True)
@@ -3335,21 +4155,21 @@ def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path,
 
     # Iterate over shifts
     for shift in shifts:
-        logger.info(f'############## Processing shift: {shift} #################')
+        logger.info(f"############## Processing shift: {shift} #################")
 
         shifted_df = df.copy(deep=True)
-        
-        dataframe[f'{target}_{shift}_{tresh}'] = np.copy(dataframe[target].values)
-        df[f'{target}_{shift}_{tresh}'] = np.copy(df[target].values)
+
+        dataframe[f"{target}_{shift}_{tresh}"] = np.copy(dataframe[target].values)
+        df[f"{target}_{shift}_{tresh}"] = np.copy(df[target].values)
 
         for fet in features_selected:
             fet_key = f"{fet}_{shift}"
-            
-            shifted_df[fet] = shifted_df.groupby('graph_id')[fet].shift(shift)
+
+            shifted_df[fet] = shifted_df.groupby("graph_id")[fet].shift(shift)
             values = shifted_df[fet].values
             values[np.isnan(values)] = 0
-            
-            predictor = read_object(f'{fet}_{shift}.pkl', dir_break_point / fet)
+
+            predictor = read_object(f"{fet}_{shift}.pkl", dir_break_point / fet)
             if predictor is None:
                 continue
             predclass = order_class(predictor, predictor.predict(values))
@@ -3363,8 +4183,10 @@ def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path,
                     low = True
                     values_risk[mask] = new_val
 
-        df[f'{target}_{shift}_{tresh}'] = np.copy(values_risk)
-        logger.info(f'{target}_{shift}_{tresh} : {df[target].sum()} -> {df[f"{target}_{shift}_{tresh}"].sum()}')
+        df[f"{target}_{shift}_{tresh}"] = np.copy(values_risk)
+        logger.info(
+            f'{target}_{shift}_{tresh} : {df[target].sum()} -> {df[f"{target}_{shift}_{tresh}"].sum()}'
+        )
 
     if mask_df is None:
         return df
@@ -3372,76 +4194,87 @@ def apply_kmeans_class_on_target(dataframe: pd.DataFrame, dir_break_point: Path,
         dataframe[mask_df] = df
         return dataframe
 
+
 def calculate_woe_iv(data, feature, target):
     """
     Calcule le WoE (Weight of Evidence) et l'IV (Information Value) pour une variable.
-    
+
     Args:
         data (pd.DataFrame): Le DataFrame contenant les données.
         feature (str): Le nom de la variable pour laquelle on veut calculer le WoE.
         target (str): Le nom de la variable cible (somme des valeurs pour les "bons").
-    
+
     Returns:
         pd.DataFrame: Un DataFrame avec le WoE et IV pour chaque groupe de la variable.
         float: La valeur totale de l'IV pour la variable.
     """
     # Table de contingence pour la variable et la cible
-    df_woe = data[[feature, target]].groupby(feature).agg(
-        Good=(target, lambda x: (x >= 1).sum()), # Somme des valeurs comme "bons"
-        Bad=(target, lambda x: (x == 0).sum())  # Compte les "mauvais" (cible = 0)
-    ).reset_index()
-    
+    df_woe = (
+        data[[feature, target]]
+        .groupby(feature)
+        .agg(
+            Good=(target, lambda x: (x >= 1).sum()),  # Somme des valeurs comme "bons"
+            Bad=(target, lambda x: (x == 0).sum()),  # Compte les "mauvais" (cible = 0)
+        )
+        .reset_index()
+    )
+
     # Calcul des totaux de "bons" et de "mauvais"
-    total_good = df_woe['Good'].sum()
-    total_bad = df_woe['Bad'].sum()
-    
+    total_good = df_woe["Good"].sum()
+    total_bad = df_woe["Bad"].sum()
+
     # Calcul des proportions et du WoE
-    df_woe['Dist_Good'] = df_woe['Good'] / max(total_good, 1e-10)
-    df_woe['Dist_Bad'] = df_woe['Bad'] / max(total_bad, 1e-10)
-    df_woe['WoE'] = np.log((df_woe['Dist_Good'] / df_woe['Dist_Bad'].replace(0, 1e-10)).replace(0, 1e-10))
-    
+    df_woe["Dist_Good"] = df_woe["Good"] / max(total_good, 1e-10)
+    df_woe["Dist_Bad"] = df_woe["Bad"] / max(total_bad, 1e-10)
+    df_woe["WoE"] = np.log(
+        (df_woe["Dist_Good"] / df_woe["Dist_Bad"].replace(0, 1e-10)).replace(0, 1e-10)
+    )
+
     # Calcul de l'IV pour chaque catégorie
-    df_woe['IV'] = (df_woe['Dist_Good'] - df_woe['Dist_Bad']) * df_woe['WoE']
-    
+    df_woe["IV"] = (df_woe["Dist_Good"] - df_woe["Dist_Bad"]) * df_woe["WoE"]
+
     # IV total
-    iv_total = df_woe['IV'].sum()
-    
+    iv_total = df_woe["IV"].sum()
+
     return df_woe, iv_total
+
 
 def get_saison(x):
     date = allDates[(int(x))]
-    month = int(date.split('-')[1])
+    month = int(date.split("-")[1])
     group_month = [
-                [2, 3, 4, 5],    # Medium season
-                [6, 7, 8, 9],    # High season
-                [10, 11, 12, 1]  # Low season
-            ]
-    
+        [2, 3, 4, 5],  # Medium season
+        [6, 7, 8, 9],  # High season
+        [10, 11, 12, 1],  # Low season
+    ]
+
     if month in [2, 3, 4, 5]:
-        return 'medium'
+        return "medium"
     if month in [6, 7, 8, 9]:
-        return 'high'
-    return 'low'
+        return "high"
+    return "low"
+
 
 def get_saison_encoding(x):
     date = allDates[(int(x))]
-    month = int(date.split('-')[1])
+    month = int(date.split("-")[1])
     group_month = [
-                [2, 3, 4, 5],    # Medium season
-                [6, 7, 8, 9],    # High season
-                [10, 11, 12, 1]  # Low season
-            ]
-    
+        [2, 3, 4, 5],  # Medium season
+        [6, 7, 8, 9],  # High season
+        [10, 11, 12, 1],  # Low season
+    ]
+
     if month in [2, 3, 4, 5]:
         return 1
     if month in [6, 7, 8, 9]:
         return 2
     return 0
 
+
 def calculate_ks(data, score_col, event_col, thresholds, dir_output):
     """
     Calcule le KS-Statistic pour plusieurs seuils définis et renvoie les seuils optimaux pour chaque KS.
-    
+
     :param data: pd.DataFrame contenant les scores et les événements.
     :param score_col: Nom de la colonne des scores prédits.
     :param event_col: Nom de la colonne des événements observés.
@@ -3456,49 +4289,75 @@ def calculate_ks(data, score_col, event_col, thresholds, dir_output):
 
     for threshold in thresholds:
         # Définir les groupes basés sur les seuils modifiés
-        data['group'] = np.where(
-            data[event_col] < threshold, 'low_risk',  # Low risk pour les valeurs <= threshold - 1
-            np.where(data[event_col] >= threshold, 'high_risk', 'other')  # High risk pour les valeurs == threshold
+        data["group"] = np.where(
+            data[event_col] < threshold,
+            "low_risk",  # Low risk pour les valeurs <= threshold - 1
+            np.where(
+                data[event_col] >= threshold, "high_risk", "other"
+            ),  # High risk pour les valeurs == threshold
         )
-        
+
         # Filtrer uniquement les données pertinentes (low_risk et high_risk)
-        data_filtered = data[data['group'].isin(['low_risk', 'high_risk'])].copy()
+        data_filtered = data[data["group"].isin(["low_risk", "high_risk"])].copy()
 
         # Trier par score prédictif
         data_sorted = data_filtered.sort_values(by=score_col).reset_index(drop=True)
-        
+
         # Calcul des distributions cumulées pour chaque groupe
-        low_risk_cdf = np.cumsum(data_sorted['group'] == 'low_risk') / (data_filtered['group'] == 'low_risk').sum()
-        high_risk_cdf = np.cumsum(data_sorted['group'] == 'high_risk') / (data_filtered['group'] == 'high_risk').sum()
-        
+        low_risk_cdf = (
+            np.cumsum(data_sorted["group"] == "low_risk")
+            / (data_filtered["group"] == "low_risk").sum()
+        )
+        high_risk_cdf = (
+            np.cumsum(data_sorted["group"] == "high_risk")
+            / (data_filtered["group"] == "high_risk").sum()
+        )
+
         # Calcul du KS : distance maximale entre les deux CDF
         ks_stat = np.max(np.abs(low_risk_cdf - high_risk_cdf))
         try:
-            optimal_score = data_sorted[score_col][np.argmax(np.abs(low_risk_cdf - high_risk_cdf))]
+            optimal_score = data_sorted[score_col][
+                np.argmax(np.abs(low_risk_cdf - high_risk_cdf))
+            ]
         except:
-            optimal_score =-1
+            optimal_score = -1
             ks_stat = 0.0
 
         # Stocker les résultats pour le seuil courant
-        ks_results.append({'threshold': threshold, 'ks_stat': ks_stat, 'optimal_score': optimal_score})
-        
+        ks_results.append(
+            {"threshold": threshold, "ks_stat": ks_stat, "optimal_score": optimal_score}
+        )
+
         # Visualiser les CDF
         plt.figure()
-        plt.plot(data_sorted[score_col], low_risk_cdf, label='Low Risk CDF', color='blue')
-        plt.plot(data_sorted[score_col], high_risk_cdf, label='High Risk CDF', color='red')
-        plt.axvline(optimal_score, color='green', linestyle='--', label=f'Optimal Score: {optimal_score:.3f}')
+        plt.plot(
+            data_sorted[score_col], low_risk_cdf, label="Low Risk CDF", color="blue"
+        )
+        plt.plot(
+            data_sorted[score_col], high_risk_cdf, label="High Risk CDF", color="red"
+        )
+        plt.axvline(
+            optimal_score,
+            color="green",
+            linestyle="--",
+            label=f"Optimal Score: {optimal_score:.3f}",
+        )
         plt.title(f"KS Plot for Threshold {threshold} (KS={ks_stat:.3f})")
-        plt.xlabel('Score')
-        plt.ylabel('Cumulative Distribution')
+        plt.xlabel("Score")
+        plt.ylabel("Cumulative Distribution")
         plt.legend()
         plt.grid(True)
-        plt.savefig(dir_output / f'Cumulative_Distribution_{score_col}_{event_col}_{threshold}.png')
-        plt.close('all')
+        plt.savefig(
+            dir_output
+            / f"Cumulative_Distribution_{score_col}_{event_col}_{threshold}.png"
+        )
+        plt.close("all")
 
     # Convertir les résultats en DataFrame pour inspection (facultatif)
     ks_results_df = pd.DataFrame(ks_results)
 
     return ks_results_df
+
 
 def silhouette_score_with_plot(y_pred, target, name, dir_output):
     """
@@ -3512,11 +4371,11 @@ def silhouette_score_with_plot(y_pred, target, name, dir_output):
     if dir_output is None:
         return score
     # Calcul du score de silhouette
-    
+
     # Calcul des valeurs individuelles de silhouette
-    silhouette_vals = silhouette_samples(target, y_pred).reshape(-1,1)
+    silhouette_vals = silhouette_samples(target, y_pred).reshape(-1, 1)
     cluster_labels = np.unique(y_pred)
-    
+
     # Création du graphique de silhouette
     fig, ax = plt.subplots(figsize=(10, 7))
     y_lower = 10
@@ -3524,20 +4383,20 @@ def silhouette_score_with_plot(y_pred, target, name, dir_output):
         # Valeurs de silhouette pour le cluster actuel
         cluster_silhouette_vals = silhouette_vals[y_pred == label]
         cluster_silhouette_vals.sort()
-        
+
         # Hauteur de la barre
         y_upper = y_lower + len(cluster_silhouette_vals)
         color = plt.cm.nipy_spectral(float(i) / len(cluster_labels))
-        
+
         ax.fill_betweenx(
             np.arange(y_lower, y_upper),
-            0, 
+            0,
             cluster_silhouette_vals,
             facecolor=color,
             edgecolor=color,
-            alpha=0.7
+            alpha=0.7,
         )
-        
+
         # Ajouter une étiquette pour le cluster
         ax.text(-0.05, y_lower + 0.5 * len(cluster_silhouette_vals), str(label))
         y_lower = y_upper + 10  # Espacement entre les clusters
@@ -3549,15 +4408,18 @@ def silhouette_score_with_plot(y_pred, target, name, dir_output):
     ax.set_ylabel("Cluster Label")
     ax.set_yticks([])  # Pas de graduation sur l'axe Y
     ax.set_xticks(np.arange(-1, 1.1, 0.2))  # Échelle sur l'axe X
-    
+
     # Sauvegarde du graphique
     plot_path = Path(dir_output) / f"silhouette_plot_{name}.png"
     fig.savefig(plot_path)
     plt.close(fig)
-    
+
     return score
 
-def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, dir_output):
+
+def calculate_apr_and_optimal_threshold(
+    data, score_col, event_col, thresholds, dir_output
+):
     """
     Calcule l'Average Precision (AP) et identifie le seuil optimal basé sur le F1-score global
     pour chaque seuil défini dans 'thresholds'.
@@ -3578,10 +4440,10 @@ def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, 
 
     for threshold in thresholds:
         # Générer les labels binaires pour le seuil courant
-        data['binary_pred'] = (data[event_col] >= threshold).astype(int)
+        data["binary_pred"] = (data[event_col] >= threshold).astype(int)
 
         # Calculer les labels et scores
-        y_true = data['binary_pred']
+        y_true = data["binary_pred"]
         y_scores = data[score_col]
 
         if len(y_true) == 0:
@@ -3594,34 +4456,48 @@ def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, 
         # Identifier le seuil optimal basé sur le F1-score
         f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
         optimal_index = np.argmax(f1_scores)
-        optimal_threshold = pr_thresholds[optimal_index] if optimal_index < len(pr_thresholds) else None
+        optimal_threshold = (
+            pr_thresholds[optimal_index] if optimal_index < len(pr_thresholds) else None
+        )
         optimal_precision = precision[optimal_index]
         optimal_recall = recall[optimal_index]
         optimal_f1 = f1_scores[optimal_index]
 
         # Ajouter les résultats pour ce seuil
-        apr_results.append({
-            'threshold': threshold,
-            'apr_score': apr_score,
-            'f1_score': optimal_f1,
-            'optimal_threshold': optimal_threshold,
-            'optimal_precision': optimal_precision,
-            'optimal_recall': optimal_recall
-        })
+        apr_results.append(
+            {
+                "threshold": threshold,
+                "apr_score": apr_score,
+                "f1_score": optimal_f1,
+                "optimal_threshold": optimal_threshold,
+                "optimal_precision": optimal_precision,
+                "optimal_recall": optimal_recall,
+            }
+        )
 
         # Tracer la courbe précision-rappel
         plt.figure()
-        plt.plot(recall, precision, label=f"AP={apr_score:.3f}, F1={optimal_f1:.3f}", color='blue')
+        plt.plot(
+            recall,
+            precision,
+            label=f"AP={apr_score:.3f}, F1={optimal_f1:.3f}",
+            color="blue",
+        )
         if optimal_index < len(pr_thresholds):
-            plt.scatter(optimal_recall, optimal_precision, color='red', label=f'Optimal Point (F1={optimal_f1:.3f}, Score={optimal_threshold:.3f})')
+            plt.scatter(
+                optimal_recall,
+                optimal_precision,
+                color="red",
+                label=f"Optimal Point (F1={optimal_f1:.3f}, Score={optimal_threshold:.3f})",
+            )
         plt.title(f"Precision-Recall Curve for Threshold: {threshold}")
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
+        plt.xlabel("Recall")
+        plt.ylabel("Precision")
         plt.legend()
         plt.grid(True)
 
         # Sauvegarder la courbe
-        plt.savefig(dir_output / f'Precision_Recall_Threshold_{threshold}.png')
+        plt.savefig(dir_output / f"Precision_Recall_Threshold_{threshold}.png")
         plt.close()
 
     # Convertir les résultats en DataFrame
@@ -3629,7 +4505,10 @@ def calculate_apr_and_optimal_threshold(data, score_col, event_col, thresholds, 
 
     return apr_results_df
 
-def calculate_ks_per_season_and_graph_id(data, score_col, event_col, thresholds, dir_output):
+
+def calculate_ks_per_season_and_graph_id(
+    data, score_col, event_col, thresholds, dir_output
+):
     """
     Calcule le KS-Statistic pour chaque combinaison unique de 'saison' et 'graph_id'
     à travers une liste de seuils définis, et renvoie les seuils optimaux pour chaque KS.
@@ -3648,52 +4527,86 @@ def calculate_ks_per_season_and_graph_id(data, score_col, event_col, thresholds,
     results_per_group = {}
 
     # Boucle sur chaque combinaison unique de 'saison' et 'graph_id'
-    for (saison, graph_id), group_data in data.groupby(['saison', 'graph_id']):
+    for (saison, graph_id), group_data in data.groupby(["saison", "graph_id"]):
         ks_results = []  # Liste pour stocker les résultats pour ce groupe spécifique
 
         for threshold in thresholds:
             # Définir les groupes basés sur les seuils modifiés
-            group_data['group'] = np.where(
-                group_data[event_col] == threshold - 1, 'low_risk',
-                np.where(group_data[event_col] >= threshold, 'high_risk', 'other')
+            group_data["group"] = np.where(
+                group_data[event_col] == threshold - 1,
+                "low_risk",
+                np.where(group_data[event_col] >= threshold, "high_risk", "other"),
             )
 
             # Filtrer uniquement les données pertinentes (low_risk et high_risk)
-            data_filtered = group_data[group_data['group'].isin(['low_risk', 'high_risk'])].copy()
+            data_filtered = group_data[
+                group_data["group"].isin(["low_risk", "high_risk"])
+            ].copy()
 
             # Trier par score prédictif
             data_sorted = data_filtered.sort_values(by=score_col).reset_index(drop=True)
 
             # Calcul des distributions cumulées pour chaque groupe
-            low_risk_cdf = np.cumsum(data_sorted['group'] == 'low_risk') / (data_filtered['group'] == 'low_risk').sum()
-            high_risk_cdf = np.cumsum(data_sorted['group'] == 'high_risk') / (data_filtered['group'] == 'high_risk').sum()
+            low_risk_cdf = (
+                np.cumsum(data_sorted["group"] == "low_risk")
+                / (data_filtered["group"] == "low_risk").sum()
+            )
+            high_risk_cdf = (
+                np.cumsum(data_sorted["group"] == "high_risk")
+                / (data_filtered["group"] == "high_risk").sum()
+            )
 
             # Calcul du KS : distance maximale entre les deux CDF
             ks_stat = np.max(np.abs(low_risk_cdf - high_risk_cdf))
 
             try:
-                optimal_score = data_sorted[score_col][np.argmax(np.abs(low_risk_cdf - high_risk_cdf))]
+                optimal_score = data_sorted[score_col][
+                    np.argmax(np.abs(low_risk_cdf - high_risk_cdf))
+                ]
             except:
                 optimal_score = -1
                 ks_stat = 0.0
 
             # Stocker les résultats pour le seuil courant
-            ks_results.append({'threshold': threshold, 'ks_stat': ks_stat, 'optimal_score': optimal_score})
+            ks_results.append(
+                {
+                    "threshold": threshold,
+                    "ks_stat": ks_stat,
+                    "optimal_score": optimal_score,
+                }
+            )
 
             # Visualiser les CDF pour ce seuil spécifique
             plt.figure()
-            plt.plot(data_sorted[score_col], low_risk_cdf, label='Low Risk CDF', color='blue')
-            plt.plot(data_sorted[score_col], high_risk_cdf, label='High Risk CDF', color='red')
-            plt.axvline(optimal_score, color='green', linestyle='--', label=f'Optimal Score: {optimal_score:.3f}')
-            plt.title(f"KS Plot for Saison: {saison}, Graph ID: {graph_id}, Threshold: {threshold} (KS={ks_stat:.3f})")
-            plt.xlabel('Score')
-            plt.ylabel('Cumulative Distribution')
+            plt.plot(
+                data_sorted[score_col], low_risk_cdf, label="Low Risk CDF", color="blue"
+            )
+            plt.plot(
+                data_sorted[score_col],
+                high_risk_cdf,
+                label="High Risk CDF",
+                color="red",
+            )
+            plt.axvline(
+                optimal_score,
+                color="green",
+                linestyle="--",
+                label=f"Optimal Score: {optimal_score:.3f}",
+            )
+            plt.title(
+                f"KS Plot for Saison: {saison}, Graph ID: {graph_id}, Threshold: {threshold} (KS={ks_stat:.3f})"
+            )
+            plt.xlabel("Score")
+            plt.ylabel("Cumulative Distribution")
             plt.legend()
             plt.grid(True)
 
             # Sauvegarder l'image du graphique dans le répertoire de sortie
-            plt.savefig(dir_output / f'KS_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png')
-            plt.close('all')
+            plt.savefig(
+                dir_output
+                / f"KS_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png"
+            )
+            plt.close("all")
 
         # Convertir les résultats de ce groupe en DataFrame pour inspection (facultatif)
         ks_results_df = pd.DataFrame(ks_results)
@@ -3703,7 +4616,10 @@ def calculate_ks_per_season_and_graph_id(data, score_col, event_col, thresholds,
 
     return results_per_group
 
-def calculate_apr_per_season_and_graph_id(data, score_col, event_col, thresholds, dir_output):
+
+def calculate_apr_per_season_and_graph_id(
+    data, score_col, event_col, thresholds, dir_output
+):
     """
     Calcule le score Average Precision (APR) pour chaque combinaison unique de 'saison' et 'graph_id'
     à travers une liste de seuils définis, et renvoie les seuils optimaux pour maximiser l'APR.
@@ -3722,61 +4638,87 @@ def calculate_apr_per_season_and_graph_id(data, score_col, event_col, thresholds
     results_per_group = {}
 
     # Boucle sur chaque combinaison unique de 'saison' et 'graph_id'
-    for (saison, graph_id), group_data in data.groupby(['saison', 'graph_id']):
+    for (saison, graph_id), group_data in data.groupby(["saison", "graph_id"]):
         apr_results = []  # Liste pour stocker les résultats pour ce groupe spécifique
 
         for threshold in thresholds:
             # Définir les groupes basés sur les seuils modifiés
-            group_data['group'] = np.where(
-                group_data[event_col] < threshold, 'low_risk',
-                np.where(group_data[event_col] >= threshold, 'high_risk', 'other')
+            group_data["group"] = np.where(
+                group_data[event_col] < threshold,
+                "low_risk",
+                np.where(group_data[event_col] >= threshold, "high_risk", "other"),
             )
 
             # Filtrer uniquement les données pertinentes (low_risk et high_risk)
-            data_filtered = group_data[group_data['group'].isin(['low_risk', 'high_risk'])].copy()
+            data_filtered = group_data[
+                group_data["group"].isin(["low_risk", "high_risk"])
+            ].copy()
 
             # Calculer les labels binaires pour la métrique APR
-            y_true = (data_filtered['group'] == 'high_risk').astype(int)
+            y_true = (data_filtered["group"] == "high_risk").astype(int)
             y_scores = data_filtered[score_col]
-            
+
             if y_true.shape[0] == 0:
                 continue
-            
+
             # Calculer les courbes précision-rappel et l'APR
-            precision, recall, thresholds_pr = precision_recall_curve(y_true, y_scores, pos_label=1)
+            precision, recall, thresholds_pr = precision_recall_curve(
+                y_true, y_scores, pos_label=1
+            )
             apr_score = average_precision_score(y_true, y_scores)
 
             # Identifier le seuil optimal comme celui avec le F1-score maximal
             f1_scores = 2 * (precision * recall) / (precision + recall + 1e-10)
             optimal_index = np.argmax(f1_scores)
-            optimal_threshold = thresholds_pr[optimal_index] if optimal_index < len(thresholds_pr) else None
+            optimal_threshold = (
+                thresholds_pr[optimal_index]
+                if optimal_index < len(thresholds_pr)
+                else None
+            )
             optimal_precision = precision[optimal_index]
             optimal_recall = recall[optimal_index]
             optimal_f1 = f1_scores[optimal_index]
 
             # Stocker les résultats pour le seuil courant
-            apr_results.append({
-                'threshold': threshold,
-                'apr_score': apr_score,
-                'f1_score': optimal_f1,
-                'optimal_threshold': optimal_threshold,
-                'optimal_precision': optimal_precision,
-                'optimal_recall': optimal_recall
-            })
+            apr_results.append(
+                {
+                    "threshold": threshold,
+                    "apr_score": apr_score,
+                    "f1_score": optimal_f1,
+                    "optimal_threshold": optimal_threshold,
+                    "optimal_precision": optimal_precision,
+                    "optimal_recall": optimal_recall,
+                }
+            )
 
             # Visualiser la courbe précision-rappel
             plt.figure()
-            plt.plot(recall, precision, label=f"Precision-Recall Curve (APR={apr_score:.3f}, (F1={optimal_f1:.3f})", color='blue')
-            plt.scatter(optimal_recall, optimal_precision, color='red', label=f'Optimal Point (P={optimal_precision:.3f}, R={optimal_recall:.3f})')
-            plt.title(f"{saison}, Graph ID: {graph_id}, Threshold: {threshold}. Optimal threshold: {optimal_threshold:.3f}")
-            plt.xlabel('Recall')
-            plt.ylabel('Precision')
+            plt.plot(
+                recall,
+                precision,
+                label=f"Precision-Recall Curve (APR={apr_score:.3f}, (F1={optimal_f1:.3f})",
+                color="blue",
+            )
+            plt.scatter(
+                optimal_recall,
+                optimal_precision,
+                color="red",
+                label=f"Optimal Point (P={optimal_precision:.3f}, R={optimal_recall:.3f})",
+            )
+            plt.title(
+                f"{saison}, Graph ID: {graph_id}, Threshold: {threshold}. Optimal threshold: {optimal_threshold:.3f}"
+            )
+            plt.xlabel("Recall")
+            plt.ylabel("Precision")
             plt.legend()
             plt.grid(True)
 
             # Sauvegarder l'image du graphique dans le répertoire de sortie
-            plt.savefig(dir_output / f'APR_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png')
-            plt.close('all')
+            plt.savefig(
+                dir_output
+                / f"APR_Plot_Saison_{saison}_GraphID_{graph_id}_Threshold_{threshold}.png"
+            )
+            plt.close("all")
 
         # Convertir les résultats de ce groupe en DataFrame pour inspection (facultatif)
         apr_results_df = pd.DataFrame(apr_results)
@@ -3786,10 +4728,11 @@ def calculate_apr_per_season_and_graph_id(data, score_col, event_col, thresholds
 
     return results_per_group
 
+
 def calculate_ks_continous(data, score_col, event_col, dir_output=None):
     """
     Calcule le KS-Statistic pour une colonne d'événements non binaire.
-    
+
     :param data: pd.DataFrame contenant les scores et les événements.
     :param score_col: Nom de la colonne des scores prédits.
     :param event_col: Nom de la colonne des événements observés (valeurs continues ou non binaires).
@@ -3798,35 +4741,55 @@ def calculate_ks_continous(data, score_col, event_col, dir_output=None):
     """
     # Trier les données par score décroissant
     data_sorted = data.sort_values(by=score_col).reset_index(drop=True)
-    
+
     total_events = data_sorted[event_col].sum()
     total_non_events = len(data_sorted[data_sorted[event_col] == 0])
 
-    data_sorted['cum_events'] = np.cumsum(data_sorted[event_col]) / total_events
-    data_sorted['cum_non_events'] = np.cumsum(data_sorted[event_col].apply(lambda x: x == 0)) / total_non_events
+    data_sorted["cum_events"] = np.cumsum(data_sorted[event_col]) / total_events
+    data_sorted["cum_non_events"] = (
+        np.cumsum(data_sorted[event_col].apply(lambda x: x == 0)) / total_non_events
+    )
 
     # Calcul du KS-Statistic
-    data_sorted['ks_diff'] = np.abs(data_sorted['cum_events'] - data_sorted['cum_non_events'])
-    ks_stat = data_sorted['ks_diff'].max()
-    ks_position = data_sorted['ks_diff'].idxmax()
+    data_sorted["ks_diff"] = np.abs(
+        data_sorted["cum_events"] - data_sorted["cum_non_events"]
+    )
+    ks_stat = data_sorted["ks_diff"].max()
+    ks_position = data_sorted["ks_diff"].idxmax()
 
     # Optionnel : Visualisation
     plt.figure(figsize=(10, 6))
-    plt.plot(data_sorted[score_col], data_sorted['cum_events'], label='Cumulative Events', color='red')
-    plt.plot(data_sorted[score_col], data_sorted['cum_non_events'], label='Cumulative Non-Events', color='blue')
-    plt.axvline(x=data_sorted.loc[ks_position, score_col], color='green', linestyle='--', label=f'KS Point (KS={ks_stat:.3f})')
-    plt.title('KS Plot')
-    plt.xlabel('Score')
-    plt.ylabel('Cumulative Proportion')
+    plt.plot(
+        data_sorted[score_col],
+        data_sorted["cum_events"],
+        label="Cumulative Events",
+        color="red",
+    )
+    plt.plot(
+        data_sorted[score_col],
+        data_sorted["cum_non_events"],
+        label="Cumulative Non-Events",
+        color="blue",
+    )
+    plt.axvline(
+        x=data_sorted.loc[ks_position, score_col],
+        color="green",
+        linestyle="--",
+        label=f"KS Point (KS={ks_stat:.3f})",
+    )
+    plt.title("KS Plot")
+    plt.xlabel("Score")
+    plt.ylabel("Cumulative Proportion")
     plt.legend()
     plt.grid(True)
-    
-    if dir_output:
-        plt.savefig(dir_output / f'KS_Plot_{score_col}_{event_col}.png')
 
-    plt.close('all')
-    
-    return ks_stat, data_sorted[[score_col, 'cum_events', 'cum_non_events', 'ks_diff']]
+    if dir_output:
+        plt.savefig(dir_output / f"KS_Plot_{score_col}_{event_col}.png")
+
+    plt.close("all")
+
+    return ks_stat, data_sorted[[score_col, "cum_events", "cum_non_events", "ks_diff"]]
+
 
 def calculate_area_under_curve(y_values):
     """
@@ -3837,7 +4800,8 @@ def calculate_area_under_curve(y_values):
     """
     return np.trapz(y_values, dx=1)
 
-def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
+
+def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison, departement):
     """
     Calcule les scores (aire commune, union, sous-prédiction, sur-prédiction) entre deux signaux.
 
@@ -3855,7 +4819,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     ###################################### I. For the all signal ####################################
     # Calcul des différentes aires
     intersection = np.trapz(np.minimum(y_pred, y_true))  # Aire commune
-    union = np.trapz(np.maximum(y_pred, y_true))         # Aire d'union
+    union = np.trapz(np.maximum(y_pred, y_true))  # Aire d'union
 
     over_prediction_zeros = np.trapz(np.maximum(0, y_pred[y_true == 0]))
     under_prediction_zeros = np.trapz(np.maximum(0, y_true[y_pred == 0]))
@@ -3877,19 +4841,37 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
     f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-    f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true, y_pred, average='macro', labels=np.union1d(y_true, y_pred), zero_division=0)
+    f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+        y_true,
+        y_pred,
+        average="macro",
+        labels=np.union1d(y_true, y_pred),
+        zero_division=0,
+    )
 
     y_pred_clipped_ytrue = np.copy(y_pred)
-    y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)])
-    intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true))  # Aire commune
-    union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true))         # Aire d'union
-    iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+    y_pred_clipped_ytrue[(y_pred > 0) & (y_true > 0)] = np.minimum(
+        y_true[(y_pred > 0) & (y_true > 0)], y_pred[(y_pred > 0) & (y_true > 0)]
+    )
+    intersection_clipped = np.trapz(
+        np.minimum(y_pred_clipped_ytrue, y_true)
+    )  # Aire commune
+    union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true))  # Aire d'union
+    iou_no_overestimation = (
+        intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+    )
 
-    dice_coefficient = 2 * intersection / (union + intersection) if union + intersection > 0 else np.nan
+    dice_coefficient = (
+        2 * intersection / (union + intersection)
+        if union + intersection > 0
+        else np.nan
+    )
 
     # Enregistrement dans un dictionnaire
     scores = {
-        "iou": intersection / union if union > 0 else np.nan,  # To avoid division by zero
+        "iou": (
+            intersection / union if union > 0 else np.nan
+        ),  # To avoid division by zero
         "iou_wildfire_or_pred": iou_wildfire_or_pred,
         "iou_wildfire_and_pred": iou_wildfire_and_pred,
         "rec_bin": rec_bin,
@@ -3898,15 +4880,16 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         "rec_macro": rec_macro,
         "prec_macro": prec_macro,
         "f1_macro": f1_macro,
-
-        "iou_no_overestimation" : iou_no_overestimation,
-        
-        "over_bad_prediction" : over_prediction_zeros / union if union > 0 else np.nan,
-        "under_bad_prediction" : under_prediction_zeros / union if union > 0 else np.nan,
-        "bad_prediction" : (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
-        
+        "iou_no_overestimation": iou_no_overestimation,
+        "over_bad_prediction": over_prediction_zeros / union if union > 0 else np.nan,
+        "under_bad_prediction": under_prediction_zeros / union if union > 0 else np.nan,
+        "bad_prediction": (
+            (over_prediction_zeros + under_prediction_zeros) / union
+            if union > 0
+            else np.nan
+        ),
         # Ajout du Dice coefficient
-        "dice_coefficient": dice_coefficient
+        "dice_coefficient": dice_coefficient,
     }
 
     ###################################### I. For each graph_id ####################################
@@ -3933,21 +4916,51 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
         y_pred_graph = y_pred[mask]
         y_true_graph = y_true[mask]
-        y_true_fire_graph = y_true_fire[mask]            
+        y_true_fire_graph = y_true_fire[mask]
+
+        dept = departement[mask][0]
+
+        print(f'{i} {g_id} {dept}')
 
         mask_fire_graph = (y_pred_graph > 0) | (y_true_fire_graph > 0)
-        intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        iou_wildfire_or_pred_graph = intersection_fire_graph / union_fire_graph if union_fire_graph > 0 else np.nan
+        intersection_fire_graph = np.trapz(
+            np.minimum(
+                y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]
+            )
+        )
+        union_fire_graph = np.trapz(
+            np.maximum(
+                y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]
+            )
+        )
+        iou_wildfire_or_pred_graph = (
+            intersection_fire_graph / union_fire_graph
+            if union_fire_graph > 0
+            else np.nan
+        )
 
         mask_fire_graph = (y_pred_graph > 0) & (y_true_fire_graph > 0)
-        intersection_fire_graph = np.trapz(np.minimum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        union_fire_graph = np.trapz(np.maximum(y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]))
-        iou_wildfire_and_pred_graph = intersection_fire_graph / union_fire_graph if union_fire_graph > 0 else np.nan
+        intersection_fire_graph = np.trapz(
+            np.minimum(
+                y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]
+            )
+        )
+        union_fire_graph = np.trapz(
+            np.maximum(
+                y_pred_graph[mask_fire_graph], y_true_fire_graph[mask_fire_graph]
+            )
+        )
+        iou_wildfire_and_pred_graph = (
+            intersection_fire_graph / union_fire_graph
+            if union_fire_graph > 0
+            else np.nan
+        )
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
-        y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+        y_true_fire_clipped = np.clip(
+            y_true_fire[mask], 0, 1
+        )  # Limiter y_true_fire à 1
 
         if np.all(y_true_graph == 0) and np.all(y_pred_graph == 0):
             rec_bin = 0
@@ -3961,67 +4974,116 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             auoc = 0
         else:
             rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
-            prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            prec_bin = precision_score(
+                y_true_fire_clipped, y_pred_clipped, zero_division=0
+            )
             f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
-            
-            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_graph, y_pred_graph, average='macro', labels=np.union1d(y_true_graph, y_pred_graph), zero_division=0)
 
-            auoc = auoc_func(confusion_matrix(y_true_graph, y_pred_graph, labels=np.union1d(y_true_graph, y_pred_graph)))
+            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+                y_true_graph,
+                y_pred_graph,
+                average="macro",
+                labels=np.union1d(y_true_graph, y_pred_graph),
+                zero_division=0,
+            )
+
+            auoc = auoc_func(
+                confusion_matrix(
+                    y_true_graph,
+                    y_pred_graph,
+                    labels=np.union1d(y_true_graph, y_pred_graph),
+                )
+            )
 
         y_pred_clipped_ytrue = np.copy(y_pred_graph)
-        y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)], y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)])
-        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph))  # Aire commune
-        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph))         # Aire d'union
-        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        y_pred_clipped_ytrue[(y_pred_graph > 0) & (y_true_graph > 0)] = np.minimum(
+            y_true_graph[(y_pred_graph > 0) & (y_true_graph > 0)],
+            y_pred_graph[(y_pred_graph > 0) & (y_true_graph > 0)],
+        )
+        intersection_clipped = np.trapz(
+            np.minimum(y_pred_clipped_ytrue, y_true_graph)
+        )  # Aire commune
+        union_clipped = np.trapz(
+            np.maximum(y_pred_clipped_ytrue, y_true_graph)
+        )  # Aire d'union
+        iou_no_overestimation = (
+            intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        )
 
-        intersection_graph = np.trapz(np.minimum(y_pred_graph, y_true_graph))  # Aire commune
-        union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))         # Aire d'union
+        intersection_graph = np.trapz(
+            np.minimum(y_pred_graph, y_true_graph)
+        )  # Aire commune
+        union_graph = np.trapz(np.maximum(y_pred_graph, y_true_graph))  # Aire d'union
 
-        over_prediction_zeros_graph = np.trapz(np.maximum(0, y_pred_graph[y_true_graph == 0]))
-        under_prediction_zeros_graph = np.trapz(np.maximum(0, y_true_graph[y_pred_graph == 0]))
+        over_prediction_zeros_graph = np.trapz(
+            np.maximum(0, y_pred_graph[y_true_graph == 0])
+        )
+        under_prediction_zeros_graph = np.trapz(
+            np.maximum(0, y_true_graph[y_pred_graph == 0])
+        )
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         graph_scores = {
-            f"iou_wildfire_or_pred_{i}_{g_id}": iou_wildfire_or_pred_graph,
-            f"iou_wildfire_and_pred_{i}_{g_id}": iou_wildfire_and_pred_graph,
-            f"iou_no_overestimation_{i}_{g_id}": iou_no_overestimation,
-            f"iou_{i}_{g_id}": intersection_graph / union_graph if union_graph > 0 else np.nan,  # Pour éviter la division par zéro
-            f"rec_bin_{i}_{g_id}": rec_bin,
-            f"prec_bin_{i}_{g_id}": prec_bin,
-            f"f1_bin_{i}_{g_id}": f1_bin,
-
-            f"rec_macro_{i}_{g_id}": rec_macro,
-            f"prec_macro_{i}_{g_id}": prec_macro,
-            f"f1_macro_{i}_{g_id}": f1_macro,
-
-            f"auoc_{i}_{g_id}": auoc,
-
+            f"iou_wildfire_or_pred_{i}_{g_id}_{dept}": iou_wildfire_or_pred_graph,
+            f"iou_wildfire_and_pred_{i}_{g_id}_{dept}": iou_wildfire_and_pred_graph,
+            f"iou_no_overestimation_{i}_{g_id}_{dept}": iou_no_overestimation,
+            f"iou_{i}_{g_id}_{dept}": (
+                intersection_graph / union_graph if union_graph > 0 else np.nan
+            ),  # Pour éviter la division par zéro
+            f"rec_bin_{i}_{g_id}_{dept}": rec_bin,
+            f"prec_bin_{i}_{g_id}_{dept}": prec_bin,
+            f"f1_bin_{i}_{g_id}_{dept}": f1_bin,
+            f"rec_macro_{i}_{g_id}_{dept}": rec_macro,
+            f"prec_macro_{i}_{g_id}_{dept}": prec_macro,
+            f"f1_macro_{i}_{g_id}_{dept}": f1_macro,
+            f"auoc_{i}_{g_id}_{dept}": auoc,
             # Ajout du Dice coefficient pour chaque itération
-            f"dice_coefficient_{i}_{g_id}": 2 * intersection_graph / (union_graph + intersection_graph) if (union_graph + intersection_graph) > 0 else np.nan,
-
-            f"over_bad_prediction_local_{i}_{g_id}": over_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
-            f"under_bad_prediction_local_{i}_{g_id}": under_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan,
-            f"bad_prediction_local_{i}_{g_id}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union_graph if union_graph > 0 else np.nan,
-
-            f"over_bad_prediction_global_{i}_{g_id}": over_prediction_zeros_graph / union if union_graph > 0 else np.nan,
-            f"under_bad_prediction_global_{i}_{g_id}": under_prediction_zeros_graph / union if union_graph > 0 else np.nan,
-            f"bad_prediction_global_{i}_{g_id}": (over_prediction_zeros_graph + under_prediction_zeros_graph) / union if union_graph > 0 else np.nan,
+            f"dice_coefficient_{i}_{g_id}": (
+                2 * intersection_graph / (union_graph + intersection_graph)
+                if (union_graph + intersection_graph) > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_local_{i}_{g_id}_{dept}": (
+                over_prediction_zeros_graph / union_graph if union_graph > 0 else np.nan
+            ),
+            f"under_bad_prediction_local_{i}_{g_id}_{dept}": (
+                under_prediction_zeros_graph / union_graph
+                if union_graph > 0
+                else np.nan
+            ),
+            f"bad_prediction_local_{i}_{g_id}_{dept}": (
+                (over_prediction_zeros_graph + under_prediction_zeros_graph)
+                / union_graph
+                if union_graph > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_global_{i}_{g_id}_{dept}": (
+                over_prediction_zeros_graph / union if union_graph > 0 else np.nan
+            ),
+            f"under_bad_prediction_global_{i}_{g_id}_{dept}": (
+                under_prediction_zeros_graph / union if union_graph > 0 else np.nan
+            ),
+            f"bad_prediction_global_{i}_{g_id}_{dept}": (
+                (over_prediction_zeros_graph + under_prediction_zeros_graph) / union
+                if union_graph > 0
+                else np.nan
+            ),
         }
         if np.any(y_true_fire_graph > 0):
-            iou_scores.append(graph_scores[f'iou_{i}_{g_id}'])
-            f1_scores.append(graph_scores[f'f1_bin_{i}_{g_id}'])
+            iou_scores.append(graph_scores[f"iou_{i}_{g_id}_{dept}"])
+            f1_scores.append(graph_scores[f"f1_bin_{i}_{g_id}_{dept}"])
             precision_scores.append(prec_bin)
             recall_scores.append(rec_bin)
 
             precision_macro_graph_scores.append(prec_macro)
             recall_macro_graph_scores.append(rec_macro)
             f1_macro_graph_scores.append(f1_macro)
-        
+
         auoc_graph_scores.append(auoc)
         scores.update(graph_scores)
 
     max_area = np.trapz(np.ones(np.unique(graph_id[y_true > 0]).shape[0]))
-    
+
     IoU_area = calculate_area_under_curve(iou_scores)
 
     F1_area = calculate_area_under_curve(f1_scores)
@@ -4031,28 +5093,28 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     F1_area_macro = calculate_area_under_curve(f1_macro_graph_scores)
     Prec_area_macro = calculate_area_under_curve(precision_macro_graph_scores)
     Rec_area_macro = calculate_area_under_curve(recall_macro_graph_scores)
-    
+
     auoc_area = calculate_area_under_curve(auoc_graph_scores)
 
-    if max_area > 0: 
-        scores['iou_area'] = IoU_area / max_area
-        scores['f1_area'] = F1_area / max_area
-        scores['prec_area'] = Prec_area / max_area
-        scores['rec_area'] = Rec_area / max_area
-        scores['f1_macro_area'] = F1_area_macro / max_area
-        scores['prec_macro_area'] = Prec_area_macro / max_area
-        scores['rec_macro_area'] = Rec_area_macro / max_area
-        scores['auoc_area'] = auoc_area / max_area
+    if max_area > 0:
+        scores["iou_area"] = IoU_area / max_area
+        scores["f1_area"] = F1_area / max_area
+        scores["prec_area"] = Prec_area / max_area
+        scores["rec_area"] = Rec_area / max_area
+        scores["f1_macro_area"] = F1_area_macro / max_area
+        scores["prec_macro_area"] = Prec_area_macro / max_area
+        scores["rec_macro_area"] = Rec_area_macro / max_area
+        scores["auoc_area"] = auoc_area / max_area
     else:
-        scores['iou_area'] = 0
-        scores['f1_area'] = 0
-        scores['prec_area'] = 0
-        scores['rec_area'] = 0
-        scores['f1_macro_area'] = 0
-        scores['prec_macro_area'] = 0
-        scores['rec_macro_area'] = 0
-        scores['auoc_area'] = 0
-    
+        scores["iou_area"] = 0
+        scores["f1_area"] = 0
+        scores["prec_area"] = 0
+        scores["rec_area"] = 0
+        scores["f1_macro_area"] = 0
+        scores["prec_macro_area"] = 0
+        scores["rec_macro_area"] = 0
+        scores["auoc_area"] = 0
+
     unique_seasons = np.unique(saison)
 
     # Collecte pour macro par saison
@@ -4073,18 +5135,44 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         y_true_fire_season = y_true_fire[mask]
 
         mask_fire_season = (y_pred_season > 0) | (y_true_fire_season > 0)
-        intersection_fire_season = np.trapz(np.minimum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        iou_wildfire_or_pred_season = intersection_fire_season / union_fire_season if union_fire_season > 0 else np.nan
+        intersection_fire_season = np.trapz(
+            np.minimum(
+                y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]
+            )
+        )
+        union_fire_season = np.trapz(
+            np.maximum(
+                y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]
+            )
+        )
+        iou_wildfire_or_pred_season = (
+            intersection_fire_season / union_fire_season
+            if union_fire_season > 0
+            else np.nan
+        )
 
         mask_fire_season = (y_pred_season > 0) & (y_true_fire_season > 0)
-        intersection_fire_season = np.trapz(np.minimum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        union_fire_season = np.trapz(np.maximum(y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]))
-        iou_wildfire_and_pred_season = intersection_fire_season / union_fire_season if union_fire_season > 0 else np.nan
+        intersection_fire_season = np.trapz(
+            np.minimum(
+                y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]
+            )
+        )
+        union_fire_season = np.trapz(
+            np.maximum(
+                y_pred_season[mask_fire_season], y_true_fire_season[mask_fire_season]
+            )
+        )
+        iou_wildfire_and_pred_season = (
+            intersection_fire_season / union_fire_season
+            if union_fire_season > 0
+            else np.nan
+        )
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
-        y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+        y_true_fire_clipped = np.clip(
+            y_true_fire[mask], 0, 1
+        )  # Limiter y_true_fire à 1
 
         if np.all(y_true_season == 0) and np.all(y_pred_season == 0):
             rec_bin = 0
@@ -4098,51 +5186,103 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             auoc = 0
         else:
             rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
-            prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+            prec_bin = precision_score(
+                y_true_fire_clipped, y_pred_clipped, zero_division=0
+            )
             f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_season, y_pred_season, average='macro', labels=np.union1d(y_true_season, y_pred_season), zero_division=0)
+            f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+                y_true_season,
+                y_pred_season,
+                average="macro",
+                labels=np.union1d(y_true_season, y_pred_season),
+                zero_division=0,
+            )
 
-            auoc = auoc_func(confusion_matrix(y_true_season, y_pred_season, labels=np.union1d(y_true_season, y_pred_season)))
+            auoc = auoc_func(
+                confusion_matrix(
+                    y_true_season,
+                    y_pred_season,
+                    labels=np.union1d(y_true_season, y_pred_season),
+                )
+            )
 
         y_pred_clipped_ytrue = np.copy(y_pred_season)
-        y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(y_true_season[(y_pred_season > 0) & (y_true_season > 0)], y_pred_season[(y_pred_season > 0) & (y_true_season > 0)])
-        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_season))  # Aire commune
-        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_season))         # Aire d'union
-        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        y_pred_clipped_ytrue[(y_pred_season > 0) & (y_true_season > 0)] = np.minimum(
+            y_true_season[(y_pred_season > 0) & (y_true_season > 0)],
+            y_pred_season[(y_pred_season > 0) & (y_true_season > 0)],
+        )
+        intersection_clipped = np.trapz(
+            np.minimum(y_pred_clipped_ytrue, y_true_season)
+        )  # Aire commune
+        union_clipped = np.trapz(
+            np.maximum(y_pred_clipped_ytrue, y_true_season)
+        )  # Aire d'union
+        iou_no_overestimation = (
+            intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        )
 
-        intersection_season = np.trapz(np.minimum(y_pred_season, y_true_season))  # Aire commune
-        union_season = np.trapz(np.maximum(y_pred_season, y_true_season))         # Aire d'union
+        intersection_season = np.trapz(
+            np.minimum(y_pred_season, y_true_season)
+        )  # Aire commune
+        union_season = np.trapz(
+            np.maximum(y_pred_season, y_true_season)
+        )  # Aire d'union
 
-        over_prediction_zeros_season = np.trapz(np.maximum(0, y_pred_season[y_true_season == 0]))
-        under_prediction_zeros_season = np.trapz(np.maximum(0, y_true_season[y_pred_season == 0]))
+        over_prediction_zeros_season = np.trapz(
+            np.maximum(0, y_pred_season[y_true_season == 0])
+        )
+        under_prediction_zeros_season = np.trapz(
+            np.maximum(0, y_true_season[y_pred_season == 0])
+        )
 
         # Stocker les scores avec des clés utilisant uniquement l'indice
         season_scores = {
             f"iou_wildfire_or_pred_{s}": iou_wildfire_or_pred_season,
             f"iou_wildfire_and_pred_{s}": iou_wildfire_and_pred_season,
             f"iou_no_overestimation_{s}": iou_no_overestimation,
-            f"iou_{s}": intersection_season / union_season if union_season > 0 else np.nan,  # Pour éviter la division par zéro
-            
+            f"iou_{s}": (
+                intersection_season / union_season if union_season > 0 else np.nan
+            ),  # Pour éviter la division par zéro
             f"rec_bin_{s}": rec_bin,
             f"prec_bin_{s}": prec_bin,
             f"f1_bin_{s}": f1_bin,
-
             f"rec_macro_{s}": rec_macro,
             f"prec_macro_{s}": prec_macro,
             f"f1_macro_{s}": f1_macro,
-            
             f"auoc_{s}": auoc,
-
-            f"over_bad_prediction_local_{s}": over_prediction_zeros_season / union_season if union_season > 0 else np.nan,
-            f"under_bad_prediction_local_{s}": under_prediction_zeros_season / union_season if union_season > 0 else np.nan,
-            f"bad_prediction_local_{s}": (over_prediction_zeros_season + under_prediction_zeros_season) / union_season if union_season > 0 else np.nan,
-            
-            f"dice_coefficient_{s}": 2 * intersection_season / (union_season + intersection_season) if (union_season + intersection_season) > 0 else np.nan,
-
-            f"over_bad_prediction_global_{s}": over_prediction_zeros_season / union if union_season > 0 else np.nan,
-            f"under_bad_prediction_global_{s}": under_prediction_zeros_season / union if union_season > 0 else np.nan,
-            f"bad_prediction_global_{s}": (over_prediction_zeros_season + under_prediction_zeros_season) / union if union_season > 0 else np.nan,
+            f"over_bad_prediction_local_{s}": (
+                over_prediction_zeros_season / union_season
+                if union_season > 0
+                else np.nan
+            ),
+            f"under_bad_prediction_local_{s}": (
+                under_prediction_zeros_season / union_season
+                if union_season > 0
+                else np.nan
+            ),
+            f"bad_prediction_local_{s}": (
+                (over_prediction_zeros_season + under_prediction_zeros_season)
+                / union_season
+                if union_season > 0
+                else np.nan
+            ),
+            f"dice_coefficient_{s}": (
+                2 * intersection_season / (union_season + intersection_season)
+                if (union_season + intersection_season) > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_global_{s}": (
+                over_prediction_zeros_season / union if union_season > 0 else np.nan
+            ),
+            f"under_bad_prediction_global_{s}": (
+                under_prediction_zeros_season / union if union_season > 0 else np.nan
+            ),
+            f"bad_prediction_global_{s}": (
+                (over_prediction_zeros_season + under_prediction_zeros_season) / union
+                if union_season > 0
+                else np.nan
+            ),
         }
         scores.update(season_scores)
 
@@ -4155,7 +5295,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
     ###################################### For each graph_id in each season ####################################
     # Get unique seasons
     unique_seasons = np.unique(saison)
-    
+
     # Iterate over seasons
     for season in unique_seasons:
         # Mask for the current season
@@ -4175,19 +5315,53 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
             y_true_graph_season = y_true[mask]
             y_true_fire_graph_season = y_true_fire[mask]
 
-            mask_fire_graph_season = (y_pred_graph_season > 0) | (y_true_fire_graph_season > 0)
-            intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            iou_wildfire_or_pred_graph_season = intersection_fire_graph_season / union_fire_graph_season if union_fire_graph_season > 0 else np.nan
+            mask_fire_graph_season = (y_pred_graph_season > 0) | (
+                y_true_fire_graph_season > 0
+            )
+            intersection_fire_graph_season = np.trapz(
+                np.minimum(
+                    y_pred_graph_season[mask_fire_graph_season],
+                    y_true_fire_graph_season[mask_fire_graph_season],
+                )
+            )
+            union_fire_graph_season = np.trapz(
+                np.maximum(
+                    y_pred_graph_season[mask_fire_graph_season],
+                    y_true_fire_graph_season[mask_fire_graph_season],
+                )
+            )
+            iou_wildfire_or_pred_graph_season = (
+                intersection_fire_graph_season / union_fire_graph_season
+                if union_fire_graph_season > 0
+                else np.nan
+            )
 
-            mask_fire_graph_season = (y_pred_graph_season > 0) & (y_true_fire_graph_season > 0)
-            intersection_fire_graph_season = np.trapz(np.minimum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            union_fire_graph_season = np.trapz(np.maximum(y_pred_graph_season[mask_fire_graph_season], y_true_fire_graph_season[mask_fire_graph_season]))
-            iou_wildfire_and_pred_graph_season = intersection_fire_graph_season / union_fire_graph_season if union_fire_graph_season > 0 else np.nan
+            mask_fire_graph_season = (y_pred_graph_season > 0) & (
+                y_true_fire_graph_season > 0
+            )
+            intersection_fire_graph_season = np.trapz(
+                np.minimum(
+                    y_pred_graph_season[mask_fire_graph_season],
+                    y_true_fire_graph_season[mask_fire_graph_season],
+                )
+            )
+            union_fire_graph_season = np.trapz(
+                np.maximum(
+                    y_pred_graph_season[mask_fire_graph_season],
+                    y_true_fire_graph_season[mask_fire_graph_season],
+                )
+            )
+            iou_wildfire_and_pred_graph_season = (
+                intersection_fire_graph_season / union_fire_graph_season
+                if union_fire_graph_season > 0
+                else np.nan
+            )
 
             # Limitation des signaux à un maximum de 1
             y_pred_clipped = np.clip(y_pred[mask], 0, 1)  # Limiter y_pred à 1
-            y_true_fire_clipped = np.clip(y_true_fire[mask], 0, 1)  # Limiter y_true_fire à 1
+            y_true_fire_clipped = np.clip(
+                y_true_fire[mask], 0, 1
+            )  # Limiter y_true_fire à 1
 
             if np.all(y_true_graph_season == 0) and np.all(y_pred_graph_season == 0):
                 rec_bin = 0
@@ -4200,48 +5374,108 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
                 auoc = 0
             else:
-                rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
-                prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
+                rec_bin = recall_score(
+                    y_true_fire_clipped, y_pred_clipped, zero_division=0
+                )
+                prec_bin = precision_score(
+                    y_true_fire_clipped, y_pred_clipped, zero_division=0
+                )
                 f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-                f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_graph_season, y_pred_graph_season, average='macro', labels=np.union1d(y_true_graph_season, y_pred_graph_season), zero_division=0)
+                f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+                    y_true_graph_season,
+                    y_pred_graph_season,
+                    average="macro",
+                    labels=np.union1d(y_true_graph_season, y_pred_graph_season),
+                    zero_division=0,
+                )
 
-                auoc = auoc_func(confusion_matrix(y_true_graph_season, y_pred_graph_season, labels=np.union1d(y_true_graph_season, y_pred_graph_season)))
+                auoc = auoc_func(
+                    confusion_matrix(
+                        y_true_graph_season,
+                        y_pred_graph_season,
+                        labels=np.union1d(y_true_graph_season, y_pred_graph_season),
+                    )
+                )
 
             y_pred_clipped_ytrue = np.copy(y_pred_graph_season)
-            y_pred_clipped_ytrue[(y_pred_graph_season > 0) & (y_true_graph_season > 0)] = np.minimum(y_true_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)], y_pred_graph_season[(y_pred_graph_season > 0) & (y_true_graph_season > 0)])
-            intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_graph_season))  # Aire commune
-            union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_graph_season))         # Aire d'union
-            iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+            y_pred_clipped_ytrue[
+                (y_pred_graph_season > 0) & (y_true_graph_season > 0)
+            ] = np.minimum(
+                y_true_graph_season[
+                    (y_pred_graph_season > 0) & (y_true_graph_season > 0)
+                ],
+                y_pred_graph_season[
+                    (y_pred_graph_season > 0) & (y_true_graph_season > 0)
+                ],
+            )
+            intersection_clipped = np.trapz(
+                np.minimum(y_pred_clipped_ytrue, y_true_graph_season)
+            )  # Aire commune
+            union_clipped = np.trapz(
+                np.maximum(y_pred_clipped_ytrue, y_true_graph_season)
+            )  # Aire d'union
+            iou_no_overestimation = (
+                intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+            )
 
-            intersection_graph_season = np.trapz(np.minimum(y_pred_graph_season, y_true_graph_season))  # Common area
-            union_graph_season = np.trapz(np.maximum(y_pred_graph_season, y_true_graph_season))         # Union area
+            intersection_graph_season = np.trapz(
+                np.minimum(y_pred_graph_season, y_true_graph_season)
+            )  # Common area
+            union_graph_season = np.trapz(
+                np.maximum(y_pred_graph_season, y_true_graph_season)
+            )  # Union area
 
-            over_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_pred_graph_season[y_true_graph_season == 0]))
-            under_prediction_zeros_graph_season = np.trapz(np.maximum(0, y_true_graph_season[y_pred_graph_season == 0]))
+            over_prediction_zeros_graph_season = np.trapz(
+                np.maximum(0, y_pred_graph_season[y_true_graph_season == 0])
+            )
+            under_prediction_zeros_graph_season = np.trapz(
+                np.maximum(0, y_true_graph_season[y_pred_graph_season == 0])
+            )
 
             # Compute scores for the graph in this season
             graph_season_scores = {
                 f"iou_wildfire_or_pred_graph_{i}_season_{season}": iou_wildfire_or_pred_graph_season,
                 f"iou_wildfire_and_pred_graph_{i}_season_{season}": iou_wildfire_and_pred_graph_season,
                 f"iou_no_overestimation_graph_{i}_season_{season}": iou_no_overestimation,
-                f"iou_graph_{i}_season_{season}": intersection_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
-                
+                f"iou_graph_{i}_season_{season}": (
+                    intersection_graph_season / union_graph_season
+                    if union_graph_season > 0
+                    else np.nan
+                ),
                 f"rec_bin_graph_{i}_season_{season}": rec_bin,
                 f"prec_bin_graph_{i}_season_{season}": prec_bin,
                 f"f1_bin_graph_{i}_season_{season}": f1_bin,
-
                 f"auoc_bin_graph_{i}_season_{season}": auoc,
-
                 f"rec_macro_graph_{i}_season_{season}": rec_macro,
                 f"prec_macro_graph_{i}_season_{season}": prec_macro,
                 f"f1_macro_graph_{i}_season_{season}": f1_macro,
-                
-                f"dice_coefficient_graph_{i}_season_{season}": 2 * intersection_graph_season / (union_graph_season + intersection_graph_season) if (union_graph_season + intersection_graph_season) > 0 else np.nan,
-
-                f"over_bad_prediction_local_graph_{i}_season_{season}": over_prediction_zeros_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
-                f"under_bad_prediction_local_graph_{i}_season_{season}": under_prediction_zeros_graph_season / union_graph_season if union_graph_season > 0 else np.nan,
-                f"bad_prediction_local_graph_{i}_season_{season}": (over_prediction_zeros_graph_season + under_prediction_zeros_graph_season) / union_graph_season if union_graph_season > 0 else np.nan,
+                f"dice_coefficient_graph_{i}_season_{season}": (
+                    2
+                    * intersection_graph_season
+                    / (union_graph_season + intersection_graph_season)
+                    if (union_graph_season + intersection_graph_season) > 0
+                    else np.nan
+                ),
+                f"over_bad_prediction_local_graph_{i}_season_{season}": (
+                    over_prediction_zeros_graph_season / union_graph_season
+                    if union_graph_season > 0
+                    else np.nan
+                ),
+                f"under_bad_prediction_local_graph_{i}_season_{season}": (
+                    under_prediction_zeros_graph_season / union_graph_season
+                    if union_graph_season > 0
+                    else np.nan
+                ),
+                f"bad_prediction_local_graph_{i}_season_{season}": (
+                    (
+                        over_prediction_zeros_graph_season
+                        + under_prediction_zeros_graph_season
+                    )
+                    / union_graph_season
+                    if union_graph_season > 0
+                    else np.nan
+                ),
             }
 
             # Update global scores dictionary
@@ -4273,65 +5507,129 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         if y_pred_sample.shape[0] == 1:
             y_pred_sample = np.concatenate((y_pred_sample, y_pred_sample))
             y_true_sample = np.concatenate((y_true_sample, y_true_sample))
-            y_true_fire_sample = np.concatenate((y_true_fire_sample, y_true_fire_sample))
+            y_true_fire_sample = np.concatenate(
+                (y_true_fire_sample, y_true_fire_sample)
+            )
 
         mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_or_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_or_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         mask_fire_sample = (y_pred_sample > 0) & (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_and_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_and_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
-        y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
+        y_true_fire_clipped = np.clip(
+            y_true_fire_sample, 0, 1
+        )  # Limiter y_true_fire à 1
 
         rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+            y_true_sample,
+            y_pred_sample,
+            average="macro",
+            labels=np.union1d(y_true_sample, y_pred_sample),
+            zero_division=0,
+        )
 
-        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
+        auoc = auoc_func(
+            confusion_matrix(
+                y_true_sample,
+                y_pred_sample,
+                labels=np.union1d(y_true_sample, y_pred_sample),
+            )
+        )
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
-        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
-        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
-        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
-        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(
+            y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+            y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+        )
+        intersection_clipped = np.trapz(
+            np.minimum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire commune
+        union_clipped = np.trapz(
+            np.maximum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire d'union
+        iou_no_overestimation = (
+            intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        )
 
         # Calculer les aires
-        intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
-        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
+        intersection = np.trapz(
+            np.minimum(y_pred_sample, y_true_sample)
+        )  # Aire commune
+        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))  # Aire d'union
 
-        over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
-        under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
+        over_prediction_zeros = np.trapz(
+            np.maximum(0, y_pred_sample[y_true_sample == 0])
+        )
+        under_prediction_zeros = np.trapz(
+            np.maximum(0, y_true_sample[y_pred_sample == 0])
+        )
 
         # Enregistrement dans un dictionnaire
-        scores_elt = {            
-            f"iou_elt_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
+        scores_elt = {
+            f"iou_elt_{unique_value}": (
+                intersection / union if union > 0 else np.nan
+            ),  # Éviter la division par zéro
             f"iou_wildfire_or_pred_elt_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_{unique_value}": iou_no_overestimation,
-            
             f"rec_bin_elt_{unique_value}": rec_bin,
             f"prec_bin_elt_{unique_value}": prec_bin,
             f"f1_bin_elt_{unique_value}": f1_bin,
-            
             f"auoc_elt_{unique_value}": auoc,
-
             f"rec_macro_elt_{unique_value}": rec_macro,
             f"prec_macro_elt_{unique_value}": prec_macro,
             f"f1_macro_elt_{unique_value}": f1_macro,
-
-            f"dice_coefficient_elt_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
-
-            f"over_bad_prediction_elt_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
-            f"under_bad_prediction_elt_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
-            f"bad_prediction_elt_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
+            f"dice_coefficient_elt_{unique_value}": (
+                2 * intersection / (union + intersection)
+                if (union + intersection) > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_elt_{unique_value}": (
+                over_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"under_bad_prediction_elt_{unique_value}": (
+                under_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"bad_prediction_elt_{unique_value}": (
+                (over_prediction_zeros + under_prediction_zeros) / union
+                if union > 0
+                else np.nan
+            ),
         }
 
         # Ajouter les scores pour cette valeur unique à la collection globale
@@ -4362,67 +5660,131 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         if y_pred_sample.shape[0] == 1:
             y_pred_sample = np.concatenate((y_pred_sample, y_pred_sample))
             y_true_sample = np.concatenate((y_true_sample, y_true_sample))
-            y_true_fire_sample = np.concatenate((y_true_fire_sample, y_true_fire_sample))
+            y_true_fire_sample = np.concatenate(
+                (y_true_fire_sample, y_true_fire_sample)
+            )
 
         mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_or_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_or_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         mask_fire_sample = (y_pred_sample > 0) & (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_and_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_and_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
-        y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
+        y_true_fire_clipped = np.clip(
+            y_true_fire_sample, 0, 1
+        )  # Limiter y_true_fire à 1
 
         # Calcul de la métrique IOU
-        #rec_bin = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
+        # rec_bin = intersection_fire_detected / union_fire_detected if union_fire_detected > 0 else np.nan
         rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+            y_true_sample,
+            y_pred_sample,
+            average="macro",
+            labels=np.union1d(y_true_sample, y_pred_sample),
+            zero_division=0,
+        )
 
-        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
+        auoc = auoc_func(
+            confusion_matrix(
+                y_true_sample,
+                y_pred_sample,
+                labels=np.union1d(y_true_sample, y_pred_sample),
+            )
+        )
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
-        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
-        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
-        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
-        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(
+            y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+            y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+        )
+        intersection_clipped = np.trapz(
+            np.minimum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire commune
+        union_clipped = np.trapz(
+            np.maximum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire d'union
+        iou_no_overestimation = (
+            intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        )
 
         # Calculer les aires
-        intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
-        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
+        intersection = np.trapz(
+            np.minimum(y_pred_sample, y_true_sample)
+        )  # Aire commune
+        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))  # Aire d'union
 
-        over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
-        under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
+        over_prediction_zeros = np.trapz(
+            np.maximum(0, y_pred_sample[y_true_sample == 0])
+        )
+        under_prediction_zeros = np.trapz(
+            np.maximum(0, y_true_sample[y_pred_sample == 0])
+        )
 
         # Enregistrement dans un dictionnaire
-        scores_elt = {            
-            f"iou_elt_sup_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
+        scores_elt = {
+            f"iou_elt_sup_{unique_value}": (
+                intersection / union if union > 0 else np.nan
+            ),  # Éviter la division par zéro
             f"iou_wildfire_or_pred_elt_sup_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_elt_sup_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_elt_sup_{unique_value}": iou_no_overestimation,
-            
             f"rec_bin_elt_sup_{unique_value}": rec_bin,
             f"prec_bin_elt_sup_{unique_value}": prec_bin,
             f"f1_bin_elt_sup_{unique_value}": f1_bin,
-            
             f"rec_macro_elt_sup_{unique_value}": rec_macro,
             f"prec_macro_elt_sup_{unique_value}": prec_macro,
             f"f1_macro_elt_sup_{unique_value}": f1_macro,
-            
             f"auoc_elt_sup_{unique_value}": auoc,
-
-            f"dice_coefficient_elt_sup_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
-            
-            f"over_bad_prediction_elt_sup_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
-            f"under_bad_prediction_elt_sup_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
-            f"bad_prediction_elt_sup_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
+            f"dice_coefficient_elt_sup_{unique_value}": (
+                2 * intersection / (union + intersection)
+                if (union + intersection) > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_elt_sup_{unique_value}": (
+                over_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"under_bad_prediction_elt_sup_{unique_value}": (
+                under_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"bad_prediction_elt_sup_{unique_value}": (
+                (over_prediction_zeros + under_prediction_zeros) / union
+                if union > 0
+                else np.nan
+            ),
         }
         scores.update(scores_elt)
 
@@ -4433,7 +5795,7 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
     for unique_value in np.unique(y_true[y_true > 0]):
         # Créer un masque pour sélectionner les éléments correspondant à la valeur unique
-        mask =  (y_pred >= unique_value)
+        mask = y_pred >= unique_value
 
         y_pred_sample = y_pred[mask]
         y_true_sample = y_true[mask]
@@ -4445,62 +5807,127 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
         if y_pred_sample.shape[0] == 1:
             y_pred_sample = np.concatenate((y_pred_sample, y_pred_sample))
             y_true_sample = np.concatenate((y_true_sample, y_true_sample))
-            y_true_fire_sample = np.concatenate((y_true_fire_sample, y_true_fire_sample))
+            y_true_fire_sample = np.concatenate(
+                (y_true_fire_sample, y_true_fire_sample)
+            )
 
         mask_fire_sample = (y_pred_sample > 0) | (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_or_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_or_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         mask_fire_sample = (y_pred_sample > 0) & (y_true_fire_sample > 0)
-        intersection_fire_sample = np.trapz(np.minimum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        union_fire_sample = np.trapz(np.maximum(y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]))
-        iou_wildfire_and_pred_sample = intersection_fire_sample / union_fire_sample if union_fire_sample > 0 else np.nan
+        intersection_fire_sample = np.trapz(
+            np.minimum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        union_fire_sample = np.trapz(
+            np.maximum(
+                y_pred_sample[mask_fire_sample], y_true_fire_sample[mask_fire_sample]
+            )
+        )
+        iou_wildfire_and_pred_sample = (
+            intersection_fire_sample / union_fire_sample
+            if union_fire_sample > 0
+            else np.nan
+        )
 
         # Limitation des signaux à un maximum de 1
         y_pred_clipped = np.clip(y_pred_sample, 0, 1)  # Limiter y_pred à 1
-        y_true_fire_clipped = np.clip(y_true_fire_sample, 0, 1)  # Limiter y_true_fire à 1
+        y_true_fire_clipped = np.clip(
+            y_true_fire_sample, 0, 1
+        )  # Limiter y_true_fire à 1
 
         # Calcul de la métrique IOU
         rec_bin = recall_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         prec_bin = precision_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
         f1_bin = f1_score(y_true_fire_clipped, y_pred_clipped, zero_division=0)
 
-        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(y_true_sample, y_pred_sample, average='macro', labels=np.union1d(y_true_sample, y_pred_sample), zero_division=0)
+        f1_macro, rec_macro, prec_macro = macro_precision_recall_f1_no_tp0(
+            y_true_sample,
+            y_pred_sample,
+            average="macro",
+            labels=np.union1d(y_true_sample, y_pred_sample),
+            zero_division=0,
+        )
 
-        auoc = auoc_func(confusion_matrix(y_true_sample, y_pred_sample, labels=np.union1d(y_true_sample, y_pred_sample)))
+        auoc = auoc_func(
+            confusion_matrix(
+                y_true_sample,
+                y_pred_sample,
+                labels=np.union1d(y_true_sample, y_pred_sample),
+            )
+        )
 
         y_pred_clipped_ytrue = np.copy(y_pred_sample)
-        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)], y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)])
-        intersection_clipped = np.trapz(np.minimum(y_pred_clipped_ytrue, y_true_sample))  # Aire commune
-        union_clipped = np.trapz(np.maximum(y_pred_clipped_ytrue, y_true_sample))         # Aire d'union
-        iou_no_overestimation = intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        y_pred_clipped_ytrue[(y_pred_sample > 0) & (y_true_sample > 0)] = np.minimum(
+            y_true_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+            y_pred_sample[(y_pred_sample > 0) & (y_true_sample > 0)],
+        )
+        intersection_clipped = np.trapz(
+            np.minimum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire commune
+        union_clipped = np.trapz(
+            np.maximum(y_pred_clipped_ytrue, y_true_sample)
+        )  # Aire d'union
+        iou_no_overestimation = (
+            intersection_clipped / union_clipped if union_clipped > 0 else np.nan
+        )
 
         # Calculer les aires
-        intersection = np.trapz(np.minimum(y_pred_sample, y_true_sample))  # Aire commune
-        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))        # Aire d'union
+        intersection = np.trapz(
+            np.minimum(y_pred_sample, y_true_sample)
+        )  # Aire commune
+        union = np.trapz(np.maximum(y_pred_sample, y_true_sample))  # Aire d'union
 
-        over_prediction_zeros = np.trapz(np.maximum(0, y_pred_sample[y_true_sample == 0]))
-        under_prediction_zeros = np.trapz(np.maximum(0, y_true_sample[y_pred_sample == 0]))
+        over_prediction_zeros = np.trapz(
+            np.maximum(0, y_pred_sample[y_true_sample == 0])
+        )
+        under_prediction_zeros = np.trapz(
+            np.maximum(0, y_true_sample[y_pred_sample == 0])
+        )
 
         # Enregistrement dans un dictionnaire
-        scores_predicted = {            
-            f"iou_predicted_sup_{unique_value}": intersection / union if union > 0 else np.nan,  # Éviter la division par zéro
+        scores_predicted = {
+            f"iou_predicted_sup_{unique_value}": (
+                intersection / union if union > 0 else np.nan
+            ),  # Éviter la division par zéro
             f"iou_wildfire_or_pred_predicted_sup_{unique_value}": iou_wildfire_or_pred_sample,
             f"iou_wildfire_and_pred_predicted_sup_{unique_value}": iou_wildfire_and_pred_sample,
             f"iou_no_overestimation_predicted_sup_{unique_value}": iou_no_overestimation,
-            
             f"rec_macro_predicted_sup_{unique_value}": rec_macro,
             f"prec_macro_predicted_sup_{unique_value}": prec_macro,
             f"f1_macro_predicted_sup_{unique_value}": f1_macro,
-            
             f"auoc_predicted_sup_{unique_value}": auoc,
-
-            f"dice_coefficient_predicted_sup_{unique_value}": 2 * intersection / (union + intersection) if (union + intersection) > 0 else np.nan,
-            
-            f"over_bad_prediction_predicted_sup_{unique_value}": over_prediction_zeros / union if union > 0 else np.nan,
-            f"under_bad_prediction_predicted_sup_{unique_value}": under_prediction_zeros / union if union > 0 else np.nan,
-            f"bad_prediction_predicted_sup_{unique_value}": (over_prediction_zeros + under_prediction_zeros) / union if union > 0 else np.nan,
+            f"dice_coefficient_predicted_sup_{unique_value}": (
+                2 * intersection / (union + intersection)
+                if (union + intersection) > 0
+                else np.nan
+            ),
+            f"over_bad_prediction_predicted_sup_{unique_value}": (
+                over_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"under_bad_prediction_predicted_sup_{unique_value}": (
+                under_prediction_zeros / union if union > 0 else np.nan
+            ),
+            f"bad_prediction_predicted_sup_{unique_value}": (
+                (over_prediction_zeros + under_prediction_zeros) / union
+                if union > 0
+                else np.nan
+            ),
         }
 
         # Ajouter les scores pour cette valeur unique à la collection globale
@@ -4508,24 +5935,25 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
     # Ajouter des alias plus explicites pour les métriques (sans casser l'existant)
     import re
+
     alias_rules = [
-        (r'^rec_bin(.*)$', r'recall\1'),
-        (r'^prec_bin(.*)$', r'precision\1'),
-        (r'^f1_bin(.*)$', r'f1\1'),
-        (r'^iou_no_overestimation(.*)$', r'iou_sans_surprediction\1'),
-        (r'^over_bad_prediction_local(.*)$', r'ratio_surprediction_locale\1'),
-        (r'^under_bad_prediction_local(.*)$', r'ratio_sousprediction_locale\1'),
-        (r'^bad_prediction_local(.*)$', r'ratio_erreur_locale\1'),
-        (r'^over_bad_prediction_global(.*)$', r'ratio_surprediction_global\1'),
-        (r'^under_bad_prediction_global(.*)$', r'ratio_sousprediction_global\1'),
-        (r'^bad_prediction_global(.*)$', r'ratio_erreur_global\1'),
-        (r'^dice_coefficient(.*)$', r'dice\1'),
-        (r'^iou_wildfire_or_pred(.*)$', r'iou_union_feu_ou_pred\1'),
-        (r'^iou_wildfire_and_pred(.*)$', r'iou_intersection_feu_et_pred\1'),
-        (r'^iou_area$', r'iou_area_normalized'),
-        (r'^f1_area$', r'f1_area_normalized'),
-        (r'^prec_area$', r'precision_area_normalized'),
-        (r'^rec_are$', r'recall_area_normalized'),
+        (r"^rec_bin(.*)$", r"recall\1"),
+        (r"^prec_bin(.*)$", r"precision\1"),
+        (r"^f1_bin(.*)$", r"f1\1"),
+        (r"^iou_no_overestimation(.*)$", r"iou_sans_surprediction\1"),
+        (r"^over_bad_prediction_local(.*)$", r"ratio_surprediction_locale\1"),
+        (r"^under_bad_prediction_local(.*)$", r"ratio_sousprediction_locale\1"),
+        (r"^bad_prediction_local(.*)$", r"ratio_erreur_locale\1"),
+        (r"^over_bad_prediction_global(.*)$", r"ratio_surprediction_global\1"),
+        (r"^under_bad_prediction_global(.*)$", r"ratio_sousprediction_global\1"),
+        (r"^bad_prediction_global(.*)$", r"ratio_erreur_global\1"),
+        (r"^dice_coefficient(.*)$", r"dice\1"),
+        (r"^iou_wildfire_or_pred(.*)$", r"iou_union_feu_ou_pred\1"),
+        (r"^iou_wildfire_and_pred(.*)$", r"iou_intersection_feu_et_pred\1"),
+        (r"^iou_area$", r"iou_area_normalized"),
+        (r"^f1_area$", r"f1_area_normalized"),
+        (r"^prec_area$", r"precision_area_normalized"),
+        (r"^rec_are$", r"recall_area_normalized"),
     ]
     new_aliases = {}
     for k, v in list(scores.items()):
@@ -4538,20 +5966,21 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison):
 
     return scores
 
+
 def add_fr_variables(df: pd.DataFrame, dir_break_point: Path, features_selected):
-    dico_correlation = read_object('break_point_dict.pkl', dir_break_point)
+    dico_correlation = read_object("break_point_dict.pkl", dir_break_point)
     new_fet_fr = []
     for fet in features_selected:
-        if fet.find('AutoRegression') != -1:
+        if fet.find("AutoRegression") != -1:
             continue
-        logger.info(f'############## {fet} #################')
+        logger.info(f"############## {fet} #################")
         values = np.copy(df[fet].values)
         values = values[~np.isnan(values)]
-        predictor = read_object(f'{fet}.pkl', dir_break_point / fet)
+        predictor = read_object(f"{fet}.pkl", dir_break_point / fet)
         if predictor is None:
             continue
-        if f'{fet}_frequencyratio' not in df.columns:
-            df[f'{fet}_frequencyratio'] = np.nan
+        if f"{fet}_frequencyratio" not in df.columns:
+            df[f"{fet}_frequencyratio"] = np.nan
             predclass = order_class(predictor, predictor.predict(values))
             cls = np.unique(predclass)
             for c in cls:
@@ -4560,19 +5989,24 @@ def add_fr_variables(df: pd.DataFrame, dir_break_point: Path, features_selected)
                     continue
                 values[mask] = dico_correlation[fet][int(c)]
 
-            df.loc[df[~df[fet].isna()].index, f'{fet}_frequencyratio'] = values
-        new_fet_fr.append(f'{fet}_frequencyratio')
+            df.loc[df[~df[fet].isna()].index, f"{fet}_frequencyratio"] = values
+        new_fet_fr.append(f"{fet}_frequencyratio")
 
     return df, new_fet_fr
 
+
 def group_probability(group):
     # Calculer la probabilité que au moins un des événements se produise
-    minus_prediction = np.ones(group['prediction'].values.shape[0]) - group['prediction'].values
+    minus_prediction = (
+        np.ones(group["prediction"].values.shape[0]) - group["prediction"].values
+    )
     combined_prob = 1 - np.prod(minus_prediction)
-    return pd.Series({'prediction': combined_prob})
+    return pd.Series({"prediction": combined_prob})
+
 
 def est_bissextile(annee):
     return annee % 4 == 0 and (annee % 100 != 0 or annee % 400 == 0)
+
 
 def ajuster_jour_annee(date, dayoyyear):
     if not est_bissextile(date.year) and date > pd.Timestamp(date.year, 2, 28):
@@ -4580,7 +6014,8 @@ def ajuster_jour_annee(date, dayoyyear):
         return dayoyyear + 1
     else:
         return dayoyyear
-    
+
+
 def generate_season_dict(years):
     res = {}
 
@@ -4593,39 +6028,40 @@ def generate_season_dict(years):
     names = ['winter', 'spring', 'summer', 'autumn']
     """
 
-    dates = {'medium' : ('02-01', '05-31'),
-             'high' : ('06-01', '09-30'),
-             'low' : ('10-01', '01-31'),
-            }
+    dates = {
+        "medium": ("02-01", "05-31"),
+        "high": ("06-01", "09-30"),
+        "low": ("10-01", "01-31"),
+    }
 
-    names = ['medium', 'high', 'low']
-    
+    names = ["medium", "high", "low"]
+
     for season in names:
         res[season] = []
         for year in years:
-            if season == 'winter':
+            if season == "winter":
                 y2 = str(int(year) + 1)
             else:
                 y2 = year
-            datesBetween = find_dates_between(year+'-'+dates[season][0], y2+'-'+dates[season][1])
+            datesBetween = find_dates_between(
+                year + "-" + dates[season][0], y2 + "-" + dates[season][1]
+            )
             res[season] += [allDates.index(d) for d in datesBetween if d in allDates]
 
     return res
 
+
 def show_pcs(pca, size, components, dir_output):
     labels = {
-    str(i): f"PC {i+1} ({var:.1f}%)"
-    for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+        str(i): f"PC {i+1} ({var:.1f}%)"
+        for i, var in enumerate(pca.explained_variance_ratio_ * 100)
     }
 
-    fig = px.scatter_matrix(
-        components,
-        labels=labels,
-        dimensions=range(size)
-    )
+    fig = px.scatter_matrix(components, labels=labels, dimensions=range(size))
     fig.update_traces(diagonal_visible=False)
-    #fig.show()
+    # fig.show()
     pio.write_image(fig, dir_output / "pca.png")
+
 
 def find_n_component(thresh, pca):
     nb_component = 0
@@ -4637,9 +6073,13 @@ def find_n_component(thresh, pca):
             break
     return nb_component
 
+
 import numpy as np
 
-def compute_rolling_by_group(df, group_col, date_col, value_col, windows, agg_func=sum, col_name=''):
+
+def compute_rolling_by_group(
+    df, group_col, date_col, value_col, windows, agg_func=sum, col_name=""
+):
     """
     Applique un rolling forward par groupe, pour plusieurs tailles de fenêtres,
     avec une fonction d'agrégation personnalisée (sum, mean, max, ...).
@@ -4659,20 +6099,21 @@ def compute_rolling_by_group(df, group_col, date_col, value_col, windows, agg_fu
     result_df = df.copy()
 
     for window in windows:
-        col_name_ = col_name+f'{window}'
-        logger.info(f'Process {col_name_}')
+        col_name_ = col_name + f"{window}"
+        logger.info(f"Process {col_name_}")
 
         # Fonction de rolling forward par groupe
         def apply_rolling(dataset):
             backward_rolling = (
-                dataset.set_index('date')
+                dataset.set_index("date")
                 .iloc[::-1]
                 .groupby([group_col])[value_col]
                 .rolling(window=window, min_periods=1)
-                .apply(agg_func, raw=True).reset_index()
+                .apply(agg_func, raw=True)
+                .reset_index()
                 .iloc[::-1]  # Remettre dans l'ordre original
             )
-            backward_rolling[col_name_] = backward_rolling[value_col]  
+            backward_rolling[col_name_] = backward_rolling[value_col]
             return backward_rolling
 
         # Appliquer le rolling par groupe
@@ -4681,32 +6122,39 @@ def compute_rolling_by_group(df, group_col, date_col, value_col, windows, agg_fu
         if col_name_ in np.unique(result_df.columns):
             result_df.drop(col_name_, inplace=True, axis=1)
 
-        #print(res['date'].shape)
-        result_df = result_df.set_index(['graph_id', 'date']).join(res.set_index(['graph_id', 'date'])[col_name_], on=['graph_id', 'date']).reset_index()
+        # print(res['date'].shape)
+        result_df = (
+            result_df.set_index(["graph_id", "date"])
+            .join(
+                res.set_index(["graph_id", "date"])[col_name_], on=["graph_id", "date"]
+            )
+            .reset_index()
+        )
 
     return result_df
 
-def target_by_day(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.DataFrame:
+
+def target_by_day(df: pd.DataFrame, days_range: list, target_spe="0") -> pd.DataFrame:
     """
     Adjust target values based on specified method (mean or max) over a number of future days.
-    
+
     Parameters:
     df : DataFrame containing the data
     days : number of days to look ahead for calculating the target
     method : method to use for aggregation ('mean' or 'max')
-    
+
     Returns:
     DataFrame with adjusted target values.
     """
     df_res = df.copy(deep=True)
 
-    unique_nodes = df['graph_id'].unique()
+    unique_nodes = df["graph_id"].unique()
 
-    #df_res[f'nbsinister_sum_{target_spe}_+0'] =  df[f'nbsinister_{target_spe}'].values
-    #df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
-    #df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
-    #df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}'].values
-    
+    # df_res[f'nbsinister_sum_{target_spe}_+0'] =  df[f'nbsinister_{target_spe}'].values
+    # df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    # df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}'].values
+    # df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}'].values
+
     """for days in days_range:
         logger.info(f'################ {days} ################')
         df_res[f'nbsinister_sum_{target_spe}_+{days}'] = 0
@@ -4729,127 +6177,200 @@ def target_by_day(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.Data
             values = df.loc[mask, f'nbsinister_{target_spe}_0'].rolling(window=days, min_periods=1).sum()
             print(df.loc[mask].shape, values.shape)
             df.loc[mask,  f'nbsinister_sum_{target_spe}_+{days}'] = df[mask, f'nbsinister_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).sum())"""
-    
+
     from statistics import mean
-    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'nbsinister', days_range, sum, col_name=f'nbsinister_sum_{target_spe}_+')
-    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'burned_area', days_range, sum, col_name=f'burnedarea_sum_{target_spe}_+')
-    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, max, col_name=f'risk_max_{target_spe}_+')
-    #df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
-    df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'risk', days_range, mean, col_name=f'risk_mean_{target_spe}_+')
+
+    df_res = compute_rolling_by_group(
+        df_res,
+        "graph_id",
+        "date",
+        f"nbsinister",
+        days_range,
+        sum,
+        col_name=f"nbsinister_sum_{target_spe}_+",
+    )
+    df_res = compute_rolling_by_group(
+        df_res,
+        "graph_id",
+        "date",
+        f"burned_area",
+        days_range,
+        sum,
+        col_name=f"burnedarea_sum_{target_spe}_+",
+    )
+    df_res = compute_rolling_by_group(
+        df_res,
+        "graph_id",
+        "date",
+        f"risk",
+        days_range,
+        max,
+        col_name=f"risk_max_{target_spe}_+",
+    )
+    # df_res = compute_rolling_by_group(df_res, 'graph_id', 'date', f'class_risk', days_range, max, col_name=f'class_risk_max_{target_spe}_+')
+    df_res = compute_rolling_by_group(
+        df_res,
+        "graph_id",
+        "date",
+        f"risk",
+        days_range,
+        mean,
+        col_name=f"risk_mean_{target_spe}_+",
+    )
 
     return df_res
 
-def target_by_day_opti(df: pd.DataFrame, days_range: list, target_spe='0') -> pd.DataFrame:
+
+def target_by_day_opti(
+    df: pd.DataFrame, days_range: list, target_spe="0"
+) -> pd.DataFrame:
     """
     Adjust target values based on specified method (mean or max) over a number of future days.
-    
+
     Parameters:
     df : DataFrame containing the data
     days_range : List of future days to look ahead for calculating the target
     target_spe : Target specification as a string
-    
+
     Returns:
     DataFrame with adjusted target values.
     """
     df_res = df.copy(deep=True)
-    df = df.sort_values(by=['graph_id', 'date'])  # Ensure the data is sorted
-    
-    #df_res[f'nbsinister_sum_{target_spe}_+0'] = df[f'nbsinister_{target_spe}_0'].values
-    #df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
-    #df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
-    #df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}_0'].values
+    df = df.sort_values(by=["graph_id", "date"])  # Ensure the data is sorted
 
-    grouped = df.groupby('graph_id')
-    
+    # df_res[f'nbsinister_sum_{target_spe}_+0'] = df[f'nbsinister_{target_spe}_0'].values
+    # df_res[f'risk_mean_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
+    # df_res[f'risk_max_{target_spe}_+0'] = df[f'risk_{target_spe}_0'].values
+    # df_res[f'class_risk_max_{target_spe}_+0'] = df[f'class_risk_{target_spe}_0'].values
+
+    grouped = df.groupby("graph_id")
+
     for days in days_range:
-        df_res[f'nbsinister_sum_{target_spe}_+{days}'] = grouped[f'nbsinister_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).sum().shift(-days + 1))
-        df_res[f'risk_mean_{target_spe}_+{days}'] = grouped[f'risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).mean().shift(-days + 1))
-        df_res[f'risk_max_{target_spe}_+{days}'] = grouped[f'risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
-        df_res[f'class_risk_max_{target_spe}_+{days}'] = grouped[f'class_risk_{target_spe}_0'].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
-    
+        df_res[f"nbsinister_sum_{target_spe}_+{days}"] = grouped[
+            f"nbsinister_{target_spe}_0"
+        ].apply(lambda x: x.rolling(window=days, min_periods=1).sum().shift(-days + 1))
+        df_res[f"risk_mean_{target_spe}_+{days}"] = grouped[
+            f"risk_{target_spe}_0"
+        ].apply(lambda x: x.rolling(window=days, min_periods=1).mean().shift(-days + 1))
+        df_res[f"risk_max_{target_spe}_+{days}"] = grouped[
+            f"risk_{target_spe}_0"
+        ].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
+        df_res[f"class_risk_max_{target_spe}_+{days}"] = grouped[
+            f"class_risk_{target_spe}_0"
+        ].apply(lambda x: x.rolling(window=days, min_periods=1).max().shift(-days + 1))
+
     return df_res
+
 
 def set_weight_every_n_days(df: pd.DataFrame, days_in_futur: int) -> pd.DataFrame:
     """
     Sets the `weight` column to 0 except for every `days_in_futur` days for each node in `graph_id`.
     Selection is based on the `date` column.
-    
+
     Parameters:
     df : DataFrame containing the data
     days_in_futur : Interval of days to keep non-zero weight
-    
+
     Returns:
     DataFrame with updated weight values.
     """
-    df = df.sort_values(by=['graph_id', 'date']).copy()
-    df['weight'] = 0  # Set all weights to 0
-    
+    df = df.sort_values(by=["graph_id", "date"]).copy()
+    df["weight"] = 0  # Set all weights to 0
+
     def select_dates(group):
-        selected_dates = group['date'].iloc[::days_in_futur]
-        group.loc[group['date'].isin(selected_dates), 'weight'] = 1
+        selected_dates = group["date"].iloc[::days_in_futur]
+        group.loc[group["date"].isin(selected_dates), "weight"] = 1
         return group
-    
-    df = df.groupby('graph_id', group_keys=False).apply(select_dates)
-    
+
+    df = df.groupby("graph_id", group_keys=False).apply(select_dates)
+
     return df
+
 
 def scale_target(df, df_train, col, method):
-    assert col in ['nbsinister', 'risk']
+    assert col in ["nbsinister", "risk"]
 
-    if method == 'standard':
-        df[f'{col}-standard'] = standard_scaler(df[col].values, df_train[col].values, concat=False)
-        ids_columns.append(f'{col}-standard')
-    elif method == 'robust':
-        df[f'{col}-robust'] = robust_scaler(df[col].values, df_train[col].values, concat=False)
-        ids_columns.append(f'{col}-robust')
-    elif method == 'MinMax':
-        df[f'{col}-MinMax'] = min_max_scaler(df[col].values, df_train[col].values, concat=False)
-        ids_columns.append(f'{col}-MinMax')
+    if method == "standard":
+        df[f"{col}-standard"] = standard_scaler(
+            df[col].values, df_train[col].values, concat=False
+        )
+        ids_columns.append(f"{col}-standard")
+    elif method == "robust":
+        df[f"{col}-robust"] = robust_scaler(
+            df[col].values, df_train[col].values, concat=False
+        )
+        ids_columns.append(f"{col}-robust")
+    elif method == "MinMax":
+        df[f"{col}-MinMax"] = min_max_scaler(
+            df[col].values, df_train[col].values, concat=False
+        )
+        ids_columns.append(f"{col}-MinMax")
 
     return df
+
 
 def min_max_class(df):
-    df['nbsinister-MinMaxClass'] = 0
-    df.loc[df['nbsinister-MinMax'] == 0, 'nbsinister-MinMaxClass'] = 0
-    df.loc[df['nbsinister-MinMax'] > 0, 'nbsinister-MinMaxClass'] = 1
-    df.loc[df['nbsinister-MinMax'] > 0.25, 'nbsinister-MinMaxClass'] = 2
-    df.loc[df['nbsinister-MinMax'] > 0.5, 'nbsinister-MinMaxClass'] = 3
-    df.loc[df['nbsinister-MinMax'] > 0.75, 'nbsinister-MinMaxClass'] = 4
+    df["nbsinister-MinMaxClass"] = 0
+    df.loc[df["nbsinister-MinMax"] == 0, "nbsinister-MinMaxClass"] = 0
+    df.loc[df["nbsinister-MinMax"] > 0, "nbsinister-MinMaxClass"] = 1
+    df.loc[df["nbsinister-MinMax"] > 0.25, "nbsinister-MinMaxClass"] = 2
+    df.loc[df["nbsinister-MinMax"] > 0.5, "nbsinister-MinMaxClass"] = 3
+    df.loc[df["nbsinister-MinMax"] > 0.75, "nbsinister-MinMaxClass"] = 4
     return df
 
-def add_temporal_spatial_prediction(X : np.array, Y_localized : np.array, Y_daily : np.array, graph_temporal, features_name : dict, target_name : str):
+
+def add_temporal_spatial_prediction(
+    X: np.array,
+    Y_localized: np.array,
+    Y_daily: np.array,
+    graph_temporal,
+    features_name: dict,
+    target_name: str,
+):
     logger.info(features_name)
     res = np.full((X.shape[0], X.shape[1] + 2), fill_value=0.0)
-    res[:, :X.shape[1]] = X
+    res[:, : X.shape[1]] = X
 
-    if target_name == 'nbsinister' or target_name == 'binary':
+    if target_name == "nbsinister" or target_name == "binary":
         band = -2
     else:
         band = -1
 
     # Add spatial
-    res[:, features_name.index('spatial_prediction')] = Y_localized[:, band]
-    if target_name == 'binary':
-        res[:, features_name.index('spatial_prediction')] = (res[:, features_name.index('spatial_prediction')] > 0).astype(int)
+    res[:, features_name.index("spatial_prediction")] = Y_localized[:, band]
+    if target_name == "binary":
+        res[:, features_name.index("spatial_prediction")] = (
+            res[:, features_name.index("spatial_prediction")] > 0
+        ).astype(int)
 
     # Add temporal
     unodes = np.unique(res[:, 0])
-    udates = np.unique(res[:, ids_columns.index('date')])
+    udates = np.unique(res[:, ids_columns.index("date")])
 
     for node in unodes:
         lon = np.unique(res[res[:, 0] == node][:, 1])[0]
         lat = np.unique(res[res[:, 0] == node][:, 2])[0]
         temporal_node_pred = graph_temporal._predict_node_with_position([[lon, lat]])
         for date in udates:
-            mask = np.argwhere((res[:, 0] == node) & (res[:, ids_columns.index('date')] == date))[:, 0]
-            mask_temporal = np.argwhere((Y_daily[:, 0] == temporal_node_pred) & (Y_daily[:, ids_columns.index('date')] == date))[:, 0]
+            mask = np.argwhere(
+                (res[:, 0] == node) & (res[:, ids_columns.index("date")] == date)
+            )[:, 0]
+            mask_temporal = np.argwhere(
+                (Y_daily[:, 0] == temporal_node_pred)
+                & (Y_daily[:, ids_columns.index("date")] == date)
+            )[:, 0]
             if mask.shape[0] == 0 or mask_temporal.shape[0] == 0:
                 continue
-            
-            res[mask, features_name.index('temporal_prediction')] = Y_daily[mask_temporal, band][0]
-            if target_name == 'binary':
-                res[:, features_name.index('temporal_prediction')] = (res[:, features_name.index('temporal_prediction')] > 0).astype(int)
+
+            res[mask, features_name.index("temporal_prediction")] = Y_daily[
+                mask_temporal, band
+            ][0]
+            if target_name == "binary":
+                res[:, features_name.index("temporal_prediction")] = (
+                    res[:, features_name.index("temporal_prediction")] > 0
+                ).astype(int)
     return res
+
 
 def log_metrics_recursively(metrics_dict, prefix=""):
     for key, value in metrics_dict.items():
@@ -4867,67 +6388,73 @@ def log_metrics_recursively(metrics_dict, prefix=""):
             except:
                 mlflow.log_metric(full_key, 0)
             # Gérer d'autres types si nécessaire (par exemple, des listes)
-            #raise ValueError(f"Unsupported metric type: {type(value)} for key: {full_key}")
+            # raise ValueError(f"Unsupported metric type: {type(value)} for key: {full_key}")
+
 
 def calculate_iou(image1, image2):
-    
+
     # Vérifier que les deux images sont de la même taille
     if image1.shape != image2.shape:
-        raise ValueError("Les deux images doivent être de la même taille pour calculer l'IoU.")
-    
+        raise ValueError(
+            "Les deux images doivent être de la même taille pour calculer l'IoU."
+        )
+
     # Binariser les images (seuiling pour les valeurs de pixels 0 ou 255)
     _, binary_image1 = cv2.threshold(image1, 127, 255, cv2.THRESH_BINARY)
     _, binary_image2 = cv2.threshold(image2, 127, 255, cv2.THRESH_BINARY)
-    
+
     # Calculer l'intersection et l'union
     intersection = np.logical_and(binary_image1, binary_image2).sum()
     union = np.logical_or(binary_image1, binary_image2).sum()
-    
+
     # Calculer l'IoU
     iou = intersection / union if union != 0 else 0
     return iou
+
 
 def get_existing_run(run_name):
     # Récupère tous les runs avec le nom spécifié
     client = mlflow.tracking.MlflowClient()
     runs = client.search_runs(
-        experiment_ids=['0'],  # Spécifiez ici l'ID de l'expérience si nécessaire
+        experiment_ids=["0"],  # Spécifiez ici l'ID de l'expérience si nécessaire
         filter_string=f"tags.mlflow.runName = '{run_name}'",
-        run_view_type=mlflow.entities.ViewType.ALL
+        run_view_type=mlflow.entities.ViewType.ALL,
     )
-    
+
     # Si un run est trouvé, le retourner
     if runs:
         return runs[0]  # retourne le premier run trouvé
     return None
 
-def frequency_ratio(values: np.array, mask : np.array):
+
+def frequency_ratio(values: np.array, mask: np.array):
     FF_t = np.sum(values)
     Area_t = len(values)
     FF_i = np.sum(values[mask])
 
     if FF_t == 0 or Area_t == 0:
         return 0
-    
+
     # Calculer Area_i (le nombre total de pixels pour la classe c)
     Area_i = mask.shape[0]
-    
+
     # Calculer FireOcc et Area pour la classe c
     FireOcc = FF_i / FF_t
     Area = Area_i / Area_t
     if Area == 0:
         return 0
-    
+
     # Calculer le ratio de fréquence (FR) pour la classe c
     FR = FireOcc / Area
 
     return round(FR, 3)
 
+
 def remove_0_risk_pixel(dir_target, dir_bin, rasterImage, dept, on, val):
-    binImage = read_object(dept+'binScale0.pkl', dir_bin)
-    riskImage = read_object(dept+'Influence.pkl', dir_target)
-    
-    if on == 'bin':
+    binImage = read_object(dept + "binScale0.pkl", dir_bin)
+    riskImage = read_object(dept + "Influence.pkl", dir_target)
+
+    if on == "bin":
         values = np.nansum(binImage, axis=2)
     else:
         values = np.nansum(riskImage, axis=2)
@@ -4938,7 +6465,10 @@ def remove_0_risk_pixel(dir_target, dir_bin, rasterImage, dept, on, val):
 
     return rasterImage
 
-def get_features_selected_for_time_series(features, features_name, time_varying_features):
+
+def get_features_selected_for_time_series(
+    features, features_name, time_varying_features
+):
     features_selected = []
     features_selected_str = []
     for fet in features:
@@ -4947,71 +6477,82 @@ def get_features_selected_for_time_series(features, features_name, time_varying_
             if fet not in features_selected_str:
                 features_selected_str.append(fet)
         elif fet in time_varying_features:
-            vec = fet.split('_')
-            new_fet = ''
+            vec = fet.split("_")
+            new_fet = ""
             limit = len(vec) - 3
             for i, v in enumerate(vec):
                 new_fet += v
                 if i < limit:
-                    new_fet += '_'
+                    new_fet += "_"
                 else:
                     break
-            if new_fet in air_variables or new_fet in calendar_variables or new_fet in historical_variables\
-            or new_fet.find('frequencyratio') != -1 or new_fet.find('AutoRegressionReg') != -1 or new_fet.find('AutoRegressionBin') != -1:
+            if (
+                new_fet in air_variables
+                or new_fet in calendar_variables
+                or new_fet in historical_variables
+                or new_fet.find("frequencyratio") != -1
+                or new_fet.find("AutoRegressionReg") != -1
+                or new_fet.find("AutoRegressionBin") != -1
+            ):
                 if new_fet not in features_selected_str:
-                    features_selected_str.append(f'{new_fet}')
+                    features_selected_str.append(f"{new_fet}")
             else:
-                if f'{new_fet}_mean' not in features_selected_str:
-                    features_selected_str.append(f'{new_fet}_mean')
-                
+                if f"{new_fet}_mean" not in features_selected_str:
+                    features_selected_str.append(f"{new_fet}_mean")
+
     return features_selected_str
 
-def get_features_selected_for_time_series_for_2D(features, features_name, time_varying_features, nbfeatures):
-    
+
+def get_features_selected_for_time_series_for_2D(
+    features, features_name, time_varying_features, nbfeatures
+):
+
     features_selected_str = []
     for fet in features:
-        if len(features_selected_str) == nbfeatures and nbfeatures != 'all':
+        if len(features_selected_str) == nbfeatures and nbfeatures != "all":
             break
-        if fet in calendar_variables or \
-                fet == "id_encoder" or \
-                fet == "cluster_encoder" or \
-                fet == 'Past_burnedarea' or \
-                fet == 'Past_risk' or \
-                'calendar' in fet:
+        if (
+            fet in calendar_variables
+            or fet == "id_encoder"
+            or fet == "cluster_encoder"
+            or fet == "Past_burnedarea"
+            or fet == "Past_risk"
+            or "calendar" in fet
+        ):
             if fet not in features_selected_str:
                 features_selected_str.append(fet)
         elif fet in time_varying_features:
-            vec = fet.split('_')
-            new_fet = ''
+            vec = fet.split("_")
+            new_fet = ""
             limit = len(vec) - 3
             for i, v in enumerate(vec):
                 new_fet += v
                 if i < limit:
-                    new_fet += '_'
+                    new_fet += "_"
                 else:
                     break
             if new_fet not in features_selected_str:
                 features_selected_str.append(new_fet)
-        elif fet.find('frequencyratio') != -1:
-            vec = fet.split('_')
-            new_fet = ''
+        elif fet.find("frequencyratio") != -1:
+            vec = fet.split("_")
+            new_fet = ""
             limit = len(vec) - 3
             for i, v in enumerate(vec):
                 new_fet += v
                 if i < limit:
-                    new_fet += '_'
+                    new_fet += "_"
                 else:
                     break
             if new_fet not in features_selected_str:
                 features_selected_str.append(new_fet)
         else:
-            vec = fet.split('_')
-            new_fet = ''
+            vec = fet.split("_")
+            new_fet = ""
             limit = len(vec) - 2
             for i, v in enumerate(vec):
                 new_fet += v
                 if i < limit:
-                    new_fet += '_'
+                    new_fet += "_"
                 else:
                     break
             if new_fet not in features_selected_str:
@@ -5019,28 +6560,32 @@ def get_features_selected_for_time_series_for_2D(features, features_name, time_v
 
     return features_selected_str
 
+
 def calculate_proportion_weights(df):
     res = np.empty((df.shape[0], 1))
 
-    uclass = np.unique(df['class'].values)
+    uclass = np.unique(df["class"].values)
 
-    mask_zero_class = np.argwhere(df['class'].values == 0)
+    mask_zero_class = np.argwhere(df["class"].values == 0)
 
     for c in uclass:
-        mask_class = np.argwhere(df['class'].values == c)[:, 0]
-        w =  mask_zero_class.shape[0] / mask_class.shape[0]
+        mask_class = np.argwhere(df["class"].values == c)[:, 0]
+        w = mask_zero_class.shape[0] / mask_class.shape[0]
         res[mask_class, 0] = w
 
-    zero_weight = np.argwhere(df['weight'].values == 0)[:, 0]
+    zero_weight = np.argwhere(df["weight"].values == 0)[:, 0]
     res[zero_weight, 0] = 0
 
     return res
 
+
 def calculate_class_weights(df):
-    return df['class'].values + 1
+    return df["class"].values + 1
+
 
 def calculate_nbsinister(df):
-    return df['nbsinister'].values + 1
+    return df["nbsinister"].values + 1
+
 
 def calculate_normalize_weights(df, band):
     res = (df[band].values - np.nanmean(df[band])) / np.nanstd(df[band])
@@ -5048,51 +6593,65 @@ def calculate_normalize_weights(df, band):
     res = (res + abs(min_value)) + np.ones(df.shape[0])
     return res
 
+
 def calculate_outlier_weighs(df, band, params):
     res = df[band].values - np.mean(df[band])
-    res = np.power(res, params['p'])
+    res = np.power(res, params["p"])
     return np.where(res < 1, 1, res)
 
+
 def calculate_weight_proportion_on_zero_sinister(df):
-    mask_sinister = np.argwhere(df['nbsinister'].values > 0).shape[0]
-    mask_non_sinister = np.argwhere(df['nbsinister'].values == 0).shape[0]
+    mask_sinister = np.argwhere(df["nbsinister"].values > 0).shape[0]
+    mask_non_sinister = np.argwhere(df["nbsinister"].values == 0).shape[0]
     res = np.ones(df.shape[0])
     if mask_sinister > 0:
-        res = np.where(df['nbsinister'] == 0, 1, mask_non_sinister / mask_sinister)
+        res = np.where(df["nbsinister"] == 0, 1, mask_non_sinister / mask_sinister)
     else:
-        res = np.where(df['nbsinister'] == 0, 1, mask_non_sinister)
+        res = np.where(df["nbsinister"] == 0, 1, mask_non_sinister)
     return res
+
 
 def random_weights(df):
     rand_array = np.random.rand(df.shape[0]) * 10
     return rand_array
 
-def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, train_mask):
+
+def calculate_weighs(
+    weight_col, dff, target_name_sinister, target_name_risk, train_mask
+):
 
     df = dff.copy(deep=True)
-    df['nbsinister'] = dff[target_name_sinister]
-    df['risk'] = dff[target_name_risk]
+    df["nbsinister"] = dff[target_name_sinister]
+    df["risk"] = dff[target_name_risk]
 
     # Helper function to adjust weights conditionally
     def adjust_weights_for_zero_sinister(weights, df):
-        zero_sinister_mask = df['nbsinister'] == 0
+        zero_sinister_mask = df["nbsinister"] == 0
         weights[zero_sinister_mask] = 1
         return weights
-    
+
     # Helper function to calculate weights based on mask
     def calculate_weight_by_mask(weight_func, df, mask, band=None, params=None):
         # Calculate weights for the subset and the full dataset
         if True in np.unique(mask):
             if params is not None:
-                subset_weights = weight_func(df[mask], band, params) if band else weight_func(df[mask], params)
+                subset_weights = (
+                    weight_func(df[mask], band, params)
+                    if band
+                    else weight_func(df[mask], params)
+                )
             else:
-                subset_weights = weight_func(df[mask], band) if band else weight_func(df[mask])
+                subset_weights = (
+                    weight_func(df[mask], band) if band else weight_func(df[mask])
+                )
 
         if params is not None:
-            full_weights = weight_func(df, band, params) if band else weight_func(df, params)
+            full_weights = (
+                weight_func(df, band, params) if band else weight_func(df, params)
+            )
         else:
             full_weights = weight_func(df, band) if band else weight_func(df)
-        
+
         # Initialize final weight array
         weights = np.ones(df.shape[0], dtype=float)
         # Assign subset weights for the masked elements, and full weights otherwise
@@ -5104,70 +6663,83 @@ def calculate_weighs(weight_col, dff, target_name_sinister, target_name_risk, tr
         return weights
 
     # Apply the appropriate weight function based on `weight_col`
-    if weight_col == 'proportion-on-zero-class':
+    if weight_col == "proportion-on-zero-class":
         return calculate_weight_by_mask(calculate_proportion_weights, df, train_mask)
-    
-    elif weight_col == 'class':
+
+    elif weight_col == "class":
         return calculate_weight_by_mask(calculate_class_weights, df, train_mask)
-    
-    elif weight_col == 'nbsinister':
+
+    elif weight_col == "nbsinister":
         weights = calculate_weight_by_mask(calculate_nbsinister, df, train_mask)
         return weights
-    
-    elif weight_col == 'one':
+
+    elif weight_col == "one":
         return np.ones((df.shape[0], 1))
-    
-    elif weight_col == 'normalize':
-        return calculate_weight_by_mask(calculate_normalize_weights, df, train_mask, 'risk')
-    
-    elif weight_col == 'proportion_on_zero_sinister':
-        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, train_mask)
+
+    elif weight_col == "normalize":
+        return calculate_weight_by_mask(
+            calculate_normalize_weights, df, train_mask, "risk"
+        )
+
+    elif weight_col == "proportion_on_zero_sinister":
+        weights = calculate_weight_by_mask(
+            calculate_weight_proportion_on_zero_sinister, df, train_mask
+        )
         return weights
-    
-    elif weight_col == 'random':
+
+    elif weight_col == "random":
         return calculate_weight_by_mask(random_weights, df, train_mask)
-    
-    elif weight_col.find('outlier') != -1 and weight_col.find('nbsinister') == -1:
-        p_param = int(weight_col.split('_')[-1])
-        return calculate_weight_by_mask(calculate_outlier_weighs, df, train_mask, 'risk', {'p' : p_param})
-    
-    elif weight_col == 'proportion-on-zero-class-nbsinister':
+
+    elif weight_col.find("outlier") != -1 and weight_col.find("nbsinister") == -1:
+        p_param = int(weight_col.split("_")[-1])
+        return calculate_weight_by_mask(
+            calculate_outlier_weighs, df, train_mask, "risk", {"p": p_param}
+        )
+
+    elif weight_col == "proportion-on-zero-class-nbsinister":
         weights = calculate_weight_by_mask(calculate_proportion_weights, df, train_mask)
         return weights
-    
-    elif weight_col == 'class_nbsinister':
+
+    elif weight_col == "class_nbsinister":
         weights = calculate_weight_by_mask(calculate_class_weights, df, train_mask)
         return weights
-    
-    elif weight_col == 'one_nbsinister':
+
+    elif weight_col == "one_nbsinister":
         return np.ones((df.shape[0], 1))
-    
-    elif weight_col == 'nbsinister_nbsinister':
+
+    elif weight_col == "nbsinister_nbsinister":
         weights = calculate_weight_by_mask(calculate_nbsinister, df, train_mask)
         return weights
-    
-    elif weight_col == 'normalize_nbsinister':
-        return calculate_weight_by_mask(calculate_normalize_weights, df, train_mask, 'nbsinister')
-    
-    elif weight_col == 'random_nbsinister':
+
+    elif weight_col == "normalize_nbsinister":
+        return calculate_weight_by_mask(
+            calculate_normalize_weights, df, train_mask, "nbsinister"
+        )
+
+    elif weight_col == "random_nbsinister":
         weights = calculate_weight_by_mask(random_weights, df, train_mask)
         return weights
-    
-    elif weight_col == 'proportion_on_zero_sinister_nbsinister':
-        weights = calculate_weight_by_mask(calculate_weight_proportion_on_zero_sinister, df, train_mask)
+
+    elif weight_col == "proportion_on_zero_sinister_nbsinister":
+        weights = calculate_weight_by_mask(
+            calculate_weight_proportion_on_zero_sinister, df, train_mask
+        )
         return weights
-    
-    elif weight_col.find('outlier') != -1 and weight_col.find('nbsinister') != -1:
-        p_param = int(weight_col.split('_')[2])
-        return calculate_weight_by_mask(calculate_outlier_weighs, df, train_mask, 'nbsinister', {'p' : p_param})
+
+    elif weight_col.find("outlier") != -1 and weight_col.find("nbsinister") != -1:
+        p_param = int(weight_col.split("_")[2])
+        return calculate_weight_by_mask(
+            calculate_outlier_weighs, df, train_mask, "nbsinister", {"p": p_param}
+        )
     else:
-        logger.info(f'Unknown value of weight {weight_col}')
+        logger.info(f"Unknown value of weight {weight_col}")
         exit(1)
+
 
 def calculate_days_until_next_event(id_array, date_array, event_array):
     """
     Calcule le nombre de jours jusqu'au prochain événement pour chaque région (id).
-    Les jours où un événement se produit auront une valeur de 0, 
+    Les jours où un événement se produit auront une valeur de 0,
     et les jours sans événement auront le nombre de jours jusqu'au prochain événement.
 
     :param id_array: Tableau contenant les identifiants de région (id)
@@ -5175,43 +6747,44 @@ def calculate_days_until_next_event(id_array, date_array, event_array):
     :param event_array: Tableau contenant le nombre d'événements observés (nbsinister)
     :return: Un tableau des jours jusqu'au prochain événement
     """
-    
+
     # Créer un DataFrame à partir des trois tableaux
-    df = pd.DataFrame({
-        'id': id_array,
-        'date': date_array,
-        'nbsinister': event_array
-    })
-    
+    df = pd.DataFrame({"id": id_array, "date": date_array, "nbsinister": event_array})
+
     # Trier par id et date pour garantir que les événements sont dans l'ordre chronologique
-    df = df.sort_values(by=['id', 'date'])
-    
+    df = df.sort_values(by=["id", "date"])
+
     # Initialiser une nouvelle colonne pour stocker le nombre de jours avant le prochain événement
-    df['days_until_next_event'] = -1  # Initialiser avec -1
-    
+    df["days_until_next_event"] = -1  # Initialiser avec -1
+
     # Parcourir chaque région (id)
-    for reg_id in df['id'].unique():
+    for reg_id in df["id"].unique():
         # Filtrer les données pour chaque région
-        region_df = df[df['id'] == reg_id]
-        
+        region_df = df[df["id"] == reg_id]
+
         # Trouver les indices où un événement se produit (nbsinister > 0)
-        event_indices = region_df[region_df['nbsinister'] > 0].index
-        
+        event_indices = region_df[region_df["nbsinister"] > 0].index
+
         # Parcourir chaque ligne du DataFrame de cette région
         for i in region_df.index:
-            if df.loc[i, 'nbsinister'] > 0:
-                df.loc[i, 'days_until_next_event'] = 0  # Si un événement se produit, mettre à 0
+            if df.loc[i, "nbsinister"] > 0:
+                df.loc[i, "days_until_next_event"] = (
+                    0  # Si un événement se produit, mettre à 0
+                )
             else:
                 # Trouver le prochain événement
                 future_events = event_indices[event_indices > i]
                 if len(future_events) > 0:
                     next_event_index = future_events[0]
-                    next_event_date = df.loc[next_event_index, 'date']
-                    current_date = df.loc[i, 'date']
-                    df.loc[i, 'days_until_next_event'] = next_event_date - current_date  # Calculer les jours
-    
+                    next_event_date = df.loc[next_event_index, "date"]
+                    current_date = df.loc[i, "date"]
+                    df.loc[i, "days_until_next_event"] = (
+                        next_event_date - current_date
+                    )  # Calculer les jours
+
     # Retourner la colonne des jours jusqu'au prochain événement
-    return df['days_until_next_event'].values
+    return df["days_until_next_event"].values
+
 
 def compare_lists(list1, list2):
     """
@@ -5230,6 +6803,7 @@ def compare_lists(list1, list2):
     result = (set1 | set2) - only_in_second
     return list(result)
 
+
 def my_convolve(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False, semi2=False):
     dimX, dimY, dimZ = dimS
     if dimX == 0 or dimY == 0 or dimZ == 0:
@@ -5237,83 +6811,145 @@ def my_convolve(raster, mask, dimS, mode, dim=(90, 150, 3), semi=False, semi2=Fa
     if dim[-1] == 1:
         dimZ = 1
     else:
-        dimZ = np.linspace(dim[-1]/2, 0, num=(dim[-1] // 2) + 1)[0] - np.linspace(dim[-1]//2, 0, num=(dim[-1] // 2) + 1)[1]
+        dimZ = (
+            np.linspace(dim[-1] / 2, 0, num=(dim[-1] // 2) + 1)[0]
+            - np.linspace(dim[-1] // 2, 0, num=(dim[-1] // 2) + 1)[1]
+        )
     if mode == "laplace":
-        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
+        kernel = (
+            myFunctionDistanceDugrandCercle3D(
+                dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ
+            )
+            + dimZ
+        )
         kernel = dimZ / kernel
-    elif mode == 'inverse_laplace':
-        kernel = myFunctionDistanceDugrandCercle3D(dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ) + dimZ
+    elif mode == "inverse_laplace":
+        kernel = (
+            myFunctionDistanceDugrandCercle3D(
+                dim, resolution_lon=dimX, resolution_lat=dimY, resolution_altitude=dimZ
+            )
+            + dimZ
+        )
         kernel = dimZ / kernel
         kernel = (np.max(kernel) - kernel) + np.min(kernel)
     else:
-        kernel = np.full(dim, 1/(dim[0]*dim[1]*dim[2]), dtype=float)
+        kernel = np.full(dim, 1 / (dim[0] * dim[1] * dim[2]), dtype=float)
 
     if semi:
         if dim[2] != 1:
-            kernel[:,:,:(dim[2]//2)] = 0.0
+            kernel[:, :, : (dim[2] // 2)] = 0.0
     if semi2:
         if dim[2] != 1:
-            kernel[:,:,(dim[2]//2):] = 0.0
+            kernel[:, :, (dim[2] // 2) :] = 0.0
     res = convolve_fft(raster, kernel, normalize_kernel=False, mask=mask)
     return res
+
 
 def add_weigh_column(dff, train_mask, weight_col, graph_method):
 
     df = dff.copy(deep=True)
 
-    #df = df[df['weight'] > 0]
+    # df = df[df['weight'] > 0]
 
-    logger.info(f'Adding weight columns')
-    target_name_nbsinister = 'nbsinister'
-    target_name_risk = 'risk'
-    target_name_class = 'class'
+    logger.info(f"Adding weight columns")
+    target_name_nbsinister = "nbsinister"
+    target_name_risk = "risk"
+    target_name_class = "class"
 
-    dataframe_graph = df[[target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
-    dataframe_graph.drop_duplicates(keep='first', inplace=True)
+    dataframe_graph = df[
+        [
+            target_name_risk,
+            target_name_nbsinister,
+            "date",
+            "departement",
+            "graph_id",
+            target_name_class,
+            "weight",
+        ]
+    ]
+    dataframe_graph.drop_duplicates(keep="first", inplace=True)
 
-    weigh_col_name = f'weight_{weight_col}'
+    weigh_col_name = f"weight_{weight_col}"
 
     df_weight = []
 
-    if graph_method == 'node':
+    if graph_method == "node":
         df[weigh_col_name] = 0.0
 
     for dept in df.departement.unique():
-        index_dept = df[df['departement'] == dept].index
-        if graph_method == 'graph':
-            dataframe_graph_2 = df.loc[index_dept, [target_name_risk, target_name_nbsinister, 'date', 'departement', 'graph_id', target_name_class, 'weight']]
-            dataframe_graph_2.drop_duplicates(keep='first', inplace=True)
-            weight_dept = calculate_weighs(weight_col, dataframe_graph_2.copy(deep=True), target_name_nbsinister, target_name_risk, np.asarray([True for i in range(dataframe_graph_2.shape[0])]))
+        index_dept = df[df["departement"] == dept].index
+        if graph_method == "graph":
+            dataframe_graph_2 = df.loc[
+                index_dept,
+                [
+                    target_name_risk,
+                    target_name_nbsinister,
+                    "date",
+                    "departement",
+                    "graph_id",
+                    target_name_class,
+                    "weight",
+                ],
+            ]
+            dataframe_graph_2.drop_duplicates(keep="first", inplace=True)
+            weight_dept = calculate_weighs(
+                weight_col,
+                dataframe_graph_2.copy(deep=True),
+                target_name_nbsinister,
+                target_name_risk,
+                np.asarray([True for i in range(dataframe_graph_2.shape[0])]),
+            )
             if weight_dept is None:
                 continue
 
-            weight_dept = weight_dept.reshape(dataframe_graph_2['weight'].values.shape)
+            weight_dept = weight_dept.reshape(dataframe_graph_2["weight"].values.shape)
 
-            result = np.multiply(dataframe_graph_2['weight'].values, weight_dept)
+            result = np.multiply(dataframe_graph_2["weight"].values, weight_dept)
             dataframe_graph_2[weigh_col_name] = result
             df_weight.append(dataframe_graph_2)
         else:
-            weight_dept = calculate_weighs(weight_col, df.copy(deep=True).loc[index_dept], target_name_nbsinister, target_name_risk, np.asarray([True for i in range(df.loc[index_dept].shape[0])]))
+            weight_dept = calculate_weighs(
+                weight_col,
+                df.copy(deep=True).loc[index_dept],
+                target_name_nbsinister,
+                target_name_risk,
+                np.asarray([True for i in range(df.loc[index_dept].shape[0])]),
+            )
             if weight_dept is None:
                 continue
 
-            weight_dept = weight_dept.reshape(df.loc[index_dept, 'weight'].values.shape)
+            weight_dept = weight_dept.reshape(df.loc[index_dept, "weight"].values.shape)
 
-            result = np.multiply(df.loc[index_dept, 'weight'].values, weight_dept)
+            result = np.multiply(df.loc[index_dept, "weight"].values, weight_dept)
 
             df.loc[index_dept, weigh_col_name] = result
 
-    if graph_method == 'graph':
+    if graph_method == "graph":
         df_weight = pd.concat(df_weight)
-        dataframe_graph = dataframe_graph.set_index(['graph_id', 'date']).join(df_weight.set_index(['graph_id', 'date'])[weigh_col_name], on=['graph_id', 'date']).reset_index()
+        dataframe_graph = (
+            dataframe_graph.set_index(["graph_id", "date"])
+            .join(
+                df_weight.set_index(["graph_id", "date"])[weigh_col_name],
+                on=["graph_id", "date"],
+            )
+            .reset_index()
+        )
         try:
             df.drop(weigh_col_name, inplace=True, axis=1)
         except Exception as e:
             print(e)
-        df = df.set_index(['graph_id', 'date']).join(dataframe_graph.set_index(['graph_id', 'date'])[weigh_col_name], how='right').reset_index()
-    
-    df['weight'] = df['weight'] * df[weigh_col_name]
+        df = (
+            df.set_index(["graph_id", "date"])
+            .join(
+                dataframe_graph.set_index(["graph_id", "date"])[weigh_col_name],
+                how="right",
+            )
+            .reset_index()
+        )
+
+    df["weight"] = df["weight"] * df[weigh_col_name]
     return df
+
 
 def has_method(obj, method_name):
     """
@@ -5328,16 +6964,20 @@ def has_method(obj, method_name):
     """
     return callable(getattr(obj, method_name, None))
 
+
 def required_params(func):
     sig = inspect.signature(func)
     req = []
     for name, p in sig.parameters.items():
         # Un paramètre est "requis" s'il n'a pas de valeur par défaut
         # et que ce n'est pas *args ni **kwargs
-        if (p.default is inspect._empty
-            and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)):
+        if p.default is inspect._empty and p.kind not in (
+            p.VAR_POSITIONAL,
+            p.VAR_KEYWORD,
+        ):
             req.append(name)
     return req
+
 
 def binary_closing_id(mask, selem):
 
@@ -5348,33 +6988,36 @@ def binary_closing_id(mask, selem):
     processed_mask = np.full(mask.shape, fill_value=np.nan)
 
     for uid in unique_ids:
-        mask_binary = (mask == uid)
+        mask_binary = mask == uid
         closed_mask = binary_closing(mask_binary, selem)
         processed_mask[closed_mask] = uid  # Réinjecter les valeurs
-        
+
     return processed_mask
 
-def generate_graph_list(scale: int, graph_construct: str, graph_method: str, dir_output: Path):
+
+def generate_graph_list(
+    scale: int, graph_construct: str, graph_method: str, dir_output: Path
+):
     # Échelle disponibles en ordre croissant, avec "departement" comme la plus grande
-    if graph_construct == 'risk-regular':
+    if graph_construct == "risk-regular":
         if scale == 6:
-            available_scales = [4, 6, 'departement']
+            available_scales = [4, 6, "departement"]
         else:
-            available_scales = [4, 5, 7, 'departement']
+            available_scales = [4, 5, 7, "departement"]
     else:
-        available_scales = [4, 5, 6, 7, 'departement']
-    
+        available_scales = [4, 5, 6, 7, "departement"]
+
     graph_list = []
 
     for s in available_scales:
-        if s != 'departement' and (isinstance(s, int) and s >= scale):
+        if s != "departement" and (isinstance(s, int) and s >= scale):
             filename = f"graph_{s}_{'None' if s == 'departement' else graph_construct}_{graph_method}.pkl"
-            graph_list.append((filename, dir_output / '..'))
+            graph_list.append((filename, dir_output / ".."))
             logger.info(filename)
-        elif s == 'departement':
+        elif s == "departement":
             filename = f"graph_departement_None_{graph_method}.pkl"
-            graph_list.append((filename, dir_output / '..'))
-        
+            graph_list.append((filename, dir_output / ".."))
+
             logger.info(filename)
 
     return graph_list
@@ -5385,73 +7028,106 @@ def get_static_temporal_idx(features):
     temporal_idx = []
     foret_variables_name = list(foret.keys())
     osmnx_variables_name = list(osmnxint2str.values())
-    #print(foret_variables_name)
+    # print(foret_variables_name)
     for i, fet in enumerate(features):
-        #print(fet)
-        if fet in cluster_encoder or fet in geo_variables or fet in region_variables or 'encoder' in fet or fet == 'isBassin':
-            static_idx.append(i)
-            continue
-        
-        if 'days_since_rain' in fet or fet == 'Past_risk' or 'sum_rain_last_7_days' in fet or 'sum_snow_last_7_days' \
-        in fet or 'sum_consecutive_rainfall' in fet or 'niveau_nappe_eau' in fet or 'profondeur_nappe' \
-        in fet or 'calendar' in fet or 'AutoRegression' in fet or fet in air_variables:
-            temporal_idx.append(i)
-            continue
-        
-        if 'Corine' in fet:
+        # print(fet)
+        if (
+            fet in cluster_encoder
+            or fet in geo_variables
+            or fet in region_variables
+            or "encoder" in fet
+            or fet == "isBassin"
+        ):
             static_idx.append(i)
             continue
 
-        if 'prev' in fet:
+        if (
+            "days_since_rain" in fet
+            or fet == "Past_risk"
+            or "sum_rain_last_7_days" in fet
+            or "sum_snow_last_7_days" in fet
+            or "sum_consecutive_rainfall" in fet
+            or "niveau_nappe_eau" in fet
+            or "profondeur_nappe" in fet
+            or "AutoRegression" in fet
+            or fet in air_variables
+        ):
             temporal_idx.append(i)
             continue
-        
-        fet_name, _ = fet.split('_')
-        if fet_name in landcover_variables or fet_name in foret_variables_name or \
-              fet_name in cosia_variables or fet_name in osmnx_variables_name or fet_name in dynamic_world_variables or \
-                fet in elevation_variables or fet_name in population_variabes or fet_name in bdroute_variables:
+
+        t = False
+        for cal in calendar_variables:
+            if cal in fet:
+                temporal_idx.append(i)
+                t = True
+                break
+        if t:
+            continue
+
+        if "Corine" in fet:
+            static_idx.append(i)
+            continue
+
+        if "prev" in fet:
+            temporal_idx.append(i)
+            continue
+
+        fet_name, _ = fet.split("_")
+        if (
+            fet_name in landcover_variables
+            or fet_name in foret_variables_name
+            or fet_name in cosia_variables
+            or fet_name in osmnx_variables_name
+            or fet_name in dynamic_world_variables
+            or fet in elevation_variables
+            or fet_name in population_variabes
+            or fet_name in bdroute_variables
+        ):
             static_idx.append(i)
         else:
             temporal_idx.append(i)
 
     static_idx, temporal_idx = np.asarray(static_idx), np.asarray(temporal_idx)
-    #logger.info(f'Static features -> {np.asarray(features)[static_idx]}')
-    #logger.info(f'Temporal features -> {np.asarray(features)[temporal_idx]}')
+    # logger.info(f'Static features -> {np.asarray(features)[static_idx]}')
+    # logger.info(f'Temporal features -> {np.asarray(features)[temporal_idx]}')
     return static_idx, temporal_idx
 
 
 def select_samples(df, n_samples=1000, kdays=5):
     # S'assurer que le département est une string si besoin
-    df['departement'] = df['departement'].astype(str)
-    
+    df["departement"] = df["departement"].astype(str)
+
     # Nombre de départements
-    departments = df['departement'].unique()
+    departments = df["departement"].unique()
     n_departments = len(departments)
-    
+
     # Combien de points par département ?
     samples_per_dept = n_samples // n_departments
-    
+
     selected_rows = []
-    
+
     for dept in departments:
         # Sous-échantillonner dans chaque département
-        df_dept = df[df['departement'] == dept]
-        
+        df_dept = df[df["departement"] == dept]
+
         if len(df_dept) < samples_per_dept:
             raise ValueError(f"Pas assez de données dans le département {dept}")
-        
+
         # Tirage aléatoire de samples_per_dept dates
         selected = df_dept.sample(n=samples_per_dept, random_state=42)
-        
+
         # Pour chaque date sélectionnée, ajouter tous les points où date >= date_selec - kdays
-        for date_selec in selected['date']:
-            mask = (df_dept['date'] >= date_selec - kdays) & (df_dept['date'] <= date_selec)
+        for date_selec in selected["date"]:
+            mask = (df_dept["date"] >= date_selec - kdays) & (
+                df_dept["date"] <= date_selec
+            )
             selected_rows.append(df_dept[mask])
-    
+
     # Concaténer toutes les sélections
     final_selection = pd.concat(selected_rows).drop_duplicates()
-    
+
     return final_selection
+
 
 def auoc_func(conf_matrix: np.ndarray, n_beta: int = 1001) -> float:
     """
@@ -5524,14 +7200,14 @@ def auoc_func(conf_matrix: np.ndarray, n_beta: int = 1001) -> float:
 
         # first row
         for j in range(1, K):
-            dp[0, j] = dp[0, j-1] + cell_cost[0, j]
+            dp[0, j] = dp[0, j - 1] + cell_cost[0, j]
         # first column
         for i in range(1, K):
-            dp[i, 0] = dp[i-1, 0] + cell_cost[i, 0]
+            dp[i, 0] = dp[i - 1, 0] + cell_cost[i, 0]
         # rest
         for i in range(1, K):
             for j in range(1, K):
-                dp[i, j] = min(dp[i-1, j], dp[i, j-1]) + cell_cost[i, j]
+                dp[i, j] = min(dp[i - 1, j], dp[i, j - 1]) + cell_cost[i, j]
 
         # Add the lone constant "1" term explained above
         uoc_vals[idx] = 1.0 + dp[-1, -1]
@@ -5541,7 +7217,15 @@ def auoc_func(conf_matrix: np.ndarray, n_beta: int = 1001) -> float:
 
     return float(auoc_value)
 
-def macro_precision_recall_f1_no_tp0(y_true, y_pred, labels=None, zero_division=0, return_per_class=False, average='macro'):
+
+def macro_precision_recall_f1_no_tp0(
+    y_true,
+    y_pred,
+    labels=None,
+    zero_division=0,
+    return_per_class=False,
+    average="macro",
+):
     """
     Calcule macro-precision, macro-recall et macro-F1 en incluant la classe 0
     mais en forçant TP_0 = 0.
@@ -5568,36 +7252,48 @@ def macro_precision_recall_f1_no_tp0(y_true, y_pred, labels=None, zero_division=
 
     # Precision_c = TP / (TP + FP)
     prec_den = tp + fp
-    precision = np.divide(tp, prec_den,
-                          out=np.full_like(tp, float(zero_division)),
-                          where=prec_den > 0)
+    precision = np.divide(
+        tp, prec_den, out=np.full_like(tp, float(zero_division)), where=prec_den > 0
+    )
 
     # Recall_c = TP / (TP + FN)
     rec_den = tp + fn
-    recall = np.divide(tp, rec_den,
-                       out=np.full_like(tp, float(zero_division)),
-                       where=rec_den > 0)
+    recall = np.divide(
+        tp, rec_den, out=np.full_like(tp, float(zero_division)), where=rec_den > 0
+    )
 
     # F1_c = 2 * P * R / (P + R)
     f1_den = precision + recall
-    f1 = np.divide(2 * precision * recall, f1_den,
-                   out=np.full_like(tp, float(zero_division)),
-                   where=f1_den > 0)
+    f1 = np.divide(
+        2 * precision * recall,
+        f1_den,
+        out=np.full_like(tp, float(zero_division)),
+        where=f1_den > 0,
+    )
 
     macro_precision = float(np.mean(precision))
-    macro_recall    = float(np.mean(recall))
-    macro_f1        = float(np.mean(f1))
+    macro_recall = float(np.mean(recall))
+    macro_f1 = float(np.mean(f1))
 
     if return_per_class:
-        return (macro_precision, macro_recall, macro_f1,
-                {"labels": labels.tolist(),
-                 "precision_per_class": precision.tolist(),
-                 "recall_per_class": recall.tolist(),
-                 "f1_per_class": f1.tolist(),
-                 "support": C.sum(axis=1).astype(int).tolist()})
+        return (
+            macro_precision,
+            macro_recall,
+            macro_f1,
+            {
+                "labels": labels.tolist(),
+                "precision_per_class": precision.tolist(),
+                "recall_per_class": recall.tolist(),
+                "f1_per_class": f1.tolist(),
+                "support": C.sum(axis=1).astype(int).tolist(),
+            },
+        )
     return macro_precision, macro_recall, macro_f1
 
-def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('best_tp',)):
+
+def summarize_metrics_at_best_tp(
+    model, run, metrics_dict, fields=None, skip=("best_tp",)
+):
     """
     Récupère model.metrics[model.metrics['best_tp']] puis, pour chaque champ numérique,
     sauvegarde mean/std/var dans metrics_dict[run].
@@ -5614,11 +7310,9 @@ def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('b
     ------
     dict : le sous-dict metrics_dict[run] rempli
     """
-
-    print(model.metrics.keys(), model.metrics['best_tp'])
-
+    
     # Sous-bloc (comme dans ton code)
-    sub = model.metrics[model.metrics['best_tp']]
+    sub = model.metrics[model.metrics["best_tp"]]
 
     out = metrics_dict.setdefault(run, {})
 
@@ -5631,14 +7325,18 @@ def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('b
             try:
                 keys = list(sub.index)
             except Exception:
-                raise TypeError("Impossible d'itérer sur les champs de 'sub'. Fournis 'fields=' explicitement.")
+                raise TypeError(
+                    "Impossible d'itérer sur les champs de 'sub'. Fournis 'fields=' explicitement."
+                )
     else:
         keys = list(fields)
 
     for k in keys:
         if k in skip:
             continue
-        if (hasattr(sub, "keys") and k not in sub) or (not hasattr(sub, "keys") and k not in getattr(sub, "index", [])):
+        if (hasattr(sub, "keys") and k not in sub) or (
+            not hasattr(sub, "keys") and k not in getattr(sub, "index", [])
+        ):
             # champ absent -> on saute
             continue
 
@@ -5646,9 +7344,9 @@ def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('b
         vals = sub[k]
         arr = np.asarray(vals, dtype=float).ravel()  # aplati au cas où
 
-        if 'ic95' in k:
-            out[f'lower_{k}'] = round(vals[0], 2)
-            out[f'upper_{k}'] = round(vals[1], 2)
+        if "ic95" in k:
+            out[f"lower_{k}"] = round(vals[0], 2)
+            out[f"upper_{k}"] = round(vals[1], 2)
         else:
             if arr.size == 0:
                 mean = std = var = np.nan
@@ -5658,22 +7356,24 @@ def summarize_metrics_at_best_tp(model, run, metrics_dict, fields=None, skip=('b
                     std = float(np.nanstd(arr, ddof=1))  # écart-type (échantillon)
                     var = float(np.nanvar(arr, ddof=1))  # variance (échantillon)
                 else:
-                    std = var = float('nan')  # pas assez d'éléments pour ddof=1
+                    std = var = float("nan")  # pas assez d'éléments pour ddof=1
 
             # Nommage simple et homogène
             out[f"mean_{k}"] = round(mean, 2)
-            out[f"std_{k}"]  = round(std, 2)
-            out[f"var_{k}"]  = round(var, 2)
+            out[f"std_{k}"] = round(std, 2)
+            out[f"var_{k}"] = round(var, 2)
 
     return out
 
+
 from typing import Any
+
 
 def round_floats(obj: Any, ndigits: int = 2, round_keys: bool = False) -> Any:
     """
     Arrondit tous les float rencontrés dans une structure Python (dict, list, tuple, set),
     et renvoie une nouvelle structure du même type.
-    
+
     - obj: structure d'entrée (dict, list, tuple, set, scalaires)
     - ndigits: nombre de décimales (par défaut 2)
     - round_keys: si True, arrondit aussi les *clés* de type float dans les dicts
@@ -5706,8 +7406,10 @@ def round_floats(obj: Any, ndigits: int = 2, round_keys: bool = False) -> Any:
     # autre type (int, str, bool, None, etc.) -> inchangé
     return obj
 
+
 from typing import Dict, Any, Iterable, Optional
 import numpy as np
+
 
 def add_ic95_to_dict(
     d: Dict[str, Any],
@@ -5777,11 +7479,13 @@ def add_ic95_to_dict(
 
     return d
 
+
 import warnings
 import geopandas as gpd
 from shapely.ops import unary_union
 from shapely.geometry import Polygon, MultiPolygon
 from pyproj import Geod
+
 
 def _geodesic_area_km2(geom, geod: Geod) -> float:
     """Surface géodésique (km²) d'un Polygon/MultiPolygon en WGS84."""
@@ -5826,6 +7530,7 @@ def _geodesic_area_m2(geom, geod: Geod) -> float:
 
     return 0.0
 
+
 def compute_department_areas_km2_dict_wgs84_union(
     geojson_or_gdf,
     dept_col: str,
@@ -5850,7 +7555,9 @@ def compute_department_areas_km2_dict_wgs84_union(
         warnings.warn("Input has no CRS; assuming EPSG:4326 (WGS84).")
         gdf = gdf.set_crs("EPSG:4326")
     elif str(gdf.crs).upper() not in ("EPSG:4326", "WGS 84", "OGC:CRS84"):
-        raise ValueError(f"Expected EPSG:4326 (WGS84). Found '{gdf.crs}'. Convert to EPSG:4326.")
+        raise ValueError(
+            f"Expected EPSG:4326 (WGS84). Found '{gdf.crs}'. Convert to EPSG:4326."
+        )
 
     # 3) Optionnel: réparer les géométries invalides
     if fix_invalid:
@@ -5859,20 +7566,24 @@ def compute_department_areas_km2_dict_wgs84_union(
     # 4) Unary union par département (combine tous les polygones d'un même dept)
     unions = (
         gdf.groupby(dept_col, dropna=False)["geometry"]
-           .apply(lambda geoms: unary_union(list(geoms)))
-           .reset_index()
+        .apply(lambda geoms: unary_union(list(geoms)))
+        .reset_index()
     )
     unions_gdf = gpd.GeoDataFrame(unions, geometry="geometry", crs="EPSG:4326")
 
     # 5) Aire géodésique WGS84 (km²)
     geod = Geod(ellps="WGS84")
-    unions_gdf["area_km2"] = unions_gdf.geometry.apply(lambda g: _geodesic_area_m2(g, geod))
+    unions_gdf["area_km2"] = unions_gdf.geometry.apply(
+        lambda g: _geodesic_area_m2(g, geod)
+    )
 
     # 6) Retour dict
     return dict(zip(unions_gdf[dept_col].tolist(), unions_gdf["area_km2"].tolist()))
 
+
 import numpy as np
 import scipy.optimize as spo
+
 
 def egpd_trunc_discrete_weights(
     X,
@@ -5958,11 +7669,17 @@ def egpd_trunc_discrete_weights(
 
         # Fit robustifié
         try:
-            res_nm = spo.minimize(obj, x0, method="Nelder-Mead",
-                                  options={"maxiter": maxiter_nm})
+            res_nm = spo.minimize(
+                obj, x0, method="Nelder-Mead", options={"maxiter": maxiter_nm}
+            )
             start = res_nm.x if res_nm.success else x0
-            res = spo.minimize(obj, start, method="L-BFGS-B", bounds=bounds,
-                               options={"maxiter": maxiter_lbfgs})
+            res = spo.minimize(
+                obj,
+                start,
+                method="L-BFGS-B",
+                bounds=bounds,
+                options={"maxiter": maxiter_lbfgs},
+            )
 
             if not res.success:
                 raise RuntimeError("LBFGS failed")
@@ -5992,7 +7709,7 @@ def egpd_trunc_discrete_weights(
         else:
             weights = 1.0 / (pmf[X] + eps)
         if normalize:
-            weights /= (weights.mean() + eps)
+            weights /= weights.mean() + eps
         return weights, pmf, params
 
     # ------------------------------------------------------------------
@@ -6007,7 +7724,7 @@ def egpd_trunc_discrete_weights(
     params_dict = {}
 
     for c in np.unique(clusters):
-        mask = (clusters == c)
+        mask = clusters == c
         Xc = X[mask]
         pmf, params, failed = fit_one_cluster(Xc)
         pmfs[c] = pmf
@@ -6019,6 +7736,6 @@ def egpd_trunc_discrete_weights(
             weights[mask] = 1.0 / (pmf[Xc] + eps)
 
     if normalize:
-        weights /= (weights.mean() + eps)
+        weights /= weights.mean() + eps
 
     return weights
