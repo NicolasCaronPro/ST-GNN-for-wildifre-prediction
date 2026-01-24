@@ -27,8 +27,6 @@ from GNN.tools import (
 from GNN.config import graph_id_index, departement_index
 from sklearn.metrics import f1_score, jaccard_score
 
-import dgl
-
 from GNN.graph_builder import *
 from GNN.tools import check_and_create_path, save_object, read_object
 from forecasting_models.pytorch.distillation_utils import RelationMLP, RelationAttention, Adapter, FitNet, multi_teacher_kd_loss, multi_teacher_kd_loss_global_weights, lht_loss, angle_triplet_loss, confidence_distillation_loss
@@ -1194,7 +1192,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False, proportion_0_sample_with_positive_weight=0.0):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -1233,7 +1231,7 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
     print(ks, horizon)
     for id in date_ids:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
+            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns))
             if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
@@ -1243,9 +1241,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
                 Ys.append(y)
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
+            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
+            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
 
         if x is None:
             continue
@@ -1271,8 +1269,7 @@ def create_dataset(graph,
                     horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None,
-                    proportion_0_sample_with_positive_weight=0.0
+                    mesh2graph=None
                     ):
     
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
@@ -1284,17 +1281,17 @@ def create_dataset(graph,
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
     dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
     dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
-    
+
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1328,8 +1325,7 @@ def create_train_dataset(graph,
                     horizon:int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None,
-                    proportion_0_sample_with_positive_weight=0.0):
+                    mesh2graph=None):
 
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
@@ -1340,7 +1336,7 @@ def create_train_dataset(graph,
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1367,8 +1363,7 @@ def create_test_val_dataset(graph,
                     horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None,
-                    proportion_0_sample_with_positive_weight=1.0):
+                    mesh2graph=None):
         
     x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns + [target_name]].values
 
@@ -1380,10 +1375,10 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
     
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
@@ -1477,8 +1472,7 @@ def create_test_loader(graph, df,
                        horizon:int,
                        graph_mesh=None,
                         gridh2mesh=None,
-                        mesh2graph=None,
-                        proportion_0_sample_witg_positive_weight=1.0):
+                        mesh2graph=None):
     
     Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
@@ -1518,16 +1512,16 @@ def create_test_loader(graph, df,
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), proportion_0_sample_witg_positive_weight)
+            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
                     Y.append(y[i])
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), proportion_0_sample_witg_positive_weight)
+            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
         else:
-            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns), proportion_0_sample_witg_positive_weight)
+            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns), 1.0)
 
         if x is None:
             continue
@@ -3994,8 +3988,9 @@ class Training():
         optimizer = optim.Adam(parameters, lr=self.lr)
         #optimizer = optim.SGD(parameters, lr=self.lr, momentum=0.9)
         return optimizer
-
-    def shapley_additive_explanation(self, df, outname, dir_output, mode='bar', figsize=(50, 25), samples=None, samples_name=None):
+    
+    
+    def shapley_additive_explanation(self, df, outname, dir_output, mode='beeswarm', figsize=(15, 25), samples=None, samples_name=None, horizon_shap=0, plot=True):
         """
         Visualisation des valeurs SHAP pour expliquer les prédictions.
         :param df_set: DataFrame des caractéristiques d'entrée.
@@ -4006,34 +4001,72 @@ class Training():
         :param samples: Échantillons spécifiques à analyser.
         :param samples_name: Noms des échantillons à afficher.
         """
+        # Utiliser un backend non-interactif pour éviter les erreurs Qt
+        import matplotlib
+        matplotlib.use('Agg')
+        
         if hasattr(self, 'use_temporal_as_edges'):
             use_temporal_as_edges = self.use_temporal_as_edges
         else:
             use_temporal_as_edges = None
 
-        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks)
+        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         Xst = torch.Tensor(Xst).to(self.device)
-
         B, F, T = Xst.shape
-
+        
+        Xst_horizon = self.compute_inputs(Xst,  -1 - (self.horizon - horizon_shap), "current" if horizon_shap == 0 else "futur")
         Xst_flat = Xst.reshape((B, F*T))
+        Xst_horizon_flat = Xst_horizon[:, :, -1]
+        
         df_features = []
-        # SHAP DeepExplainer avec wrapper du modèle
-        explainer = shap.DeepExplainer(WrapperModel(self.model, F, T, e).to(self.device), Xst_flat)
-        shap_values = explainer.shap_values(Xst_flat)
 
+        if self.under_sampling == 'search':
+            y = self.df_train[self.target_name].values
+            nb = int(self.metrics['best_tp'] * len(y[y == 0]))
+            df_combined = self.split_dataset(self.df_train, nb, reset=False)
+            self.df_train['weight'] = 0
+
+            # Mettre à jour df_train pour l'entraînement
+            self.df_train.loc[df_combined.index, 'weight'] = 1
+            
+        background_data_train = self.df_train
+                        
+        background_data_train, e = get_numpy_data(self.graph, background_data_train, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
+        background_data_train = torch.Tensor(background_data_train).to(self.device)
+        B_train, F_train, T_train = background_data_train.shape
+        
+        background_data_train = background_data_train.reshape((B_train, F_train*T_train))
+        
+        # SHAP DeepExplainer avec wrapper du modèle
+        self.model.eval()
+        self.explainer = shap.DeepExplainer(WrapperModel(self, F, T, e, horizon_shap, return_logits=True).to(self.device), background_data_train)
+        self.model.eval()
+        shap_values = self.explainer.shap_values(Xst_flat, check_additivity=False)
+        
         n_classes = self.out_channels
+        
+        # Vérifier la forme des valeurs SHAP pour débogage
+        print(f"SHAP values type: {type(shap_values)}")
+        print(f"SHAP values shape (before processing): {np.asarray(shap_values).shape if isinstance(shap_values, (list, np.ndarray)) else 'N/A'}")
 
         # Vérifier si la sortie SHAP est multi-classes
         if n_classes == 1:
             shap_values = shap_values[:, :, np.newaxis]
+                
+        shap_values = np.moveaxis(shap_values, 0, 2)
         
         shap_values = np.asarray(shap_values)
-        shap_values = np.reshape(shap_values, (n_classes, B, F, T))
-        shap_values = shap_values[:, :, :, -1]
-        shap_values = np.moveaxis(shap_values, 0, 2)
-        #shap_values = shap_values.values
-
+        
+        # Vérification de dimensions pour éviter les erreurs de reshape
+        expected_shape = (B, F, T, n_classes)
+        try:
+            shap_values = np.reshape(shap_values, expected_shape)
+        except ValueError as e:
+            print(f"Erreur de reshape: forme actuelle {shap_values.shape}, forme attendue {expected_shape}")
+            raise e
+        
+        shap_values = shap_values[:, :,  -1 - (self.horizon - horizon_shap), :]
+        
         # Pour chaque classe, calculer et sauvegarder les résultats SHAP
         for class_idx in range(n_classes):
             # Calcul des valeurs SHAP moyennes et écarts-types
@@ -4045,50 +4078,46 @@ class Training():
                 "stdev_abs_shap": shap_std_abs,
                 "name": self.features_name
             }).sort_values("mean_abs_shap", ascending=False)
+            
+            print(df_shap.sort_values("mean_abs_shap").head())
 
             df_shap['class'] = class_idx
             df_features.append(df_shap)
 
-            # Visualisation globale (summary_plot) pour chaque classe
-            plt.figure(figsize=figsize)
-            """if mode == 'bar':
-                shap.summary_plot(
-                    shap_values[:, :, class_idx],
-                    features=Xst_flat, 
-                    feature_names=self.features_name,
-                    plot_type='bar',
-                    show=False
-                )
-            elif mode == 'beeswarm':
-                #print(shap_values[:, :, class_idx].shape, df.values.shape, len(self.features_name))
-                fig, ax = plt.subplots(figsize=(10, 6))
+            if plot:
+                check_and_create_path(dir_output)
+                # Visualisation globale (summary_plot) pour chaque classe
+                plt.figure(figsize=figsize)
+                if mode == 'bar':
+                    shap.summary_plot(
+                        shap_values[:, :, class_idx],
+                        features=Xst_horizon_flat,
+                        feature_names=self.features_name,
+                        plot_type='bar',
+                        show=False
+                    )
+                elif mode == 'beeswarm':
+                    # Générer le graphique SHAP pour une classe spécifique (class_idx)
+                    shap.summary_plot(
+                        shap_values[:, :, class_idx],
+                        features=Xst_horizon_flat,
+                        feature_names=self.features_name,
+                        show=False,
+                        plot_type="dot"
+                    )
 
-                # Générer le graphique SHAP pour une classe spécifique (class_idx)
-                shap.summary_plot(
-                    shap_values[:, :, class_idx],
-                    features=Xst_flat,
-                    feature_names=self.features_name,
-                    show=False,
-                    plot_type="dot",  # Vous pouvez choisir 'dot', 'bar', ou 'violin' comme type de plot
-                    ax=ax
-                )
-
-                # Ajouter explicitement la colorbar
-                plt.colorbar(ax.collections[0], ax=ax)
-                """
-                #plt.show()
-
-            #print(dir_output / f"{outname}_class_{class_idx}_shapley.png")
-            #plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png")
-            #plt.close()
+            print(f"Sauvegarde: {dir_output / f'{outname}_class_{class_idx}_shapley.png'}")
+            if plot:
+                plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png", bbox_inches='tight', dpi=100)
+                plt.close('all')
 
             # Visualisations spécifiques aux échantillons (force_plot)
-            if samples is not None and samples_name is not None:
+            if samples is not None and samples_name is not None and plot:
 
                 for i, sample in enumerate(samples):
                     plt.figure(figsize=figsize)
                     shap.force_plot(
-                        explainer.expected_value[class_idx],
+                        self.explainer.expected_value[class_idx],
                         shap_values[sample, :, class_idx],
                         features=df.iloc[sample].values,
                         feature_names=self.features_name,
@@ -4100,10 +4129,196 @@ class Training():
                         dir_output / f"{outname}_class_{class_idx}_{samples_name[i]}_shapley.png",
                         bbox_inches='tight'
                     )
-                    plt.close()
-
+                    plt.close('all')
+                    
         df_features = pd.concat(df_features)
         save_object(df_features, 'features_importance.pkl', dir_output)
+        
+        # Sauvegarder les valeurs SHAP ET l'explainer pour réutilisation ultérieure
+        shap_data = {
+            'shap_values': shap_values,  # Shape: (B, F, n_classes)
+            'expected_values': self.explainer.expected_value,
+            'feature_names': self.features_name,
+            'n_classes': n_classes,
+            'B': B,
+            'F': F,
+            'T': T,
+            'Xst_flat': Xst_flat.cpu().numpy() if torch.is_tensor(Xst_flat) else Xst_flat,
+            'horizon_shap': horizon_shap,
+            'e': e  # Edges pour reconstruire le WrapperModel si nécessaire
+        }
+        save_object(shap_data, f'{outname}_shap_values.pkl', dir_output)
+        
+        # Sauvegarder l'explainer séparément (peut être volumineux)
+        explainer_data = {
+            'explainer': self.explainer,
+            'wrapper_model': WrapperModel(self, F, T, e, horizon_shap),
+            'F': F,
+            'T': T,
+            'e': e,
+            'horizon_shap': horizon_shap
+        }
+        #save_object(explainer_data, f'{outname}_shap_explainer.pkl', dir_output)
+        save_object(self.explainer, f'{outname}_shap_explainer.pkl', dir_output)
+        print(f"SHAP values sauvegardées dans: {dir_output / f'{outname}_shap_values.pkl'}")
+        print(f"SHAP explainer sauvegardé dans: {dir_output / f'{outname}_shap_explainer.pkl'}")
+
+    def shapley_additive_explanation_sample(self, df_sample, explainer, outname, dir_output, 
+                                           shap_data_file=None, sample_name=None, 
+                                           figsize=(15, 10), generate_force_plot=True, plot=True,
+                                           horizon=0):
+        """
+        Calcule et visualise les valeurs SHAP pour un échantillon spécifique.
+        
+        :param df_sample: DataFrame contenant un seul échantillon (1 ligne) ou index de l'échantillon dans df_test
+        :param outname: Nom de sortie pour les fichiers
+        :param dir_output: Répertoire de sortie
+        :param shap_data_file: Chemin vers le fichier de SHAP values sauvegardé (optionnel)
+        :param sample_name: Nom de l'échantillon pour les fichiers de sortie
+        :param figsize: Taille des figures
+        :param generate_force_plot: Si True, génère les force plots
+        :param plot: Si True, génère les visualisations
+        :return: Dictionary contenant les SHAP values pour cet échantillon
+        """
+        from pathlib import Path
+        import pandas as pd
+        
+        # Priorité 1: Vérifier si self.explainer existe (explainer en mémoire)
+        if hasattr(self, 'explainer') and self.explainer is not None:
+            print(f"Utilisation de self.explainer (en mémoire)")
+            
+            # Préparer les données pour cet échantillon
+            if hasattr(self, 'use_temporal_as_edges'):
+                use_temporal_as_edges = self.use_temporal_as_edges
+            else:
+                use_temporal_as_edges = None
+            
+            Xst_sample, e = get_numpy_data(self.graph, df_sample, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
+            Xst_sample = torch.Tensor(Xst_sample).to(self.device)
+            B, F, T = Xst_sample.shape
+            Xst_sample_flat = Xst_sample.reshape((B, F*T))
+            
+            # Calculer les SHAP values pour cet échantillon
+            
+            # Activer le mode logits si le modèle est un WrapperModel
+            sample_shap_values_raw = explainer.shap_values(Xst_sample_flat, check_additivity=False)
+            
+            n_classes = self.out_channels
+            
+            # Reformater les SHAP values
+            if n_classes == 1:
+                sample_shap_values_raw = sample_shap_values_raw[:, :, np.newaxis]
+            
+            sample_shap_values_raw = np.asarray(sample_shap_values_raw)
+            
+            # Reshape selon le format attendu
+            expected_shape = (n_classes, B, F, T)
+            sample_shap_values_raw = np.reshape(sample_shap_values_raw, expected_shape)
+            
+            # Extraire le dernier pas de temps (utiliser horizon 0 par défaut si non spécifié)
+            sample_shap_values_raw = sample_shap_values_raw[:, :, :, -1 - (self.horizon - horizon)]
+            sample_shap_values_raw = np.moveaxis(sample_shap_values_raw, 0, 2)
+            
+            # Extraire pour cet échantillon
+            sample_shap_values = sample_shap_values_raw[0, :, :]  # Shape: (F, n_classes)
+            sample_features = Xst_sample[:, :,  -1 - (self.horizon - horizon)].cpu().numpy()
+            expected_values = self.explainer.expected_value
+            feature_names = self.features_name
+        else:
+            print(f"Aucune SHAP value ni explainer pré-calculé trouvé.")
+            raise FileNotFoundError(
+                f"Impossible de trouver les fichiers SHAP nécessaires:\n"
+                f"Veuillez d'abord exécuter shapley_additive_explanation() pour calculer et sauvegarder les valeurs SHAP."
+            )
+        
+        # Générer les visualisations pour chaque classe
+        results = {
+            'shap_values': sample_shap_values,
+            'features': sample_features,
+            'feature_names': feature_names,
+            'plots_generated': []
+        }
+        
+        if plot:
+            for class_idx in range(n_classes):
+                # 1. Bar plot des valeurs SHAP pour cet échantillon
+                plt.figure(figsize=figsize)
+                
+                # Créer un DataFrame pour faciliter la visualisation
+                # Flatten sample_features to 1D if needed (it may have shape (1, F) or (F,))
+                sample_features_flat = sample_features.flatten() if sample_features.ndim > 1 else sample_features
+                
+                shap_df = pd.DataFrame({
+                    'feature': feature_names,
+                    'shap_value': sample_shap_values[:, class_idx],
+                    'feature_value': sample_features_flat[:len(feature_names)]
+                })
+                shap_df = shap_df.reindex(shap_df['shap_value'].abs().sort_values(ascending=False).index)
+                
+                # Limiter aux 10 features les plus importantes pour le bar plot
+                shap_df_top10 = shap_df.head(10)
+                
+                # Bar plot
+                colors = ['red' if x < 0 else 'blue' for x in shap_df_top10['shap_value']]
+                plt.barh(range(len(shap_df_top10)), shap_df_top10['shap_value'], color=colors)
+                plt.yticks(range(len(shap_df_top10)), shap_df_top10['feature'])
+                plt.xlabel('SHAP value')
+                plt.title(f'SHAP Values (Top 10) - {sample_name} - Class {class_idx}')
+                plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+                plt.tight_layout()
+                
+                bar_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_bar.png"
+                plt.savefig(bar_plot_path, bbox_inches='tight', dpi=100)
+                plt.close('all')
+                results['plots_generated'].append(str(bar_plot_path))
+                print(f"Sauvegardé: {bar_plot_path}")
+                # 2. Waterfall plot (si SHAP le supporte)
+                try:
+                    plt.figure(figsize=figsize)
+                    shap.plots._waterfall.waterfall_legacy(
+                        expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
+                        sample_shap_values[:, class_idx],
+                        feature_names=feature_names,
+                        max_display=20,
+                        show=False
+                    )
+                    waterfall_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_waterfall.png"
+                    plt.savefig(waterfall_path, bbox_inches='tight', dpi=100)
+                    plt.close('all')
+                    results['plots_generated'].append(str(waterfall_path))
+                    print(f"Sauvegardé: {waterfall_path}")
+                except Exception as e:
+                    print(f"Impossible de générer le waterfall plot: {e}")
+                
+                # 3. Force plot (optionnel)
+                if generate_force_plot:
+                    try:
+                        plt.figure(figsize=figsize)
+                        # Arrondir les valeurs SHAP à 3 décimales pour meilleure visibilité
+                        sample_shap_values_rounded = np.round(sample_shap_values[:, class_idx], 5)
+                        expected_values = np.round(expected_values, 3)
+                        shap.force_plot(
+                            expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
+                            sample_shap_values_rounded,
+                            features=sample_features_flat[:len(feature_names)],
+                            feature_names=feature_names,
+                            matplotlib=True,
+                            show=False
+                        )
+                        force_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_force.png"
+                        plt.savefig(force_plot_path, bbox_inches='tight', dpi=100)
+                        plt.close('all')
+                        results['plots_generated'].append(str(force_plot_path))
+                        print(f"Sauvegardé: {force_plot_path}")
+                    except Exception as e:
+                        print(f"Impossible de générer le force plot: {e}")
+            
+            # Sauvegarder les résultats pour cet échantillon
+            save_object(results, f'{outname}_{sample_name}_shap_results.pkl', dir_output)
+            print(f"\nRésultats sauvegardés: {dir_output / f'{outname}_{sample_name}_shap_results.pkl'}")
+            print(f"Nombre de visualisations générées: {len(results['plots_generated'])}")
+        
+        return results
 
 ############################################ Split training ##############################################################
 
