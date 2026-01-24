@@ -83,7 +83,7 @@ def parse_string(s):
 
     return result
 
-def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, departements,
+def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, train_departements, test_departements,
                     geo, nmax, k_days, dir_output, doRaster, doEdgesFeatures, resolution, graph_construct, train_dates, val_date, graph_method):
     
     train_date = train_dates[-1]
@@ -126,7 +126,8 @@ def construct_graph(scale, maxDist, sinister, dataset_name, sinister_encoding, t
                                             target='nbsinister', train_dates=train_dates,
                                             path=dir_output,
                                             root_data=rootDisk / 'csv',
-                                            root_target=root_target / sinister / dataset_name / sinister_encoding)
+                                            root_target=root_target / sinister / dataset_name / sinister_encoding,
+                                            test_departements=test_departements)
     
     #graphScale.find_closest_cluster(graphScale.departements.unique(), train_date, dir_output, rootDisk / 'csv')
 
@@ -621,12 +622,12 @@ def init(args, dir_output, script):
     kmeans_features = args.kmeans_features
 
     ######################## Get departments and train departments #######################
-
-    departements = args.train_departments
+    
+    train_departements = deepcopy(args.train_departments)
+    test_departements = deepcopy(args.test_departments)
+    departements = deepcopy(args.train_departments)
     departements += [dept for dept in args.test_departments if dept not in departements]
     departements = sorted(departements)
-    train_departements = args.train_departments
-
     ######################## CONFIG ################################
     
     if dataset_name == 'firemen2':
@@ -664,7 +665,7 @@ def init(args, dir_output, script):
 
         graphScale = construct_graph(
                                     train_departements=train_departements,
-                                    departements=departements,
+                                    test_departements=test_departements,
                                     scale=scale,
                                      maxDist=maxDist[scale],
                                     sinister=sinister,

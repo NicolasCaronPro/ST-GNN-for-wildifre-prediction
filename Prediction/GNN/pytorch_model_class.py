@@ -367,7 +367,7 @@ class ModelGNN(SplitTraining):
             inputs, labels, DGLgraphs, graphs_id = data
 
         if inputs.shape[0] == 1:
-            return 0
+            return 0, 0
 
         band = -1
         total_loss = None
@@ -442,7 +442,12 @@ class ModelGNN(SplitTraining):
             hidden_past.append(hidden)
             output_past.append(output)
 
-            loss = self.calculate_loss(criterion, logits, target, weights, labels)
+            loss_res = self.calculate_loss(criterion, logits, target, weights, labels)
+            
+            if isinstance(loss_res, dict):
+                loss = loss_res['total_loss']
+            else:
+                loss = loss_res
 
             if self.student_train:
                 criterion_teacher = self.get_loss('kldivloss')
@@ -479,7 +484,7 @@ class ModelGNN(SplitTraining):
             else:
                 total_loss += loss
 
-        return total_loss
+        return total_loss, loss_res
 
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf='test', calibrate=False) -> torch.tensor:
         """

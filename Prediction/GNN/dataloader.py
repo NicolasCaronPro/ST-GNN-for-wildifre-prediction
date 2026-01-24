@@ -153,7 +153,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
             df['scale'] = scale
 
     departements = cfg.train_departments + cfg.test_departments
-    train_departements = cfg.train_departments
+    train_departements = deepcopy(cfg.train_departments)
     if 'select' in name_exp:
         # Utiliser findall pour capturer toutes les balises présentes
         matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
@@ -330,6 +330,10 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
                dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
                args: dict, cfg=None,
                save=True):
+    
+    
+    print(train_departements)
+    exit(1)
     
     global features
 
@@ -1587,7 +1591,7 @@ def test_sklearn_api_model(cfg,
             logger.info(f'{model.get_params(deep=True)}')
 
         run = f'{test_name}_{name}_0_{scale}_{prefix_train}'
-
+        
         if MLFLOW:
             existing_run = get_existing_run(f'{run}')
             if existing_run:

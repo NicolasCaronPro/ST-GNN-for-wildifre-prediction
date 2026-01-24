@@ -2566,7 +2566,7 @@ class Training():
     def launch_batch(self, data, criterion, batch_type, do_update):
         inputs, labels, _ = data
         graphs = None
-
+        
         if inputs.shape[0] == 1:
             return 0, 0
 
@@ -2713,7 +2713,7 @@ class Training():
             self._epoch_distill_worst = {'loss': float('-inf'), 'graph_id': None}
         
         for i, data in enumerate(loader, 0):
-
+            
             loss, loss_res = self.launch_batch(data, criterion, 'train', do_update)
 
             if isinstance(loss, int):
@@ -2797,6 +2797,7 @@ class Training():
         with torch.no_grad():
 
             for i, data in enumerate(loader, 0):
+                
                 loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=False)
 
                 total_loss += loss.item()

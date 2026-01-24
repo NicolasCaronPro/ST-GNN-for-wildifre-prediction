@@ -2109,6 +2109,9 @@ class GraphStructure():
             return
 
         for dept in test_departements:
+            if dept in departements:
+                continue
+            
             dir_data = root_data / dept / 'raster' / self.resolution
 
             datacube_target = read_object(
@@ -2118,14 +2121,14 @@ class GraphStructure():
             assert datacube_target is not None
 
             # Important : même fenêtre temporelle que pour l'entraînement
-            datacube_target = datacube_target.sel(date=train_dates)
+            datacube_target_sel = datacube_target.sel(date=train_dates)
 
             # target_values: (lat, lon, time) ou (time, lat, lon) selon ton datacube
             # Dans ton code train tu fais: values[0] puis sum(mask, axis=0)
             # -> on garde la même logique
-            target_values = datacube_target['occurence'].values[0]
+            target_values = datacube_target_sel['occurence'].values[0]
             
-            raster = datacube_target['area'].values[0]
+            raster = datacube_target_sel['area'].values[0]
 
             time_series_image = np.full(raster.shape, fill_value=np.nan)
 
@@ -2146,13 +2149,15 @@ class GraphStructure():
                     cluster_id = self.cluster_node_model.predict(target_node.reshape(1, -1))[0]
 
                 time_series_image[raster == node] = cluster_id
+                
+            print(f'{dept} -> {np.unique(time_series_image)}')
 
-            datacube_target['time_series_clustering'] = xr.DataArray(
+            datacube_target_sel['time_series_clustering'] = xr.DataArray(
                 time_series_image, dims=('latitude', 'longitude')
             )
 
             save_object(
-                datacube_target,
+                datacube_target_sel,
                 f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl',
                 dir_datacube
             )
