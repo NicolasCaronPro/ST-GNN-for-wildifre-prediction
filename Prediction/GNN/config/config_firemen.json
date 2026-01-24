@@ -90,7 +90,7 @@
       "kdays": 10,
       "horizon": 10,
       "nbfeatures": "all",
-      "target": "nbsinister-kmeans-5-Class-Dept",
+      "target": "nbsinister-quantile-5-Class-Dept",
       "task": "classification",
       "loss": "wkloss",
       "out_channels": 5,
@@ -104,7 +104,7 @@
      "epochs": 30000,
     "batch_size": 64,
     "lr": 0.00005,
-    "PATIENCE_CNT":25,
+    "PATIENCE_CNT": 25,
     "CHECKPOINT":25
   }
 }
