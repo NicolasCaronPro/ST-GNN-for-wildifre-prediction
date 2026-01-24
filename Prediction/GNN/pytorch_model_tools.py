@@ -1402,54 +1402,29 @@ def create_test_val_dataset(graph,
 def get_numpy_data(graph, df,
                        features_name,
                        use_temporal_as_edges : bool,
-                       ks :int):
+                       ks :int,
+                       horizon:int,
+                       
+                       ):
 
     Xset = df[ids_columns + features_name].values
 
     X = []
     E = []
     Yset = None
-    """if graph.graph_method == 'graph':
-        graphId = np.unique(Xset[:, graph_id_index])
-        for id in graphId:
-            Xset_graph = Xset[Xset[:, graph_id_index] == id]
-            Yset_graph = Yset[Yset[:, graph_id_index] == id]
-            udates = np.unique(Xset_graph[:, date_index])
-            for date in udates:
-                if use_temporal_as_edges is None:
-                    x, y = construct_time_series(date, Xset_graph, Yset_graph, ks, len(ids_columns))
-                    if x is not None:
-                        for i in range(x.shape[0]):
-                            X.append(x[i])
-                            Y.append(y[i])
-                    continue
-                elif use_temporal_as_edges:
-                    x, y, e = construct_graph_set(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
-                else:
-                    x, y, e = construct_graph_with_time_series(graph, date, Xset_graph, Yset_graph, ks, len(ids_columns))
 
-                if x is None:
-                    continue
-
-                if x.shape[0] == 0:
-                    continue
-
-                X.append(x)
-                Y.append(y)
-                E.append(e)
-    else:"""
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, _ = construct_time_series(date, Xset, Yset, ks, len(ids_columns))
+            x, _ = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
             continue
         elif use_temporal_as_edges:
-            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
         else:
-            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, len(ids_columns))
+            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
 
         if x is None:
             continue
