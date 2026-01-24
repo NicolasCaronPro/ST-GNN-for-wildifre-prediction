@@ -800,210 +800,9 @@ def generate_subgraph(
     return newSubNode
 
 
-def construct_graph_set(graph, date, X, Y, ks, horizon: int, start_features: int):
-    """
-    Construct indexing graph with nodes sort by their id and date and corresponding edges.
-    We consider spatial edges and temporal edges
-    date : date
-    X : train or val nodes
-    Y : train or val target
-    ks : size of the time series
-    """
-
-    mask = np.argwhere((X[:, date_index] == date) & (X[:, weight_index] > 0))[:, 0]
-    x = X[mask]
-    node_with_weight = np.unique(x[:, id_index])
-
-    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
-
-    if ks != 0:
-        maskts = np.argwhere(
-            (
-                (
-                    np.isin(X[:, id_index], x[:, id_index])
-                    | np.isin(X[:, id_index], connection)
-                )
-                & (X[:, date_index] <= date)
-                & (X[:, date_index] >= date - ks)
-            )
-        )[:, 0]
-        if maskts.shape[0] == 0:
-            return None, None, None
-        xts = X[maskts]
-        x = np.concatenate((x, xts))
-
-    if Y is not None:
-        y = Y[mask]
-        if ks != 0:
-            yts = Y[maskts]
-            yts[:, weight_index] = 0
-            y = np.concatenate((y, yts))
-
-    else:
-        y = None
-
-    if horizon != 0:
-        maskts = np.argwhere(
-            (
-                (
-                    np.isin(X[:, id_index], x[:, id_index])
-                    | np.isin(X[:, id_index], connection)
-                )
-                & (X[:, date_index] > date)
-                & (X[:, date_index] <= date + horizon)
-            )
-        )[:, 0]
-        if maskts.shape[0] == 0:
-            return None, None, None
-        xts = X[maskts]
-        x = np.concatenate((x, xts))
-
-    if Y is not None:
-        if ks != 0:
-            yts = Y[maskts]
-            y = np.concatenate((y, yts))
-
-    else:
-        y = None
-
-    # Graph indexing
-    ind = np.lexsort((x[:, id_index], x[:, date_index]))
-    x = x[ind]
-    if Y is not None:
-        y = y[ind]
-
-    # Get graph specific spatial and temporal edges
-    maskgraph = np.argwhere(
-        (np.isin(graph.edges[0], np.unique(node_with_weight)))
-        & (np.isin(graph.edges[1], np.unique(x[:, id_index])))
-    )[:, 0]
-    maskTemp = np.argwhere(
-        (np.isin(graph.temporalEdges[0], date))
-        & (np.isin(graph.temporalEdges[1], np.unique(x[:, date_index])))
-    )[:, 0]
-
-    spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
-    temporalEdges = np.asarray(
-        [graph.temporalEdges[0][maskTemp], graph.temporalEdges[1][maskTemp]]
-    )
-
-    edges = []
-    target = []
-    seen_edges = []
-    src = []
-    time_delta = []
-
-    if spatialEdges.shape[1] != 0 or temporalEdges.shape[1] != 0:
-        for i, node in enumerate(x):
-            # Spatial edges
-            if spatialEdges.shape[1] != 0:
-                spatialNodes = x[np.argwhere((x[:, date_index] == node[date_index]))]
-                spatialNodes = spatialNodes.reshape(-1, spatialNodes.shape[-1])
-                spatial = spatialEdges[1][
-                    (np.isin(spatialEdges[1], spatialNodes[:, id_index]))
-                    & (spatialEdges[0] == node[id_index])
-                ]
-                for sp in spatial:
-                    if (
-                        i,
-                        np.argwhere(
-                            (x[:, date_index] == node[date_index])
-                            & (x[:, id_index] == sp)
-                        )[0][0],
-                    ) not in seen_edges:
-                        src.append(i)
-                        target.append(
-                            np.argwhere(
-                                (x[:, date_index] == node[date_index])
-                                & (x[:, id_index] == sp)
-                            )[0][0]
-                        )
-                        time_delta.append(0)
-                        seen_edges.append(
-                            (
-                                i,
-                                np.argwhere(
-                                    (x[:, date_index] == node[date_index])
-                                    & (x[:, id_index] == sp)
-                                )[0][0],
-                            )
-                        )
-
-            # temporal edges
-            if temporalEdges.shape[1] != 0:
-                temporalNodes = x[np.argwhere((x[:, id_index] == node[id_index]))]
-                temporalNodes = temporalNodes.reshape(-1, temporalNodes.shape[-1])
-                temporal = temporalEdges[1][
-                    (np.isin(temporalEdges[1], temporalNodes[:, date_index]))
-                    & (temporalEdges[0] == node[date_index])
-                ]
-                for tm in temporal:
-                    if (
-                        i,
-                        np.argwhere(
-                            (x[:, date_index] == tm)
-                            & (x[:, id_index] == node[id_index])
-                        )[0][0],
-                    ) not in seen_edges:
-                        src.append(i)
-                        target.append(
-                            np.argwhere(
-                                (x[:, date_index] == tm)
-                                & (x[:, id_index] == node[id_index])
-                            )[0][0]
-                        )
-                        time_delta.append(abs(node[date_index] - tm))
-                        seen_edges.append(
-                            (
-                                i,
-                                np.argwhere(
-                                    (x[:, date_index] == tm)
-                                    & (x[:, id_index] == node[id_index])
-                                )[0][0],
-                            )
-                        )
-
-            # Spatio-temporal edges
-            if temporalEdges.shape[1] != 0 and spatialEdges.shape[1] != 0:
-                nodes = x[
-                    (
-                        np.argwhere(
-                            (x[:, date_index] != node[date_index])
-                            & (x[:, id_index] != node[id_index])
-                        )
-                    )
-                ]
-                nodes = nodes.reshape(-1, nodes.shape[-1])
-                spatial = spatialEdges[1][
-                    (np.isin(spatialEdges[1], nodes[:, id_index]))
-                    & (spatialEdges[0] == node[id_index])
-                ]
-                temporal = temporalEdges[1][
-                    (np.isin(temporalEdges[1], nodes[:, date_index]))
-                    & (temporalEdges[0] == node[date_index])
-                ]
-                for sp in spatial:
-                    for tm in temporal:
-                        arg = np.argwhere(
-                            (x[:, id_index] == sp) & (x[:, date_index] == tm)
-                        )
-                        if arg.shape[0] == 0:
-                            continue
-                        if (i, arg[0][0]) not in seen_edges:
-                            src.append(i)
-                            target.append(arg[0][0])
-                            time_delta.append(abs(node[date_index] - tm))
-                            seen_edges.append((i, arg[0][0]))
-
-        edges = np.row_stack((src, target, time_delta)).astype(int)
-
-    return x[:, start_features:], y, edges
-
-
 import random
 import numpy as np
 import warnings
-
 
 def astype_with_watch(arr, dtype=np.float32, name="cur_array"):
     # capture tous les warnings émis pendant le cast
@@ -1028,10 +827,132 @@ def is_below_threshold(threshold: float = 0.35) -> bool:
     print(p)
     return p < threshold
 
+def construct_graph_set(graph, date, X, Y, ks, horizon:int, start_features: int, proportion_0_with_positive_weight: float):
+    """
+    Construct indexing graph with nodes sort by their id and date and corresponding edges.
+    We consider spatial edges and temporal edges
+    date : date
+    X : train or val nodes
+    Y : train or val target
+    ks : size of the time series
+    """
 
-def concat_temporal_graph_into_time_series(
-    array: np.array, ks: int, date: int, horizon: int
-) -> np.array:
+    mask = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    x = X[mask]
+    node_with_weight = np.unique(x[:, id_index])
+
+    connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
+
+    if ks != 0:
+        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+        if maskts.shape[0] == 0:
+            return None, None, None
+        xts = X[maskts]
+        x = np.concatenate((x, xts))
+
+    if Y is not None:
+        y = Y[mask]
+        if ks != 0:
+            yts = Y[maskts]
+            yts[:, weight_index] = 0
+            y = np.concatenate((y, yts))
+
+    else:
+        y = None
+
+    if horizon != 0:
+        maskts = np.argwhere(((np.isin(X[:,id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:, date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
+        if maskts.shape[0] == 0:
+            return None, None, None
+        xts = X[maskts]
+        x = np.concatenate((x, xts))
+
+    if Y is not None:
+        if horizon != 0:
+            yts = Y[maskts].copy()
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
+            y = np.concatenate((y, yts))
+
+    else:
+        y = None
+
+    # Graph indexing
+    ind = np.lexsort((x[:,id_index], x[:,date_index]))
+    x = x[ind]
+    if Y is not None:
+        y = y[ind]
+    
+    # Get graph specific spatial and temporal edges 
+    maskgraph = np.argwhere((np.isin(graph.edges[0], np.unique(node_with_weight))) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    maskTemp = np.argwhere((np.isin(graph.temporalEdges[0], date)) & (np.isin(graph.temporalEdges[1], np.unique(x[:,date_index]))))[:, 0]
+    
+    spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    temporalEdges = np.asarray([graph.temporalEdges[0][maskTemp], graph.temporalEdges[1][maskTemp]])
+
+    edges = []
+    target = []
+    seen_edges = []
+    src = []
+    time_delta = []
+
+    if spatialEdges.shape[1] != 0  or temporalEdges.shape[1] != 0:
+        for i, node in enumerate(x):
+            # Spatial edges
+            if spatialEdges.shape[1] != 0:
+                spatialNodes = x[np.argwhere((x[:,date_index] == node[date_index]))]
+                spatialNodes = spatialNodes.reshape(-1, spatialNodes.shape[-1])
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
+                for sp in spatial:
+                    if (i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]) not in seen_edges:
+                        src.append(i)
+                        target.append(np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0])
+                        time_delta.append(0)
+                        seen_edges.append((i, np.argwhere((x[:,date_index] == node[date_index]) & (x[:,id_index] == sp))[0][0]))
+
+            # temporal edges
+            if temporalEdges.shape[1] != 0:
+                temporalNodes = x[np.argwhere((x[:,id_index] == node[id_index]))]
+                temporalNodes = temporalNodes.reshape(-1, temporalNodes.shape[-1])
+                temporal = temporalEdges[1][(np.isin(temporalEdges[1], temporalNodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
+                for tm in temporal:
+                    if (i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]) not in seen_edges:
+                        src.append(i)
+                        target.append(np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0])
+                        time_delta.append(abs(node[date_index] - tm))
+                        seen_edges.append((i, np.argwhere((x[:,date_index] == tm) & (x[:,id_index] == node[id_index]))[0][0]))
+
+            # Spatio-temporal edges
+            if temporalEdges.shape[1] != 0  and spatialEdges.shape[1] != 0:
+                nodes = x[(np.argwhere((x[:,date_index] != node[date_index]) & (x[:,id_index]  != node[id_index])))]
+                nodes = nodes.reshape(-1, nodes.shape[-1])
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], nodes[:,id_index])) & (spatialEdges[0] == node[id_index])]
+                temporal = temporalEdges[1][(np.isin(temporalEdges[1], nodes[:,date_index])) & (temporalEdges[0] == node[date_index])]
+                for sp in spatial:
+                    for tm in temporal:
+                        arg = np.argwhere((x[:,id_index] == sp) & (x[:,date_index] == tm))
+                        if arg.shape[0] == 0:
+                            continue
+                        if (i, arg[0][0]) not in seen_edges:
+                            src.append(i)
+                            target.append(arg[0][0])
+                            time_delta.append(abs(node[date_index] - tm))
+                            seen_edges.append((i, arg[0][0]))
+
+        edges = np.row_stack((src, target, time_delta)).astype(int)
+
+    return x[:, start_features:], y, edges
+
+def concat_temporal_graph_into_time_series(array: np.array, ks: int, date: int, horizon:int) -> np.array:
 
     uniqueNodes = np.unique(array[:, id_index])
     res = []
@@ -1069,27 +990,16 @@ def concat_temporal_graph_into_time_series(
                     x = arrayNode[:, date_index]
                     y = arrayNode[:, band]
                     if len(x) > 1:  # Vérifier si interpolation possible
-                        f = scipy.interpolate.interp1d(
-                            x,
-                            y,
-                            kind="nearest",
-                            bounds_error=False,
-                            fill_value="extrapolate",
-                        )
+                        f = scipy.interpolate.interp1d(x, y, kind='nearest', bounds_error=False, fill_value='extrapolate')
                         new_data[:, band] = f(ud)
                     else:
                         new_data[:, band] = 0  # ou une autre valeur par défaut
 
                 arrayNode = np.vstack([arrayNode, new_data])
                 arrayNode = arrayNode[np.argsort(arrayNode[:, date_index])]
-
+        
         # Extraire les données dans l'intervalle de date
-        cur_array = arrayNode[
-            (arrayNode[:, date_index] >= date_limit_min)
-            & (arrayNode[:, date_index] <= date + horizon)
-        ]
-        # cur_array = astype_with_watch(cur_array, np.float32, name="cur_array")
-
+        cur_array = arrayNode[(arrayNode[:, date_index] >= date_limit_min) & (arrayNode[:, date_index] <= date + horizon)]
         cur_array = cur_array.astype(np.float32)
 
         """new_data = np.copy(cur_array)
@@ -1121,8 +1031,8 @@ def concat_temporal_graph_into_time_series(
 
         print("\nIndices overflow:")
         print(np.where(is_inf)[0])"""
-
-        res.append(cur_array[: ks + horizon + 1])
+        
+        res.append(cur_array[:ks + horizon + 1])
 
     if len(res) == 0:
         return np.empty((0, ks))
@@ -1131,16 +1041,9 @@ def concat_temporal_graph_into_time_series(
     res = np.moveaxis(res, 1, 2)
     return res
 
-
-def construct_graph_with_time_series(
-    graph,
-    date: int,
-    X: np.array,
-    Y: np.array,
-    ks: int,
-    horizon: int,
-    start_features: int,
-) -> np.array:
+def construct_graph_with_time_series(graph, date : int,
+                                     X : np.array, Y : np.array,
+                                     ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight) -> np.array:
     """
     Construct indexing graph with nodes sort by their id and date and corresponding edges.
     We consider spatial edges and time series X
@@ -1150,27 +1053,16 @@ def construct_graph_with_time_series(
     ks : size of the time series
     """
 
-    mask = np.argwhere((X[:, date_index] == date))[:, 0]
+    mask = np.argwhere((X[:,date_index] == date))[:, 0]
 
     x = X[mask]
     if graph.edges is not None:
-        connection = graph.edges[1][
-            np.argwhere(np.isin(graph.edges[0], x[:, id_index]))
-        ]
+        connection = graph.edges[1][np.argwhere(np.isin(graph.edges[0], x[:, id_index]))]
     else:
         connection = []
 
-    maskts = np.argwhere(
-        (
-            (
-                np.isin(X[:, id_index], x[:, id_index])
-                | np.isin(X[:, id_index], connection)
-            )
-            & (X[:, date_index] <= date)
-            & (X[:, date_index] >= date - ks)
-        )
-    )[:, 0]
-
+    maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] <= date) & (X[:,date_index] >= date - ks)))[:, 0]
+    
     if maskts.shape[0] == 0:
         return None, None, None
 
@@ -1184,24 +1076,15 @@ def construct_graph_with_time_series(
         y = Y[mask]
         if maskts.shape[0] != 0:
             yts = Y[maskts]
-            yts[:, weight_index] = 0
+            yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
 
     else:
         y = None
 
     if horizon != 0:
-        maskts = np.argwhere(
-            (
-                (
-                    np.isin(X[:, id_index], x[:, id_index])
-                    | np.isin(X[:, id_index], connection)
-                )
-                & (X[:, date_index] > date)
-                & (X[:, date_index] <= date + horizon)
-            )
-        )[:, 0]
-
+        maskts = np.argwhere(((np.isin(X[:, id_index], x[:,id_index]) | np.isin(X[:, id_index], connection)) & (X[:,date_index] > date) & (X[:,date_index] <= date + horizon)))[:, 0]
+    
         if maskts.shape[0] == 0:
             return None, None, None
 
@@ -1212,7 +1095,18 @@ def construct_graph_with_time_series(
             x = np.concatenate((x, xts))
 
         if Y is not None:
-            yts = Y[maskts]
+            yts = Y[maskts].copy()
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
             y = np.concatenate((y, yts))
 
     def get_unique_pair_indices(array, graph_id_index, date_index):
@@ -1232,9 +1126,7 @@ def construct_graph_with_time_series(
                 unique_indices.append(i)
         return unique_indices
 
-    unique_indices = get_unique_pair_indices(
-        y, graph_id_index=id_index, date_index=date_index
-    )
+    unique_indices = get_unique_pair_indices(y, graph_id_index=id_index, date_index=date_index)
     x = x[unique_indices]
     if Y is not None:
         y = y[unique_indices]
@@ -1243,13 +1135,13 @@ def construct_graph_with_time_series(
     x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
     if x is None:
         return None, None, None
-
+    
     if Y is not None:
         y = concat_temporal_graph_into_time_series(y, ks, date, horizon)
 
     # Get graph specific spatial
-    # maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
-    # spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
+    #maskgraph = np.argwhere((np.isin(graph.edges[0], node_with_weight)) & (np.isin(graph.edges[1], np.unique(x[:,id_index]))))[:, 0]
+    #spatialEdges = np.asarray([graph.edges[0][maskgraph], graph.edges[1][maskgraph]])
     if graph.edges is not None:
         spatialEdges = graph.edges
 
@@ -1258,34 +1150,23 @@ def construct_graph_with_time_series(
         src = []
 
         for i, node in enumerate(x):
-            spatialNodes = x[
-                np.argwhere((x[:, date_index, -1] == node[date_index][-1]))
-            ][:, :, 0, 0]
+            spatialNodes = x[np.argwhere((x[:,date_index,-1] == node[date_index][-1]))][:,:, 0, 0]
             if spatialEdges.shape[1] != 0:
-                spatial = spatialEdges[1][
-                    (np.isin(spatialEdges[1], spatialNodes[:, 0]))
-                    & (spatialEdges[0] == node[id_index][0])
-                ]
+                spatial = spatialEdges[1][(np.isin(spatialEdges[1], spatialNodes[:,0])) & (spatialEdges[0] == node[id_index][0])]
                 for sp in spatial:
                     src.append(i)
-                    target.append(
-                        np.argwhere(
-                            (x[:, date_index, -1] == node[date_index][-1])
-                            & (x[:, id_index, 0] == sp)
-                        )[0][0]
-                    )
-            # src.append(i)
-            # target.append(i)
-
+                    target.append(np.argwhere((x[:,date_index,-1] == node[date_index][-1]) & (x[:,id_index,0] == sp))[0][0])
+            #src.append(i)
+            #target.append(i)
+            
         edges = np.row_stack((src, target)).astype(int)
     else:
         edges = []
     return x[:, start_features:], y, edges
 
-
-def construct_time_series(
-    date: int, X: np.array, Y: np.array, ks: int, horizon: int, start_features: int
-) -> np.array:
+def construct_time_series(date : int,
+                            X : np.array, Y : np.array,
+                            ks :int, horizon:int, start_features : int, proportion_0_with_positive_weight : float) -> np.array:
     """
     Construct time series
     We consider spatial edges and time series X
@@ -1295,51 +1176,49 @@ def construct_time_series(
     ks : size of the time series
     """
 
-    maskgraph = np.argwhere((X[:, date_index] == date) & (X[:, weight_index] > 0))[:, 0]
+    maskgraph = np.argwhere((X[:,date_index] == date) & (X[:, weight_index] > 0))[:, 0]
     x = X[maskgraph]
-
+    
     if ks != 0:
-        maskts = np.argwhere(
-            (
-                np.isin(X[:, id_index], x[:, id_index])
-                & (X[:, date_index] < date)
-                & (X[:, date_index] >= date - ks)
-            )
-        )[:, 0]
+        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] < date ) & (X[:,date_index] >= date - ks)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
-
+        
         if maskts.shape[0] == 0:
             return None, None
-
+    
         xts = X[maskts]
         x = np.concatenate((x, xts))
-
+        
     if Y is not None:
         y = Y[maskgraph]
         if ks != 0:
             yts = Y[maskts]
-            yts[:, weight_index] = 0
+            yts[:,weight_index] = 0
             y = np.concatenate((y, yts))
 
-    horizon = int(horizon)
-    if horizon != 0:
-        maskts = np.argwhere(
-            (
-                np.isin(X[:, id_index], x[:, id_index])
-                & (X[:, date_index] > date)
-                & (X[:, date_index] <= date + horizon)
-            )
-        )[:, 0]
+    if horizon !=0:
+        maskts = np.argwhere((np.isin(X[:,id_index], x[:,id_index]) & (X[:,date_index] > date ) & (X[:,date_index] <= date + horizon)))[:, 0]
         maskts = np.asarray([index for index in maskts if index not in maskgraph])
-
+        
         if maskts.shape[0] == 0:
             return None, None
-
+    
         xts = X[maskts]
         x = np.concatenate((x, xts))
-
+        
         if Y is not None:
-            yts = Y[maskts]
+            yts = Y[maskts].copy()
+            mask_zeros = (yts[:, -1] == 0)
+
+            p_keep = float(proportion_0_with_positive_weight)
+            p_drop = np.clip(1.0 - p_keep, 0.0, 1.0)
+
+            zeros_idx = np.flatnonzero(mask_zeros)
+            if zeros_idx.size:
+                r = np.random.rand(zeros_idx.size)
+                drop_idx = zeros_idx[r < p_drop]
+                yts[drop_idx, weight_index] = 0
+
             y = np.concatenate((y, yts))
 
     x = concat_temporal_graph_into_time_series(x, ks, date, horizon)
@@ -1350,7 +1229,7 @@ def construct_time_series(
     else:
         y = None
 
-    x = x[:, start_features:]
+    x =  x[:, start_features:]
     return x, y
 
 

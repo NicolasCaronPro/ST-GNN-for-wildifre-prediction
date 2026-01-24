@@ -223,7 +223,8 @@ class ModelGNN(SplitTraining):
                                                     self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
-                                                    mesh2graph=self.mesh2graph
+                                                    mesh2graph=self.mesh2graph,
+                                                    proportion_0_sample_with_positive_weight=1.0
                                                     )
             else:
                 val_dataset, test_dataset = create_test_val_dataset(graph,
@@ -236,7 +237,8 @@ class ModelGNN(SplitTraining):
                                                     self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
-                                                    mesh2graph=self.mesh2graph)
+                                                    mesh2graph=self.mesh2graph,
+                                                    proportion_0_sample_with_positive_weight=1.0)
                 
             if not self.mesh or self.mesh == False:            
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
@@ -318,7 +320,8 @@ class ModelGNN(SplitTraining):
                                                     self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
-                                                    mesh2graph=self.mesh2graph)
+                                                    mesh2graph=self.mesh2graph,
+                                                    proportion_0_sample_with_positive_weight=best_tp if 'best_tp' in locals() else 1.0)
             else:
                 train_dataset = create_train_dataset(graph,
                                                     df_train,
@@ -329,7 +332,8 @@ class ModelGNN(SplitTraining):
                                                     self.horizon,
                                                     graph_mesh=self.graph_mesh,
                                                     gridh2mesh=self.gridh2mesh,
-                                                    mesh2graph=self.mesh2graph)
+                                                    mesh2graph=self.mesh2graph,
+                                                    proportion_0_sample_with_positive_weight=best_tp if 'best_tp' in locals() else 1.0)
 
             if not self.mesh or self.mesh == False:            
                 self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn)
@@ -354,7 +358,8 @@ class ModelGNN(SplitTraining):
                         self.horizon,
                        self.graph_mesh,
                         self.gridh2mesh,
-                        self.mesh2graph)
+                        self.mesh2graph,
+                        1.0)
 
         return loader
 
@@ -685,7 +690,8 @@ class Model_Torch(SplitTraining):
                                                                 self.horizon,
                                                                 graph_mesh=None,
                                                                 gridh2mesh=None,
-                                                                mesh2graph=None)
+                                                                mesh2graph=None,
+                                                                proportion_0_sample_with_positive_weight=1.0)
             
             val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
             test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
@@ -810,7 +816,8 @@ class Model_Torch(SplitTraining):
                                                 self.device, self.ks, self.horizon,
                                                 graph_mesh=None,
                                                 gridh2mesh=None,
-                                                mesh2graph=None)
+                                                mesh2graph=None,
+                                                proportion_0_sample_with_positive_weight=best_tp if 'best_tp' in locals() else 1.0)
     
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
@@ -830,6 +837,7 @@ class Model_Torch(SplitTraining):
                        self.horizon,
                         graph_mesh=None,
                         gridh2mesh=None,
-                        mesh2graph=None)
+                        mesh2graph=None,
+                        proportion_0_sample_witg_positive_weight=1.0)
 
         return loader

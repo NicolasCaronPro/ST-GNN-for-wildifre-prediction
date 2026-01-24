@@ -1194,7 +1194,7 @@ def graph_collate_fn_adj_mat(batch):
 
     return node_features, node_labels, adjacency_matrix, graph_labels.to(device)
 
-def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False):
+def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon, use_temporal_as_edges, isNotmesh=False, proportion_0_sample_with_positive_weight=0.0):
     Xs, Ys, Es = [], [], []
     
     """if graph.graph_method == 'graph':
@@ -1233,7 +1233,7 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
     print(ks, horizon)
     for id in date_ids:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y = construct_time_series(id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
             if x is not None and isNotmesh:
                 for i in range(x.shape[0]):
                     Xs.append(x[i])
@@ -1243,9 +1243,9 @@ def construct_dataset(date_ids, x_data, y_data, graph, ids_columns, ks, horizon,
                 Ys.append(y)
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_set(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
         else:
-            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, id, x_data, y_data, ks, horizon, len(ids_columns), proportion_0_sample_with_positive_weight)
 
         if x is None:
             continue
@@ -1271,7 +1271,8 @@ def create_dataset(graph,
                     horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None
+                    mesh2graph=None,
+                    proportion_0_sample_with_positive_weight=0.0
                     ):
     
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
@@ -1283,17 +1284,17 @@ def create_dataset(graph,
     dateTrain = np.sort(np.unique(y_train[y_train[:, weight_index] > 0, date_index]))
     dateVal = np.sort(np.unique(y_val[y_val[:, weight_index] > 0, date_index]))
     dateTest = np.sort(np.unique(y_test[y_test[:, weight_index] > 0, date_index]))
-
+    
     logger.info(f'{dateTrain.shape}, {dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1327,7 +1328,8 @@ def create_train_dataset(graph,
                     horizon:int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None):
+                    mesh2graph=None,
+                    proportion_0_sample_with_positive_weight=0.0):
 
     x_train, y_train = df_train[ids_columns + features_name].values, df_train[ids_columns + targets_columns + [target_name]].values
     
@@ -1338,7 +1340,7 @@ def create_train_dataset(graph,
     logger.info(f'{dateTrain.shape}')
 
     logger.info(f'Constructing train Dataset')
-    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    Xst, Yst, Est = construct_dataset(dateTrain, x_train, y_train, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
 
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(Xst) > 0, "Le jeu de données d'entraînement est vide"
@@ -1365,7 +1367,8 @@ def create_test_val_dataset(graph,
                     horizon: int,
                     graph_mesh=None,
                     gridh2mesh=None,
-                    mesh2graph=None):
+                    mesh2graph=None,
+                    proportion_0_sample_with_positive_weight=1.0):
         
     x_val, y_val = df_val[ids_columns + features_name].values, df_val[ids_columns + targets_columns + [target_name]].values
 
@@ -1377,10 +1380,10 @@ def create_test_val_dataset(graph,
     logger.info(f'{dateVal.shape}, {dateTest.shape}')
 
     logger.info(f'Constructing val Dataset')
-    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsV, YsV, EsV = construct_dataset(dateVal, x_val, y_val, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
 
     logger.info(f'Constructing test Dataset')
-    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None)
+    XsTe, YsTe, EsTe = construct_dataset(dateTest, x_test, y_test, graph, ids_columns, ks, horizon, use_temporal_as_edges, graph_mesh is None, proportion_0_sample_with_positive_weight)
     
     # Assurez-vous que les ensembles ne sont pas vides
     assert len(XsV) > 0, "Le jeu de données de validation est vide"
@@ -1474,7 +1477,8 @@ def create_test_loader(graph, df,
                        horizon:int,
                        graph_mesh=None,
                         gridh2mesh=None,
-                        mesh2graph=None):
+                        mesh2graph=None,
+                        proportion_0_sample_witg_positive_weight=1.0):
     
     Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
@@ -1514,16 +1518,16 @@ def create_test_loader(graph, df,
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns))
+            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), proportion_0_sample_witg_positive_weight)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
                     Y.append(y[i])
             continue
         elif use_temporal_as_edges:
-            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns))
+            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), proportion_0_sample_witg_positive_weight)
         else:
-            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns))
+            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon,len(ids_columns), proportion_0_sample_witg_positive_weight)
 
         if x is None:
             continue

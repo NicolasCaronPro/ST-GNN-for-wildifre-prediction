@@ -332,9 +332,6 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
                save=True):
     
     
-    print(train_departements)
-    exit(1)
-    
     global features
 
     old_shape = df.shape
