@@ -270,7 +270,7 @@ ids_columns = ['graph_id', 'id', 'longitude', 'latitude', 'departement', 'date',
 targets_columns = ['time_intervention',
                    'ressource',
                     'burned_area',
-                   'nbsinister_id', 'nbsinister', 'risk']
+                   'nbsinister_id', 'nbsinister', 'risk', 'DFE']
 
 weights_columns = ['proportion_on_zero_class',
                    'class',
@@ -393,8 +393,8 @@ jours_feries = sum([list(jours_feries_france.JoursFeries.for_year(k).values()) f
 veille_jours_feries = sum([[l-dt.timedelta(days=1) for l \
             in jours_feries_france.JoursFeries.for_year(k).values()] for k in range(2017,2025)],[]) # French Veille Jours fériés, used in features_*.py 
 vacances_scolaire = vacances_scolaires_france.SchoolHolidayDates() # French Holidays used in features_*.py
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
-#device = torch.device("cpu") # The device on which we train each models
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # The device on which we train each models
+device = torch.device("cpu") # The device on which we train each models
 Rewrite = True
 #scaling='MinMax' # Scale to used
 #scaling='none' # Scale to used

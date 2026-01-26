@@ -179,6 +179,11 @@ def main():
         val_dataset = read_object(f"df_val_{prefix}.pkl", dir_output)
         test_dataset = read_object(f"df_test_{prefix}.pkl", dir_output)
         
+        if 'DFE' not in train_dataset.columns:
+            train_dataset['DFE'] = 0.0
+            val_dataset['DFE'] = 0.0
+            test_dataset['DFE'] = 0.0
+        
         train_dataset['burnedarea'] = train_dataset['burned_area'].values
         val_dataset['burnedarea'] = val_dataset['burned_area'].values
         test_dataset['burnedarea'] = test_dataset['burned_area'].values

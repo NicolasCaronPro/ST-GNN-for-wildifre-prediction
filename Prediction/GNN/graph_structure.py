@@ -26,6 +26,91 @@ from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 import re
 
+def load_dfe_for_06(dir_data):
+    
+    dir_data_dfe = dir_data / 'departement-06-alpes-maritimes' / 'firepoint'
+    
+    if not (dir_data_dfe / 'Analyse de la météo 2015-2025.xlsx').is_file():
+        print(f"Unable to find the file {dir_data_dfe}/Analyse de la météo 2015-2025.xlsx")
+        return None
+    
+    # Charger toutes les feuilles
+    all_sheets = pd.read_excel(dir_data_dfe / 'Analyse de la météo 2015-2025.xlsx', sheet_name=None)
+
+    def make_df(sheet_names, all_sheets):
+        """Concatène les feuilles demandées, en ajoutant la colonne sheet_name.
+        Ignore celles qui n'existent pas et prévient."""
+        missing = [s for s in sheet_names if s not in all_sheets]
+        if missing:
+            print(f"Attention: feuilles absentes -> {missing}")
+        frames = [all_sheets[s].assign(sheet_name=s) for s in sheet_names if s in all_sheets]
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+    # ---- Sélectionne ici tes deux listes d'onglets ----
+    sheets_A = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2023']   # exemple
+    sheets_B = ['2024']   # exemple
+
+    # ---- Constructions des deux DataFrames ----
+    df = make_df(sheets_A, all_sheets)
+    df_2024_2025 = make_df(sheets_B, all_sheets)
+
+    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
+    df_2024_2025 = df_2024_2025[df_2024_2025['DFE'].isin(['F', 'L', 'M', 'T', 'S'])]
+    df_2024_2025.DFE.unique()
+
+    df_2024_2025 = df_2024_2025[~df_2024_2025['date_validite'].isna()]
+    df_2024_2025 = df_2024_2025.rename({'production' : 'reseau'}, axis=1)
+    df_2024_2025 = df_2024_2025.rename({'Sech_expert' : 'secheresse expertisee'}, axis=1)
+    df_2024_2025 = df_2024_2025.rename({'Reserve' : 'reserve'}, axis=1)
+
+    # Dictionnaire de correspondance
+    mapping_dfe = {
+        'F': 1,  # faible
+        'L': 2,  # léger
+        'M': 3,  # modéré
+        'S': 4,  # sévère
+        'T': 5,  # très sévère
+        'E': 6   # extrême
+    }
+
+    # Encodage
+    df_2024_2025['DFE'] = df_2024_2025['DFE'].map(mapping_dfe)
+
+    def clean_date_column(df, col_name):
+        """
+        Convertit une colonne de dates mixtes (ex: '27/09/2024', '2025-06-16 00:00:00')
+        en format uniforme YYYY-MM-DD.
+        """
+        df[col_name] = pd.to_datetime(df[col_name], errors='coerce', dayfirst=True)
+        df[col_name] = df[col_name].dt.strftime('%Y-%m-%d')
+        return df
+
+    df_2024_2025['date'] = df_2024_2025['date_validite'].values
+    df_2024_2025 = clean_date_column(df_2024_2025, 'date')
+
+    df = df[~df['date'].isna()]
+    df = df[df['DFE'] > -999]
+    
+    return df
+
+def num_zone2_graph_id_dep6(df, graph_ids):
+    """
+    Inverse du mapping graph_id -> num_zone
+    pour departement == 6, avec graph_ids fourni.
+    """
+
+    num_zone = [65, 62, 64, 61, 66, 67, 63]
+    
+    assert len(num_zone) == len(graph_ids), f'The size of {graph_ids} must match the size of {num_zone}'
+
+    # Mapping inversé : num_zone -> graph_id
+    inv_map = {nz: gi for gi, nz in zip(graph_ids, num_zone)}
+
+    mask = df['departement'] == 6
+    df.loc[mask, 'graph_id'] = df.loc[mask, 'num_zone'].map(inv_map)
+
+    return df
+
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
     def __init__(self, scale : int,
@@ -846,14 +931,89 @@ class GraphStructure():
             datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
             datacube = datacube.expand_dims(dim={'departement': [dept]})
-
-            #print(bin.shape)
-            #print(datacube)
-
+            
+            if dept == 'departement-06-alpes-maritimes' and "zonemeteo" in self.base:
+                dfe_df = load_dfe_for_06(rootDisk / 'csv')
+            else:
+                dfe_df = None
+            if not dfe_df is None:
+                graph_ids = np.unique(mask)
+                graph_ids = graph_ids[(graph_ids > 0) & ~(np.isnan(graph_ids))]
+                graph_ids = np.sort(graph_ids)
+                dfe_df = num_zone2_graph_id_dep6(dfe_df, graph_ids)
+                datacube = self.add_dfe_variable(datacube, dfe_df)
+            else:
+                datacube['DFE'] = np.nan
+                
             self.numCluster = np.shape(np.unique(self.ids))[0]
 
             save_object(datacube, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'datacube')
 
+
+    def add_dfe_variable(self, ds: xr.Dataset, df: pd.DataFrame) -> xr.Dataset:
+        df = df.copy()
+        df["DFE"] = df["DFE"] - 1
+
+        # --- area_map : on le force à 2D (y, x) ---
+        area_map = ds["area"]
+        # Si area dépend du temps, on prend la première date (puisque tu dis que ça ne varie pas)
+        if "date" in area_map.dims:
+            area_map = area_map.isel(date=0)
+
+        # Identifie les dims spatiales à partir de area_map (robuste)
+        spatial_dims = tuple(area_map.dims)  # ex: ("latitude","longitude") ou ("y","x")
+
+        # --- Prépare df (date, area, DFE) ---
+        df["area"] = df["graph_id"].values
+        df = df[df["area"].notna() & (df["area"] != -1)].copy()
+
+        pivot = df.pivot_table(
+            index="date",
+            columns="area",
+            values="DFE",
+            aggfunc="first",
+            fill_value=0
+        )
+
+        # Aligne les dates du pivot sur celles du ds
+        pivot = pivot.reindex(ds["date"].values, fill_value=0)
+
+        dfe_matrix = pivot.to_numpy()              # shape (T, A)
+        area_ids = pivot.columns.to_numpy()        # shape (A,)
+
+        area_to_col = {a: i for i, a in enumerate(area_ids)}
+
+        # area_index : 2D (spatial)
+        area_index = xr.apply_ufunc(
+            lambda x: np.vectorize(lambda a: area_to_col.get(a, -1))(x),
+            area_map,
+            vectorize=True,
+            dask="parallelized",
+            output_dtypes=[int],
+        ).values  # shape (spatial...)
+
+        valid = area_index != -1  # shape (spatial...)
+
+        # --- Construit le cube DFE avec dims (date + spatial_dims) ---
+        T = ds.sizes["date"]
+        spatial_shape = tuple(ds.sizes[d] for d in spatial_dims)
+
+        dfe_cube = np.zeros((T, *spatial_shape), dtype=float)
+
+        for t in range(T):
+            dfe_cube[t][valid] = dfe_matrix[t, area_index[valid]]
+
+        dfe_da = xr.DataArray(
+            dfe_cube,
+            coords={"date": ds["date"], **{d: ds[d] for d in spatial_dims}},
+            dims=("date", *spatial_dims),
+            name="DFE",
+        )
+
+        ds_out = ds.copy()
+        ds_out["DFE"] = dfe_da
+        return ds_out
+    
     def _raster(self, path : Path,
                 sinister : str,
                 dataset_name: str,
