@@ -999,7 +999,7 @@ class GraphStructure():
         )
 
         # Aligne les dates du pivot sur celles du ds
-        pivot = pivot.reindex(ds["date"].values, fill_value=0)
+        pivot = pivot.reindex(ds["date"].values, fill_value=np.nan)
 
         dfe_matrix = pivot.to_numpy()              # shape (T, A)
         area_ids = pivot.columns.to_numpy()        # shape (A,)

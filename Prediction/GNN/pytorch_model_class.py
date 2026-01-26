@@ -20,8 +20,12 @@ class ModelCNN(SplitTraining):
         
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs,
                                      PATIENCE_CNT, CHECKPOINT, features_importance=True,
-                                     varying_time_variables=[], train_features=[], custom_model_params=None, name_exp=None):
+                                     varying_time_variables=[], train_features=[], custommodel_params=None, name_exp=None):
 
+        df_train = df_train[~df_train[self.target_name].isna()]
+        df_val = df_val[~df_val[self.target_name].isna()]
+        df_test = df_test[~df_test[self.target_name].isna()]
+        
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features], df_train[self.target_name], self.features, self.dir_log / '../importance', self.target_name)
@@ -162,7 +166,11 @@ class ModelGNN(SplitTraining):
         self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
-
+        
+        df_train = df_train[~df_train[self.target_name].isna()]
+        df_val = df_val[~df_val[self.target_name].isna()]
+        df_test = df_test[~df_test[self.target_name].isna()]
+        
         self.graph = graph
         if self.mesh and self.graph_mesh is None:
             
@@ -660,6 +668,10 @@ class Model_Torch(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
+        
+        df_train = df_train[~df_train[self.target_name].isna()]
+        df_val = df_val[~df_val[self.target_name].isna()]
+        df_test = df_test[~df_test[self.target_name].isna()]
 
         if 'learnable-area' in self.loss:
             area_parameters = np.sort(df_train['graph_id'].unique())

@@ -319,9 +319,6 @@ def main():
 
     global_params = {
         "graphScale": graphScale,
-        "train_dataset": train_dataset,
-        "val_dataset": val_dataset,
-        "test_dataset": test_dataset,
         "device": device,
         "optimize_feature": cfg.optimizeFeature,
         "PATIENCE_CNT": cfg.PATIENCE_CNT,
@@ -334,7 +331,6 @@ def main():
         "prefix": prefix,
         "Rewrite": Rewrite,
         "dir_output": dir_output,
-        "train_dataset_unscale": train_dataset_unscale,
         "graph": graphScale,
         "name_dir": name_dir,
         "graph_method": cfg.graph_method,
@@ -345,6 +341,19 @@ def main():
     stat_model_names = []
 
     for i, m in enumerate(cfg.get("models", [])):
+        
+        train_dataset_model = train_dataset[~train_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        val_dataset_model = val_dataset[~val_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        test_dataset_model = test_dataset[~test_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        train_dataset_unscale_model = train_dataset_unscale[~train_dataset_unscale[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        
+        global_params.update(
+            {'train_dataset' : train_dataset_model,
+            'val_dataset' :  val_dataset_model,
+            'test_dataset' : test_dataset_model,
+            'train_dataset_unscale' : train_dataset_unscale_model
+            }
+        )
         
         #features_name = remove_correlated_feature(train_dataset, cfg.scale, features_selected, name_exp, graphScale, dir_output, logger, METHODS_SPATIAL_TRAIN)
 

@@ -2472,10 +2472,10 @@ def shift_target(
             df.loc[index, prev_col] = prev
 
             if task_type == "classification":
-                df.loc[index, full_cols[int(prev)]] = 1
+                df.loc[index, full_cols[int(prev)]] = 1.0
                 
             elif task_type == "binary":
-                df.loc[index, full_cols[int(prev) > 0]] = 1
+                df.loc[index, full_cols[int(prev) > 0]] = 1.0
 
             elif task_type == "regression":
                 pass
@@ -2484,7 +2484,6 @@ def shift_target(
     df = df.dropna(subset=['graph_id', 'date', colunm]).reset_index(drop=True)
 
     return df, features_res
-
 
 def calculate_precipitation_index_1d(precipitation, A=0.1657, n=3):
     """
