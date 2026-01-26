@@ -91,6 +91,22 @@ def load_dfe_for_06(dir_data):
     df = df[~df['date'].isna()]
     df = df[df['DFE'] > -999]
     
+    def change_date_format(df):
+        df['date'] = df['date'].astype(int)
+        df['date'] = df['date'].astype(str)
+
+        def inverse_split(x):
+            year = x[:4]
+            month = x[4:6]
+            day = x[6:]
+            return f'{year}-{month}-{day}'
+
+        df['date'] = df['date'].apply(lambda x : inverse_split(x))
+        
+        return df
+
+    df = change_date_format(df)
+    
     return df
 
 def num_zone2_graph_id_dep6(df, graph_ids):
@@ -952,6 +968,7 @@ class GraphStructure():
 
     def add_dfe_variable(self, ds: xr.Dataset, df: pd.DataFrame) -> xr.Dataset:
         df = df.copy()
+
         df["DFE"] = df["DFE"] - 1
 
         # --- area_map : on le force à 2D (y, x) ---
@@ -960,6 +977,12 @@ class GraphStructure():
         if "date" in area_map.dims:
             area_map = area_map.isel(date=0)
 
+        
+        print(df['graph_id'].unique())
+        print(np.unique(ds['area'].values))
+        
+        print(df['date'].unique())
+        print(np.unique(ds.date))
         # Identifie les dims spatiales à partir de area_map (robuste)
         spatial_dims = tuple(area_map.dims)  # ex: ("latitude","longitude") ou ("y","x")
 
