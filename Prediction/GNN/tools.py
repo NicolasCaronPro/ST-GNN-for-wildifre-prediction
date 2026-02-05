@@ -223,7 +223,7 @@ def find_dates_between(start, end):
     delta = dt.timedelta(days=1)
     date = start_date
     res = []
-    while date < end_date:
+    while date <= end_date:
         res.append(date.strftime("%Y-%m-%d"))
         date += delta
     return res
@@ -4798,8 +4798,6 @@ def calculate_signal_scores(y_pred, y_true, y_fire, graph_id, saison, departemen
         y_true_fire_graph = y_true_fire[mask]
 
         dept = departement[mask][0]
-
-        print(f'{i} {g_id} {dept}')
 
         mask_fire_graph = (y_pred_graph > 0) | (y_true_fire_graph > 0)
         intersection_fire_graph = np.trapz(

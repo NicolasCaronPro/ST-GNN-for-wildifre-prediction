@@ -49,7 +49,7 @@ from GNN.config import (
 from GNN.tools import (check_and_create_path, get_features_name_list,
                        read_object, save_object, get_features_selected_for_time_series_for_2D,
                        get_features_name_lists_2D, get_saison_encoding,
-                       compute_department_areas_km2_dict_wgs84_union)
+                       compute_department_areas_km2_dict_wgs84_union, allDates)
 
 from GNN.discretization import post_process_model, get_post_process_model
 from GNN.features import add_past_risk, shift_target
@@ -164,6 +164,10 @@ def main():
         train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
         val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
         test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+        
+        train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-quantile-5-Class-Dept']
+        val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-quantile-5-Class-Dept']
+        test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-quantile-5-Class-Dept']
 
         save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
         save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
@@ -217,18 +221,13 @@ def main():
         val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
         test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
 
-        if 'time_intervention-kmeans-5-Class-Dept' not in train_dataset.columns:
-            train_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
-            val_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
-            test_dataset['timeintervention-kmeans-5-Class-Dept'] = 0
-        else:
-            train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-            val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-            test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
-            
-            train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-            val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-            test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+        
+        train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
+        val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
+        test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
 
         if 'ressource' not in train_dataset.columns:
             train_dataset['ressource'] = 0
@@ -345,13 +344,28 @@ def main():
         train_dataset_model = train_dataset[~train_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
         val_dataset_model = val_dataset[~val_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
         test_dataset_model = test_dataset[~test_dataset[m['target']].isna()].reset_index(drop=True).copy(deep=True)
-        train_dataset_unscale_model = train_dataset_unscale[~train_dataset_unscale[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        #train_dataset_unscale_model = train_dataset_unscale[~train_dataset_unscale[m['target']].isna()].reset_index(drop=True).copy(deep=True)
+        train_dataset_unscale_model = train_dataset_unscale.copy(deep=True)
+        
+        #train_dataset_model = train_dataset.copy(deep=True)
+        #val_dataset_model = val_dataset.copy(deep=True)
+        #test_dataset_model = test_dataset.copy(deep=True)
+        
+        if m['target'] == 'DFE':
+            def filter_dates(date_int):
+                date_str = allDates[int(date_int)]
+                mm_dd = date_str[5:]
+                return '07-15' <= mm_dd <= '09-25'
+
+            train_dataset_model = train_dataset_model[train_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
+            val_dataset_model = val_dataset_model[val_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
+            test_dataset_model = test_dataset_model[test_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
         
         global_params.update(
             {'train_dataset' : train_dataset_model,
             'val_dataset' :  val_dataset_model,
             'test_dataset' : test_dataset_model,
-            'train_dataset_unscale' : train_dataset_unscale_model
+            'train_dataset_unscale' : train_dataset_unscale_model,
             }
         )
         
@@ -375,9 +389,9 @@ def main():
             model_tuple = (model_name, None, None, None, m.get("n_run", 1))
             if cfg.doTrain:
                 if cfg.training_mode == "voting":
-                    wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset.copy(deep=True),
-                                val_dataset=val_dataset.copy(deep=True),
-                                test_dataset=test_dataset.copy(deep=True),
+                    wrapped_train_sklearn_api_voting_model(train_dataset=train_dataset_model.copy(deep=True),
+                                val_dataset=val_dataset_model.copy(deep=True),
+                                test_dataset=test_dataset_model.copy(deep=True),
                                 graph_method=cfg.graph_method,
                                 dir_output=dir_output / name,
                                 device='cpu',
@@ -391,9 +405,9 @@ def main():
 
                 else:
                     wrapped_train_sklearn_api_model(
-                        train_dataset=train_dataset.copy(deep=True),
-                        val_dataset=val_dataset.copy(deep=True),
-                        test_dataset=test_dataset.copy(deep=True),
+                        train_dataset=train_dataset_model.copy(deep=True),
+                        val_dataset=val_dataset_model.copy(deep=True),
+                        test_dataset=test_dataset_model.copy(deep=True),
                         model=model_tuple,
                         graph_method=cfg.graph_method,
                         dir_output=dir_output / name,
@@ -422,13 +436,10 @@ def main():
             params = dict(global_params)
 
             if cfg.training_mode == 'distrib2classtraining':
-                train_dataset, _ = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
-                val_dataset, features_class = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
-                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
+                train_dataset_model, _ = shift_target(train_dataset_model, m["target"], features_selected_str, m["task"], m['out_channels'])
+                val_dataset_model, features_class = shift_target(val_dataset_model, m["target"], [], m["task"], m["out_channels"])
+                test_dataset_model, _ = shift_target(test_dataset_model, m["target"], [], m["task"], m['out_channels'], drop_nan=False)
                 prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
-                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
-                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
-                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
                 features_selected = features_selected_str
                 
                 params["features_selected"] = features_selected
@@ -438,35 +449,29 @@ def main():
                 #params["features_selected_str_class"] = features_class
                 
             elif cfg.training_mode != "dualtraining":
-                train_dataset, _ = shift_target(train_dataset, m["target"], features_selected_str, m["task"], m['out_channels'])
-                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task"], m["out_channels"])
-                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task"], m['out_channels'])
+                train_dataset_model, _ = shift_target(train_dataset_model, m["target"], features_selected_str, m["task"], m['out_channels'])
+                val_dataset_model, _ = shift_target(val_dataset_model, m["target"], [], m["task"], m["out_channels"])
+                test_dataset_model, _ = shift_target(test_dataset_model, m["target"], [], m["task"], m["out_channels"], drop_nan=False)
                 prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
-                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
-                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
-                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
                 features_selected = features_selected_str
                 params["features_selected"] = features_selected
                 params["features_selected_str"] = features_selected
             else:
-                train_dataset, features_selected_str_occ = shift_target(train_dataset, m["target"], features_selected_str, m["task_occ"], m['out_channels_occ'])
-                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_occ"], m["out_channels_occ"])
-                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_occ"], m['out_channels_occ'])
+                train_dataset_model, features_selected_str_occ = shift_target(train_dataset_model, m["target"], features_selected_str, m["task_occ"], m['out_channels_occ'])
+                val_dataset_model, _ = shift_target(val_dataset_model, m["target"], [], m["task_occ"], m["out_channels_occ"])
+                test_dataset_model, _ = shift_target(test_dataset_model, m["target"], [], m["task_occ"], m['out_channels_occ'], drop_nan=False)
                 
                 params["features_selected_occ"] = features_selected_str_occ
                 params["features_selected_str_occ"] = features_selected_str_occ
                 
-                train_dataset, features_selected_str_num = shift_target(train_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'])
-                val_dataset, _ = shift_target(val_dataset, m["target"], [], m["task_num"], m["out_channels_num"])
-                test_dataset, _ = shift_target(test_dataset, m["target"], [], m["task_num"], m['out_channels_num'])
+                train_dataset_model, features_selected_str_num = shift_target(train_dataset_model, m["target"], features_selected_str, m["task_num"], m['out_channels_num'])
+                val_dataset_model, _ = shift_target(val_dataset_model, m["target"], [], m["task_num"], m["out_channels_num"])
+                test_dataset_model, _ = shift_target(test_dataset_model, m["target"], [], m["task_num"], m['out_channels_num'], drop_nan=False)
 
                 params["features_selected_num"] = features_selected_str_num
                 params["features_selected_str_num"] = features_selected_str_num
 
                 prefix_save = f"full_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
-                save_object(train_dataset, f"df_train_{prefix_save}.pkl", dir_output)
-                save_object(val_dataset, f"df_val_{prefix_save}.pkl", dir_output)
-                save_object(test_dataset, f"df_test_{prefix_save}.pkl", dir_output)
             if cfg.doTrain:
                 if m.get("mesh_file"):
                     params["mesh_file"] = m.get("mesh_file")
@@ -715,7 +720,7 @@ def main():
                     }
                     )
                     wrapped_train_sklearn_api_and_pytorch_voting_model(
-                                            train_dataset, val_dataset, test_dataset,
+                                            train_dataset_model, val_dataset_model, test_dataset_model,
                                             voting_model, cfg.graph_method,
                                             dir_output,
                                             False,
@@ -911,6 +916,27 @@ def main():
             df_metrics = pd.DataFrame.from_dict(metrics, orient="index").reset_index()
 
         if dl_model_names:
+            for m in cfg.get("models", []):
+                if m.get("type") == "fwi" or m["type"].lower() in TREE_MODELS:
+                    continue
+
+                if cfg.training_mode == 'distrib2classtraining':
+                    test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task"], m['out_channels'], drop_nan=False)
+                elif cfg.training_mode != "dualtraining":
+                    test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task"], m["out_channels"], drop_nan=False)
+                else:
+                    test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task_occ"], m["out_channels_occ"], drop_nan=False)
+                    test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'], drop_nan=False)
+
+            for m in cfg.get("models", []):
+                if m['target'] == 'DFE':
+                    def filter_dates(date_int):
+                        date_str = allDates[int(date_int)]
+                        mm_dd = date_str[5:]
+                        return '07-15' <= mm_dd <= '09-25'
+                    test_dataset = test_dataset[test_dataset['date'].apply(filter_dates)].reset_index(drop=True)
+                    break # Apply once, as it filters the shared test_dataset
+
             metrics, _, _, _ = test_dl_model(
                 cfg,
                 graphScale,

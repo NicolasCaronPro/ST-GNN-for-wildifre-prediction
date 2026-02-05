@@ -2387,6 +2387,8 @@ def get_loss_function(loss_name, **loss_params):
                     loss_params[key] = med_index
                 elif val == 'area':
                     loss_params[key] = area_index
+                elif val == 'all':
+                    loss_params[key] = -1
                 else:
                     raise ValueError(f'Unknown value of id {val}')
             else:
@@ -2434,7 +2436,9 @@ def get_loss_function(loss_name, **loss_params):
             "gwdl":                        lambda: GeneralizedWassersteinDiceLoss(),
             "flwk":                        lambda: FocalLossAndWKLoss(**loss_params),
             "fl":                          lambda: FocalLoss(**loss_params),
-            "flwki":                          lambda: FocalWKInversionLoss(**loss_params),
+            "flwki":                       lambda: FocalWKInversionLoss(**loss_params),
+            "inv" :                        lambda: ClusterInversionLoss(**loss_params),
+            "monotonic" :                  lambda: MonoticRiskLoss(**loss_params)
         }
 
     try:

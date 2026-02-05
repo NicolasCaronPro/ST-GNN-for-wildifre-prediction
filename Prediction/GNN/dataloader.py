@@ -6,6 +6,7 @@ import statsmodels.formula.api as smf
 import seaborn as sns
 import matplotlib.pyplot as plt
 import re
+from GNN.forecasting_models.sklearn.score import evaluation_scoring
 
 #########################################################################################################
 #                                                                                                       #
@@ -1126,12 +1127,18 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         _, iv = calculate_woe_iv(res, f'prediction_{target_name}_{horizon}', 'nbsinister')
         metrics['IV'] = round(iv, 2)  # Ajouter au dictionnaire des métriques
         logger.info(f'IV = {iv}')
+        
+        try:
 
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='true')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='all')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='pred')
-        plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize=None)
+            plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='true')
+            plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='all')
+            plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize='pred')
+            plot_confusion_matrix(y_true, y_pred, all_class_label, name, dir_output, normalize=None)
 
+        except Exception as e:
+            print(f'Can t load confusion matrix -> {e}')
+            pass
+        
         accuracy = round(accuracy_score(y_true, y_pred), 2)
         metrics[f'accuracy'] = accuracy
         logger.info(f'accuracy = {accuracy}')
@@ -1168,6 +1175,44 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         metrics['prec_macro'] = prec_macro
         metrics['rec_macro'] = rec_macro
         logger.info(f'f1_macro = {f1_macro} | prec_macro = {prec_macro} | rec_macro = {rec_macro}')
+
+        try:
+            if 'timeintervention' in target_name:
+                print('Calculate on timeintervention')
+                y_true_real = res['time_intervention'].values
+            elif 'ressource' in target_name:
+                print('Calculate on ressource')
+                y_true_real = res['ressource'].values
+            elif 'burnedareaRoot' in target_name:
+                print('Calculate on burnedareaRoot')
+                y_true_real = res['burnedareaRoot'].values
+            elif 'nbsinister' in target_name:
+                print('Calculate on nbsinister')
+                y_true_real = res['nbsinister'].values
+            else:
+                y_true_real = y_true
+            
+            score_high, score_low, coverage_k, score_adj_k = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
+            metrics['score_high'] = score_high
+            metrics['score_low'] = score_low
+            metrics['score'] = score_high + score_low
+            
+            # Add coverage metrics
+            for k, count in coverage_k.items():
+                metrics[f'coverage_k{k}'] = count
+                logger.info(f'coverage_k{k} = {count}')
+
+            # Add score k metrics
+            for k, val in score_adj_k.items():
+                metrics[f'score_k{k}'] = val
+                logger.info(f'score_k{k} = {val}')
+            
+            logger.info(f'Monotonic scores: high={score_high:.3f}, low={score_low:.3f}, total={score_high+score_low:.3f}')
+        except Exception as e:
+            logger.warning(f"Monotonic scoring failed in evaluate_pipeline: {e}")
+            metrics['score_high'] = np.nan
+            metrics['score_low'] = np.nan
+            metrics['score'] = np.nan
 
     elif name.find('binary') != -1:
         apr = round(average_precision_score(y_true > 0, y_pred), 2)
@@ -1380,7 +1425,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         if key == 'iou' or key == 'bad_prediction' or key == 'rec':
             logger.info(f'{metric_key} = {round(value, 3)}')  # Afficher la métrique enregistrée
 
-    for cl in np.unique(y_true):
+    for cl in np.union1d(np.unique(y_true), np.unique(y_pred)):
         logger.info(f'{cl} -> {y_true[y_true == cl].shape[0]}, {y_pred[y_pred == cl].shape[0]}')
         metrics[f'{cl}_true'] = y_true[y_true == y_true].shape[0]
         metrics[f'{cl}_pred'] = y_pred[y_pred == y_pred].shape[0]
@@ -1810,8 +1855,12 @@ def test_dl_model(cfg,
     test_dataset_dep_.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
     print(test_dataset_dep_.date.unique())
-    print(allDates[int(test_dataset_dep_.date.min())])
-    print(allDates[int(test_dataset_dep_[test_dataset_dep_['weight'] > 0].date.min())])
+    if not test_dataset_dep_.empty:
+        print(allDates[int(test_dataset_dep_.date.min())])
+        if not test_dataset_dep_[test_dataset_dep_['weight'] > 0].empty:
+            print(allDates[int(test_dataset_dep_[test_dataset_dep_['weight'] > 0].date.min())])
+    else:
+        print("Warning: test_dataset_dep_ is empty.")
     
     #################################### GNN ###################################################
     for name in models:
@@ -2336,7 +2385,7 @@ def wrapped_train_deep_learning_1D(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2368,7 +2417,7 @@ def wrapped_train_deep_learning_1D(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -2438,7 +2487,7 @@ def wrapped_train_deep_learning_1D_federated(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2465,7 +2514,7 @@ def wrapped_train_deep_learning_1D_federated(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -2552,7 +2601,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2579,7 +2628,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -2669,7 +2718,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2696,7 +2745,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -2784,7 +2833,7 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2811,7 +2860,7 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -2900,7 +2949,7 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -2927,7 +2976,7 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -3011,7 +3060,7 @@ def wrapped_train_deep_learning_1D_protofederated(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -3037,7 +3086,7 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -3127,7 +3176,7 @@ def wrapped_train_deep_learning_1D_splittraining(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -3162,7 +3211,7 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                  mesh_file=mesh_file,
                                  model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
@@ -3243,7 +3292,7 @@ def wrapped_train_deep_learning_1D_unique(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
                                     target_name=target_name,
@@ -3275,7 +3324,7 @@ def wrapped_train_deep_learning_1D_unique(params):
                                 mesh_file=mesh_file,
                                 model_name=model,
                                     nbfeatures=nbfeatures,
-                                    batch_size=batch_size,
+                                    batch_size=params['batch_size'],
                                     lr=params['lr'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],

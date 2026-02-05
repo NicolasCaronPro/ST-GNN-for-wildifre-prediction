@@ -3330,7 +3330,7 @@ class Training():
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, None)
+                    metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['departement'])
                     metrics_run = round_floats(metrics_run)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
@@ -4479,14 +4479,14 @@ class SplitTraining(Training):
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_pdf="val")
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
-                metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
+                metrics_val = evaluate_metrics(y_val_np, pred_val_np)
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
                 pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
 
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
-                metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
+                metrics_test = evaluate_metrics(y_test_np, pred_test_np)
 
                 metrics_combo['iou'].append(metrics_test['iou'])
                 metrics_combo['f1'].append(metrics_test['f1'])
@@ -4653,7 +4653,7 @@ class DualTraining:
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
 
-            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
@@ -5856,7 +5856,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
@@ -5870,7 +5870,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -6191,7 +6191,7 @@ class FederatedALA(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
@@ -6205,7 +6205,7 @@ class FederatedALA(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -6385,7 +6385,7 @@ class MOONFederatedLearning(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
             
@@ -6398,7 +6398,7 @@ class MOONFederatedLearning(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -6569,7 +6569,7 @@ class FederatedProx(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
             

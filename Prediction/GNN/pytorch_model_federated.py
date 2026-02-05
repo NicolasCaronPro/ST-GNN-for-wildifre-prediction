@@ -216,7 +216,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
@@ -230,7 +230,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -648,7 +648,7 @@ class FederatedALA(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
@@ -662,7 +662,7 @@ class FederatedALA(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -890,7 +890,7 @@ class MOONFederatedLearning(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
             
@@ -903,7 +903,7 @@ class MOONFederatedLearning(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'val')
             plot_score_per_epochs(self.score_per_epochs, self.dir_log, f'score_per_epoch_run_{run}')
@@ -1073,7 +1073,7 @@ class FederatedProx(FederatedLearningModel):
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
             
-            metrics_run = evaluate_metrics(dff, self.target_name, test_output)
+            metrics_run = evaluate_metrics(dff[self.target_name], test_output, zones=dff['departement'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
             

@@ -2420,6 +2420,7 @@ def shift_target(
     features: List[str],
     task_type: str,
     output_channels: int,  # toujours fourni
+    drop_nan: bool = True
 ) -> Tuple[pd.DataFrame, List[str]]:
     """
     Décale `colunm` d'une date exacte -1 par graph_id :
@@ -2431,7 +2432,16 @@ def shift_target(
         raise ValueError("output_channels doit être un entier > 0")
     if "graph_id" not in df.columns or "date" not in df.columns:
         raise KeyError("Les colonnes 'graph_id' et 'date' doivent exister dans df")
-
+    
+    """if task_type == 'classification' and colunm == 'burnedareaRoot':
+        colunm = 'burnedareaRoot-quantile-5-Class-Dept'
+    elif task_type == 'classification' and colunm == 'nbsinister':
+        colunm = 'nbsinister-quantile-5-Class-Dept'
+    elif task_type == 'classification' and colunm == 'timeintervention':
+        colunm = 'timeintervention-quantile-5-Class-Dept'
+    elif task_type == 'classification' and colunm == 'ressource':
+        colunm = 'ressource-quantile-5-Class-Dept'"""
+    
     prev_col = f"{colunm}_prev"
 
     # ---------- 1) Décalage par date exacte -1 pour chaque graph_id ----------
@@ -2468,6 +2478,9 @@ def shift_target(
                 prev = 0
             else:
                 prev = df_date_prev[colunm].values[0]
+                
+            if np.isnan(prev):
+                continue
             
             df.loc[index, prev_col] = prev
 
@@ -2481,7 +2494,8 @@ def shift_target(
                 pass
         
     # ---------- 3) Dropna final (sécurisation) ----------
-    df = df.dropna(subset=['graph_id', 'date', colunm]).reset_index(drop=True)
+    if drop_nan:
+        df = df.dropna(subset=['graph_id', 'date', colunm]).reset_index(drop=True)
 
     return df, features_res
 

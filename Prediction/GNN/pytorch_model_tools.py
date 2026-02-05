@@ -1452,7 +1452,8 @@ def create_test_loader(graph, df,
                        horizon:int,
                        graph_mesh=None,
                         gridh2mesh=None,
-                        mesh2graph=None):
+                        mesh2graph=None,
+                        proportion_0_sample_witg_positive_weight=1.0):
     
     Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
@@ -2025,6 +2026,7 @@ class Training():
             # Pour classification : les colonnes one-hot sont du type f"{colunm}_prev_<classe>"
             new_features = [f"{self.target_name}_prev_{i}" for i in range(self.out_channels)]
             self.prev_idx = [self.features_name.index(f) for f in new_features if f in self.features_name]
+            print(self.prev_idx)
 
         elif self.task_type == "binary":
             # Pour binaire : on a colunm_prev_bin, colunm_prev_bin_0 et colunm_prev_bin_1
@@ -2156,19 +2158,22 @@ class Training():
         if areas is not None:
             additionnal_params['areas'] = areas
         
-        
         try:
             additionnal_params['sample_weight'] = wei
         
             return criterion(out, tar, **additionnal_params)
-        except:
+        except Exception as e:
+            print(e)
             return criterion(out, tar)
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
 
         if 'clusters_ids' in required_params(criterion.forward) and criterion.id is not None:
-            clusters_ids = label[:, criterion.id, -1]
-            self.cluster_id_index = criterion.id
+            if criterion.id == -1 :
+                clusters_ids = torch.ones(target.shape[0])
+            else:
+                clusters_ids = label[:, criterion.id, -1]
+                self.cluster_id_index = criterion.id
         else:
             clusters_ids = None
             
@@ -2177,9 +2182,9 @@ class Training():
         
         else:
             areas = None
-        
+            
         base_loss = self.compute_single_loss(output, target, weights, clusters_ids, tolong, areas, criterion)
-
+        
         if 'area' in self.loss and False: # Calculate area loss (specify loss-area)
             area_mask = label[:, graph_id_index, -1]
             unique_ids = torch.unique(area_mask)
@@ -2694,12 +2699,16 @@ class Training():
             
             loss, loss_res = self.launch_batch(data, criterion, 'train', do_update)
 
-            if isinstance(loss, int):
+            if isinstance(loss, int) or isinstance(loss, float):
+                print(f'loss is does not required grad {loss}')
                 continue
             
             if optimizer is not None:
                 optimizer.zero_grad()
-                loss.backward()
+                try:
+                    loss.backward()
+                except:
+                    continue
             
             if 'res_loss' in locals():
                 res_loss += loss.item()
@@ -3376,10 +3385,12 @@ class Training():
                         
                     dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
                     dff['departement'] = y[:, departement_index]
+                    dff['date'] = y[:, date_index]
+                    dff['graph_id'] = y[:, graph_id_index]
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, None)
+                    metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
                     metrics_run = round_floats(metrics_run)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
@@ -3402,10 +3413,12 @@ class Training():
                 
                     dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
                     dff['departement'] = y[:, departement_index]
+                    dff['date'] = y[:, date_index]
+                    dff['graph_id'] = y[:, graph_id_index]
                     dff[self.target_name] = y[:, -1]
                     y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
 
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, None)
+                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, zones=dff['graph_id'], dates=dff['date'])
                     metrics_run = round_floats(metrics_run)
                     under_prediction_score_value = under_prediction_score(y, prediction)
                     over_prediction_score_value = over_prediction_score(y, prediction)
@@ -4749,14 +4762,14 @@ class SplitTraining(Training):
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_pdf="val")
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
-                metrics_val = evaluate_metrics(pd.DataFrame({self.target_name: y_val_np}), self.target_name, pred_val_np)
+                metrics_val = evaluate_metrics(y_val_np, pred_val_np, zones=y_val_np[:, graph_id_index], dates=y_val_np[:, date_index])
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
                 pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
 
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
-                metrics_test = evaluate_metrics(pd.DataFrame({self.target_name: y_test_np}), self.target_name, pred_test_np)
+                metrics_test = evaluate_metrics(y_test_np, pred_test_np, zones=y_test_np[:, graph_id_index], dates=y_test_np[:, date_index])
 
                 metrics_combo['iou'].append(metrics_test['iou'])
                 metrics_combo['f1'].append(metrics_test['f1'])
@@ -4920,10 +4933,12 @@ class DualTraining:
         
             dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
             dff['departement'] = y[:, departement_index]
+            dff['date'] = y[:, date_index]
+            dff['graph_id'] = y[:, graph_id_index]
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
 
-            metrics_run = evaluate_metrics(dff, self.target_name, prediction)
+            metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 

@@ -47,7 +47,7 @@ def load_dfe_for_06(dir_data):
         return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     # ---- Sélectionne ici tes deux listes d'onglets ----
-    sheets_A = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2023']   # exemple
+    sheets_A = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023']   # exemple
     sheets_B = ['2024']   # exemple
 
     # ---- Constructions des deux DataFrames ----
@@ -74,6 +74,7 @@ def load_dfe_for_06(dir_data):
     }
 
     # Encodage
+    df_2024_2025 = df_2024_2025[df_2024_2025['DFE'].isin(['F', 'L', 'M', 'T', 'S'])]
     df_2024_2025['DFE'] = df_2024_2025['DFE'].map(mapping_dfe)
 
     def clean_date_column(df, col_name):
@@ -88,9 +89,17 @@ def load_dfe_for_06(dir_data):
     df_2024_2025['date'] = df_2024_2025['date_validite'].values
     df_2024_2025 = clean_date_column(df_2024_2025, 'date')
 
+    df_2024_2025 = df_2024_2025.rename({'production' : 'reseau'}, axis=1)
+    df_2024_2025 = df_2024_2025[df_2024_2025['reseau'] == 'M']
+
+    df_2024_2025 = df_2024_2025[~df_2024_2025['date'].isna()]
+    df_2024_2025 = df_2024_2025[df_2024_2025['DFE'] > -999]
+
     df = df[~df['date'].isna()]
     df = df[df['DFE'] > -999]
-    
+
+    df = df[df['production'] == 'AM']
+
     def change_date_format(df):
         df['date'] = df['date'].astype(int)
         df['date'] = df['date'].astype(str)
@@ -106,6 +115,8 @@ def load_dfe_for_06(dir_data):
         return df
 
     df = change_date_format(df)
+
+    df = pd.concat([df, df_2024_2025], axis=0)
     
     return df
 

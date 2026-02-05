@@ -146,7 +146,7 @@ class ModelCNN(SplitTraining):
         loader = DataLoader(test_dataset, test_dataset.__len__(), False)
 
         return loader
-
+    
 class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, target_name, task_type,
                  out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
@@ -167,9 +167,9 @@ class ModelGNN(SplitTraining):
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         
-        df_train = df_train[~df_train[self.target_name].isna()]
-        df_val = df_val[~df_val[self.target_name].isna()]
-        df_test = df_test[~df_test[self.target_name].isna()]
+        #df_train = df_train[~df_train[self.target_name].isna()]
+        #df_val = df_val[~df_val[self.target_name].isna()]
+        #df_test = df_test[~df_test[self.target_name].isna()]
         
         self.graph = graph
         if self.mesh and self.graph_mesh is None:
@@ -669,9 +669,9 @@ class Model_Torch(SplitTraining):
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
         self.graph = graph
         
-        df_train = df_train[~df_train[self.target_name].isna()]
-        df_val = df_val[~df_val[self.target_name].isna()]
-        df_test = df_test[~df_test[self.target_name].isna()]
+        #df_train = df_train[~df_train[self.target_name].isna()]
+        #df_val = df_val[~df_val[self.target_name].isna()]
+        #df_test = df_test[~df_test[self.target_name].isna()]
 
         if 'learnable-area' in self.loss:
             area_parameters = np.sort(df_train['graph_id'].unique())
@@ -834,8 +834,10 @@ class Model_Torch(SplitTraining):
             #save_object_torch(train_dataset, 'train_dataset.pkl', self.dir_log)
             #save_object_torch(val_dataset, 'val_dataset.pkl', self.dir_log)
             #save_object_torch(test_dataset, 'test_dataset.pkl', self.dir_log)
+            
+            print('Batchsize->',self.batch_size)
 
-            train_loader = DataLoader(train_dataset, batch_size, True, worker_init_fn=seed_worker, generator=g)
+            train_loader = DataLoader(train_dataset, self.batch_size, True, worker_init_fn=seed_worker, generator=g)
 
             self.train_loader = train_loader
 
