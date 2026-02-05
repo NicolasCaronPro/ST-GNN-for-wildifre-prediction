@@ -351,7 +351,7 @@ def main():
         #val_dataset_model = val_dataset.copy(deep=True)
         #test_dataset_model = test_dataset.copy(deep=True)
         
-        if m['target'] == 'DFE':
+        """if m['target'] == 'DFE':
             def filter_dates(date_int):
                 date_str = allDates[int(date_int)]
                 mm_dd = date_str[5:]
@@ -359,7 +359,7 @@ def main():
 
             train_dataset_model = train_dataset_model[train_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
             val_dataset_model = val_dataset_model[val_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
-            test_dataset_model = test_dataset_model[test_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)
+            test_dataset_model = test_dataset_model[test_dataset_model['date'].apply(filter_dates)].reset_index(drop=True)"""
         
         global_params.update(
             {'train_dataset' : train_dataset_model,
@@ -928,19 +928,10 @@ def main():
                     test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task_occ"], m["out_channels_occ"], drop_nan=False)
                     test_dataset, _ = shift_target(test_dataset, m["target"], features_selected_str, m["task_num"], m['out_channels_num'], drop_nan=False)
 
-            for m in cfg.get("models", []):
-                if m['target'] == 'DFE':
-                    def filter_dates(date_int):
-                        date_str = allDates[int(date_int)]
-                        mm_dd = date_str[5:]
-                        return '07-15' <= mm_dd <= '09-25'
-                    test_dataset = test_dataset[test_dataset['date'].apply(filter_dates)].reset_index(drop=True)
-                    break # Apply once, as it filters the shared test_dataset
-
             metrics, _, _, _ = test_dl_model(
                 cfg,
                 graphScale,
-                test_dataset,
+                test_dataset.copy(deep=True),
                 test_dataset_unscale,
                 train_dataset_unscale,
                 "all",

@@ -1823,7 +1823,7 @@ def filter_prediction(graphScale, test_dataset_dept, predTensor, y, dir_train, c
     return predTensor, y, test_dataset_dept
    
 def test_dl_model(cfg,
-                  graphScale, test_dataset_dep_,
+                  graphScale, test_dataset_dep_entry,
                           test_dataset_unscale_dept,
                           train_dataset,
                            test_name,
@@ -1852,18 +1852,20 @@ def test_dl_model(cfg,
     metrics = {}
     metrics_dept = {}
 
-    test_dataset_dep_.sort_values(by=['graph_id', 'date'], inplace=True)
+    test_dataset_dep_entry.sort_values(by=['graph_id', 'date'], inplace=True)
     i = 0
-    print(test_dataset_dep_.date.unique())
-    if not test_dataset_dep_.empty:
-        print(allDates[int(test_dataset_dep_.date.min())])
-        if not test_dataset_dep_[test_dataset_dep_['weight'] > 0].empty:
-            print(allDates[int(test_dataset_dep_[test_dataset_dep_['weight'] > 0].date.min())])
+    print(test_dataset_dep_entry.date.unique())
+    if not test_dataset_dep_entry.empty:
+        print(allDates[int(test_dataset_dep_entry.date.min())])
+        if not test_dataset_dep_entry[test_dataset_dep_entry['weight'] > 0].empty:
+            print(allDates[int(test_dataset_dep_entry[test_dataset_dep_entry['weight'] > 0].date.min())])
     else:
         print("Warning: test_dataset_dep_ is empty.")
     
     #################################### GNN ###################################################
     for name in models:
+
+        test_dataset_dep_ = test_dataset_dep_entry.copy(deep=True)
 
         test_dataset_dep_['saison'] = test_dataset_dep_['date'].apply(get_saison)
 
@@ -1902,6 +1904,8 @@ def test_dl_model(cfg,
         if model is None:
             logger.info(f'{model_dir}/{read_name}.pkl not found')
             continue
+
+        test_dataset_dep_ = test_dataset_dep_[~test_dataset_dep_[model.target_name].isna()]
         
         if has_method(model, 'clean'):
             model.clean()
@@ -1922,6 +1926,7 @@ def test_dl_model(cfg,
             else:
                 model_per_task = None
                 generalized_departement = None
+
             predTensor, y = graphScale.predict_model_voting_pytorch(
                 test_dataset_dep_,
                 model.feature_names,

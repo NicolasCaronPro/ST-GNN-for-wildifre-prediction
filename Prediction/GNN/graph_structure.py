@@ -98,7 +98,7 @@ def load_dfe_for_06(dir_data):
     df = df[~df['date'].isna()]
     df = df[df['DFE'] > -999]
 
-    df = df[df['production'] == 'AM']
+    df = df[df['reseau'] == 'AM']
 
     def change_date_format(df):
         df['date'] = df['date'].astype(int)
