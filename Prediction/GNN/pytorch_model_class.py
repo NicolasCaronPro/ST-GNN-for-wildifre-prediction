@@ -348,7 +348,7 @@ class ModelGNN(SplitTraining):
             
             elif self.mesh == 'mesh':
                 self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn_mesh)
-
+                
             elif self.mesh == 'mygraph':
                 self.train_loader = DataLoader(train_dataset, self.batch_size, True, collate_fn=graph_collate_fn_multiple_graph)
 

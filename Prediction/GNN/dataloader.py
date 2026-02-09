@@ -1008,7 +1008,20 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
 
     ############################################## Get daily metrics #######################################################
     if name.find('classification') != -1:
-        col_class = target_name
+        mapping = {
+            "nbsinister": "nbsinister-quantile-5-Class-Dept",
+            "timeintervention": "timeintervention-quantile-5-Class-Dept",
+            "ressource": "ressource-quantile-5-Class-Dept",
+            "burnedareaRoot": "burnedareaRoot-quantile-5-Class-Dept",
+            "burnedarea": "burnedarea-quantile-5-Class-Dept",
+        }
+
+        if target_name in mapping.keys():
+            col_class = mapping[target_name]
+            target_name = col_class
+        else:
+            col_class = target_name
+
         col_class_1 = 'nbsinister-kmeans-5-Class-Dept'
         col_class_2 = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
         col_nbsinister = 'nbsinister'
@@ -2378,10 +2391,10 @@ def wrapped_train_deep_learning_1D(params):
     #    train_dataset.drop('weight', inplace=True, axis=1)
     
     #weight_train = egpd_trunc_discrete_weights(train_dataset[target_name].values, train_dataset['graph_id'].values)
-    weight_val = egpd_trunc_discrete_weights(val_dataset[target_name].values, val_dataset['graph_id'].values)
+    #weight_val = egpd_trunc_discrete_weights(val_dataset[target_name].values, val_dataset['graph_id'].values)
     
     train_dataset['weight'] = 1.0
-    val_dataset['weight'] = weight_val
+    val_dataset['weight'] = 1.0
     test_dataset['weight'] = 1.0
 
     print(torch_structure)

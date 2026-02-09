@@ -1920,229 +1920,6 @@ def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clus
 
 ################################ DEEP LEARNING #########################################
 
-def compute_weights_and_target(target_name, labels, band, ids_columns, is_grap_or_node, graphs):
-    weight_idx = ids_columns.index('weight')
-    target_is_binary = target_name == 'binary'
-
-    if len(labels.shape) == 3:
-        weights = labels[:, weight_idx, -1]
-        target = (labels[:, band, -1] > 0).long() if target_is_binary else labels[:, band, -1]
-
-    elif len(labels.shape) == 5:
-        weights = labels[:, :, :, weight_idx, -1]
-        target = (labels[:, :, :, band, -1] > 0).long() if target_is_binary else labels[:, :, :, band, -1]
-
-    elif len(labels.shape) == 4:
-        weights = labels[:, :, :, weight_idx,]
-        target = (labels[:, :, :, band] > 0).long() if target_is_binary else labels[:, :, :, band]
-
-    else:
-        weights = labels[:, weight_idx]
-        target = (labels[:, band] > 0).long() if target_is_binary else labels[:, band]
-    
-    if is_grap_or_node:
-        unique_elements = torch.unique(graphs, return_inverse=False, return_counts=False, sorted=True)
-        first_indices = torch.tensor([torch.nonzero(graphs == u, as_tuple=True)[0][0] for u in unique_elements])
-        weights = weights[first_indices]
-        target = target[first_indices]
-
-    return target, weights
-
-def compute_labels(labels, is_grap_or_node, graphs):
-    if len(labels.shape) == 3:
-        labels = labels[:, :, -1]
-    elif len(labels.shape) == 5:
-        labels = labels[:, :, :, :, -1]
-    elif len(labels.shape) == 4:
-        labels = labels
-    else:
-        labels = labels
-    
-    if is_grap_or_node:
-        unique_elements = torch.unique(graphs, return_inverse=False, return_counts=False, sorted=True)
-        first_indices = torch.tensor([torch.nonzero(graphs == u, as_tuple=True)[0][0] for u in unique_elements])
-        labels = labels[first_indices]
-
-    return labels
-
-def launch_train_loader(model, loader,
-                  features, target_name,
-                  criterion, optimizer,
-                  model_name):
-    
-    model.train()
-    for i, data in enumerate(loader, 0):
-        
-        try:
-            if model_name in models_hybrid:
-                inputs_1D, inputs_2D, labels, edges, graphs = data
-            else:
-                inputs, labels, edges, graphs = data
-        except:
-            if model_name in models_hybrid:
-                inputs_1D, inputs_2D, labels, edges = data
-            else:
-                inputs, labels, edges = data
-            graphs = None
-
-        #if target_name == 'binary' or target_name == 'nbsinister':
-        #    band = -2
-        #else:
-        band = -1
-
-        try:
-            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
-        except Exception as e:
-            target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, False, graphs)
-
-        # Prepare inputs for the model
-        if model_name in models_hybrid:
-            inputs_1D = inputs_1D[:, features[0]]
-            inputs_2D = inputs_2D[:, features[1]]
-            output = model(inputs_1D, inputs_2D, edges, graphs)
-        elif model_name in models_2D:
-            inputs_model = inputs[:, features]
-            output = model(inputs_model, edges, graphs)
-        elif model_name in temporal_model_list:
-            inputs_model = inputs[:, features]
-            output = model(inputs_model, edges, graphs)
-        else:
-            inputs_model = inputs[:, features]
-            output = model(inputs_model, edges, graphs)
-
-        if target_name == 'risk' or target_name == 'nbsinister':
-            #print(inputs.shape, labels.shape, target.shape, output.shape)
-
-            target = target.view(output.shape)
-            weights = weights.view(output.shape)
-            
-            target = torch.masked_select(target, weights.gt(0))
-            output = torch.masked_select(output, weights.gt(0))
-            weights = torch.masked_select(weights, weights.gt(0))
-            loss = criterion(output, target, weights)
-        else:
-            target = torch.masked_select(target, weights.gt(0))
-            output = output[weights.gt(0)]
-            weights = torch.masked_select(weights, weights.gt(0))
-            loss = criterion(output, target)
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-    return loss
-
-def launch_val_test_loader(model, loader,
-                           features, target_name,
-                           criterion, optimizer,
-                           model_name):
-    """
-    Evaluates the model using the provided data loader, with optional autoregression.
-
-    Note:
-    - 'node_id' and 'date_id' are not included in features_name but can be found in labels[:, 0] and labels[:, 4].
-
-    Parameters:
-    - model: The PyTorch model to evaluate.
-    - loader: DataLoader providing the validation or test data.
-    - features: List or tuple of feature indices to use.
-    - target_name: Name of the target variable.
-    - criterion: Loss function.
-    - optimizer: Optimizer (not used during evaluation but included for consistency).
-    - autoRegression: Boolean indicating whether to use autoregression.
-    - features_name: List of feature names.
-    - hybrid: Boolean indicating if the model uses hybrid inputs.
-
-    Returns:
-    - total_loss: The cumulative loss over the dataset.
-    """
-    model.eval()
-    total_loss = 0.0
-
-    with torch.no_grad():
-
-        for i, data in enumerate(loader, 0):
-            
-            try:
-                if model_name in models_hybrid:
-                    inputs_1D, inputs_2D, labels, edges, graphs = data
-                else:
-                    inputs, labels, edges, graphs = data
-            except:
-                if model_name in models_hybrid:
-                    inputs_1D, inputs_2D, labels, edges = data
-                else:
-                    inputs, labels, edges = data
-                graphs = None
-
-            # Determine the index of the target variable in labels
-            #if target_name == 'binary' or target_name == 'nbsinister':
-            #    band = -2
-            #else:
-            band = -1
-
-            try:
-                target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, model.is_graph_or_node, graphs)
-            except Exception as e:
-                target, weights = compute_weights_and_target(target_name, labels, band, ids_columns, False, graphs)
-
-            # Prepare inputs for the model
-            if model_name in models_hybrid:
-                inputs_1D = inputs_1D[:, features[0]]
-                inputs_2D = inputs_2D[:, features[1]]
-                output = model(inputs_1D, inputs_2D, edges, graphs)
-            elif model_name in models_2D:
-                inputs_model = inputs[:, features]
-                output = model(inputs_model, edges, graphs)
-            elif model_name in temporal_model_list:
-                inputs_model = inputs[:, features]
-                output = model(inputs_model, edges, graphs)
-            else:
-                inputs_model = inputs[:, features]
-                output = model(inputs_model, edges, graphs)
-
-            # Compute loss
-            if target_name == 'risk' or target_name == 'nbsinister':
-                target = target.view(output.shape)
-                weights = weights.view(output.shape)
-
-                # Mask out invalid weights
-                valid_mask = weights.gt(0)
-                target = torch.masked_select(target, valid_mask)
-                output = torch.masked_select(output, valid_mask)
-                weights = torch.masked_select(weights, valid_mask)
-                loss = criterion(output, target, weights)
-            else:
-                valid_mask = weights.gt(0)
-                target = torch.masked_select(target, valid_mask)
-                output = output[valid_mask]
-                weights = torch.masked_select(weights, valid_mask)
-                loss = criterion(output, target)
-
-            total_loss += loss.item()
-
-    return total_loss
-
-def func_epoch(model, train_loader, val_loader, features,
-               optimizer, criterion, target_name,
-                model_name):
-    
-    train_loss = launch_train_loader(model, train_loader,
-                  features, target_name,
-                  criterion, optimizer,
-                  model_name)
-
-    if val_loader is not None:
-        val_loss = launch_val_test_loader(model, val_loader,
-                  features, target_name,
-                  criterion, optimizer,
-                  model_name)
-    
-    else:
-        val_loss = train_loss
-
-    return val_loss, train_loss
-
 def plot_train_val_loss(epochs, train_loss_list, val_loss_list, dir_output):
 
     if isinstance(train_loss_list[0], dict):
@@ -2211,115 +1988,6 @@ def plot_train_val_loss(epochs, train_loss_list, val_loss_list, dir_output):
         plt.title('Training Loss over Epochs')
         plt.savefig(dir_output / 'Training.png')
         plt.close('all')
-
-def train(params):
-    """
-    Train neural network model
-    """
-    train_loader = params['train_loader']
-    val_loader = params['val_loader']
-    test_loader = params['test_loader']
-    graph = params['graph']
-    training_mode = params['training_mode']
-    PATIENCE_CNT = params['PATIENCE_CNT']
-    CHECKPOINT = params['CHECKPOINT']
-    lr = params['lr']
-    epochs = params['epochs']
-    loss_name = params['loss_name']
-    features_selected_str = params['features_selected_str']
-    features_selected = params['features_selected']
-    modelname = params['modelname']
-    dir_output = params['dir_output']
-    target_name = params['target_name']
-    task_type = params['task_type']
-    out_channels = params['out_channels']
-    k_days = params['k_days']
-
-    if 'custom_model_params' in params.keys():
-        custom_model_params = params['custom_model_params']
-    else:
-        custom_model_params = None
-
-    if MLFLOW:
-        existing_run = get_existing_run(f'{modelname}_')
-        if existing_run:
-            mlflow.start_run(run_id=existing_run.info.run_id, nested=True)
-        else:
-            mlflow.start_run(run_name=f'{modelname}_', nested=True)
-
-    assert train_loader is not None and val_loader is not None
-
-    check_and_create_path(dir_output)
-
-    criterion = get_loss_function(loss_name)
-
-    if modelname in models_hybrid:
-        model, _ = make_model(modelname, len(features_selected[0]), len(features_selected[1]),
-                              graph, dropout, 'relu',
-                              k_days,
-                              out_channels=out_channels,
-                              task_type = task_type,
-                              device=device, num_lstm_layers=num_lstm_layers,
-                              custom_model_params=custom_model_params)
-    else:
-        model, _ = make_model(modelname, len(features_selected), len(features_selected),
-                              graph, dropout, 'relu',
-                              k_days,
-                              out_channels=out_channels,
-                              task_type = task_type,
-                              device=device, num_lstm_layers=num_lstm_layers,
-                              custom_model_params=custom_model_params)
-    
-    #if (dir_output / '100.pt').is_file():
-    #    model.load_state_dict(torch.load((dir_output / '100.pt'), map_location=device, weights_only=True), strict=False)
-        
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    BEST_VAL_LOSS = math.inf
-    BEST_MODEL_PARAMS = None
-    patience_cnt = 0
-
-    val_loss_list = []
-    train_loss_list = []
-    epochs_list = []
-
-    logger.info('Train model with')
-    save_object(features_selected, 'features.pkl', dir_output)
-    save_object(features_selected_str, 'features_str.pkl', dir_output)
-    for epoch in tqdm(range(epochs)):
-        val_loss, train_loss = func_epoch(model, train_loader, val_loader, features_selected,
-                                            optimizer, criterion, target_name,
-                                                modelname)
-        train_loss = train_loss.item()
-        val_loss = round(val_loss, 3)
-        train_loss = round(train_loss, 3)
-        val_loss_list.append(val_loss)
-        train_loss_list.append(train_loss)
-        epochs_list.append(epoch)
-        if val_loss < BEST_VAL_LOSS:
-            BEST_VAL_LOSS = val_loss
-            BEST_MODEL_PARAMS = model.state_dict()
-            patience_cnt = 0
-        else:
-            patience_cnt += 1
-            if patience_cnt >= PATIENCE_CNT:
-                logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
-                save_object_torch(model.state_dict(), 'last.pt', dir_output)
-                save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
-                plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, dir_output)
-                if MLFLOW:
-                    mlflow.end_run()
-                return
-        if MLFLOW:
-            mlflow.log_metric('loss', val_loss, step=epoch)
-        if epoch % CHECKPOINT == 0:
-            logger.info(f'epochs {epoch}, Val loss {val_loss}')
-            logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
-            save_object_torch(model.state_dict(), str(epoch)+'.pt', dir_output)
-
-    logger.info(f'Last val loss {val_loss}')
-    save_object_torch(model.state_dict(), 'last.pt', dir_output)
-    save_object_torch(BEST_MODEL_PARAMS, 'best.pt', dir_output)
-    plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, dir_output)
     
 # Fonction pour sélectionner la fonction de perte via son nom
 def get_loss_function(loss_name, **loss_params):
@@ -2353,10 +2021,13 @@ def get_loss_function(loss_name, **loss_params):
         base_name = parts[0]
 
         for token in parts[1:]:
-            m = re.fullmatch(r'([A-Za-z]\w*)\{(.+)\}', token)
+            # Allow whitespace around braces
+            m = re.fullmatch(r'([A-Za-z]\w*)\s*\{(.*)\}', token)
             if not m:
+                print(f"Warning: Could not parse token '{token}' in loss '{loss_name}'")
                 continue
             key, raw = m.groups()
+            key = key.strip()
             raw = raw.strip()
 
             # Conversion souple vers le bon type (int/float/bool/str/liste, etc.)
@@ -2373,6 +2044,7 @@ def get_loss_function(loss_name, **loss_params):
                         val = raw  # laisse en chaîne
 
             if key == 'id':
+                print(f'id : {val}')
                 if val == 'departement':
                     loss_params[key] = departement_index
                 elif val == 'cluster':
@@ -2438,7 +2110,9 @@ def get_loss_function(loss_name, **loss_params):
             "fl":                          lambda: FocalLoss(**loss_params),
             "flwki":                       lambda: FocalWKInversionLoss(**loss_params),
             "inv" :                        lambda: ClusterInversionLoss(**loss_params),
-            "monotonic" :                  lambda: MonoticRiskLoss(**loss_params)
+            "monotonic" :                  lambda: MonoticRiskLoss(**loss_params),
+            "ordinalNoCoverage" :          lambda: OrdinalMonotonicLossNoCoverage(**loss_params),
+            "ordinalNoCoverageWithGains" : lambda: OrdinalMonotonicLossNoCoverageWithGains(**loss_params),
         }
 
     try:

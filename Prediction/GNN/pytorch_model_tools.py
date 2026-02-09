@@ -1454,7 +1454,9 @@ def create_test_loader(graph, df,
                         gridh2mesh=None,
                         mesh2graph=None,
                         proportion_0_sample_witg_positive_weight=1.0):
-    
+
+    if 'DFE' not in df.columns:
+        df['DFE'] = 0
     Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns + [target_name]].values
 
     X = []
@@ -2168,15 +2170,19 @@ class Training():
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
 
-        if 'clusters_ids' in required_params(criterion.forward) and criterion.id is not None:
-            if criterion.id == -1 :
-                clusters_ids = torch.ones(target.shape[0])
+        if 'clusters_ids' in required_params(criterion.forward):
+            if hasattr(criterion, 'id') and criterion.id is not None:
+                if criterion.id == -1 :
+                    clusters_ids = torch.ones(target.shape[0], device=target.device)
+                else:
+                    clusters_ids = label[:, criterion.id, -1]
+                    self.cluster_id_index = criterion.id
             else:
-                clusters_ids = label[:, criterion.id, -1]
-                self.cluster_id_index = criterion.id
+                # If id is not defined, use the whole batch as a single cluster
+                clusters_ids = torch.zeros(target.shape[0], device=target.device)
         else:
             clusters_ids = None
-            
+
         if 'areas' in required_params(criterion.forward):
             areas = label[:, area_index, -1]
         
@@ -2719,10 +2725,13 @@ class Training():
                         else:
                             res_loss_dict[key] = loss_res[key]
                 else:
-                    res_loss_dict['l'] = loss_res
+                    res_loss_dict['l'] += loss_res
             else:
                 res_loss = loss.item()
-                res_loss_dict = {'l': loss_res}
+                if isinstance(loss_res, dict):
+                    res_loss_dict = {k: v for k, v in loss_res.items()}
+                else:
+                    res_loss_dict = {'l': loss_res}
 
             if self.ALATraining:
                 # Mises à jour SANS autograd
@@ -2768,6 +2777,12 @@ class Training():
             
             self.criterion_params.append(dict_params)
 
+        if len(loader) > 0:
+            res_loss /= len(loader)
+            for k in res_loss_dict:
+                if isinstance(res_loss_dict[k], (int, float, torch.Tensor)):
+                    res_loss_dict[k] /= len(loader)
+
         return res_loss, res_loss_dict
 
     def launch_val_test_loader(self, loader, criterion, teacher=None):
@@ -2806,6 +2821,11 @@ class Training():
             else:
                 self.area_parameters_log = []
                 self.area_parameters_log.append(self.area_parameters)
+
+        if len(loader) > 0:
+            total_loss /= len(loader)
+            for k in total_loss_dict:
+                total_loss_dict[k] /= len(loader)
 
         return total_loss, total_loss_dict
     
@@ -2875,6 +2895,12 @@ class Training():
 
         criterion = self.get_loss(self.loss, loss_params)
 
+        if has_method(criterion, '_preprocess'):
+            if 'id{departement}' in self.loss:
+                criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
+            elif 'id{node}' in self.loss:
+                criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
         
         new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
@@ -2904,6 +2930,9 @@ class Training():
         epochs_list = []
         val_loss_dict_list = []
         train_loss_dict_list = []
+        
+        if (self.dir_log / 'best.pt').is_file():
+            print(f"WARNING: Checkpoint found at {self.dir_log / 'best.pt'} but SKIPPING load due to hardcoded False.")
         
         #if (self.dir_log / 'best.pt').is_file():
         if False:
@@ -3032,8 +3061,8 @@ class Training():
 
         if has_method(criterion, 'plot_params'):
             if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[self.best_epoch])
-            criterion.plot_params(self.criterion_params, self.dir_log)
+                criterion.update_params(self.criterion_params[best_epoch])
+            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=best_epoch)
 
         # Save distillation best/worst logs and 3D plot at the end of training
         if 'distillation' in self.loss:

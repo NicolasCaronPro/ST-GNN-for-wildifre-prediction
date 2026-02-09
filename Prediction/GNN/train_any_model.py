@@ -228,6 +228,10 @@ def main():
         train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
         val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
         test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
+        
+        train_dataset['timeintervention'] = train_dataset['time_intervention']
+        val_dataset['timeintervention'] = val_dataset['time_intervention']
+        test_dataset['timeintervention'] = test_dataset['time_intervention']
 
         if 'ressource' not in train_dataset.columns:
             train_dataset['ressource'] = 0

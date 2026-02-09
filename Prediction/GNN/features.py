@@ -2444,6 +2444,16 @@ def shift_target(
     
     prev_col = f"{colunm}_prev"
 
+    if task_type == 'classification':
+        if colunm == 'nbsinister':
+            colunm = 'nbsinister-quantile-5-Class-Dept'
+        elif colunm == 'timeintervention':
+            colunm = 'timeintervention-quantile-5-Class-Dept'
+        elif colunm == 'ressource':
+            colunm = 'ressource-quantile-5-Class-Dept'
+        elif colunm == 'burnedareaRoot':
+            colunm = 'burnedareaRoot-quantile-5-Class-Dept'
+
     # ---------- 1) Décalage par date exacte -1 pour chaque graph_id ----------
     df[prev_col] = 0  # initialisation par défaut
 
