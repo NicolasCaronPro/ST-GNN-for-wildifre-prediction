@@ -302,6 +302,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
         
     logger.info(f'Train dates are between : {allDates[int(np.min(train_dataset["date"]))], allDates[int(np.max(train_dataset["date"]))]}')
     logger.info(f'Val dates are bewteen : {allDates[int(np.min(val_dataset["date"]))], allDates[int(np.max(val_dataset["date"]))]}')
+    logger.info(f'Test dates are bewteen : {allDates[int(np.min(test_dataset["date"]))], allDates[int(np.max(test_dataset["date"]))]}')
 
     if graph_method == 'node':
         logger.info(f'Nb sinister in train set : {train_dataset["nbsinister"].sum()}')
@@ -1221,6 +1222,39 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 logger.info(f'score_k{k} = {val}')
             
             logger.info(f'Monotonic scores: high={score_high:.3f}, low={score_low:.3f}, total={score_high+score_low:.3f}')
+
+            # --- Summer Scoring (06-15 to 09-25) ---
+            print('Calculating Summer Scores (06-15 to 09-25)')
+            # Filter indices
+            summer_mask = []
+            for d_idx in res['date'].values:
+                # allDates is global from GNN.tools or similar
+                d_str = allDates[int(d_idx)] # YYYY-MM-DD
+                mm_dd = d_str[5:]
+                if "06-15" <= mm_dd <= "09-25":
+                    summer_mask.append(True)
+                else:
+                    summer_mask.append(False)
+            summer_mask = np.array(summer_mask, dtype=bool)
+
+            if summer_mask.sum() > 0:
+                y_pred_summer = y_pred[summer_mask]
+                y_true_summer = y_true_real[summer_mask]
+                date_summer = res['date'].values[summer_mask]
+                id_summer = res['graph_id'].values[summer_mask]
+
+                sh_sum, sl_sum, cov_sum, score_adj_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
+                
+                # Store with suffix _DFE (as requested: score_k_DFE)
+                for k, val in score_adj_sum.items():
+                    metrics[f'score_k{k}_DFE'] = val
+                    logger.info(f'score_k{k}_DFE (Summer) = {val}')
+                
+                metrics['score_high_DFE'] = sh_sum
+                metrics['score_low_DFE'] = sl_sum
+                metrics['score_DFE'] = sh_sum + sl_sum
+            else:
+                logger.warning("No summer data found for scoring.")
         except Exception as e:
             logger.warning(f"Monotonic scoring failed in evaluate_pipeline: {e}")
             metrics['score_high'] = np.nan
@@ -2406,6 +2440,8 @@ def wrapped_train_deep_learning_1D(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2437,6 +2473,8 @@ def wrapped_train_deep_learning_1D(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2459,7 +2497,8 @@ def wrapped_train_deep_learning_1D(params):
                                                custom_model_params=custom_model_params, features_importance=False,
                                                use_log=params.get('use_log', True))
     
-    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'], min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
+    wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'],
+                        min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
 def wrapped_train_deep_learning_1D_federated(params):
@@ -2508,6 +2547,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2534,6 +2575,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2622,6 +2665,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2648,6 +2693,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2739,6 +2786,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2765,6 +2814,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2854,6 +2905,8 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2880,6 +2933,8 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2970,6 +3025,8 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -2996,6 +3053,8 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3081,6 +3140,8 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3106,6 +3167,8 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3197,6 +3260,8 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3231,6 +3296,8 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3313,6 +3380,8 @@ def wrapped_train_deep_learning_1D_unique(params):
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3344,6 +3413,8 @@ def wrapped_train_deep_learning_1D_unique(params):
                                     nbfeatures=nbfeatures,
                                     batch_size=params['batch_size'],
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=features,
@@ -3466,6 +3537,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             batch_size=batch_size,
             nbfeatures=nbfeatures,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=target_name,
             out_channels=2,
             features_name=features_occ,
@@ -3487,6 +3560,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             batch_size=batch_size,
             nbfeatures=nbfeatures,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=params['target_num'],
             out_channels=5,
             features_name=features_num,
@@ -3522,6 +3597,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             nbfeatures=nbfeatures,
             batch_size=batch_size,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=target_name,
             out_channels=2,
             features_name=features_occ,
@@ -3546,6 +3623,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             nbfeatures=nbfeatures,
             batch_size=batch_size,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=params['target_num'],
             out_channels=5,
             features_name=features_num,
@@ -3636,6 +3715,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             batch_size=batch_size,
             nbfeatures=nbfeatures,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=target_name,
             out_channels=3,
             features_name=features,
@@ -3657,6 +3738,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             batch_size=batch_size,
             nbfeatures=nbfeatures,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=target_name,
             out_channels=out_channels,
             features_name=[],
@@ -3692,6 +3775,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             nbfeatures=nbfeatures,
             batch_size=batch_size,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=target_name,
             out_channels=3,
             features_name=features,
@@ -3716,6 +3801,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             nbfeatures=nbfeatures,
             batch_size=batch_size,
             lr=params['lr'],
+            delta_lr=params['delta_lr'],
+            patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=params['target_class'],
             out_channels=out_channels,
             features_name=[],
@@ -3795,6 +3882,8 @@ def wrapped_train_deep_learning_2D(params):
                                  nbfeatures=nbfeatures,
                                     batch_size=batch_size,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=params['features_name_2D'],
@@ -3864,6 +3953,8 @@ def wrapped_train_deep_learning_2D_federated(params):
                                  nbfeatures=nbfeatures,
                                     batch_size=batch_size,
                                     lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                     target_name=target_name,
                                     out_channels=params['out_channels'],
                                     features_name=params['features_name_2D'],
@@ -3965,6 +4056,8 @@ def wrapped_train_deep_learning_distallation(params):
                                 student_name=student_name,
                                 batch_size=batch_size,
                                 lr=params['lr'],
+                                delta_lr=params['delta_lr'],
+                                patience_cnt_lr=params['PATIENCE_CNT_LR'],
                                 out_channels=params['out_channels'],
                                 features_name=features,
                                 ks=kdays,
@@ -4158,6 +4251,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     batch_size=batch_size,
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
+                                    delta_lr=input_params['delta_lr'],
+                                    patience_cnt_lr=input_params['PATIENCE_CNT_LR'],
                                     target_name=target,
                                     out_channels=input_params['out_channels'],
                                     features_name=features,
@@ -4183,6 +4278,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     batch_size=batch_size,
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
+                                    delta_lr=input_params['delta_lr'],
+                                    patience_cnt_lr=input_params['PATIENCE_CNT_LR'],
                                     target_name=target,
                                     out_channels=input_params['out_channels'],
                                     features_name=features,
@@ -4201,6 +4298,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     batch_size=batch_size,
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
+                                    delta_lr=input_params['delta_lr'],
+                                    patience_cnt_lr=input_params['PATIENCE_CNT_LR'],
                                     target_name=target,
                                     out_channels=input_params['out_channels'],
                                     features_name=input_params['features_name_2D'],

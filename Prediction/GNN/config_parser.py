@@ -57,6 +57,8 @@ class ConfigParser:
         self.lr = self.hyperparameters.get("lr")
         self.PATIENCE_CNT = self.hyperparameters.get("PATIENCE_CNT")
         self.CHECKPOINT = self.hyperparameters.get("CHECKPOINT")
+        self.delta_lr = self.hyperparameters.get("delta_lr")
+        self.PATIENCE_CNT_LR = self.hyperparameters.get("PATIENCE_CNT_LR")
 
         # expose all remaining entries as attributes
         for key, value in data.items():

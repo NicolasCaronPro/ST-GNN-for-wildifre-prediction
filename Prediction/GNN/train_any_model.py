@@ -88,6 +88,9 @@ def main():
     )
     args = parser.parse_args()
 
+    np.set_printoptions(suppress=True, precision=6)
+    pd.options.display.float_format = '{:.6f}'.format
+
     cfg = ConfigParser(args.config)
     QUICK = bool(cfg.get("quick", False))
 
@@ -220,14 +223,6 @@ def main():
         train_dataset['saison-cluster-encoder'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
         val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
         test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
-
-        train_dataset['timeintervention-kmeans-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-        val_dataset['timeintervention-kmeans-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-        test_dataset['timeintervention-kmeans-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
-        
-        train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-kmeans-5-Class-Dept']
-        val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-kmeans-5-Class-Dept']
-        test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-kmeans-5-Class-Dept']
         
         train_dataset['timeintervention'] = train_dataset['time_intervention']
         val_dataset['timeintervention'] = val_dataset['time_intervention']
@@ -245,6 +240,10 @@ def main():
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
             save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
             save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+
+        train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-quantile-5-Class-Dept']
+        val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-quantile-5-Class-Dept']
+        test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-quantile-5-Class-Dept']
 
         train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
@@ -283,11 +282,13 @@ def main():
             "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
             "risk",
         )
+        
         test_dataset = add_past_risk(
             test_dataset,
             "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
             "risk",
         )
+
         val_dataset = add_past_risk(
             val_dataset,
             "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
@@ -299,6 +300,7 @@ def main():
             "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
             "burnedarea",
         )
+
         test_dataset = add_past_risk(
             test_dataset,
             "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
@@ -320,6 +322,11 @@ def main():
     
     prefix = f"full_all_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
 
+    if cfg.delta_lr is None:
+        raise ValueError("delta_lr must be defined in config (hyperparameters).")
+    if cfg.PATIENCE_CNT_LR is None:
+        raise ValueError("PATIENCE_CNT_LR must be defined in config (hyperparameters).")
+
     global_params = {
         "graphScale": graphScale,
         "device": device,
@@ -337,6 +344,8 @@ def main():
         "graph": graphScale,
         "name_dir": name_dir,
         "graph_method": cfg.graph_method,
+        "delta_lr": cfg.delta_lr,
+        "PATIENCE_CNT_LR": cfg.PATIENCE_CNT_LR,
     }
 
     tree_model_names = []

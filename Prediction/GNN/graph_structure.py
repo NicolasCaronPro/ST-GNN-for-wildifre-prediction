@@ -117,7 +117,11 @@ def load_dfe_for_06(dir_data):
     df = change_date_format(df)
 
     df = pd.concat([df, df_2024_2025], axis=0)
-    
+
+    df.sort_values(by=['date'], inplace=True)
+
+    df['departement'] = 6
+
     return df
 
 def num_zone2_graph_id_dep6(df, graph_ids):
@@ -127,7 +131,7 @@ def num_zone2_graph_id_dep6(df, graph_ids):
     """
 
     num_zone = [65, 62, 64, 61, 66, 67, 63]
-    
+
     assert len(num_zone) == len(graph_ids), f'The size of {graph_ids} must match the size of {num_zone}'
 
     # Mapping inversé : num_zone -> graph_id
@@ -963,19 +967,46 @@ class GraphStructure():
                 dfe_df = load_dfe_for_06(rootDisk / 'csv')
             else:
                 dfe_df = None
+
             if not dfe_df is None:
                 graph_ids = np.unique(mask)
                 graph_ids = graph_ids[(graph_ids > 0) & ~(np.isnan(graph_ids))]
                 graph_ids = np.sort(graph_ids)
                 dfe_df = num_zone2_graph_id_dep6(dfe_df, graph_ids)
                 datacube = self.add_dfe_variable(datacube, dfe_df)
+                # --- Verify DFE 2024 data ---
+                print("Verifying DFE data for 2024...")
+                indices_2024 = [d for d in allDates if d.startswith('2024')]
+                if indices_2024:
+                    # datacube['DFE'] is (date, lat, lon) or similar dimensions
+                    # The 'date' coord in datacube matches indices in allDates
+                    # Filter by date indices
+                    
+                    # Intersect with available dates in datacube
+                    existing_dates = datacube['date'].values
+                    print('existing_dates:', existing_dates)
+                    indices_2024 = [i for i in indices_2024 if i in existing_dates]
+
+                    if indices_2024:
+                        dfe_2024 = datacube['DFE'].sel(date=indices_2024)
+                        print(f"DFE 2024 shape: {dfe_2024.shape}")
+                        print(f"DFE 2024 min: {np.nanmin(dfe_2024.values)}")
+                        print(f"DFE 2024 max: {np.nanmax(dfe_2024.values)}")
+                        print(f"DFE 2024 mean: {np.nanmean(dfe_2024.values)}")
+                        if np.nansum(dfe_2024.values) == 0:
+                            logger.warning("DFE 2024 data is all zeros!")
+                        else:
+                            logger.info("DFE 2024 data appears to be loaded (sum > 0).")
+                    else:
+                        logger.warning("No dates found for 2024 in datacube (though they exist in allDates).")
+                else:
+                    logger.warning("No dates found for 2024 in allDates.")
             else:
                 datacube['DFE'] = np.nan
                 
             self.numCluster = np.shape(np.unique(self.ids))[0]
 
             save_object(datacube, f'datacube_target_{dept}_{self.scale}_{self.base}_{self.graph_method}.pkl', path / 'datacube')
-
 
     def add_dfe_variable(self, ds: xr.Dataset, df: pd.DataFrame) -> xr.Dataset:
         df = df.copy()
@@ -988,7 +1019,6 @@ class GraphStructure():
         if "date" in area_map.dims:
             area_map = area_map.isel(date=0)
 
-        
         print(df['graph_id'].unique())
         print(np.unique(ds['area'].values))
         

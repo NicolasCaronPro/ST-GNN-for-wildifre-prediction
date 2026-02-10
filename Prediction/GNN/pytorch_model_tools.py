@@ -1961,7 +1961,7 @@ class WrapperModel(torch.nn.Module):
         return self.model(x_orig, self.edges)
 
 class Training():
-    def __init__(self, model_name, nbfeatures, batch_size, lr, target_name, task_type,
+    def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
                  features_name, ks, out_channels, dir_log,
                  loss='mse', name='Training', device='cpu',
                  under_sampling='full', over_sampling='full', n_run=1,
@@ -1978,6 +1978,8 @@ class Training():
         self.features_name = [str(fet) for fet in features_name]
         self.ks = int(ks)
         self.lr = lr
+        self.delta_lr = delta_lr
+        self.patience_cnt_lr = patience_cnt_lr
         self.out_channels = out_channels
         self.dir_log = dir_log
         self.task_type = task_type
@@ -2924,6 +2926,7 @@ class Training():
         BEST_MODEL_PARAMS = None
         best_epoch = 0
         patience_cnt = 0
+        current_patience_lr = 0
 
         val_loss_list = []
         train_loss_list = []
@@ -2953,22 +2956,59 @@ class Training():
                     BEST_VAL_LOSS = val_loss
                     BEST_MODEL_PARAMS = self.model.state_dict()
                     patience_cnt = 0
+                    current_patience_lr = 0 # Val loss improved, reset retries
                     best_epoch = epoch
                 else:
                     patience_cnt += 1
+                    
+                    # Logic for LR Decay: If PATIENCE_CNT is reached
                     if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
-                        logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
-                        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-                        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                        plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-                        if MLFLOW:
-                            mlflow.end_run()
-                        break
+                        # Check if we can reduce LR (have we used all retries?)
+                        # PATIENCE_CNT_LR is the number of allowed reductions/retries
+                        if current_patience_lr >= self.patience_cnt_lr:
+                            logger.info(f'Loss has not increased for {patience_cnt} epochs AND max LR reductions ({self.patience_cnt_lr}) reached.')
+                            logger.info(f'Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
+                            save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
+                            save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
+                            plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+                            if MLFLOW:
+                                mlflow.end_run()
+                            break
+                        else:
+                            # Reduce LR and reset patience_cnt
+                            if self.delta_lr > 0:
+                                current_patience_lr += 1
+                                logger.info(f"Patience {PATIENCE_CNT} reached (Retry {current_patience_lr}/{self.patience_cnt_lr}). Decay LR by factor {self.delta_lr}.")
+                                
+                                current_lr = optimizer.param_groups[0]['lr']
+                                new_lr = current_lr * (1 - self.delta_lr)
+                                if new_lr <= 1e-9:
+                                    new_lr = 1e-9
+                                    logger.warn("Learning rate reached floor (1e-9).")
+                                
+                                logger.info(f"Reducing LR from {current_lr:.6f} to {new_lr:.6f}")
+                                
+                                # Define new optimizer with new LR (resets state/momentum as requested)
+                                for param_group in optimizer.param_groups:
+                                    param_group['lr'] = new_lr
+                                
+                                # Reset patience_cnt to give model time to improve with new LR
+                                patience_cnt = 0
+                            else:
+                                # No delta_lr defined, stop normal
+                                logger.info(f'Loss has not increased for {patience_cnt} epochs. No delta_lr defined.')
+                                save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
+                                save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
+                                plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+                                if MLFLOW:
+                                    mlflow.end_run()
+                                break
                 if MLFLOW:
                     mlflow.log_metric('loss', val_loss, step=epoch)
                 if epoch % CHECKPOINT == 0 and verbose:
-                    logger.info(f'epochs {epoch}, Val loss {val_loss}')
-                    logger.info(f'epochs {epoch}, Best val loss {BEST_VAL_LOSS}')
+                    curr_lr = optimizer.param_groups[0]['lr']
+                    logger.info(f'Epoch {epoch}: Val loss {val_loss:.4f}, Train loss {train_loss:.4f}, Best val loss {BEST_VAL_LOSS:.4f}')
+                    logger.info(f'    LR: {curr_lr:.6f} | Patience: {patience_cnt}/{PATIENCE_CNT} | Retry: {current_patience_lr}/{self.patience_cnt_lr}')
                     save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
 
             logger.info(f'Last val loss {val_loss}')
@@ -4346,11 +4386,11 @@ class Training():
 
 class SplitTraining(Training):
     def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
-                 nbfeatures, batch_size, lr, target_name, task_type, out_channels,
+                 nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
                  horizon=0, post_process=None):
 
-        super().__init__(model_name, nbfeatures, batch_size, lr, target_name, task_type, features_name, ks,
+        super().__init__(model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
                          over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process)
 

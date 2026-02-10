@@ -283,7 +283,6 @@ def process_target(df, graphScale, prefix, find_df, minDate, departements, train
         #    df = target_by_day(df, limit_day, futur_met, target_spe)
 
         save_object(df, f'df_no_weight_{prefix}.pkl', dir_output)
-
     return df
 
 def construct_database_from_xarray(
@@ -1064,4 +1063,7 @@ def init(args, dir_output, script):
     fp['database'] = dataset_name
     
     prefix = f'full_{scale}_{graphScale.base}_{graphScale.graph_method}'
+
+    print(df['date'].unique())
+
     return df, graphScale, prefix, fp, features_name
