@@ -1,5 +1,9 @@
 from numpy import dtype
 import numpy as np
+import gc
+import psutil
+import tracemalloc
+import resource
 import random
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
@@ -2044,6 +2048,29 @@ class Training():
         
         if len(self.prev_idx) == 0:
             self.prev_idx = None
+        
+        # History for loss components decomposition
+        self.loss_components_history = {
+            'loss_total': [],
+            'loss_trans': [],     # Task loss (raw)
+            'global_loss_trans': [],  # Global transition loss
+            'entropy_pi': [],     # Entropy (raw)
+            'entropy_weighted': [],  # Entropy contribution to loss
+            'mu0_term': [],       # Mu0 term (already weighted)
+            'dirichlet_reg': [],  # Dirichlet reg (raw)
+            'dirichlet_weighted': [],  # Dirichlet contribution to loss
+            'ce_loss': [],        # CE loss (raw)
+            'ce_weighted': [],    # CE contribution to loss
+            'epoch': [],
+            
+            # Detailed scaling stats
+            'scale_min': [],
+            'scale_mean': [],
+            'scale_max': [],
+            'diff_raw_mean': [],
+            'diff_scaled_mean': [],
+            'margin_mean': []
+        }
 
     def remove_graph(self):
         del self.graph
@@ -2074,6 +2101,55 @@ class Training():
         except:
             pass
     
+    def free_memory(self):
+        """
+        Aggressively free memory by explicitly deleting heavy attributes.
+        Used in search_samples_proportion to clean up deep-copied models.
+        """
+        # Delete dataloaders
+        try:
+            del self.train_loader
+        except:
+            pass
+        try:
+            del self.val_loader
+        except:
+            pass
+        try:
+            del self.test_loader
+        except:
+            pass
+        
+        # Delete dataframes
+        try:
+            del self.df_train
+        except:
+            pass
+        try:
+            del self.df_val
+        except:
+            pass
+        try:
+            del self.df_test
+        except:
+            pass
+        
+        # Delete graph
+        try:
+            del self.graph
+        except:
+            pass
+        
+        # Delete model and optimizer
+        try:
+            del self.optimizer
+        except:
+            pass
+        try:
+            del self.model
+        except:
+            pass
+
     def compute_weights_and_target(self, labels, band, ids_columns, is_grap_or_node, graphs, H):
         weight_idx = ids_columns.index('weight')
         target_is_binary = self.task_type == 'binary'
@@ -2689,6 +2765,37 @@ class Training():
             else:
                 total_loss += loss
 
+        # Clean up intermediate tensors before returning
+        try:
+            del inputs, labels, target, weights
+        except:
+            pass
+        try:
+            del output, logits, hidden
+        except:
+            pass
+        try:
+            del inputs_horizon
+        except:
+            pass
+        try:
+            # Clean up lists of tensors
+            for t in hidden_past:
+                del t
+            del hidden_past
+        except:
+            pass
+        try:
+            for t in output_past:
+                del t
+            del output_past
+        except:
+            pass
+        try:
+            del loss
+        except:
+            pass
+
         return total_loss, loss_res
 
     def launch_train_loader(self, loader, criterion, optimizer, do_update):
@@ -2703,6 +2810,9 @@ class Training():
             self._epoch_distill_best = {'loss': float('inf'), 'graph_id': None}
             self._epoch_distill_worst = {'loss': float('-inf'), 'graph_id': None}
         
+        res_loss = 0.0
+        res_loss_dict = {'l': 0.0}
+
         for i, data in enumerate(loader, 0):
             
             loss, loss_res = self.launch_batch(data, criterion, 'train', do_update)
@@ -2754,6 +2864,16 @@ class Training():
                 optimizer.step()
 
                 #self.update_weight()
+            
+            # Clean up tensors from this batch
+            try:
+                del loss
+            except:
+                pass
+            try:
+                del loss_res
+            except:
+                pass
         # After finishing the epoch, persist the best/worst entries for this epoch
         if 'distillation' in self.loss:
             if getattr(self, '_epoch_distill_best', None) is not None and self._epoch_distill_best['graph_id'] is not None:
@@ -2804,7 +2924,14 @@ class Training():
                 
                 loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=False)
 
-                total_loss += loss.item()
+                if loss is not None:
+                    if torch.is_tensor(loss):
+                        total_loss += loss.item()
+                    else:
+                        total_loss += loss
+                else:
+                    # Should not happen ideally, but safety first
+                    pass
 
                 if isinstance(loss_res, dict):
                     for key in loss_res:
@@ -2816,6 +2943,16 @@ class Training():
                         total_loss_dict['l'] = loss_res
                     else:
                         total_loss_dict['l'] += loss_res
+                
+                # Clean up tensors from this batch
+                try:
+                    del loss
+                except:
+                    pass
+                try:
+                    del loss_res
+                except:
+                    pass
             
         if 'learnable-area' in self.loss:
             if hasattr(self, 'area_parameters_log'):
@@ -2870,6 +3007,79 @@ class Training():
         alpha = 1 / np.sqrt(freq)
         alpha = alpha / alpha.sum()
         return alpha
+    
+    def calculate_val_scores_and_compare(self, best_scores=None):
+        """
+        Calculate validation scores for k=1,2,3,4 and compare with best using Borda Count.
+        
+        Returns:
+            current_scores (dict): Dictionary with score_k1, score_k2, score_k3, score_k4
+            is_better (bool): True if current scores are better than best (lower rank sum)
+            rank_sum (int): Sum of ranks for current scores
+        """
+        from GNN.tools import evaluate_metrics
+        
+        # Get predictions on validation set
+        self.model.eval()
+        with torch.no_grad():
+            pred_tensor, y_tensor = self._predict_test_loader(self.val_loader)
+        
+        # Extract predictions and ground truth
+        test_output = pred_tensor[:, 0]
+        y = y_tensor[:, :, 0]
+        
+        prediction = test_output.detach().cpu().numpy()
+        y = y.detach().cpu().numpy()
+        
+        # Create temporary dataframe from predictions (like in search_samples_proportion)
+        dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+        dff['departement'] = y[:, departement_index]
+        dff['date'] = y[:, date_index]
+        dff['graph_id'] = y[:, graph_id_index]
+        dff[self.target_name] = y[:, -1]
+        
+        # Calculate metrics
+        metrics = evaluate_metrics(
+            dff[self.target_name],
+            prediction,
+            dates=dff['date'].values,
+            zones=dff['graph_id'].values
+        )
+        
+        # Extract scores for k=1,2,3,4
+        current_scores = {}
+        for k in [1, 2, 3, 4]:
+            key = f'score_k{k}'
+            if key in metrics:
+                current_scores[key] = metrics[key]
+            else:
+                current_scores[key] = 0.0
+        
+        # Clean up temporary objects
+        del dff, prediction, y, test_output, y_tensor, pred_tensor
+        
+        # If no previous best, this is the first epoch
+        if best_scores is None:
+            return current_scores, True, 0
+        
+        # Compare using Borda Count (rank-based)
+        # Lower rank sum is better
+        all_scores = {'current': current_scores, 'best': best_scores}
+        rank_sums = {'current': 0, 'best': 0}
+        
+        for k in [1, 2, 3, 4]:
+            key = f'score_k{k}'
+            # Sort by score (higher is better), so reverse=True
+            sorted_keys = sorted(all_scores.keys(), 
+                                key=lambda x: all_scores[x][key], 
+                                reverse=True)
+            # Assign ranks (1-based)
+            for rank, score_key in enumerate(sorted_keys, 1):
+                rank_sums[score_key] += rank
+        
+        is_better = rank_sums['current'] < rank_sums['best']
+        
+        return current_scores, is_better, rank_sums['current']
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
         """
@@ -2924,6 +3134,7 @@ class Training():
 
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
+        BEST_SCORES = None  # For score-based early stopping
         best_epoch = 0
         patience_cnt = 0
         current_patience_lr = 0
@@ -2952,57 +3163,93 @@ class Training():
                 val_loss_dict_list.append(val_loss_dict)
                 train_loss_dict_list.append(train_loss_dict)
                 epochs_list.append(epoch)
-                if val_loss < BEST_VAL_LOSS and epoch > min_epochs:
-                    BEST_VAL_LOSS = val_loss
-                    BEST_MODEL_PARAMS = self.model.state_dict()
-                    patience_cnt = 0
-                    current_patience_lr = 0 # Val loss improved, reset retries
-                    best_epoch = epoch
+                
+                # Score-based early stopping with Borda Count
+                if epoch > min_epochs:
+                    try:
+                        current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
+                        
+                        # Store scores for this epoch
+                        self.score_per_epochs[epoch] = current_scores
+                        
+                        if is_better:
+                            BEST_SCORES = current_scores
+                            BEST_VAL_LOSS = val_loss  # Still track for logging
+                            BEST_MODEL_PARAMS = self.model.state_dict()
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                            best_epoch = epoch
+                            logger.info(f'Epoch {epoch}: New best scores (Rank Sum: {rank_sum})')
+                            for k in [1, 2, 3, 4]:
+                                logger.info(f'  score_k{k}: {current_scores[f"score_k{k}"]:.4f}')
+                        else:
+                            patience_cnt += 1
+                    except Exception as e:
+                        # Fallback to loss-based if score calculation fails
+                        logger.warning(f'Score calculation failed ({e}), falling back to loss-based early stopping')
+                        if val_loss < BEST_VAL_LOSS:
+                            BEST_VAL_LOSS = val_loss
+                            BEST_MODEL_PARAMS = self.model.state_dict()
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                            best_epoch = epoch
+                        else:
+                            patience_cnt += 1
                 else:
+                    # First epoch or within min_epochs: just initialize
+                    if epoch == min_epochs:
+                        try:
+                            BEST_SCORES, _, _ = self.calculate_val_scores_and_compare(None)
+                            logger.info(f'Epoch {epoch}: Initial scores')
+                            for k in [1, 2, 3, 4]:
+                                logger.info(f'  score_k{k}: {BEST_SCORES[f"score_k{k}"]:.4f}')
+                        except Exception as e:
+                            logger.warning(f'Initial score calculation failed ({e}), using loss-based')
+                            BEST_SCORES = None
                     patience_cnt += 1
                     
-                    # Logic for LR Decay: If PATIENCE_CNT is reached
-                    if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
-                        # Check if we can reduce LR (have we used all retries?)
-                        # PATIENCE_CNT_LR is the number of allowed reductions/retries
-                        if current_patience_lr >= self.patience_cnt_lr:
-                            logger.info(f'Loss has not increased for {patience_cnt} epochs AND max LR reductions ({self.patience_cnt_lr}) reached.')
-                            logger.info(f'Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
+                # Early stopping and LR decay logic - must run on every epoch
+                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
+                    # Check if we can reduce LR (have we used all retries?)
+                    # PATIENCE_CNT_LR is the number of allowed reductions/retries
+                    if current_patience_lr >= self.patience_cnt_lr:
+                        logger.info(f'Loss has not increased for {patience_cnt} epochs AND max LR reductions ({self.patience_cnt_lr}) reached.')
+                        logger.info(f'Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
+                        save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
+                        save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
+                        plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+                        if MLFLOW:
+                            mlflow.end_run()
+                        break
+                    else:
+                        # Reduce LR and reset patience_cnt
+                        if self.delta_lr > 0:
+                            current_patience_lr += 1
+                            logger.info(f"Patience {PATIENCE_CNT} reached (Retry {current_patience_lr}/{self.patience_cnt_lr}). Decay LR by factor {self.delta_lr}.")
+                            
+                            current_lr = optimizer.param_groups[0]['lr']
+                            new_lr = current_lr * (1 - self.delta_lr)
+                            if new_lr <= 1e-9:
+                                new_lr = 1e-9
+                                logger.warn("Learning rate reached floor (1e-9).")
+                            
+                            logger.info(f"Reducing LR from {current_lr:.6f} to {new_lr:.6f}")
+                            
+                            # Define new optimizer with new LR (resets state/momentum as requested)
+                            for param_group in optimizer.param_groups:
+                                param_group['lr'] = new_lr
+                            
+                            # Reset patience_cnt to give model time to improve with new LR
+                            patience_cnt = 0
+                        else:
+                            # No delta_lr defined, stop normal
+                            logger.info(f'Loss has not increased for {patience_cnt} epochs. No delta_lr defined.')
                             save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
                             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
                             plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
                             if MLFLOW:
                                 mlflow.end_run()
                             break
-                        else:
-                            # Reduce LR and reset patience_cnt
-                            if self.delta_lr > 0:
-                                current_patience_lr += 1
-                                logger.info(f"Patience {PATIENCE_CNT} reached (Retry {current_patience_lr}/{self.patience_cnt_lr}). Decay LR by factor {self.delta_lr}.")
-                                
-                                current_lr = optimizer.param_groups[0]['lr']
-                                new_lr = current_lr * (1 - self.delta_lr)
-                                if new_lr <= 1e-9:
-                                    new_lr = 1e-9
-                                    logger.warn("Learning rate reached floor (1e-9).")
-                                
-                                logger.info(f"Reducing LR from {current_lr:.6f} to {new_lr:.6f}")
-                                
-                                # Define new optimizer with new LR (resets state/momentum as requested)
-                                for param_group in optimizer.param_groups:
-                                    param_group['lr'] = new_lr
-                                
-                                # Reset patience_cnt to give model time to improve with new LR
-                                patience_cnt = 0
-                            else:
-                                # No delta_lr defined, stop normal
-                                logger.info(f'Loss has not increased for {patience_cnt} epochs. No delta_lr defined.')
-                                save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
-                                save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                                plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
-                                if MLFLOW:
-                                    mlflow.end_run()
-                                break
                 if MLFLOW:
                     mlflow.log_metric('loss', val_loss, step=epoch)
                 if epoch % CHECKPOINT == 0 and verbose:
@@ -3104,7 +3351,103 @@ class Training():
                 criterion.update_params(self.criterion_params[best_epoch])
             criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=best_epoch)
 
+        # --- LOG LOSS COMPONENTS ---
+        # "Je veux les valeurs brutes, sans les multiplications par les lambda"
+        if hasattr(criterion, 'epoch_stats'):
+            est_g = criterion.epoch_stats.get('global', {})
+            if criterion.epoch_stats:
+                # We take the mean of the values collected during the epoch for the global component
+                # Note: epoch_stats accumulates values at each batch.
+                # Ideally we want the average over the epoch.
+                
+                # Helper to safely get mean
+                def safe_mean(key):
+                    vals = est_g.get(key, [])
+                    if vals: 
+                        return np.mean(vals)
+                    
+                    
+                    # Fallback: aggregate from cluster stats if global is missing the key
+                    # OR specific for 'loss_trans' if we want cluster average separate from global
+                    all_vals = []
+                    for k, v in criterion.epoch_stats.items():
+                        if k == 'global': continue
+                        if isinstance(v, dict) and key in v and v[key]:
+                            all_vals.extend(v[key])
+                    
+                    if all_vals:
+                        return np.mean(all_vals)
+                        
+                    return 0.0
+                
+                # Specific extraction for cluster average vs global
+                # loss_trans (cluster avg)
+                loss_trans_cluster = []
+                for k, v in criterion.epoch_stats.items():
+                     if k == 'global': continue
+                     if isinstance(v, dict) and 'loss_trans' in v and v['loss_trans']:
+                          loss_trans_cluster.extend(v['loss_trans'])
+                l_trans = np.mean(loss_trans_cluster) if loss_trans_cluster else 0.0
+
+                # global_loss_trans (from 'global' key)
+                l_trans_glob = 0.0
+                if 'global' in criterion.epoch_stats:
+                     g_stats = criterion.epoch_stats['global']
+                     if 'loss_trans' in g_stats and g_stats['loss_trans']:
+                          l_trans_glob = np.mean(g_stats['loss_trans'])
+
+                # Other components (averaged over clusters usually, or global if addglobal logic applies)
+                # For entropy, dirichlet, ce, mu0 -> these are now computed per cluster (or global cluster).
+                # So safe_mean (aggregating all) gives the average contribution per sample/cluster.
+                l_ent = safe_mean('entropy_pi')
+                l_ent_w = safe_mean('entropy_weighted')
+                l_mu0 = safe_mean('mu0_term')
+                l_dir = safe_mean('dirichlet_reg') # Now per cluster
+                l_dir_w = safe_mean('dirichlet_weighted')
+                l_ce  = safe_mean('ce_loss')
+                l_ce_w = safe_mean('ce_weighted')
+                l_total = safe_mean('loss_total')
+
+                
+                # Scaling stats
+                s_min = safe_mean('scale_min')
+                s_mean = safe_mean('scale_mean')
+                s_max = safe_mean('scale_max')
+                d_raw = safe_mean('diff_raw_mean')
+                d_scaled = safe_mean('diff_scaled_mean')
+                m_mean = safe_mean('margin_mean')
+
+                self.loss_components_history['loss_total'].append(l_total)
+                self.loss_components_history['loss_trans'].append(l_trans)
+                self.loss_components_history['global_loss_trans'].append(l_trans_glob)
+                self.loss_components_history['entropy_pi'].append(l_ent)
+                self.loss_components_history['entropy_weighted'].append(l_ent_w)
+                self.loss_components_history['mu0_term'].append(l_mu0)
+                self.loss_components_history['dirichlet_reg'].append(l_dir)
+                self.loss_components_history['dirichlet_weighted'].append(l_dir_w)
+                self.loss_components_history['ce_loss'].append(l_ce)
+                self.loss_components_history['ce_weighted'].append(l_ce_w)
+                self.loss_components_history['epoch'].append(epochs_list[-1]) # Current epoch
+                
+                self.loss_components_history['scale_min'].append(s_min)
+                self.loss_components_history['scale_mean'].append(s_mean)
+                self.loss_components_history['scale_max'].append(s_max)
+                self.loss_components_history['diff_raw_mean'].append(d_raw)
+                self.loss_components_history['diff_scaled_mean'].append(d_scaled)
+                self.loss_components_history['margin_mean'].append(m_mean)
+                
+                # Plot
+                self.plot_loss_decomposition()
+                self.plot_scaling_decomposition()
+        
+        # Plot score evolution
+        try:
+            self.plot_score_evolution()
+        except Exception as e:
+            logger.warning(f"Score evolution plot failed: {e}")
+                
         # Save distillation best/worst logs and 3D plot at the end of training
+
         if 'distillation' in self.loss:
             try:
                 self._save_distill_logs_and_plot()
@@ -3122,6 +3465,7 @@ class Training():
         logs = {
             'best': self.distill_best_log,
             'worst': self.distill_worst_log,
+
         }
         save_object(logs, 'distill_best_worst.pkl', self.dir_log)
 
@@ -3153,6 +3497,146 @@ class Training():
         plt.tight_layout()
         plt.savefig(self.dir_log / 'distill_best_worst_3d.png')
         plt.close('all')
+        plt.close('all')
+
+    def plot_loss_decomposition(self):
+        """
+        Plots the raw values of different loss components over epochs.
+        Saves to 'loss_decomposition.png'.
+        """
+        if not self.loss_components_history['epoch']:
+            return
+
+        epochs = self.loss_components_history['epoch']
+        
+        # Prepare figure
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+        
+        # We can plot everything on same axis or use twin axis if scales are very different.
+        # Given "ordre de grandeur", maybe log scale or twin axis is better.
+        # Let's try plotting raw values on linear scale first, but with different colors.
+        
+        # Plot weighted contributions (actual impact on total loss)
+        ax1.plot(epochs, self.loss_components_history['loss_trans'], label='Transitional Loss (Cluster Avg)', color='blue')
+        if any(v != 0 for v in self.loss_components_history.get('global_loss_trans', [])):
+            ax1.plot(epochs, self.loss_components_history['global_loss_trans'], label='Global Transitional Loss', color='brown', linestyle=':')
+        
+        # Weighted components (contribution to total loss)
+        if any(v != 0 for v in self.loss_components_history.get('entropy_weighted', [])):
+            ax1.plot(epochs, self.loss_components_history['entropy_weighted'], label='Entropy (λ × H)', color='green', linestyle='--')
+        
+        ax1.plot(epochs, self.loss_components_history['mu0_term'], label='Mu0 (λ × μ₀)', color='orange', linestyle=':')
+        
+        if any(v != 0 for v in self.loss_components_history.get('dirichlet_weighted', [])):
+            ax1.plot(epochs, self.loss_components_history['dirichlet_weighted'], label='Dirichlet (λ × R)', color='red', linestyle='-.')
+        
+        if any(v != 0 for v in self.loss_components_history.get('ce_weighted', [])):
+            ax1.plot(epochs, self.loss_components_history['ce_weighted'], label='CE Loss (λ × CE)', color='purple', linestyle='-')
+        
+        ax1.plot(epochs, self.loss_components_history['loss_total'], label='Total Loss', color='black', linewidth=2, alpha=0.7)
+        
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Contribution to Loss')
+        ax1.set_title('Loss Components (Weighted Contributions)')
+        ax1.legend(loc='upper right')
+        ax1.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'loss_decomposition.png')
+        plt.close(fig)
+
+    def plot_scaling_decomposition(self):
+        """
+        Plots the scaling and margin metrics over epochs.
+        Saves to 'loss_scaling_decomposition.png'.
+        """
+        if not self.loss_components_history['epoch']:
+            return
+
+        epochs = self.loss_components_history['epoch']
+        
+        # Prepare figure with 2 subplots
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        
+        # Subplot 1: Scale stats
+        ax1 = axes[0]
+        ax1.plot(epochs, self.loss_components_history['scale_mean'], label='Scale Mean', color='blue')
+        ax1.fill_between(epochs, self.loss_components_history['scale_min'], self.loss_components_history['scale_max'], color='blue', alpha=0.2, label='Min-Max Range')
+        ax1.set_xlabel('Epoch')
+        ax1.set_ylabel('Scale Value')
+        ax1.set_title('Scale Statistics')
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+        
+        # Subplot 2: Margins and Diffs
+        ax2 = axes[1]
+        ax2.plot(epochs, self.loss_components_history['diff_raw_mean'], label='Raw Diff Mean', color='orange')
+        ax2.plot(epochs, self.loss_components_history['diff_scaled_mean'], label='Scaled Diff Mean (raw/scale)', color='purple', linestyle='--')
+        ax2.plot(epochs, self.loss_components_history['margin_mean'], label='Margin Mean (gains)', color='green', linestyle='-.')
+        
+        ax2.set_xlabel('Epoch')
+        ax2.set_ylabel('Value')
+        ax2.set_title('Margins & Diffs')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'loss_scaling_decomposition.png')
+        plt.close(fig)
+    
+    def plot_score_evolution(self):
+        """
+        Plot the evolution of score_k1, score_k2, score_k3, score_k4 over epochs.
+        Creates a 2x2 subplot layout with one score per subplot.
+        Saves to 'score_evolution.png'.
+        """
+        if not self.score_per_epochs or len(self.score_per_epochs) == 0:
+            logger.info("No score data to plot (score_per_epochs is empty)")
+            return
+        
+        # Extract epochs and scores
+        epochs = sorted(self.score_per_epochs.keys())
+        scores_k1 = [self.score_per_epochs[e].get('score_k1', 0) for e in epochs]
+        scores_k2 = [self.score_per_epochs[e].get('score_k2', 0) for e in epochs]
+        scores_k3 = [self.score_per_epochs[e].get('score_k3', 0) for e in epochs]
+        scores_k4 = [self.score_per_epochs[e].get('score_k4', 0) for e in epochs]
+        
+        # Create 2x2 subplot
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        fig.suptitle('Score Evolution Over Epochs', fontsize=16)
+        
+        # Plot score_k1
+        axes[0, 0].plot(epochs, scores_k1, marker='o', color='blue', linewidth=2)
+        axes[0, 0].set_xlabel('Epoch')
+        axes[0, 0].set_ylabel('Score K=1')
+        axes[0, 0].set_title('Score K=1 (Low Severity)')
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # Plot score_k2
+        axes[0, 1].plot(epochs, scores_k2, marker='s', color='green', linewidth=2)
+        axes[0, 1].set_xlabel('Epoch')
+        axes[0, 1].set_ylabel('Score K=2')
+        axes[0, 1].set_title('Score K=2 (Medium-Low Severity)')
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # Plot score_k3
+        axes[1, 0].plot(epochs, scores_k3, marker='^', color='orange', linewidth=2)
+        axes[1, 0].set_xlabel('Epoch')
+        axes[1, 0].set_ylabel('Score K=3')
+        axes[1, 0].set_title('Score K=3 (Medium-High Severity)')
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Plot score_k4
+        axes[1, 1].plot(epochs, scores_k4, marker='D', color='red', linewidth=2)
+        axes[1, 1].set_xlabel('Epoch')
+        axes[1, 1].set_ylabel('Score K=4')
+        axes[1, 1].set_title('Score K=4 (High Severity)')
+        axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig(self.dir_log / 'score_evolution.png')
+        plt.close(fig)
+        logger.info(f"Score evolution plot saved to {self.dir_log / 'score_evolution.png'}")
 
     def plot_area_parameter(self, epochs_list, ids, sinisters):
         """
@@ -3301,7 +3785,7 @@ class Training():
         check_and_create_path(self.dir_log)
 
         if not is_unknowed_risk:
-                test_percentage = np.round(np.arange(0.1, 1.05, 0.05), 2)
+                test_percentage = np.round(np.arange(0.1, 1.05, 0.1), 2)
         else:
             test_percentage = np.arange(0.0, 1.05, 0.05)
 
@@ -3318,241 +3802,401 @@ class Training():
         self.metrics['under_prediction_scores'] = []
         self.metrics['over_predictio_scores'] = []
         self.metrics['iou_scores'] = []
+        
+        # --- Memory Logging Setup ---
+        try:
+            tracemalloc.start()
+        except:
+            pass
 
-        if use_log:
-        #if False:
-            if False:
-                if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
-                    data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
-            else:
-                print(self.dir_log / 'metrics.pkl')
-                if (self.dir_log / 'metrics.pkl').is_file():
-                    print(f'Load metrics')
-                    find_log = True
-                    data_log = read_object('metrics.pkl', self.dir_log)
+
+        try:
+            def log_memory(stage):
+                process = psutil.Process(os.getpid())
+                mem_info = process.memory_info()
+                rss_mb = mem_info.rss / 1024 / 1024
+                
+                # Resource (ru_maxrss is in KB on Linux)
+                usage = resource.getrusage(resource.RUSAGE_SELF)
+                maxrss_mb = usage.ru_maxrss / 1024
+                
+                # Tracemalloc
+                current, peak = tracemalloc.get_traced_memory()
+                current_mb = current / 1024 / 1024
+                peak_mb = peak / 1024 / 1024
+                
+                logger.info(f"[MEMORY] {stage} | RSS: {rss_mb:.2f} MB | MaxRSS: {maxrss_mb:.2f} MB | Trace: {current_mb:.2f} MB (Peak: {peak_mb:.2f} MB)")
+                
+            log_memory("Start search_samples_proportion")
+            
+            if use_log:
+            #if False:
+                if False:
+                    if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
+                        data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
                 else:
-                    xs = [0, 10]
-                    for x in xs:
-                        other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
-                        print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
-                        if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
-                            data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
-                        if data_log is not None:
-                            break
-                        
-                    if data_log is None:
-                        xs = [25]
+                    print(self.dir_log / 'metrics.pkl')
+                    if (self.dir_log / 'metrics.pkl').is_file():
+                        print(f'Load metrics')
+                        find_log = True
+                        data_log = read_object('metrics.pkl', self.dir_log)
+                    else:
+                        xs = [0, 10]
                         for x in xs:
-                            other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
+                            other_model = f'{self.model_name}_search_full_{x}_all_one_{self.target_name}_{self.task_type}_{self.loss}'
                             print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
                             if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
                                 data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                             if data_log is not None:
                                 break
-
-        print(f'data_log : {data_log}')
-        if data_log is not None:
-            try:
-                self.metrics = data_log
-                #test_percentage = self.metrics['test_percentage']
-                #under_prediction_score_scores = self.metrics['under_prediction_scores']
-                #over_prediction_score_scores = self.metrics['over_prediction_scores']
-            except Exception as e:
-                print(e)
-                self.metrics = {}
-                data_log = None
-                pass
-
-        doSearch = True
-        if data_log is not None: #and self.n_run == data_log['n_run']:
-            test_percentage = np.asarray(self.metrics['test_percentage'])
-            start_test = -1
-            for i in range(0, len(test_percentage) - 1):
-                start_test = i
-
-                if test_percentage[i] in self.metrics.keys():
-                    last_keys = test_percentage[i]
-                    val_1 = np.mean(data_log[test_percentage[i]]['iou_val'])
-                    val_2 = np.mean(data_log[test_percentage[i + 1]]['iou_val'])
-
-                    std_1 = np.std(data_log[test_percentage[i]]['iou_val'])
-                    std_2 = np.std(data_log[test_percentage[i + 1]]['iou_val'])
-
-                    print('#########################"')
-                    print(f'{test_percentage[i]} -> {val_1} -> {std_1}')
-                    print(f'{test_percentage[i + 1]} -> {val_2} -> {std_2}')
-
-                    try:
-                        if  val_1 >  val_2 or ((val_1 == val_2) and (std_1 < std_2)):
-                            print(f"Last score {val_1} current score {val_2}")
-                            print(f"Last std {std_1} current std {std_2}")
-                            doSearch = False
-                            tp = test_percentage[i]
+                            
+                        if data_log is None:
+                            xs = [25]
+                            for x in xs:
+                                other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
+                                print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
+                                if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
+                                    data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
+                                if data_log is not None:
+                                    break
+    
+            #print(f'data_log : {data_log}')
+            if data_log is not None:
+                try:
+                    self.metrics = data_log
+                    #test_percentage = self.metrics['test_percentage']
+                    #under_prediction_score_scores = self.metrics['under_prediction_scores']
+                    #over_prediction_score_scores = self.metrics['over_prediction_scores']
+                except Exception as e:
+                    print(e)
+                    self.metrics = {}
+                    data_log = None
+                    pass
+    
+            doSearch = True
+            if data_log is not None: #and self.n_run == data_log['n_run']:
+                test_percentage = np.asarray(self.metrics['test_percentage'])
+                start_test = -1
+                for i in range(0, len(test_percentage) - 1):
+                    start_test = i
+    
+                    if test_percentage[i] in self.metrics.keys():
+                        last_keys = test_percentage[i]
+                        val_1 = np.mean(data_log[test_percentage[i]]['iou_val'])
+                        val_2 = np.mean(data_log[test_percentage[i + 1]]['iou_val'])
+    
+                        std_1 = np.std(data_log[test_percentage[i]]['iou_val'])
+                        std_2 = np.std(data_log[test_percentage[i + 1]]['iou_val'])
+    
+                        print('#########################"')
+                        print(f'{test_percentage[i]} -> {val_1} -> {std_1}')
+                        print(f'{test_percentage[i + 1]} -> {val_2} -> {std_2}')
+    
+                        try:
+                            if  val_1 >  val_2 or ((val_1 == val_2) and (std_1 < std_2)):
+                                print(f"Last score {val_1} current score {val_2}")
+                                print(f"Last std {std_1} current std {std_2}")
+                                doSearch = False
+                                tp = test_percentage[i]
+                                break
+                        except Exception as e:
+                            print(e)
+                            doSearch = True
                             break
-                    except Exception as e:
-                        print(e)
-                        doSearch = True
-                        break
-
-            start_test += 1
-
-        else:
-            start_test = 0
-
-        tolerance = 0.03
-        
-        if doSearch:
-            last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['iou_val'])
-            y_ori = df_train[self.target_name].values
-            for i in range(start_test, test_percentage.shape[0]):
-                tp = round(test_percentage[i], 2)
-
-                if tp in self.metrics.keys():
-                    continue
-                
-                df_train_copy = df_train.copy(deep=True)
-                
-                if not is_unknowed_risk:
-                    nb = int(tp * y_ori[y_ori == 0].shape[0])
-                else:
-                    nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
-
-                logger.info(f'Trained with {tp} -> {nb} sample of class 0')
-
-                for run in range(self.n_run):
-
-                    df_combined = self.split_dataset(df_train_copy, nb, reset=False)
-
-                    # Mettre à jour df_train pour l'entraînement
-                    #df_train_copy["weight"] = df_combined["weight"].reindex(df_train_copy.index, fill_value=0)
+    
+                start_test += 1
+    
+            else:
+                start_test = 0
+    
+            tolerance = 0.03
+            
+            if doSearch:
+                last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['iou_val'])
+                y_ori = df_train[self.target_name].values
+                for i in range(start_test, test_percentage.shape[0]):
+                    tp = round(test_percentage[i], 2)
+    
+                    if tp in self.metrics.keys():
+                        continue
                     
-                    df_train_copy['weight'] = 0
-                    weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
-                    df_train_copy.loc[df_combined.index, 'weight'] = 1
-                    #df_train_copy.loc[df_combined.index, 'weight'] = weight
+                    df_train_copy = df_train.copy(deep=True)
                     
-                    copy_model = deepcopy(self)
-                    copy_model.under_sampling = 'full'
-                    copy_model.horizon = 0
-                    copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
-                    copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
-                    
-                    ############################# On set val ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val', prediction_type='Class')
-                    
-                    test_output = test_output[:, 0]
-                    y = y[:, :, 0]
-                    
-                    prediction = test_output.detach().cpu().numpy()
-                    y = y.detach().cpu().numpy()
-                    
-                    if 'MultiScale' in self.model_name:
-                        id_mask = y[:, scale_index]
+                    if not is_unknowed_risk:
+                        nb = int(tp * y_ori[y_ori == 0].shape[0])
                     else:
-                        id_mask = y[:, departement_index]
-                        id_mask = None
+                        nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
+    
+                    logger.info(f'Trained with {tp} -> {nb} sample of class 0')
+                    log_memory(f"Before Run Loop (tp={tp})")
+    
+                    for run in range(self.n_run):
+    
+                        df_combined = self.split_dataset(df_train_copy, nb, reset=False)
+    
+                        # Mettre à jour df_train pour l'entraînement
+                        #df_train_copy["weight"] = df_combined["weight"].reindex(df_train_copy.index, fill_value=0)
                         
-                    dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-                    dff['departement'] = y[:, departement_index]
-                    dff['date'] = y[:, date_index]
-                    dff['graph_id'] = y[:, graph_id_index]
-                    dff[self.target_name] = y[:, -1]
-                    y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
-
-                    metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
-                    metrics_run = round_floats(metrics_run)
-                    under_prediction_score_value = under_prediction_score(y, prediction)
-                    over_prediction_score_value = over_prediction_score(y, prediction)
-                    update_metrics_as_arrays(self, tp, metrics_run, 'val')
-
-                    ############################# On set test ##############################
-                    test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='Test', prediction_type='Class')
+                        df_train_copy['weight'] = 0
+                        weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
+                        df_train_copy.loc[df_combined.index, 'weight'] = 1
+                        #df_train_copy.loc[df_combined.index, 'weight'] = weight
+                        
+                        # PREVENT DEEP COPY OF HEAVY OBJECTS
+                        # We strip all data-related attributes from 'self' before deepcopy
+                        # and restore them immediately after.
+                        
+                        # 1. Save references
+                        ref_graph = getattr(self, 'graph', None)
+                        ref_df_train = getattr(self, 'df_train', None)
+                        ref_df_val = getattr(self, 'df_val', None)
+                        ref_df_test = getattr(self, 'df_test', None)
+                        ref_val_loader = getattr(self, 'val_loader', None)
+                        ref_test_loader = getattr(self, 'test_loader', None)
+                        ref_train_loader = getattr(self, 'train_loader', None)
+                        ref_optimizer = getattr(self, 'optimizer', None)
+                        ref_metrics = getattr(self, 'metrics', {})
+                        
+                        # 2. Unset attributes
+                        self.graph = None
+                        self.df_train = None
+                        self.df_val = None
+                        self.df_test = None
+                        self.val_loader = None
+                        self.test_loader = None
+                        self.train_loader = None
+                        self.optimizer = None
+                        self.metrics = {}  # Empty dict to avoid copying full history
+    
+                        # 3. Deepcopy
+                        copy_model = deepcopy(self)
+                        
+                        # 4. Restore attributes
+                        self.graph = ref_graph
+                        self.df_train = ref_df_train
+                        self.df_val = ref_df_val
+                        self.df_test = ref_df_test
+                        self.val_loader = ref_val_loader
+                        self.test_loader = ref_test_loader
+                        self.train_loader = ref_train_loader
+                        self.optimizer = ref_optimizer
+                        self.metrics = ref_metrics
+    
+                        copy_model.under_sampling = 'full'
+                        copy_model.horizon = 0
+                        copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
+                        copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
+                        
+                        log_memory(f"After Train (tp={tp}, run={run})")
+    
+                        ############################# On set val ##############################
+                        test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val', prediction_type='Class')
+                        
+                        test_output = test_output[:, 0]
+                        y = y[:, :, 0]
+                        
+                        prediction = test_output.detach().cpu().numpy()
+                        y = y.detach().cpu().numpy()
+                        
+                        if 'MultiScale' in self.model_name:
+                            id_mask = y[:, scale_index]
+                        else:
+                            id_mask = y[:, departement_index]
+                            id_mask = None
+                            
+                        dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+                        dff['departement'] = y[:, departement_index]
+                        dff['date'] = y[:, date_index]
+                        dff['graph_id'] = y[:, graph_id_index]
+                        dff[self.target_name] = y[:, -1]
+                        y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
+    
+                        metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+                        metrics_run = round_floats(metrics_run)
+                        under_prediction_score_value = under_prediction_score(y, prediction)
+                        over_prediction_score_value = over_prediction_score(y, prediction)
+                        update_metrics_as_arrays(self, tp, metrics_run, 'val')
+                        
+                        # Clean up validation dataframe and arrays
+                        del dff, test_output, prediction, y, metrics_run
+    
+                        ############################# On set test ##############################
+                        test_output, y = copy_model._predict_test_loader(copy_model.test_loader, output_pdf='Test', prediction_type='Class')
+                        
+                        test_output = test_output[:, 0]
+                        y = y[:, :, 0]
+                        
+                        prediction = test_output.detach().cpu().numpy()
+                        y = y.detach().cpu().numpy()
+                        
+                        if 'MultiScale' in self.model_name:
+                            id_mask = y[:, scale_index]
+                        else:
+                            id_mask = y[:, departement_index]
+                            id_mask = None
                     
-                    test_output = test_output[:, 0]
-                    y = y[:, :, 0]
+                        dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
+                        dff['departement'] = y[:, departement_index]
+                        dff['date'] = y[:, date_index]
+                        dff['graph_id'] = y[:, graph_id_index]
+                        dff[self.target_name] = y[:, -1]
+                        y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
+    
+                        metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+                        metrics_run = round_floats(metrics_run)
+                        under_prediction_score_value = under_prediction_score(y, prediction)
+                        over_prediction_score_value = over_prediction_score(y, prediction)
+                        update_metrics_as_arrays(self, tp, metrics_run, 'test')
+                        
+                        # Clean up test dataframe and arrays
+                        del dff, test_output, prediction, y, metrics_run
+                        
+                        # Manually cleanup deepcopied model to free memory
+                        try:
+                            copy_model.free_memory()
+                        except:
+                            pass
+                        del copy_model
+                        
+                        # Force garbage collection and clear CUDA cache
+                        gc.collect()
+                        gc.collect()  # Call twice for cyclic references
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                            torch.cuda.synchronize()  # Wait for all ops to finish
+                        
+                        # Force Python to return memory to OS (Linux only)
+                        try:
+                            import ctypes
+                            ctypes.CDLL('libc.so.6').malloc_trim(0)
+                        except:
+                            pass
+                        
+                        log_memory(f"After Cleanup (tp={tp}, run={run})")
                     
-                    prediction = test_output.detach().cpu().numpy()
-                    y = y.detach().cpu().numpy()
+                    self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
+    
+                    # REPLACED: Use 'score' (score_high + score_low) instead of 'iou'
+                    # metrics has key 'score_val' because update_metrics_as_arrays appends '_val' suffix
                     
-                    if 'MultiScale' in self.model_name:
-                        id_mask = y[:, scale_index]
+                    iou = np.mean(self.metrics[tp]['score_val']) 
+                    std_iou = np.std(self.metrics[tp]['score_val'])
+    
+                    save_object(self.metrics, 'metrics.pkl', self.dir_log)
+                    
+                    #print(f'Metrics achieved : {self.metrics[tp]}')
+    
+                    # REPLACED: Tolerance 0.0 because score scale is arbitrary/large and we want strict maximization
+                    # CHANGED: We now want to scan ALL candidates for Rank-Based Selection. 
+                    # So we update last_score for logging but DO NOT BREAK early.
+                    
+                    tolerance = 0.0
+                    if iou >= last_score - tolerance:
+                        last_score = iou
                     else:
-                        id_mask = y[:, departement_index]
-                        id_mask = None
+                        print(f'Last score {last_score} current score {iou} (Continuing search for Rank Selection)')
+                        # break  <-- COMMENTED OUT TO TEST ALL CANDIDATES
+            
+            # --- RANK-BASED SELECTION (Borda Count) ---
+            # Select tp that minimizes sum of ranks across k=1, 2, 3, 4
+            
+            tp_candidates = []
+            scores_per_k = {1: {}, 2: {}, 3: {}, 4: {}}
+            
+            # 1. Collect scores for all tp
+            for tp, metric_dict in self.metrics.items():
+                if isinstance(tp, float):
+                    # Check if all k-scores are present
+                    has_all_k = True
+                    for k in [1, 2, 3, 4]:
+                        key = f"score_k{k}_val"
+                        # self.metrics might store single values or arrays
+                        if key in self.metrics[tp]:
+                             vals = np.atleast_1d(self.metrics[tp][key])
+                             # Use mean of values (e.g. cross-validation folds)
+                             mean_k = np.nanmean(vals)
+                             if np.isnan(mean_k):
+                                 # print(f"DEBUG: NaN value for {key} for tp={tp}")
+                                 mean_k = 0.0 # Default to 0.0 if NaN
+                             
+                             scores_per_k[k][tp] = mean_k
+                        else:
+                            # print(f"DEBUG: Missing key {key} for tp={tp}")
+                            scores_per_k[k][tp] = 0.0 # Default to 0.0 if missing
+                    
+                    # We always consider the TP as a candidate now, unless other fundamental issues exist
+                    tp_candidates.append(tp)
+            
+            if not tp_candidates:
+                 # Fallback if no valid k-scores found (e.g. older metrics format or nan)
+                 logger.warning("No valid k-scores (k1..k4) found for Rank Selection. Falling back to simple score maximization.")
+                 try:
+                     # Fallback logic: maximization of score_val
+                     best_score = -np.inf
+                     best_tp = None
+                     for tp in self.metrics.keys():
+                         if isinstance(tp, float) and "score_val" in self.metrics[tp]:
+                             s = np.nanmean(self.metrics[tp]["score_val"])
+                             if s > best_score:
+                                 best_score = s
+                                 best_tp = tp
+                     if best_tp is None:
+                          raise ValueError("No valid scores found for fallback selection.")
+                 except Exception as e:
+                     raise ValueError(f"Rank Selection failed and Fallback failed: {e}")
+                     
+            else:
+                # 2. Compute Ranks
+                # Rank 1 = Best (Highest Score)
+                # Ranks are 1-based indices in sorted list
+                rank_sums = {tp: 0 for tp in tp_candidates}
                 
-                    dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-                    dff['departement'] = y[:, departement_index]
-                    dff['date'] = y[:, date_index]
-                    dff['graph_id'] = y[:, graph_id_index]
-                    dff[self.target_name] = y[:, -1]
-                    y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
-
-                    metrics_run = evaluate_metrics(dff, self.target_name, prediction, zones=dff['graph_id'], dates=dff['date'])
-                    metrics_run = round_floats(metrics_run)
-                    under_prediction_score_value = under_prediction_score(y, prediction)
-                    over_prediction_score_value = over_prediction_score(y, prediction)
-                    update_metrics_as_arrays(self, tp, metrics_run, 'test')
+                for k in [1, 2, 3, 4]:
+                    # Sort descending by score_k
+                    sorted_tps = sorted(tp_candidates, key=lambda x: scores_per_k[k][x], reverse=True)
+                    for rank, tp in enumerate(sorted_tps, 1):
+                        rank_sums[tp] += rank
+                        
+                # 3. Find Best TP (Lowest Rank Sum)
+                # Tie-break: Maximize score_k4 (High severity), then Total Score
+                # To maximize k4 with min(), we negate it.
+                def tie_breaker(tp):
+                    total_s = sum(scores_per_k[k][tp] for k in [1,2,3,4])
+                    return (rank_sums[tp], -scores_per_k[4][tp], -total_s)
+                    
+                best_tp = min(tp_candidates, key=tie_breaker)
                 
-                self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
+                # Logging details
+                logger.info("--- Rank-Based Selection Results ---")
+                for tp in tp_candidates:
+                    ranks = []
+                    # Re-calculate specific ranks for logging
+                    for k in [1,2,3,4]:
+                        sorted_tps = sorted(tp_candidates, key=lambda x: scores_per_k[k][x], reverse=True)
+                        r = sorted_tps.index(tp) + 1
+                        ranks.append(r)
+                    
+                    logger.info(f"tp={tp}: RankSum={rank_sums[tp]} (Ranks k1..k4: {ranks})")
+    
+            logger.info(f'Best tp {best_tp} (Rank-Based)')
+            self.metrics['iou_score'] = iou_scores # Keep legacy key name or update? Let's keep data but variable name is misleading. It's actually score history list but variable iou_scores was empty anyway here
+            self.metrics['test_percentage'] = test_percentage
+            self.metrics['under_prediction_scores'] = under_prediction_score_scores
+            self.metrics['over_prediction_scores'] = over_prediction_score_scores
+            self.metrics['best_tp'] = best_tp
+            self.metrics['run'] = self.n_run
+    
+            #logger.info(f'{self.metrics[best_tp]}')
+    
+            save_object(self.metrics, 'metrics.pkl', self.dir_log)
+    
+            return best_tp, find_log
 
-                iou = np.mean(self.metrics[tp]['iou_val'])
-                std_iou = np.std(self.metrics[tp]['iou_val'])
-
-                save_object(self.metrics, 'metrics.pkl', self.dir_log)
-                
-                print(f'Metrics achieved : {self.metrics[tp]}')
-
-                if iou >= last_score - tolerance:
-                    last_score = iou
-                else:
-                    print(f'Last score {last_score} current score {iou}')
-                    break
-        
-        keys_array = []
-        eps = 1e-9  # tolérance pour considérer deux moyennes égales
-
-        iou_means = []
-        iou_stds = []
-        for k in self.metrics.keys():
-            if isinstance(k, float) and "iou_val" in self.metrics[k]:
-                vals = np.asarray(self.metrics[k]["iou_val"], dtype=float)
-                mean_iou = float(np.nanmean(vals)) if vals.size else -np.inf
-                std_iou = np.std(vals)
-
-                print(f"{k} -> mean={mean_iou:.6f}, std={std_iou:.6f}")
-                keys_array.append(k)
-                iou_means.append(mean_iou)
-                iou_stds.append(std_iou)
-
-        if not keys_array:
-            raise ValueError("Aucune clé float avec 'iou_val' trouvée dans self.metrics.")
-
-        # Sélection avec tie-break: max(mean), puis min(std)
-        iou_means = np.array(iou_means, dtype=float)
-        iou_stds  = np.array(iou_stds,  dtype=float)
-
-        max_mean = np.nanmax(iou_means)
-        candidates = np.where(np.isclose(iou_means, max_mean, atol=eps))[0]
-        if candidates.size == 1:
-            index_max = int(candidates[0])
-        else:
-            # parmi les ex aequo en moyenne, prendre le plus petit std
-            index_max = int(candidates[np.nanargmin(iou_stds[candidates])])
-
-        best_tp = keys_array[index_max]
-        logger.info(f'Best tp {best_tp}')
-        self.metrics['iou_score'] = iou_scores
-        self.metrics['test_percentage'] = test_percentage
-        self.metrics['under_prediction_scores'] = under_prediction_score_scores
-        self.metrics['over_prediction_scores'] = over_prediction_score_scores
-        self.metrics['best_tp'] = best_tp
-        self.metrics['run'] = self.n_run
-
-        logger.info(f'{self.metrics[best_tp]}')
-
-        save_object(self.metrics, 'metrics.pkl', self.dir_log)
-
-        return best_tp, find_log
+        finally:
+            try:
+                tracemalloc.stop()
+            except:
+                pass
 
     def search_samples_limit(self, X, y, X_val, y_val, X_test, y_test):
         pass

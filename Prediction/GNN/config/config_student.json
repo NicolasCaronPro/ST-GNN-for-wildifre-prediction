@@ -295,7 +295,7 @@
     "training_mode": "normal",
     "train_script": "train_any_model.py",
     "models": [
-         {
+        {
             "type": "studenMLP",
             "use_temporal_as_edges": false,
             "mesh_file": null,
@@ -324,8 +324,10 @@
     "hyperparameters": {
         "epochs": 3000,
         "batch_size": 64,
-        "lr": 0.00005,
+        "lr": 5e-05,
         "PATIENCE_CNT": 25,
-        "CHECKPOINT": 25
+        "CHECKPOINT": 25,
+        "delta_lr": 0.2e-05,
+        "PATIENCE_CNT_LR": 5
     }
 }

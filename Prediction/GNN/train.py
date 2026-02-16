@@ -2044,7 +2044,6 @@ def get_loss_function(loss_name, **loss_params):
                         val = raw  # laisse en chaîne
 
             if key == 'id':
-                print(f'id : {val}')
                 if val == 'departement':
                     loss_params[key] = departement_index
                 elif val == 'cluster':
@@ -2113,6 +2112,7 @@ def get_loss_function(loss_name, **loss_params):
             "monotonic" :                  lambda: MonoticRiskLoss(**loss_params),
             "ordinalNoCoverage" :          lambda: OrdinalMonotonicLossNoCoverage(**loss_params),
             "ordinalNoCoverageWithGains" : lambda: OrdinalMonotonicLossNoCoverageWithGains(**loss_params),
+            "ommse" :                      lambda: OMMSE(**loss_params),
         }
 
     try:

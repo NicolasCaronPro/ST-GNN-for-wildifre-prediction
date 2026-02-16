@@ -249,12 +249,12 @@ class ModelGNN(SplitTraining):
                                                     proportion_0_sample_with_positive_weight=1.0)
                 
             if not self.mesh or self.mesh == False:            
-                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn)
-                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn)
+                self.val_loader = DataLoader(val_dataset, self.batch_size, False, collate_fn=graph_collate_fn)
+                self.test_loader = DataLoader(test_dataset, self.batch_size, False, collate_fn=graph_collate_fn)
             
             elif self.mesh == 'mesh':
-                self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
-                self.test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, collate_fn=graph_collate_fn_mesh)
+                self.val_loader = DataLoader(val_dataset, self.batch_size, False, collate_fn=graph_collate_fn_mesh)
+                self.test_loader = DataLoader(test_dataset, self.batch_size, False, collate_fn=graph_collate_fn_mesh)
 
             elif self.mesh == 'mygraph':
                 self.val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, collate_fn=graph_collate_fn_multiple_graph)
@@ -705,8 +705,8 @@ class Model_Torch(SplitTraining):
                                                                 mesh2graph=None,
                                                                 proportion_0_sample_with_positive_weight=1.0)
             
-            val_loader = DataLoader(val_dataset, val_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
-            test_loader = DataLoader(test_dataset, test_dataset.__len__(), False, worker_init_fn=seed_worker, generator=g)
+            val_loader = DataLoader(val_dataset, self.batch_size, False, worker_init_fn=seed_worker, generator=g)
+            test_loader = DataLoader(test_dataset, self.batch_size, False, worker_init_fn=seed_worker, generator=g)
             self.val_loader = val_loader
             self.test_loader = test_loader
         ##################################### Define percentage of 0 samples #########################################

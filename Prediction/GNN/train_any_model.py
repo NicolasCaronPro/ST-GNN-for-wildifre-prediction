@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import sys
 import os
+import gc
 
 # Get the directory of the current script
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -892,6 +893,8 @@ def main():
             elif cfg.training_mode == 'distrib2classtraining':
                 test_name = f'Distribution2Class-{m["type"]}_{info}'
                 dl_model_names.append(test_name)
+        
+        gc.collect()
             
     if cfg.doTest:
         host = "pc"

@@ -295,7 +295,6 @@
     "training_mode": "normal",
     "train_script": "train_any_model.py",
     "models": [
-
         {
             "type": "graphCastGRU",
             "use_temporal_as_edges": false,
@@ -312,48 +311,15 @@
             "n_run": 5,
             "use_log": false,
             "params": {}
-        },
-        
-        {
-            "type": "TFN",
-            "use_temporal_as_edges": false,
-            "mesh_file": null,
-            "under_sampling": "search",
-            "over_sampling": "full",
-            "kdays": 10,
-            "horizon": 0,
-            "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
-            "task": "classification",
-            "loss": "weightedcrossentropy",
-            "out_channels": 5,
-            "n_run": 5,
-            "use_log": true,
-            "params": {}
-        },
-        {
-            "type": "GRUAtt",
-            "use_temporal_as_edges": false,
-            "mesh_file": null,
-            "under_sampling": "search",
-            "over_sampling": "full",
-            "kdays": 10,
-            "horizon": 0,
-            "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
-            "task": "classification",
-            "loss": "weightedcrossentropy",
-            "out_channels": 5,
-            "n_run": 5,
-            "use_log": true,
-            "params": {}
         }
     ],
     "hyperparameters": {
         "epochs": 3000,
         "batch_size": 64,
-        "lr": 0.00005,
+        "lr": 5e-05,
         "PATIENCE_CNT": 25,
-        "CHECKPOINT": 25
+        "CHECKPOINT": 25,
+        "delta_lr": 0.2e-05,
+        "PATIENCE_CNT_LR": 5
     }
 }

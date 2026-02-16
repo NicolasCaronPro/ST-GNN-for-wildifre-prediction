@@ -1,4 +1,5 @@
 import torch_geometric
+import gc
 from zmq import device
 from GNN.pytorch_model import *
 from sklearn.metrics import confusion_matrix
@@ -155,6 +156,8 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 
     departements = cfg.train_departments + cfg.test_departments
     train_departements = deepcopy(cfg.train_departments)
+    test_departements = deepcopy(cfg.test_departments)
+
     if 'select' in name_exp:
         # Utiliser findall pour capturer toutes les balises présentes
         matches = re.findall(r"(st(?P<base>[^-]+))|(ed(?P<attempt>[^-]+))", name_exp)
@@ -263,13 +266,14 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
     # Preprocess
     train_dataset, val_dataset, test_dataset, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale = preprocess(
                                                     df=df, scaling=scaling, train_departements=train_departements,
+                                                    test_departements=test_departements,
                                                     departements=departements,
                                                     ks=k_days, dir_output=dir_output, prefix=prefix, features_name=features_name,
                                                     days_in_futur=days_in_futur,
                                                     futur_met=futur_met, ncluster=ncluster, graph=graphScale,
                                                     args=args,
                                                     cfg=cfg)
-    
+                                                    
     print(train_dataset.nbsinister.unique())
 
     ############################################### APPLY PCA ################################
@@ -328,7 +332,7 @@ def get_train_val_test_set(graphScale, df, features_name, train_departements, pr
 #                                                                                                       #
 #########################################################################################################
 
-def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departements: list, ks: int,
+def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, test_departements, departements: list, ks: int,
                dir_output: Path, prefix: str, features_name: list, days_in_futur: int, futur_met: str, ncluster: int, graph,
                args: dict, cfg=None,
                save=True):
@@ -359,6 +363,7 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
     # Sort by date
     df = df.sort_values('date')
     trainCode = [name2int[departement] for departement in train_departements]
+    testCode = [name2int[departement] for departement in test_departements]
     
     #train_mask = (df['date'] < allDates.index(trainDate)) & (df['departement'].isin(trainCode))
     #val_mask = (df['date'] >= allDates.index(trainDate) + ks) & (df['date'] < allDates.index(maxDate)) & (df['departement'].isin(trainCode))
@@ -373,7 +378,7 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, departe
 
     train_mask = (df['date'].isin([allDates.index(d) for d in all_train_dates])) & (df['departement'].isin(trainCode))
     val_mask = ((df['date'].isin([allDates.index(d) for d in all_val_dates]) | ((df['date'] >= allDates.index(all_val_dates[0]) - 20)  & (df['date'] < allDates.index(all_val_dates[0])))) & (df['departement'].isin(trainCode)))
-    test_mask = ((df['date'].isin([allDates.index(d) for d in all_test_dates]) | ((df['date'] >= allDates.index(all_test_dates[0]) - 20)  & (df['date'] < allDates.index(all_test_dates[0])))) & (df['departement'].isin(trainCode))) | (~df['departement'].isin(trainCode))
+    test_mask = ((df['date'].isin([allDates.index(d) for d in all_test_dates]) | ((df['date'] >= allDates.index(all_test_dates[0]) - 20)  & (df['date'] < allDates.index(all_test_dates[0])))) & (df['departement'].isin(testCode)))
 
     train_dataset_unscale = df[train_mask].copy(deep=True).reset_index(drop=True).copy(deep=True)
     test_dataset_unscale = df[test_mask].copy(deep=True).reset_index(drop=True).copy(deep=True)
@@ -1906,6 +1911,7 @@ def test_dl_model(cfg,
         print(allDates[int(test_dataset_dep_entry.date.min())])
         if not test_dataset_dep_entry[test_dataset_dep_entry['weight'] > 0].empty:
             print(allDates[int(test_dataset_dep_entry[test_dataset_dep_entry['weight'] > 0].date.min())])
+            print(allDates[int(test_dataset_dep_entry[test_dataset_dep_entry['weight'] > 0].date.max())])
     else:
         print("Warning: test_dataset_dep_ is empty.")
     
@@ -2501,6 +2507,10 @@ def wrapped_train_deep_learning_1D(params):
                         min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
+    del model
+    del wrapped_model
+    gc.collect()
+
 def wrapped_train_deep_learning_1D_federated(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -2617,6 +2627,10 @@ def wrapped_train_deep_learning_1D_federated(params):
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_1D_alafederated(params):
     model = params['model']
@@ -2740,6 +2754,10 @@ def wrapped_train_deep_learning_1D_alafederated(params):
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
 
+    del model
+    del wrapped_model
+    gc.collect()
+
 def wrapped_train_deep_learning_1D_moonfederated(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -2859,6 +2877,10 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
 
+    del model
+    del wrapped_model
+    gc.collect()
+
 def wrapped_train_deep_learning_1D_federatedProx(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -2977,6 +2999,10 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 
 def wrapped_train_deep_learning_1D_federatedfltg(params):
@@ -3098,6 +3124,10 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
 
+    del model
+    del wrapped_model
+    gc.collect()
+
 def wrapped_train_deep_learning_1D_protofederated(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -3207,6 +3237,10 @@ def wrapped_train_deep_learning_1D_protofederated(params):
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_1D_splittraining(params):
     torch.cuda.empty_cache()
@@ -3328,6 +3362,10 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                               custom_model_params=custom_model_params)
     
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_1D_unique(params):
     torch.cuda.empty_cache()
@@ -3474,6 +3512,10 @@ def wrapped_train_deep_learning_1D_unique(params):
               custom_model_params=custom_model_params, epochs=epochs, PATIENCE_CNT=PATIENCE_CNT, CHECKPOINT=CHECKPOINT)
 
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_1D_dualtraining(params):
     """Train two models jointly for dual tasks.
@@ -3661,6 +3703,9 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
 
     save_object(dual_model, f'{dual_model.name}.pkl', dir_log)
     
+    del dual_model
+    gc.collect()
+    
 
 def wrapped_train_deep_learning_1D_distrib2classTraining(params):
     """Train two models jointly for dual tasks.
@@ -3840,6 +3885,9 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
 
     save_object(dual_model, f'{dual_model.name}.pkl', dir_log)    
 
+    del dual_model
+    gc.collect()
+
 def wrapped_train_deep_learning_2D(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -3910,6 +3958,10 @@ def wrapped_train_deep_learning_2D(params):
     
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_2D_federated(params):
 
@@ -3991,6 +4043,10 @@ def wrapped_train_deep_learning_2D_federated(params):
     #wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset)
     #wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(model, f'{model.name}.pkl', model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
 
 def wrapped_train_deep_learning_distallation(params):
     torch.cuda.empty_cache()
@@ -4078,6 +4134,10 @@ def wrapped_train_deep_learning_distallation(params):
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'])
     save_object(wrapped_model, f'{wrapped_model.student_name}.pkl', wrapped_model.dir_log)
 
+    del model
+    del wrapped_model
+    gc.collect()
+
 def wrapped_train_deep_learning_hybrid(params):
     model = params['model']
     use_temporal_as_edges = params['use_temporal_as_edges']
@@ -4142,6 +4202,9 @@ def wrapped_train_deep_learning_hybrid(params):
     }
 
     train(train_params)
+    
+    del model
+    gc.collect()
 
 def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                             train_dataset, val_dataset, test_dataset,
@@ -4348,6 +4411,9 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
     all_vote.fit(X, y, X_val, y_val, X_test, y_test, params_dict, use_log=use_log)
 
     save_object(all_vote, all_vote.name + '.pkl', all_vote.dir_log)
+
+    del all_vote
+    gc.collect()
 
     X_test=test_dataset[ids_columns + features]
     y_test=test_dataset[ids_columns + targets_columns + target_list]
