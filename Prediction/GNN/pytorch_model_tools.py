@@ -1305,7 +1305,7 @@ def create_dataset(graph,
 
     if graph_mesh is None:
         # Création des datasets finaux
-        print('uzbdkazdkjzan')
+        print('graph_mesh')
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
         val_dataset = InplaceGraphDataset(XsV, YsV, EsV, len(XsV), device)
         test_dataset = InplaceGraphDataset(XsTe, YsTe, EsTe, len(XsTe), device)
@@ -1350,7 +1350,7 @@ def create_train_dataset(graph,
 
     if graph_mesh is None:
         # Création des datasets finaux
-        print('uzbdkazdkjzan')
+        print('graph_mesh')
         train_dataset = InplaceGraphDataset(Xst, Yst, Est, len(Xst), device)
     elif graph_mesh is not None:
         train_dataset = InplaceMeshGraphDatasetInplace(Xst, Yst, Est, len(Xst), device, graph_mesh, gridh2mesh, mesh2graph)
@@ -2030,7 +2030,7 @@ class Training():
 
         self.prev_idx = []
 
-        if self.task_type == "classification":
+        if self.task_type == "classification" or self.task_type == "corn":
             # Pour classification : les colonnes one-hot sont du type f"{colunm}_prev_<classe>"
             new_features = [f"{self.target_name}_prev_{i}" for i in range(self.out_channels)]
             self.prev_idx = [self.features_name.index(f) for f in new_features if f in self.features_name]
@@ -3007,7 +3007,51 @@ class Training():
         alpha = 1 / np.sqrt(freq)
         alpha = alpha / alpha.sum()
         return alpha
-    
+
+    def get_class_hist_from_train(self, df_train, target_name: str):
+        uclass = np.sort(df_train[target_name].unique())
+        print(uclass)
+        res = np.zeros_like(uclass, dtype=np.int64)
+        for i, cl in enumerate(uclass):
+            res[i] = len(df_train[(df_train[target_name] == cl) & (df_train["weight"] > 0)])
+        return res  # shape (K,)
+
+    def compute_corn_alpha_vector_from_hist(self, class_hist: np.ndarray):
+        """
+        class_hist: counts par classe (K,)
+        Retour: alpha_vec (K-1,), alpha[i] = poids du POSITIF pour la tâche i (y>i | y>i-1)
+        """
+        class_hist = np.asarray(class_hist, dtype=np.float64)
+        K = class_hist.shape[0]
+        print(K)
+        alpha_vec = np.zeros((K - 1,), dtype=np.float64)
+
+        for i in range(K - 1):
+            neg = class_hist[i]                 # y == i (dans le sous-ensemble conditionnel)
+            pos = class_hist[i+1:].sum()        # y > i
+
+            # Cas extrêmes
+            if (neg + pos) <= 0:
+                alpha_vec[i] = 0.5
+                continue
+            if pos <= 0:
+                alpha_vec[i] = 0.0   # aucun positif => alpha_pos=0
+                continue
+            if neg <= 0:
+                alpha_vec[i] = 1.0   # aucun négatif => alpha_pos=1
+                continue
+
+            a2 = self.compute_global_alpha(np.array([neg, pos], dtype=np.float64))
+            alpha_pos = float(a2[1])  # index 1 = pos
+            alpha_vec[i] = alpha_pos
+
+        return alpha_vec
+
+    def get_corn_alpha_from_train_df(self, df_train, target_name: str):
+        hist = self.get_class_hist_from_train(df_train, target_name)
+        alpha_vec = self.compute_corn_alpha_vector_from_hist(hist)
+        return alpha_vec
+
     def calculate_val_scores_and_compare(self, best_scores=None):
         """
         Calculate validation scores for k=1,2,3,4 and compare with best using Borda Count.
@@ -3023,11 +3067,11 @@ class Training():
         self.model.eval()
         with torch.no_grad():
             pred_tensor, y_tensor = self._predict_test_loader(self.val_loader)
-        
+
         # Extract predictions and ground truth
         test_output = pred_tensor[:, 0]
         y = y_tensor[:, :, 0]
-        
+
         prediction = test_output.detach().cpu().numpy()
         y = y.detach().cpu().numpy()
         
@@ -3078,14 +3122,15 @@ class Training():
                 rank_sums[score_key] += rank
         
         is_better = rank_sums['current'] < rank_sums['best']
-        
+
         return current_scores, is_better, rank_sums['current']
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
         """
         Train neural network model
         """
-        
+        print(self.df_train[self.target_name].unique())
+
         self.score_per_epochs = {}
         if MLFLOW:
             existing_run = get_existing_run(f'{self.model_name}_')
@@ -3099,11 +3144,11 @@ class Training():
         check_and_create_path(self.dir_log)
 
         loss_params = {}
-        if 'fl' in self.loss: # Use focal loss
-            if hasattr(self, "class_freq"):
-                loss_params = {'alpha' : self.class_freq}
-            else:
-                loss_params = {'alpha' : self.get_class_freq(self.df_train)}
+        if 'cornfl' in self.loss:
+            loss_params = {'alpha' : self.get_corn_alpha_from_train_df(self.df_train, self.target_name)}
+
+        elif 'fl' in self.loss: # Use focal loss
+            loss_params = {'alpha' : self.get_class_freq(self.df_train)}
 
         criterion = self.get_loss(self.loss, loss_params)
 
@@ -3938,7 +3983,7 @@ class Training():
                         #df_train_copy["weight"] = df_combined["weight"].reindex(df_train_copy.index, fill_value=0)
                         
                         df_train_copy['weight'] = 0
-                        weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
+                        #weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
                         df_train_copy.loc[df_combined.index, 'weight'] = 1
                         #df_train_copy.loc[df_combined.index, 'weight'] = weight
                         
@@ -4363,7 +4408,7 @@ class Training():
                         
                 if prediction_type == 'Class':
                     
-                    if self.task_type == 'classification' or self.task_type == 'binary':
+                    if self.task_type == 'classification' or self.task_type == 'binary' or self.task_type == 'corn':
                         output = torch.argmax(output, dim=1)
 
                     elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:

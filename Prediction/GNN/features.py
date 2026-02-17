@@ -2444,7 +2444,7 @@ def shift_target(
     
     prev_col = f"{colunm}_prev"
 
-    if task_type == 'classification':
+    if task_type == 'classification' or task_type == 'corn':
         if colunm == 'nbsinister':
             colunm = 'nbsinister-quantile-5-Class-Dept'
         elif colunm == 'timeintervention':
@@ -2453,11 +2453,14 @@ def shift_target(
             colunm = 'ressource-quantile-5-Class-Dept'
         elif colunm == 'burnedareaRoot':
             colunm = 'burnedareaRoot-quantile-5-Class-Dept'
+    
+    if task_type == 'corn':
+        output_channels += 1
 
     # ---------- 1) Décalage par date exacte -1 pour chaque graph_id ----------
     df[prev_col] = 0  # initialisation par défaut
 
-    if task_type == "classification":
+    if task_type == "classification" or task_type == "corn":
         full_cols = [f"{prev_col}_{int(c)}" for c in range(output_channels)]
     elif task_type == "binary":
         full_cols = [f"{prev_col}_bin_{int(c)}" for c in range(output_channels)]
@@ -2494,7 +2497,7 @@ def shift_target(
             
             df.loc[index, prev_col] = prev
 
-            if task_type == "classification":
+            if task_type == "classification" or task_type == "corn":
                 df.loc[index, full_cols[int(prev)]] = 1.0
                 
             elif task_type == "binary":

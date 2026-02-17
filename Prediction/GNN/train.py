@@ -2113,6 +2113,9 @@ def get_loss_function(loss_name, **loss_params):
             "ordinalNoCoverage" :          lambda: OrdinalMonotonicLossNoCoverage(**loss_params),
             "ordinalNoCoverageWithGains" : lambda: OrdinalMonotonicLossNoCoverageWithGains(**loss_params),
             "ommse" :                      lambda: OMMSE(**loss_params),
+            "cornloss" :                       lambda: CORNLoss(**loss_params),
+            "cornfl" :                     lambda: CORNFocalLoss(**loss_params),
+            "cornwithgains" :              lambda: CORNWithGains(**loss_params),
         }
 
     try:

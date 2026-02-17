@@ -51,54 +51,127 @@ class KMeansRisk:
             return np.zeros_like(X)
         kmeans_labels = self.model.predict(X)
         return np.vectorize(self.label_map.get)(kmeans_labels)
-    
+
 class QuantileRiskZerosHandle:
     """
-    Classe utilisant des quantiles pour identifier les classes de risque,
-    en traitant explicitement les zéros comme la classe 0.
+    Discrétisation par quantiles avec :
+    - Classe 0 réservée aux valeurs nulles
+    - n_clusters - 1 classes positives
+    - Recherche automatique de seuils distincts avec un pas de 5%
+    - Option de logging activable
     """
 
-    def __init__(self, n_clusters, quantiles=(0.5, 0.8, 0.95)):
-        self.n_clusters = n_clusters - 1
-        self.quantiles = tuple(quantiles)
-        q_str = "_".join(str(q).replace(".", "") for q in self.quantiles)
-        self.name = f"QuantileRisk_{n_clusters}_{q_str}"
+    def __init__(self, n_clusters, q_start=0.5, step=0.05, log=False, tar=None):
+        if n_clusters < 2:
+            raise ValueError("n_clusters doit être >= 2")
+
+        self.n_clusters = n_clusters
+
+        # ✅ Pour obtenir (n_clusters - 1) classes positives, il faut (n_clusters - 2) seuils
+        self.n_thresholds = max(n_clusters - 2, 0)
+
+        self.q_start = q_start
+        self.step = step
+        self.log = log
         self.thresholds_ = None
+        self.name = f"QuantileRisk_{n_clusters}_step5pct"
+        self.tar = tar  # ✅ cohérent avec tes logs
 
     def fit(self, X, y=None):
         X = np.asarray(X).reshape(-1)
         X_val = X[X > 0]
 
-        if np.unique(X_val).shape[0] == 0:
+        if self.log:
+            print(f"===== QuantileRisk FIT START {self.tar} =====")
+            print(f"Total observations: {len(X)}")
+            print(f"Positive observations: {len(X_val)}")
+            print(f"Thresholds to find: {self.n_thresholds}")
+
+        # Pas de valeurs positives => uniquement classe 0
+        if X_val.size == 0:
+            if self.log:
+                print("No positive values. All predictions will be 0.")
+                print("===== FIT END =====\n")
             self.thresholds_ = None
-            return
+            return self
 
-        q = self.quantiles
-        if self.n_clusters == 1:
-            q = (q[-1],)
-        elif self.n_clusters == 2:
-            q = (q[0], q[-1])
-        elif self.n_clusters >= 3:
-            q = q[:3]
+        # Si on veut 0 seuil (cas n_clusters=2 => 1 classe positive), on n'en calcule aucun
+        if self.n_thresholds == 0:
+            if self.log:
+                print("n_thresholds == 0 (n_clusters=2). One positive class only.")
+                print("===== FIT END =====\n")
+            self.thresholds_ = None
+            return self
 
-        self.thresholds_ = np.unique(np.quantile(X_val, q))
+        thresholds = []
+        q = self.q_start
+
+        # Premier seuil
+        if q < 1.0:
+            first_val = np.quantile(X_val, q)  # quantile sur valeurs >0 :contentReference[oaicite:1]{index=1}
+            thresholds.append(first_val)
+            if self.log:
+                print(f"Initial quantile {q:.3f} -> value {first_val}")
+
+        # Seuils suivants, step 5%
+        while len(thresholds) < self.n_thresholds and q < 1.0:
+            q = min(q + self.step, 0.999)
+            val = np.quantile(X_val, q)
+
+            if self.log:
+                print(f"Testing quantile {q:.3f} -> value {val}")
+
+            if val != thresholds[-1]:
+                thresholds.append(val)
+                if self.log:
+                    print(f"  Added new threshold: {val}")
+
+            if q >= 0.999:
+                if self.log:
+                    print("Reached upper quantile limit (0.999).")
+                break
+
+        self.thresholds_ = np.unique(thresholds)
+
+        if self.log:
+            print("Final thresholds:", self.thresholds_)
+            print("Number of thresholds found:", len(self.thresholds_))
+            # info utile : combien de classes positives possibles
+            print("Max positive classes possible:", len(self.thresholds_) + 1)
+            print("Total classes possible (with zero):", len(self.thresholds_) + 2)
+            print("===== FIT END =====\n")
+
+        return self
 
     def predict(self, X):
         X = np.asarray(X).reshape(-1)
-        res = np.zeros_like(X, dtype=float)
+        res = np.zeros_like(X, dtype=int)
 
+        X_pos_mask = (X > 0)
+        if not np.any(X_pos_mask):
+            if self.log:
+                print("No positive values in predict. Returning all zeros.")
+            return res
+
+        # Cas n_clusters=2 => thresholds_=None => une seule classe positive (1)
         if self.thresholds_ is None or len(self.thresholds_) == 0:
-            return res.reshape(-1)
-
-        X_val = X[X > 0]
-        if X_val.size == 0:
-            return res.reshape(-1)
+            res[X_pos_mask] = 1
+            if self.log:
+                print("No thresholds available. All positives -> class 1.")
+                print("Unique predicted classes:", np.unique(res))
+            return res
 
         bins = np.concatenate(([0.0], self.thresholds_, [np.inf]))
-        res[X > 0] = np.digitize(X_val, bins, right=True)
-        return res.reshape(-1)
+        if self.log:
+            print("Bins used for digitize:", bins)
 
-    
+        res[X_pos_mask] = np.digitize(X[X_pos_mask], bins, right=True)  # :contentReference[oaicite:2]{index=2}
+
+        if self.log:
+            print("Unique predicted classes:", np.unique(res))
+
+        return res
+
 class KMeansRiskZerosHandle:
     """
     Classe utilisant KMeans pour identifier les classes de risque.
@@ -1268,7 +1341,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     class_risk_dict = {'egpd' : eGPDRisk(),
                        'kmeans': KMeansRiskZerosHandle(n_clusters), 
                        "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
-                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters)}
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters, log=True)}
     
     group_col = ['Cluster', 'Season', 'Dept']
     group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
@@ -1282,6 +1355,8 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             continue
         
         class_risk = class_risk_dict[cls]
+        if cls == 'quantile':
+            class_risk.tar = f'{tar}-{col}'
         col_name = group_col_dict[col]
         
         if cls == 'egpd':
@@ -1332,6 +1407,11 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
     kernels = ['Specialized', 1, 3, 5]
     
     targets = ['nbsinister']
+
+    class_risk_dict = {'egpd' : eGPDRisk(),
+                       'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters, log=False)}
     
     ###############################################################################
 

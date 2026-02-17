@@ -1013,7 +1013,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     logger.info(f'WARNING : WE CONSIDER PRED[0] = PRED[1]')
 
     ############################################## Get daily metrics #######################################################
-    if name.find('classification') != -1:
+    if name.find('classification') != -1 or name.find('corn') != -1:
         mapping = {
             "nbsinister": "nbsinister-quantile-5-Class-Dept",
             "timeintervention": "timeintervention-quantile-5-Class-Dept",
@@ -1138,7 +1138,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
 
     y_pred = np.asarray(y_pred)
 
-    if name.find('classification') != -1 or name.find('egpd') != -1:
+    if name.find('classification') != -1 or name.find('egpd') != -1 or name.find('corn') != -1:
 
         y_true_bin = res[col_class].values > 0
         y_pred_bin = y_pred > 0
@@ -1957,6 +1957,9 @@ def test_dl_model(cfg,
         if model is None:
             logger.info(f'{model_dir}/{read_name}.pkl not found')
             continue
+
+        if hasattr(model, 'metrics') and 'best_tp' in model.metrics.keys():
+            logger.info(f'best_tp : {model.metrics["best_tp"]}')
 
         test_dataset_dep_ = test_dataset_dep_[~test_dataset_dep_[model.target_name].isna()]
         

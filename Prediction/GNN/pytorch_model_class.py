@@ -624,7 +624,7 @@ class ModelGNN(SplitTraining):
 
                     if prediction_type == 'Class':
 
-                        if self.task_type in ['classification', 'binary']:
+                        if self.task_type in ['classification', 'binary', 'corn']:
                             output = torch.argmax(output, dim=1)
 
                         elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
@@ -632,7 +632,7 @@ class ModelGNN(SplitTraining):
 
                     elif prediction_type == 'RawFormulaVal':
                         output = logits
-
+                        
                     pred_horizon.append(output[:, None])
                     labels_horizon.append(orilabels[:, :, None])
 
