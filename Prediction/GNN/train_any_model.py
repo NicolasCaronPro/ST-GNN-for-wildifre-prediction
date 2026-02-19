@@ -380,6 +380,7 @@ def main():
             'val_dataset' :  val_dataset_model,
             'test_dataset' : test_dataset_model,
             'train_dataset_unscale' : train_dataset_unscale_model,
+            'loss_param_search': m.get('loss_param_search', False)
             }
         )
         

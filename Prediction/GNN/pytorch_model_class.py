@@ -3,13 +3,13 @@ from GNN.pytorch_model_tools import *
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
                  ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                post_process=None,
+                post_process=None, loss_param_search=False,
                  **kwargs):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, post_process=post_process, **kwargs)
+                         over_sampling=over_sampling, n_run=n_run, post_process=post_process, loss_param_search=loss_param_search, **kwargs)
 
         self.training_mode = training_mode
         self.path = path
@@ -151,11 +151,11 @@ class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
                  out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
                  n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=0, post_process=None):
+                 horizon=0, post_process=None, loss_param_search=False):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
         self.training_mode = training_mode
         self.mesh = mesh
         self.mesh_file = mesh_file
@@ -653,7 +653,7 @@ class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
                  training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=0, post_process=None):
+                 horizon=0, post_process=None, loss_param_search=False):
 
         #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
         #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
@@ -662,7 +662,7 @@ class Model_Torch(SplitTraining):
                          model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
 
         self.training_mode = training_mode
 

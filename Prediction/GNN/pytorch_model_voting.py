@@ -7,10 +7,10 @@ from torch.utils.data import DataLoader
 
 class ModelKnowledgeDistillation(Training):
     def __init__(self, temperature, alpha, distillation_training_mode, teacher_name, student_name, model_name, batch_size, lr, delta_lr, patience_cnt_lr, out_channels, dir_log, features_name, ks, loss, name, device,
-                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss, beta=None, gamma=None, horizon=0):
+                under_sampling, over_sampling, nbfeatures, weight_type, target_name, task_type, teacher_loss, beta=None, gamma=None, horizon=0, loss_param_search=False):
 
         super().__init__(f'{model_name}', nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, features_name, ks, \
-        out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon)
+        out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling, over_sampling=over_sampling, horizon=horizon, loss_param_search=loss_param_search)
         
         self.teacher_loss = teacher_loss
         self.distillation_training_mode = distillation_training_mode

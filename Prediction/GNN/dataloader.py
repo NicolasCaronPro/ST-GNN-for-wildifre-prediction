@@ -2408,7 +2408,9 @@ def wrapped_train_deep_learning_1D(params):
     graph_method = params['graph_method']
     features = params['features_selected_str']
     dir_output = params['dir_output']
+    dir_output = params['dir_output']
     n_run = params['n_run']
+    loss_param_search = params.get('loss_param_search', False)
 
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2463,7 +2465,8 @@ def wrapped_train_deep_learning_1D(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
@@ -2497,7 +2500,8 @@ def wrapped_train_deep_learning_1D(params):
                                     over_sampling=over_sampling,
                                     n_run=n_run,
                                     graph_method = graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2526,6 +2530,7 @@ def wrapped_train_deep_learning_1D_federated(params):
     aggregation_method = params['aggregation_method']
     n_run = params['n_run']
     c_n_run = params['client_n_run']
+    loss_param_search = params.get('loss_param_search', False)
 
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2574,7 +2579,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2603,7 +2609,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
                                     graph_method = graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2618,7 +2625,8 @@ def wrapped_train_deep_learning_1D_federated(params):
                                     n_run=n_run,
                                    task_type=task_type,
                                    aggregation_method=aggregation_method,
-                                   nbfeatures=nbfeatures)
+                                   nbfeatures=nbfeatures,
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -2648,6 +2656,7 @@ def wrapped_train_deep_learning_1D_alafederated(params):
     eta = params['eta']
     n_run = params['n_run']
     c_n_run = params['client_n_run']
+    loss_param_search = params.get('loss_param_search', False)
 
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2696,7 +2705,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2725,7 +2735,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
                                     graph_method=graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2743,7 +2754,8 @@ def wrapped_train_deep_learning_1D_alafederated(params):
                                    nbfeatures=nbfeatures,
                                    eta=eta,
                                    params_to_update=params["params_to_update"],
-                                   horizon=int(horizon))
+                                   horizon=int(horizon),
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -2775,6 +2787,7 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
     c_n_run = params['client_n_run']
     temperature = params['temperature']
     smooth = params['smooth']
+    loss_param_search = params.get('loss_param_search', False)
 
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2821,7 +2834,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2850,7 +2864,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
                                     graph_method=graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2867,7 +2882,8 @@ def wrapped_train_deep_learning_1D_moonfederated(params):
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures,
                                    temperature=temperature,
-                                   smooth=smooth)
+                                   smooth=smooth,
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -2898,6 +2914,7 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
     c_n_run = params['client_n_run']
     prox_value = params['prox_value']
     names = params['names']
+    loss_param_search = params.get('loss_param_search', False)
 
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
@@ -2944,7 +2961,8 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -2973,7 +2991,8 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
                                     graph_method=graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -2990,7 +3009,8 @@ def wrapped_train_deep_learning_1D_federatedProx(params):
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures,
                                    prox_value=prox_value,
-                                   fed_prox_names=names)
+                                   fed_prox_names=names,
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -3023,6 +3043,7 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
     temperature = params['temperature']
     tau = params['tau']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
@@ -3068,7 +3089,8 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                     under_sampling=under_sampling,
                                     n_run=c_n_run,
                                     over_sampling=over_sampling,
-                                    horizon=int(horizon)
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -3097,7 +3119,8 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                     over_sampling=over_sampling,
                                     n_run=c_n_run,
                                     graph_method=graph_method,
-                                    horizon=int(horizon))
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -3114,7 +3137,8 @@ def wrapped_train_deep_learning_1D_federatedfltg(params):
                                    aggregation_method=aggregation_method,
                                    nbfeatures=nbfeatures,
                                    temperature=temperature,
-                                   tau=tau)
+                                   tau=tau,
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -3142,6 +3166,7 @@ def wrapped_train_deep_learning_1D_protofederated(params):
     federated_cluster = params['federated_cluster']
     n_run = params['n_run']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
@@ -3187,6 +3212,7 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                     under_sampling=under_sampling,
                                     n_run=n_run,
                                     over_sampling=over_sampling,
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = 'icospheres/icospheres_0_1.json.gz'
@@ -3214,7 +3240,8 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    graph_method = graph_method)
+                                    graph_method = graph_method,
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -3228,7 +3255,8 @@ def wrapped_train_deep_learning_1D_protofederated(params):
                                    post_process=None,
                                    n_run=n_run,
                                    task_type=task_type,
-                                   nbfeatures=nbfeatures)
+                                   nbfeatures=nbfeatures,
+                                   loss_param_search=loss_param_search)
     
     params['global_epochs'] = params['global_epochs']
     params['local_epochs'] = params['epochs']
@@ -3259,6 +3287,7 @@ def wrapped_train_deep_learning_1D_splittraining(params):
     cut_layer_name = params['cut_layer_name']
     input_server_model = params['input_server_model']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
@@ -3314,7 +3343,8 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                     training_mode='splittraining',
                                     federated_cluster=federated_cluster,
                                     cut_layer_name=cut_layer_name,
-                                    input_server_model=input_server_model
+                                    input_server_model=input_server_model,
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
@@ -3351,7 +3381,8 @@ def wrapped_train_deep_learning_1D_splittraining(params):
                                     training_mode='splittraining',
                                     federated_cluster=federated_cluster,
                                     cut_layer_name=cut_layer_name,
-                                    input_server_model=input_server_model)
+                                    input_server_model=input_server_model,
+                                    loss_param_search=loss_param_search)
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -3383,6 +3414,7 @@ def wrapped_train_deep_learning_1D_unique(params):
     cluster = params['cluster']
     sub_training_mode = params['sub_training_mode']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
@@ -3436,6 +3468,7 @@ def wrapped_train_deep_learning_1D_unique(params):
                                     over_sampling=over_sampling,
                                     n_run=n_run,
                                     training_mode=sub_training_mode,
+                                    loss_param_search=loss_param_search
                                     )
     elif torch_structure == 'Model_gnn':
         mesh_file = params['mesh_file']
@@ -3469,7 +3502,8 @@ def wrapped_train_deep_learning_1D_unique(params):
                                     over_sampling=over_sampling,
                                     n_run=n_run,
                                     graph_method = graph_method,
-                                    training_mode=sub_training_mode
+                                    training_mode=sub_training_mode,
+                                    loss_param_search=loss_param_search
                                     )
     else:
         raise ValueError(f'{torch_structure} not implemented')
@@ -3544,6 +3578,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     task_type_num = params['task_type_num']
     post_process = params['post_process']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     infos_occ = f"{under_sampling}_{over_sampling}_{kdays}_{nbfeatures}_{weight_type}_{target_name}_binary_fl"
@@ -3597,7 +3632,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             over_sampling=over_sampling,
             n_run=1,
             horizon=int(horizon),
-            post_process=None
+            post_process=None,
+            loss_param_search=loss_param_search
         )
         
         num_model = Model_Torch(
@@ -3620,7 +3656,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             over_sampling="full",
             n_run=1,
             horizon=int(horizon),
-            post_process=post_process
+            post_process=post_process,
+            loss_param_search=loss_param_search
         )
 
     elif torch_structure == 'Model_gnn':
@@ -3658,7 +3695,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             n_run=1,
             graph_method=graph_method,
             horizon=int(horizon),
-            post_process=None
+            post_process=None,
+            loss_param_search=loss_param_search
         )
 
         num_model = ModelGNN(
@@ -3684,7 +3722,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             n_run=1,
             graph_method=graph_method,
             horizon=int(horizon),
-            post_process=post_process
+            post_process=post_process,
+            loss_param_search=loss_param_search
         )
 
     else:
@@ -3697,7 +3736,8 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
         name=f'DualTraining-{model}_{infos}',
         task_type=task_type,
         n_run=n_run,
-        horizon=int(horizon)
+        horizon=int(horizon),
+        loss_param_search=loss_param_search
     )
 
     dual_model.create_train_val_test_loader(params['graph'], (train_dataset, train_pos), (val_dataset, val_pos), (test_dataset, test_pos),
@@ -3734,6 +3774,7 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
     post_process = params['post_process']
     out_channels = params['out_channels']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     infos_distrib = f"{under_sampling}_{over_sampling}_{kdays}_{horizon}_{nbfeatures}_{weight_type}_{target_name}_regression_{params['loss_distrib']}"
@@ -3778,7 +3819,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             over_sampling=over_sampling,
             n_run=n_run,
             horizon=int(horizon),
-            post_process=None
+            post_process=None,
+            loss_param_search=loss_param_search
         )
         
         num_model = Model_Torch(
@@ -3801,7 +3843,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             over_sampling=over_sampling,
             n_run=n_run,
             horizon=int(horizon),
-            post_process=post_process
+            post_process=post_process,
+            loss_param_search=loss_param_search
         )
 
     elif torch_structure == 'Model_gnn':
@@ -3839,7 +3882,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             n_run=n_run,
             graph_method=graph_method,
             horizon=int(horizon),
-            post_process=None
+            post_process=None,
+            loss_param_search=loss_param_search
         )
 
         num_model = ModelGNN(
@@ -3865,7 +3909,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
             n_run=n_run,
             graph_method=graph_method,
             horizon=int(horizon),
-            post_process=post_process
+            post_process=post_process,
+            loss_param_search=loss_param_search
         )
 
     else:
@@ -3878,7 +3923,8 @@ def wrapped_train_deep_learning_1D_distrib2classTraining(params):
         name=f'Distribution2Class-{model}_{infos}',
         task_type=task_type,
         n_run=n_run,
-        horizon=int(horizon)
+        horizon=int(horizon),
+        loss_param_search=loss_param_search
     )
     
     dual_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset,
@@ -3902,6 +3948,7 @@ def wrapped_train_deep_learning_2D(params):
     name_exp = params['name_exp']
     dir_output = params['dir_output']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
@@ -3950,7 +3997,9 @@ def wrapped_train_deep_learning_2D(params):
                                     under_sampling=under_sampling,
                                     n_run=n_run,
                                     over_sampling=over_sampling,
-                                    image_per_node=image_per_node)
+                                    image_per_node=image_per_node,
+                                    loss_param_search=loss_param_search
+                                    )
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -3980,6 +4029,7 @@ def wrapped_train_deep_learning_2D_federated(params):
     image_per_node = params['image_per_node']
     n_run = params['n_run']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
 
     #importance_df = calculate_and_plot_feature_importance(train_dataset[features], train_dataset[target_name], features, dir_output, target_name)
@@ -4024,7 +4074,9 @@ def wrapped_train_deep_learning_2D_federated(params):
                                     n_run=n_run,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    image_per_node=image_per_node)
+                                    image_per_node=image_per_node,
+                                    loss_param_search=loss_param_search
+                                    )
     else:
         raise ValueError(f'{torch_structure} not implemented')
     
@@ -4039,7 +4091,8 @@ def wrapped_train_deep_learning_2D_federated(params):
                                    post_process=None,
                                    task_type=task_type,
                                    aggregation_method=aggregation_method,
-                                   nbfeatures=nbfeatures)
+                                   nbfeatures=nbfeatures,
+                                   loss_param_search=loss_param_search)
     
     model.fit(df_train=train_dataset, df_val=val_dataset, df_test=test_dataset, graph=params['graph'], args=params)
     
@@ -4064,6 +4117,7 @@ def wrapped_train_deep_learning_distallation(params):
     alpha = params['alpha']
     teacher_loss = params['teacher_loss']
 
+    loss_param_search = params.get('loss_param_search', False)
     under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
     
     train_dataset = params['train_dataset'].copy(deep=True)
@@ -4129,7 +4183,8 @@ def wrapped_train_deep_learning_distallation(params):
                                 teacher_loss=teacher_loss,
                                 horizon=horizon,
                                 beta=params.get('beta', None),
-                                gamma=params.get('gamma', None)
+                                gamma=params.get('gamma', None),
+                                loss_param_search=loss_param_search
                                 )
     
     wrapped_model.create_train_val_test_loader(params['graph'], train_dataset, val_dataset, test_dataset, use_log=params['use_log'], 
@@ -4148,6 +4203,7 @@ def wrapped_train_deep_learning_hybrid(params):
     autoRegression = params['autoRegression']
     image_per_node = params['image_per_node']
 
+    loss_param_search = params.get('loss_param_search', False)
     target_name, task_type, loss = infos.split('_')
     loss_name = loss
 
@@ -4201,7 +4257,8 @@ def wrapped_train_deep_learning_hybrid(params):
         "dir_output": params['dir_output'] / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
         "target_name": target_name,
         "autoRegression": autoRegression,
-        'k_days' : kdays
+        'k_days' : kdays,
+        'loss_param_search': loss_param_search
     }
 
     train(train_params)
@@ -4224,6 +4281,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
     dir_output = input_params['dir_output']
     n_run = input_params['n_run']
     use_log = input_params['use_log']
+    loss_param_search = input_params.get('loss_param_search', False)
 
     features = input_params['features_selected_str']
     features_index = input_params['features_selected']
@@ -4330,7 +4388,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run
+                                    n_run=n_run,
+                                    loss_param_search=loss_param_search
                                     )
         elif model_type in ['GNN']:
             mesh_file = 'icospheres/icospheres_0.json.gz'
@@ -4357,7 +4416,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     device=device,
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
-                                    n_run=n_run
+                                    n_run=n_run,
+                                    loss_param_search=loss_param_search
                                     )
         elif model_type in ['Zhang']:
             model_i = ModelCNN(model_name=model_type,
@@ -4380,7 +4440,8 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     under_sampling=under_sampling,
                                     image_per_node=True,
                                     over_sampling=over_sampling,
-                                    n_run=n_run
+                                    n_run=n_run,
+                                    loss_param_search=loss_param_search
                                     )
 
         models_list.append(model_i)

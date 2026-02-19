@@ -11,7 +11,7 @@ class FederatedLearningModel(RegressorMixin, ClassifierMixin):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=0):
+                 aggregation_method='max', nbfeatures='all', n_run=1, horizon=0, loss_param_search=False):
         """
         Initialize the Federated Learning Model.
 
@@ -396,14 +396,14 @@ class FederatedALA(FederatedLearningModel):
     def __init__(self, federated_model, eta, features, federated_cluster='departement', loss='mse',
                  name='FederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification',
-                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=0):
+                 aggregation_method='max', nbfeatures='all', n_run=1, params_to_update=['linear2'], horizon=0, loss_param_search=False):
 
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster,
                          loss=loss, name=name, dir_log=dir_log, under_sampling=under_sampling,
                          over_sampling=over_sampling, target_name=target_name, post_process=post_process,
                          task_type=task_type, aggregation_method=aggregation_method, nbfeatures=nbfeatures,
-                         n_run=n_run, horizon=horizon)
+                         n_run=n_run, horizon=horizon, loss_param_search=loss_param_search)
         self.eta = eta
         self.weight = 0.5
         self.params_to_update = params_to_update
@@ -707,12 +707,12 @@ class MOONFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='MoonFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0):
+                 aggregation_method='max', nbfeatures='all', n_run=1, temperature=1, smooth=0, horizon=0, loss_param_search=False):
         
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run, horizon=horizon, loss_param_search=loss_param_search)
         
         self.moon_temperature_value = temperature
         self.smooth_value = smooth
@@ -918,12 +918,12 @@ class FederatedProx(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse', 
                  name='ProxFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', 
-                 aggregation_method='max', nbfeatures='all', n_run=1, prox_value=1, fed_prox_names=[]):
+                 aggregation_method='max', nbfeatures='all', n_run=1, prox_value=1, fed_prox_names=[], horizon=0, loss_param_search=False):
         
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run)
+                         aggregation_method=aggregation_method, nbfeatures=nbfeatures, n_run=n_run, horizon=horizon, loss_param_search=loss_param_search)
         
         self.prox_value = prox_value
         self.fed_prox_names = fed_prox_names
@@ -1121,6 +1121,7 @@ class FLTG(FederatedLearningModel):
         nbfeatures='all',
         n_run=1,
         horizon=0,
+        loss_param_search=False,
         # --- FLTG specific knobs ---
         fltg_clip_tau=100.0,           # clipping threshold on delta norm
         fltg_temperature=1.0,         # softmax temperature for weights
@@ -1144,7 +1145,8 @@ class FLTG(FederatedLearningModel):
             aggregation_method=aggregation_method,
             nbfeatures=nbfeatures,
             n_run=n_run,
-            horizon=horizon
+            horizon=horizon,
+            loss_param_search=loss_param_search
         )
 
         self.fltg_clip_tau = fltg_clip_tau
@@ -1381,12 +1383,12 @@ class ProtoFederatedLearning(FederatedLearningModel):
     def __init__(self, federated_model, features, federated_cluster='departement', loss='mse',
                  name='ProtoFederatedModel', dir_log=Path('../'), under_sampling='full', over_sampling='full',
                  target_name='nbsinister', post_process=None, task_type='classification', nbfeatures='all', n_run=1, prototype_weight=1.0,
-                 horizon=0):
+                 horizon=0, loss_param_search=False):
 
         super().__init__(federated_model=federated_model, features=features, federated_cluster=federated_cluster, loss=loss,
                          name=name, dir_log=dir_log, under_sampling=under_sampling, over_sampling=over_sampling,
                          target_name=target_name, post_process=post_process, task_type=task_type,
-                         aggregation_method='median', nbfeatures=nbfeatures, n_run=n_run, horizon=horizon)
+                         aggregation_method='median', nbfeatures=nbfeatures, n_run=n_run, horizon=horizon, loss_param_search=loss_param_search)
 
         self.prototype_weight = prototype_weight
 

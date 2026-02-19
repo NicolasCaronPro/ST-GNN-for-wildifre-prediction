@@ -1,9 +1,9 @@
-from numpy import dtype
 import numpy as np
 import gc
 import psutil
 import tracemalloc
 import resource
+import os
 import random
 from torch_geometric.data import Dataset
 from torch.utils.data import DataLoader
@@ -1969,7 +1969,7 @@ class Training():
                  features_name, ks, out_channels, dir_log,
                  loss='mse', name='Training', device='cpu',
                  under_sampling='full', over_sampling='full', n_run=1,
-                 horizon=0, post_process=None):
+                 horizon=0, post_process=None, loss_param_search=False):
         
         self.model_name = model_name
         self.name = name
@@ -2014,15 +2014,15 @@ class Training():
         self._current_epoch = None
         self.seed = None
         self.horizon = horizon
-        self.seed = None
+        self.apply_discretization = post_process is not None
         self.apply_discretization = post_process is not None
         self.post_process = post_process
+        self.loss_param_search = loss_param_search
 
         if 'Past_risk' in self.features_name:
             self.id_past_risk = features_name.index('Past_risk')
         else:
             self.id_past_risk = None
-
         if 'Past_burnedarea' in self.features_name:
             self.id_past_ba = features_name.index('Past_burnedarea')
         else:
@@ -2071,6 +2071,32 @@ class Training():
             'diff_scaled_mean': [],
             'margin_mean': []
         }
+
+    def log_memory(self, stage):
+        """
+        Log memory usage (RSS, MaxRSS, Tracemalloc).
+        """
+        try:
+            process = psutil.Process(os.getpid())
+            mem_info = process.memory_info()
+            rss_mb = mem_info.rss / 1024 / 1024
+            
+            # Resource (ru_maxrss is in KB on Linux)
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            maxrss_mb = usage.ru_maxrss / 1024
+            
+            # Tracemalloc
+            try:
+                current, peak = tracemalloc.get_traced_memory()
+                current_mb = current / 1024 / 1024
+                peak_mb = peak / 1024 / 1024
+                trace_str = f" | Trace: {current_mb:.2f} MB (Peak: {peak_mb:.2f} MB)"
+            except:
+                trace_str = ""
+            
+            logger.info(f"[MEMORY] {stage} | RSS: {rss_mb:.2f} MB | MaxRSS: {maxrss_mb:.2f} MB{trace_str}")
+        except Exception as e:
+            logger.warning(f"Failed to log memory: {e}")
 
     def remove_graph(self):
         del self.graph
@@ -2832,18 +2858,27 @@ class Training():
                 res_loss += loss.item()
                 if isinstance(loss_res, dict):
                     for key in loss_res:
+                        val = loss_res[key]
+                        if torch.is_tensor(val):
+                            val = val.item()
                         if key in res_loss_dict:
-                            res_loss_dict[key] += loss_res[key]
+                            res_loss_dict[key] += val
                         else:
-                            res_loss_dict[key] = loss_res[key]
+                            res_loss_dict[key] = val
                 else:
-                    res_loss_dict['l'] += loss_res
+                    val = loss_res
+                    if torch.is_tensor(val):
+                        val = val.item()
+                    res_loss_dict['l'] += val
             else:
                 res_loss = loss.item()
                 if isinstance(loss_res, dict):
-                    res_loss_dict = {k: v for k, v in loss_res.items()}
+                    res_loss_dict = {k: (v.item() if torch.is_tensor(v) else v) for k, v in loss_res.items()}
                 else:
-                    res_loss_dict = {'l': loss_res}
+                    val = loss_res
+                    if torch.is_tensor(val):
+                        val = val.item()
+                    res_loss_dict = {'l': val}
 
             if self.ALATraining:
                 # Mises à jour SANS autograd
@@ -2935,14 +2970,20 @@ class Training():
 
                 if isinstance(loss_res, dict):
                     for key in loss_res:
+                        val = loss_res[key]
+                        if torch.is_tensor(val):
+                            val = val.item()
                         if key not in total_loss_dict:
                             total_loss_dict[key] = 0
-                        total_loss_dict[key] += loss_res[key].item()
+                        total_loss_dict[key] += val
                 else:
+                    val = loss_res
+                    if torch.is_tensor(val):
+                        val = val.item()
                     if 'l' not in total_loss_dict:
-                        total_loss_dict['l'] = loss_res
+                        total_loss_dict['l'] = val
                     else:
-                        total_loss_dict['l'] += loss_res
+                        total_loss_dict['l'] += val
                 
                 # Clean up tensors from this batch
                 try:
@@ -2956,10 +2997,10 @@ class Training():
             
         if 'learnable-area' in self.loss:
             if hasattr(self, 'area_parameters_log'):
-                self.area_parameters_log.append(self.area_parameters)
+                self.area_parameters_log.append(self.area_parameters.detach().cpu().numpy())
             else:
                 self.area_parameters_log = []
-                self.area_parameters_log.append(self.area_parameters)
+                self.area_parameters_log.append(self.area_parameters.detach().cpu().numpy())
 
         if len(loader) > 0:
             total_loss /= len(loader)
@@ -3126,6 +3167,11 @@ class Training():
         return current_scores, is_better, rank_sums['current']
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
+        
+        if self.loss_param_search:
+            self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
+            return
+
         """
         Train neural network model
         """
@@ -3301,6 +3347,7 @@ class Training():
                     curr_lr = optimizer.param_groups[0]['lr']
                     logger.info(f'Epoch {epoch}: Val loss {val_loss:.4f}, Train loss {train_loss:.4f}, Best val loss {BEST_VAL_LOSS:.4f}')
                     logger.info(f'    LR: {curr_lr:.6f} | Patience: {patience_cnt}/{PATIENCE_CNT} | Retry: {current_patience_lr}/{self.patience_cnt_lr}')
+                    self.log_memory(f"Epoch {epoch} Checkpoint")
                     save_object_torch(self.model.state_dict(), str(epoch)+'.pt', self.dir_log)
 
             logger.info(f'Last val loss {val_loss}')
@@ -3836,46 +3883,20 @@ class Training():
 
         if 'MultiScale' in self.model_name:
             test_percentage = np.arange(0.5, 1.05, 0.05)
-
+            
         under_prediction_score_scores = []
         over_prediction_score_scores = []
         iou_scores = []
         data_log = None
         find_log = False
 
-        self.metrics['test_percentage'] = []
-        self.metrics['under_prediction_scores'] = []
-        self.metrics['over_predictio_scores'] = []
         self.metrics['iou_scores'] = []
-        
-        # --- Memory Logging Setup ---
+ 
         try:
             tracemalloc.start()
-        except:
-            pass
-
-
-        try:
-            def log_memory(stage):
-                process = psutil.Process(os.getpid())
-                mem_info = process.memory_info()
-                rss_mb = mem_info.rss / 1024 / 1024
-                
-                # Resource (ru_maxrss is in KB on Linux)
-                usage = resource.getrusage(resource.RUSAGE_SELF)
-                maxrss_mb = usage.ru_maxrss / 1024
-                
-                # Tracemalloc
-                current, peak = tracemalloc.get_traced_memory()
-                current_mb = current / 1024 / 1024
-                peak_mb = peak / 1024 / 1024
-                
-                logger.info(f"[MEMORY] {stage} | RSS: {rss_mb:.2f} MB | MaxRSS: {maxrss_mb:.2f} MB | Trace: {current_mb:.2f} MB (Peak: {peak_mb:.2f} MB)")
-                
-            log_memory("Start search_samples_proportion")
+            self.log_memory("Start search_samples_proportion")
             
             if use_log:
-            #if False:
                 if False:
                     if (self.dir_log / 'unknowned_scores_per_percentage.pkl').is_file():
                         data_log = read_object('unknowned_scores_per_percentage.pkl', self.dir_log)
@@ -3894,29 +3915,6 @@ class Training():
                                 data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                             if data_log is not None:
                                 break
-                            
-                        if data_log is None:
-                            xs = [25]
-                            for x in xs:
-                                other_model = f'{self.model_name}_search_full_{self.ks}_{x}_one_{self.target_name}_{self.task_type}_{self.loss}'
-                                print(f'{self.dir_log / ".."/ other_model / "metrics.pkl"}')
-                                if (self.dir_log / '..'/ other_model / 'metrics.pkl').is_file():
-                                    data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
-                                if data_log is not None:
-                                    break
-    
-            #print(f'data_log : {data_log}')
-            if data_log is not None:
-                try:
-                    self.metrics = data_log
-                    #test_percentage = self.metrics['test_percentage']
-                    #under_prediction_score_scores = self.metrics['under_prediction_scores']
-                    #over_prediction_score_scores = self.metrics['over_prediction_scores']
-                except Exception as e:
-                    print(e)
-                    self.metrics = {}
-                    data_log = None
-                    pass
     
             doSearch = True
             if data_log is not None: #and self.n_run == data_log['n_run']:
@@ -3973,7 +3971,7 @@ class Training():
                         nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
     
                     logger.info(f'Trained with {tp} -> {nb} sample of class 0')
-                    log_memory(f"Before Run Loop (tp={tp})")
+                    self.log_memory(f"Before Run Loop (tp={tp})")
     
                     for run in range(self.n_run):
     
@@ -4032,7 +4030,7 @@ class Training():
                         copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
                         copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                         
-                        log_memory(f"After Train (tp={tp}, run={run})")
+                        self.log_memory(f"After Train (tp={tp}, run={run})")
     
                         ############################# On set val ##############################
                         test_output, y = copy_model._predict_test_loader(copy_model.val_loader, output_pdf='Val', prediction_type='Class')
@@ -4117,7 +4115,7 @@ class Training():
                         except:
                             pass
                         
-                        log_memory(f"After Cleanup (tp={tp}, run={run})")
+                        self.log_memory(f"After Cleanup (tp={tp}, run={run})")
                     
                     self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
     
@@ -4166,8 +4164,8 @@ class Training():
                              
                              scores_per_k[k][tp] = mean_k
                         else:
-                            # print(f"DEBUG: Missing key {key} for tp={tp}")
-                            scores_per_k[k][tp] = 0.0 # Default to 0.0 if missing
+                             # print(f"DEBUG: Missing key {key} for tp={tp}")
+                             scores_per_k[k][tp] = 0.0 # Default to 0.0 if missing
                     
                     # We always consider the TP as a candidate now, unless other fundamental issues exist
                     tp_candidates.append(tp)
@@ -4236,7 +4234,6 @@ class Training():
             save_object(self.metrics, 'metrics.pkl', self.dir_log)
     
             return best_tp, find_log
-
         finally:
             try:
                 tracemalloc.stop()
@@ -4266,6 +4263,167 @@ class Training():
     def score_with_prediction(self, y_pred, y, sample_weight=None):
         
         return iou_score(y, y_pred)
+
+    def train_optuna(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
+        """
+        Train neural network model using Optuna for hyperparameter search.
+        """
+        import optuna
+        from optuna.pruners import MedianPruner
+        from optuna.samplers import TPESampler
+
+        def objective(trial):
+            # Define hyperparameters to tune for the loss function
+            # These are examples, adjust based on your specific loss function and its parameters
+            loss_params_trial = {}
+            if 'distillation' in self.loss:
+                loss_params_trial['lambda_entropy'] = trial.suggest_float('lambda_entropy', 1e-5, 1e-1, log=True)
+                loss_params_trial['lambda_mu0'] = trial.suggest_float('lambda_mu0', 1e-5, 1e-1, log=True)
+                loss_params_trial['lambda_dirichlet'] = trial.suggest_float('lambda_dirichlet', 1e-5, 1e-1, log=True)
+                loss_params_trial['lambda_ce'] = trial.suggest_float('lambda_ce', 1e-5, 1e-1, log=True)
+                # Add other loss-specific parameters here
+            elif 'cornfl' in self.loss:
+                loss_params_trial['alpha'] = self.get_corn_alpha_from_train_df(self.df_train, self.target_name)
+            elif 'fl' in self.loss:
+                loss_params_trial['alpha'] = self.get_class_freq(self.df_train)
+            
+            # Create a new criterion with the trial's hyperparameters
+            criterion = self.get_loss(self.loss, loss_params_trial)
+
+            if has_method(criterion, '_preprocess'):
+                if 'id{departement}' in self.loss:
+                    criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
+                elif 'id{node}' in self.loss:
+                    criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+
+            # Model setup (can also be tuned by Optuna if desired)
+            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+            new_params = {'static_idx': static_idx, 'temporal_idx': temporal_idx}
+            if self.model_name == 'TFN':
+                new_params.update({'d_static': len(static_idx)})
+            
+            current_model_params = custom_model_params.copy() if custom_model_params else {}
+            current_model_params.update(new_params)
+
+            model, _ = self.make_model(graph, current_model_params)
+            optimizer = self.get_optimizer(criterion)
+
+            BEST_VAL_LOSS = math.inf
+            BEST_SCORES = None
+            patience_cnt = 0
+            current_patience_lr = 0
+
+            for epoch in range(epochs):
+                self._current_epoch = epoch
+                val_loss, train_loss, _, _ = self.func_epoch(
+                    train_loader=self.train_loader, val_loader=self.val_loader,
+                    optimizer=optimizer, criterion=criterion, do_update=epoch < min_epochs
+                )
+
+                # Score-based early stopping with Borda Count
+                if epoch > min_epochs:
+                    try:
+                        current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
+                        if is_better:
+                            BEST_SCORES = current_scores
+                            BEST_VAL_LOSS = val_loss
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                        else:
+                            patience_cnt += 1
+                    except Exception as e:
+                        logger.warning(f'Score calculation failed ({e}), falling back to loss-based early stopping')
+                        if val_loss < BEST_VAL_LOSS:
+                            BEST_VAL_LOSS = val_loss
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                        else:
+                            patience_cnt += 1
+                else:
+                    if epoch == min_epochs:
+                        try:
+                            BEST_SCORES, _, _ = self.calculate_val_scores_and_compare(None)
+                        except Exception as e:
+                            logger.warning(f'Initial score calculation failed ({e}), using loss-based')
+                            BEST_SCORES = None
+                    patience_cnt += 1
+
+                # Optuna pruning
+                trial.report(BEST_VAL_LOSS, epoch)
+                if trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+
+                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
+                    if current_patience_lr >= self.patience_cnt_lr:
+                        break
+                    else:
+                        if self.delta_lr > 0:
+                            current_patience_lr += 1
+                            current_lr = optimizer.param_groups[0]['lr']
+                            new_lr = current_lr * (1 - self.delta_lr)
+                            for param_group in optimizer.param_groups:
+                                param_group['lr'] = new_lr
+                            patience_cnt = 0
+                        else:
+                            break
+            
+            # Return the metric to optimize (e.g., negative of the best score, or best loss)
+            # Optuna minimizes by default, so for scores (higher is better), return negative
+            if BEST_SCORES:
+                # Example: Optimize for score_k4 (high severity)
+                return -BEST_SCORES.get('score_k4', 0.0)
+            return BEST_VAL_LOSS # Fallback to loss if scores are not available
+
+        # Optuna study setup
+        study_name = f"{self.model_name}_{self.loss}_loss_param_search"
+        storage_name = f"sqlite:///{self.dir_log / 'optuna_loss_params.db'}"
+        
+        # Create or load study
+        try:
+            study = optuna.load_study(study_name=study_name, storage=storage_name)
+        except KeyError:
+            study = optuna.create_study(
+                direction="minimize",
+                study_name=study_name,
+                storage=storage_name,
+                sampler=TPESampler(seed=self.seed),
+                pruner=MedianPruner(
+                    n_startup_trials=5,  # Pruning starts after 5 trials
+                    n_warmup_steps=10,   # Pruning starts after 10 epochs
+                    interval_steps=5     # Check for pruning every 5 epochs
+                )
+            )
+
+        logger.info(f"Starting Optuna study for loss parameters: {study_name}")
+        study.optimize(objective, n_trials=self.optuna_n_trials, timeout=self.optuna_timeout_minutes * 60)
+
+        logger.info("Optuna study finished.")
+        logger.info(f"Best trial: {study.best_trial.value}")
+        logger.info(f"Best parameters: {study.best_trial.params}")
+
+        # Apply best parameters to the model
+        self.loss_params = study.best_trial.params
+        # Re-train the model with the best parameters (or just load the best model if saved)
+        # For simplicity, we'll just set the parameters and let the main train method handle it
+        # if self.loss_param_search is False for the final run.
+        # If you want to fully re-train here, you'd call the original train method with these params.
+        # For now, we'll assume the best params are stored and used later.
+        
+        # You might want to save the best model state from the best trial here
+        # For this example, we'll just log the best parameters.
+        
+        # After finding best parameters, you might want to run a final training with these parameters
+        # and save the model. This is outside the scope of this specific instruction,
+        # but a common next step.
+        
+        # For now, we'll just ensure the best parameters are stored for potential later use.
+        self.best_loss_params_found_by_optuna = study.best_trial.params
+        
+        # The original train method will not be called if loss_param_search is True,
+        # so this method effectively replaces the main training loop when searching for loss params.
+        # If you want to proceed with a full training after finding the best params,
+        # you would typically set self.loss_param_search to False and call self.train again.
+        # For this specific instruction, we just perform the search.
 
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
             assert self.model is not None
@@ -5077,11 +5235,11 @@ class SplitTraining(Training):
     def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
                  nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 horizon=0, post_process=None):
+                 horizon=0, post_process=None, loss_param_search=False):
 
         super().__init__(model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
 
         self.federated_cluster = federated_cluster
         self.cut_layer_name = cut_layer_name
