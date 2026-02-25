@@ -1211,10 +1211,11 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
             else:
                 y_true_real = y_true
             
-            score_high, score_low, coverage_k, score_adj_k = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
+            score_high, score_low, coverage_k, score_adj_k, score_min_class = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
             metrics['score_high'] = score_high
             metrics['score_low'] = score_low
             metrics['score'] = score_high + score_low
+            metrics['score_min_class'] = score_min_class
             
             # Add coverage metrics
             for k, count in coverage_k.items():
@@ -1226,7 +1227,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 metrics[f'score_k{k}'] = val
                 logger.info(f'score_k{k} = {val}')
             
-            logger.info(f'Monotonic scores: high={score_high:.3f}, low={score_low:.3f}, total={score_high+score_low:.3f}')
+            logger.info(f'Monotonic scores: high={score_high:.3f}, low={score_low:.3f}, min_class={score_min_class:.3f}, total={score_high+score_low:.3f}')
 
             # --- Summer Scoring (06-15 to 09-25) ---
             print('Calculating Summer Scores (06-15 to 09-25)')
@@ -1248,7 +1249,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 date_summer = res['date'].values[summer_mask]
                 id_summer = res['graph_id'].values[summer_mask]
 
-                sh_sum, sl_sum, cov_sum, score_adj_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
+                sh_sum, sl_sum, cov_sum, score_adj_sum, score_min_class_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
                 
                 # Store with suffix _DFE (as requested: score_k_DFE)
                 for k, val in score_adj_sum.items():
@@ -1257,7 +1258,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 
                 metrics['score_high_DFE'] = sh_sum
                 metrics['score_low_DFE'] = sl_sum
+                metrics['score_min_class_DFE'] = score_min_class_sum
                 metrics['score_DFE'] = sh_sum + sl_sum
+                logger.info(f'Summer min_class DFE = {score_min_class_sum:.3f}')
             else:
                 logger.warning("No summer data found for scoring.")
         except Exception as e:

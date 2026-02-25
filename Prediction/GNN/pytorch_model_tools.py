@@ -3167,17 +3167,18 @@ class Training():
         """
         EPS = 1e-6
         ref = getattr(self, 'reference_scores', None)
+        assert ref is not None
         s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
 
         def _u(sk, raw_key):
-            skr = float(s_ref_map.get(raw_key, 0.0) or 0.0)
+            skr = float(s_ref_map[raw_key])
             denom = max(abs(skr) + EPS, 0.1)
             # map tanh (-1, 1) to (0, 1) directly for the list of u_vals too
             return (np.tanh((sk - skr) / denom) + 1.0) / 2.0
 
-        pairs = [(float(raw_dict.get(f'score_k{k}', 0.0)), k) for k in [1, 2, 3, 4]]
-        pairs.append((float(raw_dict.get('recall', 0.0)), 'recall'))
-        pairs.append((float(raw_dict.get('score_min_class', 0.0)), 'score_min_class'))
+        pairs = [(float(raw_dict[f'score_k{k}']), f'score_k{k}') for k in [1, 2, 3, 4]]
+        pairs.append((float(raw_dict['recall']), 'recall'))
+        pairs.append((float(raw_dict['score_min_class']), 'score_min_class'))
         
         u_vals = [_u(sk, key) for sk, key in pairs]
         
@@ -3200,9 +3201,9 @@ class Training():
 
         agg, u_vals = self._compute_geometric_agg(raw)
 
-        result = {f'score_k{k}': raw.get(f'score_k{k}', 0.0) for k in [1, 2, 3, 4]}
-        result['recall'] = raw.get('recall', 0.0)
-        result['score_min_class'] = raw.get('score_min_class', 0.0)
+        result = {f'score_k{k}': raw[f'score_k{k}'] for k in [1, 2, 3, 4]}
+        result['recall'] = raw['recall']
+        result['score_min_class'] = raw['score_min_class']
         result['agg'] = agg
 
         # Individual normalised scores mapped to (0,1)
@@ -3210,7 +3211,6 @@ class Training():
             result[f'u_k{k}'] = float(u_vals[i])
         result['u_recall'] = float(u_vals[4])
         result['u_score_min_class'] = float(u_vals[5])
-        return result
         return result
 
     def define_reference_model(
@@ -3273,9 +3273,9 @@ class Training():
         def _scores_for(pred):
             """Raw scores keyed by int k + 'recall' + 'score_min_class'."""
             raw = self._compute_raw_scores(y_true, pred, dates, zones)
-            s = {k: float(raw.get(f'score_k{k}', 0.0) or 0.0) for k in [1, 2, 3, 4]}
-            s['recall'] = float(raw.get('recall', 0.0) or 0.0)
-            s['score_min_class'] = float(raw.get('score_min_class', 0.0) or 0.0)
+            s = {f'score_k{k}': float(raw[f'score_k{k}']) for k in [1, 2, 3, 4]}
+            s['recall'] = float(raw['recall'])
+            s['score_min_class'] = float(raw['score_min_class'])
             return s
 
         # Baseline: trivial predictor (all class 0)
@@ -3294,19 +3294,14 @@ class Training():
             ("mild_tail",     [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]),
         ]
 
-        # Version référence: uniform bins on first candidate column
         ref_col    = fwi_candidates[0]
         _, ref_q   = _QUANTILE_GRID[0]
         s_ref      = _scores_for(_discretize(df_train[ref_col], df_eval[ref_col], ref_q))
+        
+        # ── Critical: Bootstrap the reference scores using the uniform baseline
+        self.reference_scores = {'ref_scores': s_ref}
         if verbose:
             print(f"[ref_model] reference (uniform/{ref_col}): {s_ref}")
-
-        def _mean_u(s_candidate):
-            # Reuse _compute_geometric_agg logic safely without duplicating tanh
-            # by creating a mock class-like function internally or reusing it
-            agg, u_vals = self._compute_geometric_agg(s_candidate)
-            # define_reference_model explicitly computed mean of Us:
-            return float(np.mean(u_vals))
 
         all_results = []
         for fwi_col in fwi_candidates:
@@ -3315,7 +3310,8 @@ class Training():
             for qname, qbounds in _QUANTILE_GRID:
                 pred   = _discretize(df_train[fwi_col], df_eval[fwi_col], qbounds)
                 scores = _scores_for(pred)
-                mu     = _mean_u(scores)
+                agg, u_vals = self._compute_geometric_agg(scores)
+                mu     = float(agg)
                 cfg = {'fwi_col': fwi_col, 'quantile_name': qname,
                        'quantiles': qbounds, 'scores': scores, 'mean_u': mu}
                 all_results.append(cfg)
@@ -3326,6 +3322,11 @@ class Training():
             raise RuntimeError("Grid search produced no valid results.")
 
         best = max(all_results, key=lambda r: r['mean_u'])
+        if best['mean_u'] <= 0.0:
+            if verbose:
+                print(f"[ref_model] Warning: Best agg was <= 0 ({best['mean_u']:.4f}). Falling back to uniform reference.")
+            best = all_results[0]
+
         if verbose:
             bs = best['scores']
             lines = [
@@ -3333,7 +3334,7 @@ class Training():
                 f"[ref_model] BEST CONFIG",
                 f"  FWI col   : {best['fwi_col']}",
                 f"  Quantiles : {best['quantile_name']}",
-                f"  mean_u    : {best['mean_u']:.4f}",
+                f"  agg       : {best['mean_u']:.4f}",
                 f"{'─'*60}",
                 f"  {'Metric':<12} {'Best FWI':>10} {'Ref (uniform)':>14} {'Baseline':>10}",
                 f"  {'─'*46}",
@@ -3538,6 +3539,7 @@ class Training():
                         self.score_per_epochs[epoch] = current_scores
 
                         if is_better:
+                            prev_scores = BEST_SCORES
                             BEST_SCORES = current_scores
                             BEST_VAL_LOSS = val_loss
                             BEST_MODEL_PARAMS = self.model.state_dict()
@@ -3557,18 +3559,23 @@ class Training():
                                 for _k in [1, 2, 3, 4]:
                                     _s_cur  = current_scores.get(f'score_k{_k}', float('nan'))
                                     _u_cur  = current_scores.get(f'u_k{_k}',    float('nan'))
-                                    _s_prev = (BEST_SCORES or {}).get(f'score_k{_k}', float('nan'))
-                                    _u_prev = (BEST_SCORES or {}).get(f'u_k{_k}',    float('nan'))
+                                    _s_prev = (prev_scores or {}).get(f'score_k{_k}', float('nan'))
+                                    _u_prev = (prev_scores or {}).get(f'u_k{_k}',    float('nan'))
                                     _lines.append(f"  {'score_k'+str(_k):<10} {_s_cur:>8.4f} {_u_cur:>9.4f} {_s_prev:>11.4f} {_u_prev:>8.4f}")
                                 _rc   = current_scores.get('recall',   float('nan'))
                                 _urc  = current_scores.get('u_recall', float('nan'))
-                                _rcp  = (BEST_SCORES or {}).get('recall',   float('nan'))
-                                _urcp = (BEST_SCORES or {}).get('u_recall', float('nan'))
+                                _rcp  = (prev_scores or {}).get('recall',   float('nan'))
+                                _urcp = (prev_scores or {}).get('u_recall', float('nan'))
                                 _lines.append(f"  {'recall':<10} {_rc:>8.4f} {_urc:>9.4f} {_rcp:>11.4f} {_urcp:>8.4f}")
+                                _smc  = current_scores.get('score_min_class',   float('nan'))
+                                _usmc = current_scores.get('u_score_min_class', float('nan'))
+                                _smcp = (prev_scores or {}).get('score_min_class',   float('nan'))
+                                _usmcp= (prev_scores or {}).get('u_score_min_class', float('nan'))
+                                _lines.append(f"  {'score_min':<10} {_smc:>8.4f} {_usmc:>9.4f} {_smcp:>11.4f} {_usmcp:>8.4f}")
                                 _lines.append(f"  {'─'*52}")
                                 _lines.append(
                                     f"  {'agg (min)':<10} {'':>8} {current_scores.get('agg', float('nan')):>9.4f}"
-                                    f" {'':>11} {(BEST_SCORES or {}).get('agg', float('nan')):>8.4f}"
+                                    f" {'':>11} {(prev_scores or {}).get('agg', float('nan')):>8.4f}"
                                 )
                             logger.info('\n'.join(_lines))
                             # ─────────────────────────────────────────────────────────
@@ -3604,6 +3611,7 @@ class Training():
                                 for _k in [1, 2, 3, 4]:
                                     _lines.append(f"  {'score_k'+str(_k):<10} {BEST_SCORES.get(f'score_k{_k}', float('nan')):>8.4f}")
                                 _lines.append(f"  {'recall':<10} {BEST_SCORES.get('recall', float('nan')):>8.4f}")
+                                _lines.append(f"  {'score_min':<10} {BEST_SCORES.get('score_min_class', float('nan')):>8.4f}")
                                 _lines.append(f"  {'agg':<10} {BEST_SCORES.get('agg', float('nan')):>8.4f}")
                             logger.info('\n'.join(_lines))
                         except Exception as e:
@@ -4317,8 +4325,8 @@ class Training():
                         copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
                         # Restore parent's reference_scores: the FWI reference model must not be
                         # recomputed on subsampled data — it is always the one fitted on the full dataset.
-                        if getattr(self, 'reference_scores', None) is not None:
-                            copy_model.reference_scores = self.reference_scores
+                        copy_model.reference_scores = self.reference_scores
+                        assert self.reference_scores is not None
                         copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                         
                         self.log_memory(f"After Train (tp={tp}, run={run})")
@@ -5641,6 +5649,7 @@ class Training():
 
             # Focal loss terms
             params["wfocal"] = trial.suggest_float("cllt_wfocal", 0.0, 2.0)
+            params["wmu0"] = trial.suggest_float("cllt_wmu0", 0.0, 2.0)
             params["fgamma"] = trial.suggest_float("cllt_fgamma", 0.5, 5.0, log=True)
             params["falpha"] = trial.suggest_float("cllt_falpha", 0.1, 0.9)
 

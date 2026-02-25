@@ -169,15 +169,11 @@ class ModelGNN(SplitTraining):
 
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
-        try:
-            self.define_reference_model(
-                df_train=df_train,
-                df_test=df_test,
-                nbsinister_col=_nbsin_col,
-            )
-        except Exception as _ref_e:
-            logger.warning(f'[define_reference_model] failed: {_ref_e}')
-            self.reference_scores = None
+        self.define_reference_model(
+            df_train=df_train,
+            df_test=df_test,
+            nbsinister_col=_nbsin_col,
+        )
         # ───────────────────────────────────────────────────────────────────
 
         #df_train = df_train[~df_train[self.target_name].isna()]
@@ -688,15 +684,11 @@ class Model_Torch(SplitTraining):
 
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
-        try:
-            self.define_reference_model(
-                df_train=df_train,
-                df_test=df_test,
-                nbsinister_col=_nbsin_col,
-            )
-        except Exception as _ref_e:
-            logger.warning(f'[define_reference_model] failed: {_ref_e}')
-            self.reference_scores = None
+        self.define_reference_model(
+            df_train=df_train,
+            df_test=df_test,
+            nbsinister_col=_nbsin_col,
+        )
         # ───────────────────────────────────────────────────────────────────
 
         self.graph = graph
