@@ -1306,8 +1306,10 @@ def get_post_process_model(train_dataset, model, target, group_col, dir_log, n_c
     if (dir_log / f'{model}_{target}_{group_col}.pkl').is_file():
         return read_object(f'{model}_{target}_{group_col}.pkl', dir_log)
     
-    class_risk_dict = {'kmeans': KMeansRiskZerosHandle(n_clusters), 
-                    "gm" : GMMRiskZerosHandle(n_clusters=n_clusters)}
+    class_risk_dict = {'egpd' : eGPDRisk(),
+                       'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters, log=True)}
     
     obj2 = ScalerClassRisk(col_id=group_col, dir_output = Path('./'), target=target, scaler=None, class_risk=class_risk_dict[model])
     obj2.fit(train_dataset[target].values, train_dataset[target].values, train_dataset[group_col].values)

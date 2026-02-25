@@ -5,6 +5,8 @@ from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
 from torch.nn import KLDivLoss
+from torch.nn import KLDivLoss
+from GNN.forecasting_models.pytorch.ordinal_loss import CumulativeLinkLoss, LargeMarginOrdinalLoss, PairwiseMarginRankingLoss
 
 ############################################## Some tools ###############################################
 
@@ -2085,7 +2087,7 @@ def get_loss_function(loss_name, **loss_params):
             "cewk":                         lambda: CEWKLoss(**loss_params),
             "mcewk":                       lambda: MCEAndWKLoss(**loss_params),
             "kldivloss":                   lambda: KLDivLoss(reduction="batchmean"),
-            "egpd":                        lambda: EGPDNLLLoss(),
+            "egpd":                        lambda: EGPDNLLLoss(**loss_params),
             "degpd":                       lambda: dEGPDLossTrunc(),
             "pdegpd":                      lambda: PredictdEGPDLossTruncMostProbable(),
             "bulkTail":                      lambda : PredictdBulkTailEGPD(),
@@ -2113,9 +2115,13 @@ def get_loss_function(loss_name, **loss_params):
             "ordinalNoCoverage" :          lambda: OrdinalMonotonicLossNoCoverage(**loss_params),
             "ordinalNoCoverageWithGains" : lambda: OrdinalMonotonicLossNoCoverageWithGains(**loss_params),
             "ommse" :                      lambda: OMMSE(**loss_params),
-            "cornloss" :                       lambda: CORNLoss(**loss_params),
+            "cornloss" :                   lambda: CORNLoss(**loss_params),
             "cornfl" :                     lambda: CORNFocalLoss(**loss_params),
             "cornwithgains" :              lambda: CORNWithGains(**loss_params),
+            "cll" :                        lambda: CumulativeLinkLoss(**loss_params),
+            "lmol" :                       lambda: LargeMarginOrdinalLoss(**loss_params),
+            "prls" :                       lambda: PairwiseMarginRankingLoss(**loss_params),
+            "cllt" :                       lambda: CLMBinnedTransitionLoss(**loss_params),
         }
 
     try:

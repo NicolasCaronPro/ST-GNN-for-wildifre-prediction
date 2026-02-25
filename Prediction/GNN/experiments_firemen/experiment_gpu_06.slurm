@@ -2,14 +2,14 @@
 
 ## Slurm job script to be adapted as required ## 
 
-#SBATCH --job-name="bdiff_06%J.out"
-#SBATCH --output=res_bdiff_06.txt%J.out
-#SBATCH --error=err_bdiff_06.txt%J.out
+#SBATCH --job-name="06%J.out"
+#SBATCH --output=res_06.txt%J.out
+#SBATCH --error=err_06.txt%J.out
 #SBATCH --time=180:00:00
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 
-#SBATCH --mem=50G
+#SBATCH --mem=75G
 
 ## view allocated GPU cards
 nvidia-smi

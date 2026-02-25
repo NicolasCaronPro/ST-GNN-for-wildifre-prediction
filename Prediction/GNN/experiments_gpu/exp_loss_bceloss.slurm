@@ -3,7 +3,7 @@
 
 ## Slurm job script to be adapted as required ## 
 
-#SBATCH --job-name="flwk"
+#SBATCH --job-name="bceloss"
 #SBATCH --output=res_flwk.txt%J.out
 #SBATCH --error=err_flwk.txt%J.out
 #SBATCH --time=180:00:00

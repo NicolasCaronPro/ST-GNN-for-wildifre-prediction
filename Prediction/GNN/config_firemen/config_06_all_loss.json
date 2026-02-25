@@ -81,12 +81,12 @@
     "doTestdepartement": false,
     "doTrain": true,
     "encoder": false,
-    "database": true,
+    "database": false,
     "database2D": false,
     "pca": false,
     "doKMEANS": false,
     "point": false,
-    "graph": true,
+    "graph": false,
     "quick": true,
     "shift": 5,
     "ncluster": 5,
@@ -115,19 +115,66 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
+            "task": "corn",
+            "loss": "cornfl",
+            "out_channels": 4,
+            "n_run": 5,
+            "horizon": 0,
+            "use_log": false,
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "params": {},
+            "loss_param_search": false
+        },
+        {
+            "type": "GRU",
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "kdays": 10,
+            "nbfeatures": "all",
+            "target": "timeintervention-quantile-5-Class-Dept",
+            "task": "corn",
+            "loss": "cornloss",
+            "out_channels": 4,
+            "n_run": 5,
+            "horizon": 0,
+            "use_log": false,
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "params": {},
+            "loss_param_search": false
+        },
+        {
+            "type": "GRU",
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "kdays": 10,
+            "nbfeatures": "all",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "wkloss",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -137,19 +184,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -159,19 +207,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -181,19 +230,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "flwki-id{departement}",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -203,19 +253,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "flwk",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -225,19 +276,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "regression",
             "loss": "pdegpd",
             "out_channels": 3,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -247,19 +299,20 @@
             "over_sampling": "full",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "timeintervention-quantile-5-Class-Dept",
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {

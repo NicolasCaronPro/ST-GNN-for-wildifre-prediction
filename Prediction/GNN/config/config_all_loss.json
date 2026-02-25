@@ -275,7 +275,7 @@
     "doKMEANS": false,
     "point": false,
     "graph": true,
-    "quick":false,
+    "quick": true,
     "shift": 5,
     "ncluster": 5,
     "thresh_kmeans": 0.2,
@@ -295,7 +295,6 @@
     "training_mode": "normal",
     "train_script": "train_any_model.py",
     "models": [
-
         {
             "type": "GRU",
             "use_temporal_as_edges": false,
@@ -310,13 +309,14 @@
             "out_channels": 5,
             "n_run": 5,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -338,7 +338,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -360,7 +361,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -382,7 +384,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -404,7 +407,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -426,7 +430,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -448,16 +453,17 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
         "epochs": 3000,
         "batch_size": 64,
-        "lr": 5e-05,
+        "lr": 0.005,
         "PATIENCE_CNT": 25,
         "CHECKPOINT": 25,
-        "delta_lr": 0.2e-05,
-        "PATIENCE_CNT_LR": 5
+        "delta_lr": 20,
+        "PATIENCE_CNT_LR": 0
     }
 }

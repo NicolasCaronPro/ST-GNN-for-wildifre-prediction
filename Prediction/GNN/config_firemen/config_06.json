@@ -81,12 +81,12 @@
     "doTestdepartement": false,
     "doTrain": true,
     "encoder": false,
-    "database": true,
+    "database": false,
     "database2D": false,
     "pca": false,
     "doKMEANS": false,
     "point": false,
-    "graph": true,
+    "graph": false,
     "quick": true,
     "shift": 5,
     "ncluster": 5,
@@ -116,29 +116,31 @@
             "kdays": 10,
             "nbfeatures": "all",
             "target": "nbsinister",
-            "task": "classification",
-            "loss": "ordinalNoCoverageWithGains-id{node}-lambdaentropy{1.5}",
-            "out_channels": 5,
-            "n_run": 5,
+            "task": "regression",
+            "loss": "cllt",
+            "out_channels" : 1,
+            "n_run": 1,
             "horizon": 0,
-            "use_log": true,
+            "use_log": false,
             "aggregation_method": "weighted",
             "federated_cluster": "cluster",
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
+
     ],
     "hyperparameters": {
-        "epochs": 3000,
+        "epochs": 1000,
         "batch_size": 64,
-        "lr": 0.00005,
+        "lr": 0.0005,
         "PATIENCE_CNT": 25,
         "CHECKPOINT": 25,
         "global_epochs": 60,
         "patience_count_global": 10,
         "delta_lr": 0.2,
-        "PATIENCE_CNT_LR": 5
+        "PATIENCE_CNT_LR": 2
     }
 }

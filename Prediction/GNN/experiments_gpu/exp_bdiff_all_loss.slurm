@@ -9,7 +9,7 @@
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
 
-#SBATCH --mem=50G
+#SBATCH --mem=100G
 
 ## view allocated GPU cards
 nvidia-smi

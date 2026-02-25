@@ -312,7 +312,8 @@
             "input_server_model": 256,
             "params": {
                 "channel_attention": false
-            }
+            },
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
@@ -323,7 +324,7 @@
         "CHECKPOINT": 25,
         "global_epochs": 30,
         "patience_count_global": 10,
-        "delta_lr": 0.2e-05,
+        "delta_lr": 2e-06,
         "PATIENCE_CNT_LR": 5
     }
 }

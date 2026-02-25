@@ -1,4 +1,7 @@
 import numpy as np
+import math
+import logging
+import optuna
 import gc
 import psutil
 import tracemalloc
@@ -28,7 +31,7 @@ from GNN.tools import (
     evaluate_metrics,
     calculate_ic95,
 )
-from GNN.config import graph_id_index, departement_index
+from GNN.config import graph_id_index, departement_index, logger
 from sklearn.metrics import f1_score, jaccard_score
 
 from GNN.graph_builder import *
@@ -2015,7 +2018,6 @@ class Training():
         self.seed = None
         self.horizon = horizon
         self.apply_discretization = post_process is not None
-        self.apply_discretization = post_process is not None
         self.post_process = post_process
         self.loss_param_search = loss_param_search
 
@@ -2660,6 +2662,9 @@ class Training():
         inputs, labels, _ = data
         graphs = None
         
+        if torch.isnan(inputs).any():
+            print(f">>> [DEBUG launch_batch] inputs contains NaN! Shape: {inputs.shape}")
+        
         if inputs.shape[0] == 1:
             return 0, 0
 
@@ -2667,6 +2672,11 @@ class Training():
         
         hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
         output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+
+        is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+        if is_tfn:
+            inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
+            output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
 
         for H in range(self.horizon + 1):
 
@@ -2680,14 +2690,17 @@ class Training():
             if self.loss not in ['kldivloss']: # works on probability
                 target = target.long()
 
-            inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
-
             if H == 0:
+                inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current")
+                # Store the current features for persistence
+                inputs_horizon_persistent = inputs_horizon.clone()
                 z_prev = None
             else:
+                # Use persistence (features from H=0)
+                inputs_horizon = inputs_horizon_persistent.clone()
                 if self.ks > 0:
-                    # on prend les ks derniers états cachés déjà vus
-                    history = hidden_past[-(self.ks + 1):]
+                    # on prend les ks derniers états cachés déjà vus (detached to prevent BPTT from H>0 to H=0)
+                    history = [h.detach() for h in hidden_past[-(self.ks + 1):]]
                     # empilement (B, D, L) avec L = len(history)
                     z_prev = torch.stack(history, dim=2)  # (B, D, L)
 
@@ -2703,20 +2716,33 @@ class Training():
                         z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
                 else:
                     z_prev = hidden_past[-1]
-            if H == 0:
-                output, logits, hidden = self.model(inputs_horizon, z_prev=None)
-                if batch_type == 'train' and do_update:
-                    if has_method(criterion, 'update_after_batch'):
-                        criterion.update_after_batch(logits, target)
-            else:
-                if self.id_past_risk is not None:
-                    inputs_horizon[:, self.id_past_risk, -H:] = 0
-                if self.id_past_ba is not None:
-                    inputs_horizon[:, self.id_past_ba, -H:] = 0
-                if self.prev_idx is not None:
-                    inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
 
-                output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+            
+            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+            
+            if is_tfn:
+                output = output_all[:, H, :]
+                logits = logits_all[:, H, :]
+                hidden = hidden_all[:, H, :]
+                
+                if H == 0 and do_update and has_method(criterion, 'update_after_batch'):
+                    criterion.update_after_batch(logits, target)
+            else:
+                if H == 0:
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                    if do_update:
+                        if has_method(criterion, 'update_after_batch'):
+                            criterion.update_after_batch(logits, target)
+                else:
+                    if self.id_past_risk is not None:
+                        inputs_horizon[:, self.id_past_risk, -H:] = 0
+                    if self.id_past_ba is not None:
+                        inputs_horizon[:, self.id_past_ba, -H:] = 0
+                    if self.prev_idx is not None:
+                        # Remplacer les valeurs de la feature par les prédictions passées (detached to prevent BPTT)
+                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack([o.detach() for o in output_past], dim=2)
+    
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
             
             hidden_past.append(hidden)
             output_past.append(output)
@@ -2841,7 +2867,7 @@ class Training():
 
         for i, data in enumerate(loader, 0):
             
-            loss, loss_res = self.launch_batch(data, criterion, 'train', do_update)
+            loss, loss_res = self.launch_batch(data, criterion, 'train', False)
 
             if isinstance(loss, int) or isinstance(loss, float):
                 print(f'loss is does not required grad {loss}')
@@ -2851,6 +2877,8 @@ class Training():
                 optimizer.zero_grad()
                 try:
                     loss.backward()
+                    # Clip gradients to prevent exploding gradients causing NaN weights
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 except:
                     continue
             
@@ -2930,7 +2958,10 @@ class Training():
             for par in params:
                 name = par[0]
                 value = par[1]
-                dict_params[name] = deepcopy(value.detach().cpu().numpy())
+                if isinstance(value, torch.Tensor):
+                    dict_params[name] = value.detach().cpu().numpy()
+                else:
+                    dict_params[name] = deepcopy(value)
             
             self.criterion_params.append(dict_params)
 
@@ -2957,7 +2988,7 @@ class Training():
 
             for i, data in enumerate(loader, 0):
                 
-                loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=False)
+                loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=True)
 
                 if loss is not None:
                     if torch.is_tensor(loss):
@@ -3093,78 +3124,321 @@ class Training():
         alpha_vec = self.compute_corn_alpha_vector_from_hist(hist)
         return alpha_vec
 
+    # ──────────────────────────────────────────────────────────────────────────
+    # Shared scoring helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _compute_raw_scores(self, y_true, y_pred, dates, zones):
+        """
+        Compute raw evaluation scores using evaluate_metrics.
+        Returns the full evaluate_metrics dict, which already includes
+        score_k1..k4, recall, iou, f1, etc.
+        Missing or NaN score_k{n} values are replaced with 0.0.
+        """
+        from GNN.tools import evaluate_metrics as _evaluate_metrics
+        metrics = _evaluate_metrics(y_true, y_pred, dates=dates, zones=zones)
+        for k in [1, 2, 3, 4]:
+            key = f'score_k{k}'
+            v = metrics.get(key)
+            if v is None or (isinstance(v, float) and np.isnan(v)):
+                metrics[key] = 0.0
+                
+        key = 'score_min_class'
+        v = metrics.get(key)
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            metrics[key] = 0.0
+        if 'recall' not in metrics or metrics['recall'] is None:
+            try:
+                from sklearn.metrics import recall_score as _rec
+                metrics['recall'] = float(_rec(
+                    (np.asarray(y_true) > 0).astype(int),
+                    (np.asarray(y_pred) > 0).astype(int),
+                    zero_division=0
+                ))
+            except Exception:
+                metrics['recall'] = 0.0
+        return metrics
+
+    def _compute_geometric_agg(self, raw_dict):
+        """
+        Computes normalized scores (u_k) using self.reference_scores and returns
+        the geometric mean (mapped back to -1, 1).
+        Returns tuple: (agg_score, list_of_u_vals)
+        """
+        EPS = 1e-6
+        ref = getattr(self, 'reference_scores', None)
+        s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
+
+        def _u(sk, raw_key):
+            skr = float(s_ref_map.get(raw_key, 0.0) or 0.0)
+            denom = max(abs(skr) + EPS, 0.1)
+            # map tanh (-1, 1) to (0, 1) directly for the list of u_vals too
+            return (np.tanh((sk - skr) / denom) + 1.0) / 2.0
+
+        pairs = [(float(raw_dict.get(f'score_k{k}', 0.0)), k) for k in [1, 2, 3, 4]]
+        pairs.append((float(raw_dict.get('recall', 0.0)), 'recall'))
+        pairs.append((float(raw_dict.get('score_min_class', 0.0)), 'score_min_class'))
+        
+        u_vals = [_u(sk, key) for sk, key in pairs]
+        
+        # u_vals are already in (0, 1)
+        U = np.exp(np.mean(np.log(np.array(u_vals) + EPS)))  # geometric mean in (0,1)
+        agg = float(2.0 * U - 1.0)  # map back to (-1,1)
+        
+        return agg, u_vals
+
+    def _compute_run_scores(self, y_true, y_pred, dates, zones):
+        """
+        Compute raw scores + normalise by self.reference_scores.
+
+            u_k = clip((s_k - s_baseline) / (|s_k_ref - s_k_baseline| + ε), 0, 1)
+            agg = geometric_mean_k(u_k)
+
+        Returns dict: {score_k1..k4, recall, agg, ...}.
+        """
+        raw = self._compute_raw_scores(y_true, y_pred, dates, zones)
+
+        agg, u_vals = self._compute_geometric_agg(raw)
+
+        result = {f'score_k{k}': raw.get(f'score_k{k}', 0.0) for k in [1, 2, 3, 4]}
+        result['recall'] = raw.get('recall', 0.0)
+        result['score_min_class'] = raw.get('score_min_class', 0.0)
+        result['agg'] = agg
+
+        # Individual normalised scores mapped to (0,1)
+        for i, k in enumerate([1, 2, 3, 4]):
+            result[f'u_k{k}'] = float(u_vals[i])
+        result['u_recall'] = float(u_vals[4])
+        result['u_score_min_class'] = float(u_vals[5])
+        return result
+        return result
+
+    def define_reference_model(
+        self,
+        df_train,
+        df_test=None,
+        date_col: str  = 'date',
+        zone_col: str  = 'graph_id',
+        nbsinister_col: str = 'nbsinister',
+        fwi_candidates: list = None,
+        n_classes: int = 5,
+        verbose: bool  = True,
+    ):
+        """
+        Find the best FWI-based ordinal discretization as a reference baseline model.
+        Uses self._compute_raw_scores internally for evaluation.
+        Stores result in self.reference_scores and returns it.
+
+        Returns dict:
+            'best_config'    : {'fwi_col': str, 'quantile_name': str, 'quantiles': list, ...}
+            'best_score'     : float  (mean_u of best config)
+            'ref_scores'     : dict   {k: s_k_ref}  (uniform bins on first FWI col)
+            'baseline_scores': dict   {k: s_k_baseline} (trivial all-0 predictor)
+            'all_results'    : list[dict]
+        """
+        EPS = 1e-6
+        df_eval = df_test if df_test is not None else df_train
+
+        _DEFAULTS = ['fwi', 'fwi_mean', 'isi', 'bui', 'dc', 'ffmc', 'dmc', 'dailySeverityRating']
+        if fwi_candidates is None:
+            fwi_candidates = [c for c in _DEFAULTS if c in df_train.columns]
+        if not fwi_candidates:
+            raise ValueError("No FWI candidate column found in df_train.")
+
+        for col in [date_col, zone_col]:
+            if col not in df_eval.columns:
+                raise ValueError(f"Column '{col}' not found in evaluation dataframe.")
+        if nbsinister_col not in df_train.columns or nbsinister_col not in df_eval.columns:
+            raise ValueError(f"'{nbsinister_col}' not found in dataframe(s).")
+
+        # y_true: uniform quantile discretization of nbsinister fitted on df_train
+        _qs = np.quantile(
+            df_train[nbsinister_col].fillna(0).values,
+            np.linspace(0, 1, n_classes + 1)[1:-1]
+        )
+        y_true = np.searchsorted(_qs, df_eval[nbsinister_col].fillna(0).values
+                                 ).clip(0, n_classes - 1).astype(int)
+        dates  = df_eval[date_col].values
+        zones  = df_eval[zone_col].values
+
+        if verbose:
+            import collections
+            print(f"[ref_model] y_true dist: {dict(sorted(collections.Counter(y_true).items()))}")
+
+        def _discretize(s_train, s_eval, quantiles):
+            qs  = np.quantile(s_train.dropna(), quantiles[1:-1])
+            return np.searchsorted(qs, s_eval.fillna(s_eval.median()).values
+                                   ).clip(0, n_classes - 1).astype(int)
+
+        def _scores_for(pred):
+            """Raw scores keyed by int k + 'recall' + 'score_min_class'."""
+            raw = self._compute_raw_scores(y_true, pred, dates, zones)
+            s = {k: float(raw.get(f'score_k{k}', 0.0) or 0.0) for k in [1, 2, 3, 4]}
+            s['recall'] = float(raw.get('recall', 0.0) or 0.0)
+            s['score_min_class'] = float(raw.get('score_min_class', 0.0) or 0.0)
+            return s
+
+        # Baseline: trivial predictor (all class 0)
+        s_baseline = _scores_for(np.zeros(len(df_eval), dtype=int))
+        if verbose:
+            print(f"[ref_model] baseline: {s_baseline}")
+
+        _QUANTILE_GRID = [
+            ("uniform",       np.linspace(0.0, 1.0, n_classes + 1).tolist()),
+            ("heavy_low",     [0.0, 0.50, 0.70, 0.83, 0.92, 1.0]),
+            ("heavy_high",    [0.0, 0.08, 0.20, 0.40, 0.65, 1.0]),
+            ("low_emphasis",  [0.0, 0.30, 0.55, 0.72, 0.87, 1.0]),
+            ("high_emphasis", [0.0, 0.13, 0.28, 0.45, 0.70, 1.0]),
+            ("balanced_low",  [0.0, 0.40, 0.60, 0.75, 0.88, 1.0]),
+            ("extreme_tail",  [0.0, 0.60, 0.75, 0.85, 0.93, 1.0]),
+            ("mild_tail",     [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]),
+        ]
+
+        # Version référence: uniform bins on first candidate column
+        ref_col    = fwi_candidates[0]
+        _, ref_q   = _QUANTILE_GRID[0]
+        s_ref      = _scores_for(_discretize(df_train[ref_col], df_eval[ref_col], ref_q))
+        if verbose:
+            print(f"[ref_model] reference (uniform/{ref_col}): {s_ref}")
+
+        def _mean_u(s_candidate):
+            # Reuse _compute_geometric_agg logic safely without duplicating tanh
+            # by creating a mock class-like function internally or reusing it
+            agg, u_vals = self._compute_geometric_agg(s_candidate)
+            # define_reference_model explicitly computed mean of Us:
+            return float(np.mean(u_vals))
+
+        all_results = []
+        for fwi_col in fwi_candidates:
+            if fwi_col not in df_train.columns or fwi_col not in df_eval.columns:
+                continue
+            for qname, qbounds in _QUANTILE_GRID:
+                pred   = _discretize(df_train[fwi_col], df_eval[fwi_col], qbounds)
+                scores = _scores_for(pred)
+                mu     = _mean_u(scores)
+                cfg = {'fwi_col': fwi_col, 'quantile_name': qname,
+                       'quantiles': qbounds, 'scores': scores, 'mean_u': mu}
+                all_results.append(cfg)
+                if verbose:
+                    print(f"  {fwi_col:20s} | {qname:14s} | mean_u={mu:.4f}")
+
+        if not all_results:
+            raise RuntimeError("Grid search produced no valid results.")
+
+        best = max(all_results, key=lambda r: r['mean_u'])
+        if verbose:
+            bs = best['scores']
+            lines = [
+                f"\n{'─'*60}",
+                f"[ref_model] BEST CONFIG",
+                f"  FWI col   : {best['fwi_col']}",
+                f"  Quantiles : {best['quantile_name']}",
+                f"  mean_u    : {best['mean_u']:.4f}",
+                f"{'─'*60}",
+                f"  {'Metric':<12} {'Best FWI':>10} {'Ref (uniform)':>14} {'Baseline':>10}",
+                f"  {'─'*46}",
+            ]
+            for k in [1, 2, 3, 4]:
+                sk   = bs.get(k, 0.0)
+                skr  = s_ref.get(k, 0.0)
+                skb  = s_baseline.get(k, 0.0)
+                lines.append(f"  {'score_k'+str(k):<12} {sk:>10.4f} {skr:>14.4f} {skb:>10.4f}")
+            sr   = bs.get('recall', 0.0)
+            srr  = s_ref.get('recall', 0.0)
+            srb  = s_baseline.get('recall', 0.0)
+            lines.append(f"  {'recall':<12} {sr:>10.4f} {srr:>14.4f} {srb:>10.4f}")
+            smc  = bs.get('score_min_class', 0.0)
+            smcr = s_ref.get('score_min_class', 0.0)
+            smcb = s_baseline.get('score_min_class', 0.0)
+            lines.append(f"  {'score_min_class':<12} {smc:>10.4f} {smcr:>14.4f} {smcb:>10.4f}")
+            lines.append(f"{'─'*60}")
+            # Show exactly which scores will be used as reference in _compute_run_scores (tanh)
+            chosen = best['scores']
+            lines += [
+                f"[ref_model] CHOSEN REFERENCE SCORES (used for tanh normalisation)",
+                f"  {'Metric':<12} {'score':>10}   (model score will be centred on these)",
+                f"  {'─'*46}",
+            ]
+            for k in [1, 2, 3, 4]:
+                lines.append(f"  {'score_k'+str(k):<12} {chosen.get(k, 0.0):>10.4f}")
+            lines.append(f"  {'recall':<12} {chosen.get('recall', 0.0):>10.4f}")
+            lines.append(f"  {'score_min_class':<12} {chosen.get('score_min_class', 0.0):>10.4f}")
+            lines.append(f"{'─'*60}")
+            print('\n'.join(lines))
+
+        result = {
+            'best_config':     best,
+            'best_score':      best['mean_u'],
+            'best_scores':     best['scores'],      # {1: s1, 2: s2, 3: s3, 4: s4, 'recall': r}
+            'ref_scores':      s_ref,               # uniform-bins reference (first FWI col)
+            'baseline_scores': s_baseline,
+            'all_results':     all_results,
+        }
+        self.reference_scores = result
+        return result
+
+    # ──────────────────────────────────────────────────────────────────────────
+
     def calculate_val_scores_and_compare(self, best_scores=None):
         """
-        Calculate validation scores for k=1,2,3,4 and compare with best using Borda Count.
-        
+        Calculate validation scores (evaluate_metrics + recall, normalised by reference)
+        and compare two runs.
+
+            u_k = clip((s_k - s_baseline) / (|s_k_ref - s_k_baseline| + ε), 0, 1)
+            agg = mean_k(u_k)   k ∈ {1, 2, 3, 4, 'recall'}
+
         Returns:
-            current_scores (dict): Dictionary with score_k1, score_k2, score_k3, score_k4
-            is_better (bool): True if current scores are better than best (lower rank sum)
-            rank_sum (int): Sum of ranks for current scores
+            current_scores (dict) : {score_k1..k4, recall, agg}
+            is_better      (bool) : True if current agg > best agg
+            agg            (float): normalised aggregate score of current run
         """
-        from GNN.tools import evaluate_metrics
-        
-        # Get predictions on validation set
+        # ── 1. Predictions ────────────────────────────────────────────────────
         self.model.eval()
         with torch.no_grad():
             pred_tensor, y_tensor = self._predict_test_loader(self.val_loader)
 
-        # Extract predictions and ground truth
         test_output = pred_tensor[:, 0]
-        y = y_tensor[:, :, 0]
+        y           = y_tensor[:, :, 0]
+        prediction  = test_output.detach().cpu().numpy()
+        y_np        = y.detach().cpu().numpy()
 
-        prediction = test_output.detach().cpu().numpy()
-        y = y.detach().cpu().numpy()
-        
-        # Create temporary dataframe from predictions (like in search_samples_proportion)
-        dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-        dff['departement'] = y[:, departement_index]
-        dff['date'] = y[:, date_index]
-        dff['graph_id'] = y[:, graph_id_index]
-        dff[self.target_name] = y[:, -1]
-        
-        # Calculate metrics
-        metrics = evaluate_metrics(
-            dff[self.target_name],
+        # ── Special case: DFE target ─────────────────────────────────────────
+        if self.target_name == 'DFE':
+            from forecasting_models.sklearn.score import iou_score
+            iou = iou_score(y_np[:, -1], prediction)
+            current_scores = {'iou_score': iou, 'agg': iou}
+            del test_output, y, prediction, y_np, y_tensor, pred_tensor
+            if best_scores is None:
+                return current_scores, True, iou
+            return current_scores, iou > best_scores.get('iou_score', -float('inf')), iou
+
+        # ── 2. Build evaluation dataframe ────────────────────────────────────
+        dff = pd.DataFrame(index=np.arange(y_np.shape[0]))
+        dff['departement']    = y_np[:, departement_index]
+        dff['date']           = y_np[:, date_index]
+        dff['graph_id']       = y_np[:, graph_id_index]
+        dff[self.target_name] = y_np[:, -1]
+
+        # ── 3. Compute normalised scores via shared helper ────────────────────
+        current_scores = self._compute_run_scores(
+            dff[self.target_name].values,
             prediction,
-            dates=dff['date'].values,
-            zones=dff['graph_id'].values
+            dff['date'].values,
+            dff['graph_id'].values,
         )
-        
-        # Extract scores for k=1,2,3,4
-        current_scores = {}
-        for k in [1, 2, 3, 4]:
-            key = f'score_k{k}'
-            if key in metrics:
-                current_scores[key] = metrics[key]
-            else:
-                current_scores[key] = 0.0
-        
-        # Clean up temporary objects
-        del dff, prediction, y, test_output, y_tensor, pred_tensor
-        
-        # If no previous best, this is the first epoch
-        if best_scores is None:
-            return current_scores, True, 0
-        
-        # Compare using Borda Count (rank-based)
-        # Lower rank sum is better
-        all_scores = {'current': current_scores, 'best': best_scores}
-        rank_sums = {'current': 0, 'best': 0}
-        
-        for k in [1, 2, 3, 4]:
-            key = f'score_k{k}'
-            # Sort by score (higher is better), so reverse=True
-            sorted_keys = sorted(all_scores.keys(), 
-                                key=lambda x: all_scores[x][key], 
-                                reverse=True)
-            # Assign ranks (1-based)
-            for rank, score_key in enumerate(sorted_keys, 1):
-                rank_sums[score_key] += rank
-        
-        is_better = rank_sums['current'] < rank_sums['best']
 
-        return current_scores, is_better, rank_sums['current']
+        # ── Clean up ─────────────────────────────────────────────────────────
+        del dff, prediction, y_np, test_output, y, y_tensor, pred_tensor
+
+        agg = current_scores['agg']
+
+        # ── 4. First run ─────────────────────────────────────────────────────
+        if best_scores is None:
+            return current_scores, True, agg
+
+        # ── 5. Compare ───────────────────────────────────────────────────────
+        is_better = agg > float(best_scores.get('agg', -1.0))
+        return current_scores, is_better, agg
 
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
         
@@ -3226,7 +3500,7 @@ class Training():
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
         BEST_SCORES = None  # For score-based early stopping
-        best_epoch = 0
+        self.best_epoch = 0
         patience_cnt = 0
         current_patience_lr = 0
 
@@ -3247,7 +3521,7 @@ class Training():
                 # Expose current epoch to subroutines for logging
                 self._current_epoch = epoch
                 val_loss, train_loss, val_loss_dict, train_loss_dict = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
-                                                    optimizer=optimizer, criterion=criterion, do_update=epoch < min_epochs)
+                                                    optimizer=optimizer, criterion=criterion, do_update=True)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
@@ -3259,31 +3533,59 @@ class Training():
                 if epoch > min_epochs:
                     try:
                         current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
-                        
+
                         # Store scores for this epoch
                         self.score_per_epochs[epoch] = current_scores
-                        
+
                         if is_better:
                             BEST_SCORES = current_scores
-                            BEST_VAL_LOSS = val_loss  # Still track for logging
+                            BEST_VAL_LOSS = val_loss
                             BEST_MODEL_PARAMS = self.model.state_dict()
                             patience_cnt = 0
                             current_patience_lr = 0
-                            best_epoch = epoch
-                            logger.info(f'Epoch {epoch}: New best scores (Rank Sum: {rank_sum})')
-                            for k in [1, 2, 3, 4]:
-                                logger.info(f'  score_k{k}: {current_scores[f"score_k{k}"]:.4f}')
+                            self.best_epoch = epoch
+
+                            # ── Log score table (new best only) ──────────────────────
+                            _lines = [
+                                f"Epoch {epoch} [✓ NEW BEST]  agg={current_scores.get('agg', float('nan')):.4f}",
+                                f"  {'metric':<10} {'score':>8} {'u (0-1)':>9} {'prev score':>11} {'prev u':>8}",
+                                f"  {'─'*52}",
+                            ]
+                            if 'iou_score' in current_scores:
+                                _lines.append(f"  {'iou':<10} {current_scores['iou_score']:>8.4f}")
+                            else:
+                                for _k in [1, 2, 3, 4]:
+                                    _s_cur  = current_scores.get(f'score_k{_k}', float('nan'))
+                                    _u_cur  = current_scores.get(f'u_k{_k}',    float('nan'))
+                                    _s_prev = (BEST_SCORES or {}).get(f'score_k{_k}', float('nan'))
+                                    _u_prev = (BEST_SCORES or {}).get(f'u_k{_k}',    float('nan'))
+                                    _lines.append(f"  {'score_k'+str(_k):<10} {_s_cur:>8.4f} {_u_cur:>9.4f} {_s_prev:>11.4f} {_u_prev:>8.4f}")
+                                _rc   = current_scores.get('recall',   float('nan'))
+                                _urc  = current_scores.get('u_recall', float('nan'))
+                                _rcp  = (BEST_SCORES or {}).get('recall',   float('nan'))
+                                _urcp = (BEST_SCORES or {}).get('u_recall', float('nan'))
+                                _lines.append(f"  {'recall':<10} {_rc:>8.4f} {_urc:>9.4f} {_rcp:>11.4f} {_urcp:>8.4f}")
+                                _lines.append(f"  {'─'*52}")
+                                _lines.append(
+                                    f"  {'agg (min)':<10} {'':>8} {current_scores.get('agg', float('nan')):>9.4f}"
+                                    f" {'':>11} {(BEST_SCORES or {}).get('agg', float('nan')):>8.4f}"
+                                )
+                            logger.info('\n'.join(_lines))
+                            # ─────────────────────────────────────────────────────────
                         else:
                             patience_cnt += 1
+                            if epoch % CHECKPOINT == 0:
+                                logger.info(f"Epoch {epoch}  agg={current_scores.get('agg', float('nan')):.4f}"
+                                            f"  patience {patience_cnt}/{PATIENCE_CNT}")
                     except Exception as e:
-                        # Fallback to loss-based if score calculation fails
-                        logger.warning(f'Score calculation failed ({e}), falling back to loss-based early stopping')
+                        import traceback
+                        logger.warning(f'Score calculation failed ({e}):\n{traceback.format_exc()}\nFalling back to loss-based early stopping')
                         if val_loss < BEST_VAL_LOSS:
                             BEST_VAL_LOSS = val_loss
                             BEST_MODEL_PARAMS = self.model.state_dict()
                             patience_cnt = 0
                             current_patience_lr = 0
-                            best_epoch = epoch
+                            self.best_epoch = epoch
                         else:
                             patience_cnt += 1
                 else:
@@ -3291,11 +3593,22 @@ class Training():
                     if epoch == min_epochs:
                         try:
                             BEST_SCORES, _, _ = self.calculate_val_scores_and_compare(None)
-                            logger.info(f'Epoch {epoch}: Initial scores')
-                            for k in [1, 2, 3, 4]:
-                                logger.info(f'  score_k{k}: {BEST_SCORES[f"score_k{k}"]:.4f}')
+                            _lines = [
+                                f"Epoch {epoch} [initial scores]  agg={BEST_SCORES.get('agg', float('nan')):.4f}",
+                                f"  {'metric':<10} {'score':>8}",
+                                f"  {'─'*22}",
+                            ]
+                            if 'iou_score' in BEST_SCORES:
+                                _lines.append(f"  {'iou':<10} {BEST_SCORES['iou_score']:>8.4f}")
+                            else:
+                                for _k in [1, 2, 3, 4]:
+                                    _lines.append(f"  {'score_k'+str(_k):<10} {BEST_SCORES.get(f'score_k{_k}', float('nan')):>8.4f}")
+                                _lines.append(f"  {'recall':<10} {BEST_SCORES.get('recall', float('nan')):>8.4f}")
+                                _lines.append(f"  {'agg':<10} {BEST_SCORES.get('agg', float('nan')):>8.4f}")
+                            logger.info('\n'.join(_lines))
                         except Exception as e:
-                            logger.warning(f'Initial score calculation failed ({e}), using loss-based')
+                            import traceback
+                            logger.warning(f'Initial score calculation failed ({e}):\n{traceback.format_exc()}\nFalling back to loss-based early stopping')
                             BEST_SCORES = None
                     patience_cnt += 1
                     
@@ -3365,12 +3678,11 @@ class Training():
         self.val_loss_list = val_loss_list
         self.epochs_list = epochs_list
 
-        self.best_epoch = best_epoch
-        if best_epoch == 0:
+        if self.best_epoch == 0:
             print('WARNING: Best epoch is 0')
             print('Val loss', val_loss)
             print('Train loss', train_loss)
-        logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
+        logger.info(f'Best epoch {self.best_epoch}, Best val loss {BEST_VAL_LOSS}')
 
         ##################################### VAL #################################################
         test_output_, y_ = self._predict_test_loader(self.val_loader, output_pdf='test', calibrate=True)
@@ -3440,8 +3752,8 @@ class Training():
 
         if has_method(criterion, 'plot_params'):
             if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[best_epoch])
-            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=best_epoch)
+                criterion.update_params(self.criterion_params[self.best_epoch])
+            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
 
         # --- LOG LOSS COMPONENTS ---
         # "Je veux les valeurs brutes, sans les multiplications par les lambda"
@@ -3678,57 +3990,44 @@ class Training():
     
     def plot_score_evolution(self):
         """
-        Plot the evolution of score_k1, score_k2, score_k3, score_k4 over epochs.
-        Creates a 2x2 subplot layout with one score per subplot.
-        Saves to 'score_evolution.png'.
+        Plot the evolution of score_k1..k4, recall, agg over epochs.
+        Creates a 3x2 subplot layout. Saves to 'score_evolution.png'.
         """
         if not self.score_per_epochs or len(self.score_per_epochs) == 0:
             logger.info("No score data to plot (score_per_epochs is empty)")
             return
         
-        # Extract epochs and scores
         epochs = sorted(self.score_per_epochs.keys())
-        scores_k1 = [self.score_per_epochs[e].get('score_k1', 0) for e in epochs]
-        scores_k2 = [self.score_per_epochs[e].get('score_k2', 0) for e in epochs]
-        scores_k3 = [self.score_per_epochs[e].get('score_k3', 0) for e in epochs]
-        scores_k4 = [self.score_per_epochs[e].get('score_k4', 0) for e in epochs]
-        
-        # Create 2x2 subplot
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-        fig.suptitle('Score Evolution Over Epochs', fontsize=16)
-        
-        # Plot score_k1
-        axes[0, 0].plot(epochs, scores_k1, marker='o', color='blue', linewidth=2)
-        axes[0, 0].set_xlabel('Epoch')
-        axes[0, 0].set_ylabel('Score K=1')
-        axes[0, 0].set_title('Score K=1 (Low Severity)')
-        axes[0, 0].grid(True, alpha=0.3)
-        
-        # Plot score_k2
-        axes[0, 1].plot(epochs, scores_k2, marker='s', color='green', linewidth=2)
-        axes[0, 1].set_xlabel('Epoch')
-        axes[0, 1].set_ylabel('Score K=2')
-        axes[0, 1].set_title('Score K=2 (Medium-Low Severity)')
-        axes[0, 1].grid(True, alpha=0.3)
-        
-        # Plot score_k3
-        axes[1, 0].plot(epochs, scores_k3, marker='^', color='orange', linewidth=2)
-        axes[1, 0].set_xlabel('Epoch')
-        axes[1, 0].set_ylabel('Score K=3')
-        axes[1, 0].set_title('Score K=3 (Medium-High Severity)')
-        axes[1, 0].grid(True, alpha=0.3)
-        
-        # Plot score_k4
-        axes[1, 1].plot(epochs, scores_k4, marker='D', color='red', linewidth=2)
-        axes[1, 1].set_xlabel('Epoch')
-        axes[1, 1].set_ylabel('Score K=4')
-        axes[1, 1].set_title('Score K=4 (High Severity)')
-        axes[1, 1].grid(True, alpha=0.3)
+        def _get(key): return [self.score_per_epochs[e].get(key, float('nan')) for e in epochs]
+
+        best_ep = getattr(self, 'best_epoch', None)
+
+        fig, axes = plt.subplots(3, 2, figsize=(13, 12))
+        fig.suptitle('Score Evolution Over Epochs', fontsize=15)
+
+        _panels = [
+            (axes[0, 0], _get('score_k1'), 'Score K=1',  'blue',   'o'),
+            (axes[0, 1], _get('score_k2'), 'Score K=2',  'green',  's'),
+            (axes[1, 0], _get('score_k3'), 'Score K=3',  'orange', '^'),
+            (axes[1, 1], _get('score_k4'), 'Score K=4',  'red',    'D'),
+            (axes[2, 0], _get('recall'),   'Recall',     'purple', 'v'),
+            (axes[2, 1], _get('agg'),      'Agg',        'black',  'P'),
+        ]
+        for ax, vals, title, col, mk in _panels:
+            ax.plot(epochs, vals, marker=mk, color=col, linewidth=1.5, markersize=4)
+            if best_ep is not None:
+                ax.axvline(best_ep, color='r', linestyle='--', alpha=0.6, label=f'best ep={best_ep}')
+                ax.legend(fontsize=7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel(title)
+            ax.set_title(title)
+            ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.savefig(self.dir_log / 'score_evolution.png')
         plt.close(fig)
         logger.info(f"Score evolution plot saved to {self.dir_log / 'score_evolution.png'}")
+
 
     def plot_area_parameter(self, epochs_list, ids, sinisters):
         """
@@ -3917,37 +4216,25 @@ class Training():
                                 break
     
             doSearch = True
-            if data_log is not None: #and self.n_run == data_log['n_run']:
-                test_percentage = np.asarray(self.metrics['test_percentage'])
-                start_test = -1
-                for i in range(0, len(test_percentage) - 1):
-                    start_test = i
-    
-                    if test_percentage[i] in self.metrics.keys():
-                        last_keys = test_percentage[i]
-                        val_1 = np.mean(data_log[test_percentage[i]]['iou_val'])
-                        val_2 = np.mean(data_log[test_percentage[i + 1]]['iou_val'])
-    
-                        std_1 = np.std(data_log[test_percentage[i]]['iou_val'])
-                        std_2 = np.std(data_log[test_percentage[i + 1]]['iou_val'])
-    
-                        print('#########################"')
-                        print(f'{test_percentage[i]} -> {val_1} -> {std_1}')
-                        print(f'{test_percentage[i + 1]} -> {val_2} -> {std_2}')
-    
-                        try:
-                            if  val_1 >  val_2 or ((val_1 == val_2) and (std_1 < std_2)):
-                                print(f"Last score {val_1} current score {val_2}")
-                                print(f"Last std {std_1} current std {std_2}")
-                                doSearch = False
-                                tp = test_percentage[i]
-                                break
-                        except Exception as e:
-                            print(e)
-                            doSearch = True
-                            break
-    
-                start_test += 1
+            if data_log is not None and 'test_percentage' in data_log:
+                self.metrics = data_log
+                scores = np.asarray(self.metrics['test_percentage'])
+                    
+                # Find the first test_percentage value missing from data_log.
+                # If all values are present → no need to search further.
+                start_test = 0
+                for i, tp_val in enumerate(test_percentage):
+                    if tp_val not in data_log:
+                        # First missing value: resume search from here
+                        start_test = i
+                        doSearch = True
+                        print(f'Resuming search from tp={tp_val} (first missing in data_log, index {i})')
+                        break
+                else:
+                    # All percentages found in data_log → skip search
+                    doSearch = False
+                    start_test = len(test_percentage)  # nothing to run
+                    print(f'All test_percentage values found in data_log → doSearch=False')
     
             else:
                 start_test = 0
@@ -4028,6 +4315,10 @@ class Training():
                         copy_model.under_sampling = 'full'
                         copy_model.horizon = 0
                         copy_model.create_train_val_test_loader(graph, df_train_copy, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=False, custom_model_params=custom_model_params)
+                        # Restore parent's reference_scores: the FWI reference model must not be
+                        # recomputed on subsampled data — it is always the one fitted on the full dataset.
+                        if getattr(self, 'reference_scores', None) is not None:
+                            copy_model.reference_scores = self.reference_scores
                         copy_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=False, custom_model_params=custom_model_params)
                         
                         self.log_memory(f"After Train (tp={tp}, run={run})")
@@ -4054,7 +4345,10 @@ class Training():
                         dff[self.target_name] = y[:, -1]
                         y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
     
-                        metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+                        metrics_run = self._compute_raw_scores(
+                            dff[self.target_name], prediction,
+                            zones=dff['graph_id'].values, dates=dff['date'].values
+                        )
                         metrics_run = round_floats(metrics_run)
                         under_prediction_score_value = under_prediction_score(y, prediction)
                         over_prediction_score_value = over_prediction_score(y, prediction)
@@ -4085,7 +4379,10 @@ class Training():
                         dff[self.target_name] = y[:, -1]
                         y = y[:, -1] > 0 if self.task_type == 'binary' else y[:, -1]
     
-                        metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+                        metrics_run = self._compute_raw_scores(
+                            dff[self.target_name], prediction,
+                            zones=dff['graph_id'].values, dates=dff['date'].values
+                        )
                         metrics_run = round_floats(metrics_run)
                         under_prediction_score_value = under_prediction_score(y, prediction)
                         over_prediction_score_value = over_prediction_score(y, prediction)
@@ -4118,17 +4415,62 @@ class Training():
                         self.log_memory(f"After Cleanup (tp={tp}, run={run})")
                     
                     self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
-    
-                    # REPLACED: Use 'score' (score_high + score_low) instead of 'iou'
-                    # metrics has key 'score_val' because update_metrics_as_arrays appends '_val' suffix
-                    
-                    iou = np.mean(self.metrics[tp]['score_val']) 
+
+                    # ── Per-tp score summary ─────────────────────────────────────────────
+                    # Compute mean_u for this tp using the same shared helper logic
+                    def _mean_u_agg(m_dict, suffix='_val'):
+                        # Build a dictionary looking like raw metric output
+                        mapped_dict = {}
+                        for k in [1, 2, 3, 4]:
+                            vals = np.atleast_1d(m_dict.get(f'score_k{k}{suffix}', [0.0]))
+                            sk = float(np.nanmean(vals)) if len(vals) else 0.0
+                            mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
+                        
+                        rv = np.atleast_1d(m_dict.get(f'recall{suffix}', [0.0]))
+                        sk_r = float(np.nanmean(rv)) if len(rv) else 0.0
+                        mapped_dict['recall'] = sk_r if not np.isnan(sk_r) else 0.0
+                        
+                        smcv = np.atleast_1d(m_dict.get(f'score_min_class{suffix}', [0.0]))
+                        sk_smc = float(np.nanmean(smcv)) if len(smcv) else 0.0
+                        mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
+                        
+                        # Use the new shared helper, returning the final mapped U value for logging compatibility
+                        # However, _compute_geometric_agg returns (2U-1), while old _mean_u_log returned U.
+                        # We return U back by reversing (2U-1) to (0, 1) mapping: U = (agg + 1)/2
+                        agg, u_vals = self._compute_geometric_agg(mapped_dict)
+                        # The old logic returned the arithmetic mean of U vals instead of geometric agg directly
+                        # We will return the mean of u_vals to exactly match _mean_u_log's output behavior
+                        return float(np.mean(u_vals))
+
+                    mu_val  = _mean_u_agg(self.metrics[tp], '_val')
+                    mu_test = _mean_u_agg(self.metrics[tp], '_test')
+
+                    def _fmt_score(m_dict, key):
+                        vals = np.atleast_1d(m_dict.get(key, [float('nan')]))
+                        return f"{np.nanmean(vals):7.4f}"
+
+                    header = f"  {'metric':<12} {'val':>8} {'test':>8}"
+                    rows   = [header, "  " + "─" * 30]
+                    for k in [1, 2, 3, 4]:
+                        rows.append(f"  {'score_k'+str(k):<12}"
+                                    f" {_fmt_score(self.metrics[tp], f'score_k{k}_val'):>8}"
+                                    f" {_fmt_score(self.metrics[tp], f'score_k{k}_test'):>8}")
+                    rows.append(f"  {'recall':<12}"
+                                f" {_fmt_score(self.metrics[tp], 'recall_val'):>8}"
+                                f" {_fmt_score(self.metrics[tp], 'recall_test'):>8}")
+                    rows.append(f"  {'score_min_class':<12}"
+                                f" {_fmt_score(self.metrics[tp], 'score_min_class_val'):>8}"
+                                f" {_fmt_score(self.metrics[tp], 'score_min_class_test'):>8}")
+                    rows.append(f"  {'mean_u':<12} {mu_val:>8.4f} {mu_test:>8.4f}")
+                    logger.info(f"\n[search_tp={tp:.2f}]\n" + '\n'.join(rows))
+
+                    iou = np.mean(self.metrics[tp]['score_val'])
                     std_iou = np.std(self.metrics[tp]['score_val'])
-    
+
                     save_object(self.metrics, 'metrics.pkl', self.dir_log)
-                    
+
                     #print(f'Metrics achieved : {self.metrics[tp]}')
-    
+
                     # REPLACED: Tolerance 0.0 because score scale is arbitrary/large and we want strict maximization
                     # CHANGED: We now want to scan ALL candidates for Rank-Based Selection. 
                     # So we update last_score for logging but DO NOT BREAK early.
@@ -4140,87 +4482,57 @@ class Training():
                         print(f'Last score {last_score} current score {iou} (Continuing search for Rank Selection)')
                         # break  <-- COMMENTED OUT TO TEST ALL CANDIDATES
             
-            # --- RANK-BASED SELECTION (Borda Count) ---
-            # Select tp that minimizes sum of ranks across k=1, 2, 3, 4
-            
+            # --- REFERENCE-NORMALISED SELECTION ---
+            # Select tp that maximises mean_u = mean_k u_k,  k ∈ {1,2,3,4,'recall', 'score_min_class'}
+            # u_k = clip((s_k - s_baseline) / (|s_k_ref - s_k_baseline| + ε), 0, 1)
+
             tp_candidates = []
-            scores_per_k = {1: {}, 2: {}, 3: {}, 4: {}}
-            
-            # 1. Collect scores for all tp
+            mean_u_per_tp = {}
+
             for tp, metric_dict in self.metrics.items():
-                if isinstance(tp, float):
-                    # Check if all k-scores are present
-                    has_all_k = True
-                    for k in [1, 2, 3, 4]:
-                        key = f"score_k{k}_val"
-                        # self.metrics might store single values or arrays
-                        if key in self.metrics[tp]:
-                             vals = np.atleast_1d(self.metrics[tp][key])
-                             # Use mean of values (e.g. cross-validation folds)
-                             mean_k = np.nanmean(vals)
-                             if np.isnan(mean_k):
-                                 # print(f"DEBUG: NaN value for {key} for tp={tp}")
-                                 mean_k = 0.0 # Default to 0.0 if NaN
-                             
-                             scores_per_k[k][tp] = mean_k
-                        else:
-                             # print(f"DEBUG: Missing key {key} for tp={tp}")
-                             scores_per_k[k][tp] = 0.0 # Default to 0.0 if missing
-                    
-                    # We always consider the TP as a candidate now, unless other fundamental issues exist
-                    tp_candidates.append(tp)
-            
-            if not tp_candidates:
-                 # Fallback if no valid k-scores found (e.g. older metrics format or nan)
-                 logger.warning("No valid k-scores (k1..k4) found for Rank Selection. Falling back to simple score maximization.")
-                 try:
-                     # Fallback logic: maximization of score_val
-                     best_score = -np.inf
-                     best_tp = None
-                     for tp in self.metrics.keys():
-                         if isinstance(tp, float) and "score_val" in self.metrics[tp]:
-                             s = np.nanmean(self.metrics[tp]["score_val"])
-                             if s > best_score:
-                                 best_score = s
-                                 best_tp = tp
-                     if best_tp is None:
-                          raise ValueError("No valid scores found for fallback selection.")
-                 except Exception as e:
-                     raise ValueError(f"Rank Selection failed and Fallback failed: {e}")
-                     
-            else:
-                # 2. Compute Ranks
-                # Rank 1 = Best (Highest Score)
-                # Ranks are 1-based indices in sorted list
-                rank_sums = {tp: 0 for tp in tp_candidates}
+                if not isinstance(tp, float):
+                    continue
                 
+                # Build a mapped dict matching raw output
+                mapped_dict = {}
                 for k in [1, 2, 3, 4]:
-                    # Sort descending by score_k
-                    sorted_tps = sorted(tp_candidates, key=lambda x: scores_per_k[k][x], reverse=True)
-                    for rank, tp in enumerate(sorted_tps, 1):
-                        rank_sums[tp] += rank
-                        
-                # 3. Find Best TP (Lowest Rank Sum)
-                # Tie-break: Maximize score_k4 (High severity), then Total Score
-                # To maximize k4 with min(), we negate it.
-                def tie_breaker(tp):
-                    total_s = sum(scores_per_k[k][tp] for k in [1,2,3,4])
-                    return (rank_sums[tp], -scores_per_k[4][tp], -total_s)
-                    
-                best_tp = min(tp_candidates, key=tie_breaker)
-                
-                # Logging details
-                logger.info("--- Rank-Based Selection Results ---")
-                for tp in tp_candidates:
-                    ranks = []
-                    # Re-calculate specific ranks for logging
-                    for k in [1,2,3,4]:
-                        sorted_tps = sorted(tp_candidates, key=lambda x: scores_per_k[k][x], reverse=True)
-                        r = sorted_tps.index(tp) + 1
-                        ranks.append(r)
-                    
-                    logger.info(f"tp={tp}: RankSum={rank_sums[tp]} (Ranks k1..k4: {ranks})")
-    
+                    key = f'score_k{k}_val'
+                    vals = np.atleast_1d(metric_dict.get(key, [0.0]))
+                    sk = float(np.nanmean(vals)) if len(vals) else 0.0
+                    mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
+
+                recall_vals = np.atleast_1d(metric_dict.get('recall_val', [0.0]))
+                sk_recall = float(np.nanmean(recall_vals)) if len(recall_vals) else 0.0
+                mapped_dict['recall'] = sk_recall if not np.isnan(sk_recall) else 0.0
+
+                smc_vals = np.atleast_1d(metric_dict.get('score_min_class_val', [0.0]))
+                sk_smc = float(np.nanmean(smc_vals)) if len(smc_vals) else 0.0
+                mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
+
+                agg, u_vals = self._compute_geometric_agg(mapped_dict)
+
+                # Consistent with _mean_u_log behavior for the selection criterion:
+                mean_u_per_tp[tp] = float(np.mean(u_vals))
+                tp_candidates.append(tp)
+
+            if not tp_candidates:
+                logger.warning("No valid k-scores found for Reference Selection. Falling back to score_val maximization.")
+                try:
+                    best_tp = max(
+                        (tp for tp in self.metrics if isinstance(tp, float) and 'score_val' in self.metrics[tp]),
+                        key=lambda tp: float(np.nanmean(self.metrics[tp]['score_val']))
+                    )
+                except Exception as e:
+                    raise ValueError(f"Reference Selection failed and Fallback failed: {e}")
+            else:
+                best_tp = max(tp_candidates, key=lambda tp: mean_u_per_tp[tp])
+
+                # Logging
+                logger.info("--- Reference-Normalised Selection Results ---")
+                for tp in sorted(tp_candidates):
+                    logger.info(f"tp={tp}: mean_u={mean_u_per_tp[tp]:.4f}")
+
+
             logger.info(f'Best tp {best_tp} (Rank-Based)')
             self.metrics['iou_score'] = iou_scores # Keep legacy key name or update? Let's keep data but variable name is misleading. It's actually score history list but variable iou_scores was empty anyway here
             self.metrics['test_percentage'] = test_percentage
@@ -4264,166 +4576,6 @@ class Training():
         
         return iou_score(y, y_pred)
 
-    def train_optuna(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1):
-        """
-        Train neural network model using Optuna for hyperparameter search.
-        """
-        import optuna
-        from optuna.pruners import MedianPruner
-        from optuna.samplers import TPESampler
-
-        def objective(trial):
-            # Define hyperparameters to tune for the loss function
-            # These are examples, adjust based on your specific loss function and its parameters
-            loss_params_trial = {}
-            if 'distillation' in self.loss:
-                loss_params_trial['lambda_entropy'] = trial.suggest_float('lambda_entropy', 1e-5, 1e-1, log=True)
-                loss_params_trial['lambda_mu0'] = trial.suggest_float('lambda_mu0', 1e-5, 1e-1, log=True)
-                loss_params_trial['lambda_dirichlet'] = trial.suggest_float('lambda_dirichlet', 1e-5, 1e-1, log=True)
-                loss_params_trial['lambda_ce'] = trial.suggest_float('lambda_ce', 1e-5, 1e-1, log=True)
-                # Add other loss-specific parameters here
-            elif 'cornfl' in self.loss:
-                loss_params_trial['alpha'] = self.get_corn_alpha_from_train_df(self.df_train, self.target_name)
-            elif 'fl' in self.loss:
-                loss_params_trial['alpha'] = self.get_class_freq(self.df_train)
-            
-            # Create a new criterion with the trial's hyperparameters
-            criterion = self.get_loss(self.loss, loss_params_trial)
-
-            if has_method(criterion, '_preprocess'):
-                if 'id{departement}' in self.loss:
-                    criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
-                elif 'id{node}' in self.loss:
-                    criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
-
-            # Model setup (can also be tuned by Optuna if desired)
-            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
-            new_params = {'static_idx': static_idx, 'temporal_idx': temporal_idx}
-            if self.model_name == 'TFN':
-                new_params.update({'d_static': len(static_idx)})
-            
-            current_model_params = custom_model_params.copy() if custom_model_params else {}
-            current_model_params.update(new_params)
-
-            model, _ = self.make_model(graph, current_model_params)
-            optimizer = self.get_optimizer(criterion)
-
-            BEST_VAL_LOSS = math.inf
-            BEST_SCORES = None
-            patience_cnt = 0
-            current_patience_lr = 0
-
-            for epoch in range(epochs):
-                self._current_epoch = epoch
-                val_loss, train_loss, _, _ = self.func_epoch(
-                    train_loader=self.train_loader, val_loader=self.val_loader,
-                    optimizer=optimizer, criterion=criterion, do_update=epoch < min_epochs
-                )
-
-                # Score-based early stopping with Borda Count
-                if epoch > min_epochs:
-                    try:
-                        current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
-                        if is_better:
-                            BEST_SCORES = current_scores
-                            BEST_VAL_LOSS = val_loss
-                            patience_cnt = 0
-                            current_patience_lr = 0
-                        else:
-                            patience_cnt += 1
-                    except Exception as e:
-                        logger.warning(f'Score calculation failed ({e}), falling back to loss-based early stopping')
-                        if val_loss < BEST_VAL_LOSS:
-                            BEST_VAL_LOSS = val_loss
-                            patience_cnt = 0
-                            current_patience_lr = 0
-                        else:
-                            patience_cnt += 1
-                else:
-                    if epoch == min_epochs:
-                        try:
-                            BEST_SCORES, _, _ = self.calculate_val_scores_and_compare(None)
-                        except Exception as e:
-                            logger.warning(f'Initial score calculation failed ({e}), using loss-based')
-                            BEST_SCORES = None
-                    patience_cnt += 1
-
-                # Optuna pruning
-                trial.report(BEST_VAL_LOSS, epoch)
-                if trial.should_prune():
-                    raise optuna.exceptions.TrialPruned()
-
-                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
-                    if current_patience_lr >= self.patience_cnt_lr:
-                        break
-                    else:
-                        if self.delta_lr > 0:
-                            current_patience_lr += 1
-                            current_lr = optimizer.param_groups[0]['lr']
-                            new_lr = current_lr * (1 - self.delta_lr)
-                            for param_group in optimizer.param_groups:
-                                param_group['lr'] = new_lr
-                            patience_cnt = 0
-                        else:
-                            break
-            
-            # Return the metric to optimize (e.g., negative of the best score, or best loss)
-            # Optuna minimizes by default, so for scores (higher is better), return negative
-            if BEST_SCORES:
-                # Example: Optimize for score_k4 (high severity)
-                return -BEST_SCORES.get('score_k4', 0.0)
-            return BEST_VAL_LOSS # Fallback to loss if scores are not available
-
-        # Optuna study setup
-        study_name = f"{self.model_name}_{self.loss}_loss_param_search"
-        storage_name = f"sqlite:///{self.dir_log / 'optuna_loss_params.db'}"
-        
-        # Create or load study
-        try:
-            study = optuna.load_study(study_name=study_name, storage=storage_name)
-        except KeyError:
-            study = optuna.create_study(
-                direction="minimize",
-                study_name=study_name,
-                storage=storage_name,
-                sampler=TPESampler(seed=self.seed),
-                pruner=MedianPruner(
-                    n_startup_trials=5,  # Pruning starts after 5 trials
-                    n_warmup_steps=10,   # Pruning starts after 10 epochs
-                    interval_steps=5     # Check for pruning every 5 epochs
-                )
-            )
-
-        logger.info(f"Starting Optuna study for loss parameters: {study_name}")
-        study.optimize(objective, n_trials=self.optuna_n_trials, timeout=self.optuna_timeout_minutes * 60)
-
-        logger.info("Optuna study finished.")
-        logger.info(f"Best trial: {study.best_trial.value}")
-        logger.info(f"Best parameters: {study.best_trial.params}")
-
-        # Apply best parameters to the model
-        self.loss_params = study.best_trial.params
-        # Re-train the model with the best parameters (or just load the best model if saved)
-        # For simplicity, we'll just set the parameters and let the main train method handle it
-        # if self.loss_param_search is False for the final run.
-        # If you want to fully re-train here, you'd call the original train method with these params.
-        # For now, we'll assume the best params are stored and used later.
-        
-        # You might want to save the best model state from the best trial here
-        # For this example, we'll just log the best parameters.
-        
-        # After finding best parameters, you might want to run a final training with these parameters
-        # and save the model. This is outside the scope of this specific instruction,
-        # but a common next step.
-        
-        # For now, we'll just ensure the best parameters are stored for potential later use.
-        self.best_loss_params_found_by_optuna = study.best_trial.params
-        
-        # The original train method will not be called if loss_param_search is True,
-        # so this method effectively replaces the main training loop when searching for loss params.
-        # If you want to proceed with a full training after finding the best params,
-        # you would typically set self.loss_param_search to False and call self.train again.
-        # For this specific instruction, we just perform the search.
 
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
             assert self.model is not None
@@ -4431,7 +4583,10 @@ class Training():
             criterion = self.get_loss(self.loss, {})
             if len(self.criterion_params) > 0:
                 if has_method(criterion, 'update_params'):
-                    criterion.update_params(self.criterion_params[self.best_epoch])
+                    idx = getattr(self, 'best_epoch', -1)
+                    if idx >= len(self.criterion_params):
+                        idx = -1
+                    criterion.update_params(self.criterion_params[idx])
                     criterion.eval()
 
             with torch.no_grad():
@@ -4449,7 +4604,8 @@ class Training():
                 pred = torch.cat(pred, 0)
 
                 if self.task_type == 'regression' and prediction_type == 'Class' and self.apply_discretization:
-                    for H in range(self.horizon + 1):
+                    pass
+                    """for H in range(self.horizon + 1):
                         pred_h = pred[:, -1 - (self.horizon - H)].detach().cpu().numpy()
                         y_cluster = y[:, departement_index, -1 - (self.horizon - H)]
                         pred_h = self.post_process.predict(pred_h, pred_h, y_cluster)
@@ -4460,7 +4616,7 @@ class Training():
                         y_h = self.post_process.predict(y_h, y_h, y_cluster)
                         y[:, -1, -1 - (self.horizon - H)] = torch.as_tensor(y_h)
                         
-                        print(np.unique(pred_h), np.unique(y_h))
+                        print(np.unique(pred_h), np.unique(y_h))"""
                         
                 elif prediction_type == 'Class' and pred.dtype != torch.long:
                 #if pred.dtype != torch.long:
@@ -4474,7 +4630,10 @@ class Training():
         criterion = self.get_loss(self.loss, {})
         if len(self.criterion_params) > 0:
             if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[self.best_epoch])
+                idx = getattr(self, 'best_epoch', -1)
+                if idx >= len(self.criterion_params):
+                    idx = -1
+                criterion.update_params(self.criterion_params[idx])
                 criterion.eval()
 
         with torch.no_grad():
@@ -4487,6 +4646,12 @@ class Training():
 
             hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
             output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+            
+            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+            if is_tfn:
+                inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
+                output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
+
             for H in range(self.horizon + 1):
 
                 orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
@@ -4514,21 +4679,30 @@ class Training():
                             z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
                     else:
                         z_prev = hidden_past[-1]
-                if H == 0:
-                    output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+
+                
+                is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+                
+                if is_tfn:
+                    output = output_all[:, H, :]
+                    logits = logits_all[:, H, :]
+                    hidden = hidden_all[:, H, :]
                 else:
-                    if self.id_past_risk is not None:
-                        inputs_horizon[:, self.id_past_risk, -H:] = 0
-                    if self.id_past_ba is not None:
-                        inputs_horizon[:, self.id_past_ba, -H:] = 0
-                    if self.prev_idx is not None:
-                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-                    
-                    output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+                    if H == 0:
+                        output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                    else:
+                        if self.id_past_risk is not None:
+                            inputs_horizon[:, self.id_past_risk, -H:] = 0
+                        if self.id_past_ba is not None:
+                            inputs_horizon[:, self.id_past_ba, -H:] = 0
+                        if self.prev_idx is not None:
+                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                        
+                        output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
                 
                 hidden_past.append(hidden)
                 output_past.append(output)
-                
+                    
                 if prediction_type != 'RawFormulaVal':
                     if 'criterion' in locals() and hasattr(criterion, 'calibrate') and calibrate:
                         if 'clusters_ids' in required_params(criterion.transform):
@@ -4554,7 +4728,7 @@ class Training():
                         
                         if 'dir_output' in required_params(criterion.transform):    
                             params['dir_output'] = self.dir_log
-                            
+                                
                         if 'areas' in required_params(criterion.transform):
                             params['areas'] = orilabels[:, area_index]
                             
@@ -4563,6 +4737,9 @@ class Training():
 
                         params['prediction_type'] = prediction_type
                         output = criterion.transform(**params)
+                        
+                if hasattr(criterion, 'score_to_class'):
+                    output = criterion.score_to_class(output)
                         
                 if prediction_type == 'Class':
                     
@@ -4596,11 +4773,10 @@ class Training():
                 print(np.unique(pred_h), np.unique(y_h))
                 
         elif prediction_type == 'Class' and pred.dtype != torch.long:
-        #if pred.dtype != torch.long:
             pred = torch.round(pred, decimals=1)
-            
+
         return pred, y
-    
+
     def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, use_log=True):
         
         X = X.set_index(ids_columns[:-1]).join(y.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
@@ -4843,6 +5019,8 @@ class Training():
         """
         params = list(self.model.parameters())
 
+        print('has_method(criterion, get_learnable_parameters)', has_method(criterion, 'get_learnable_parameters'))
+
         # Ajouter paramètres spécifiques à la loss (s'ils existent)
         if has_method(criterion, 'get_learnable_parameters'):
             logger.info(f'Adding {self.loss} parameter(s)')
@@ -4889,7 +5067,7 @@ class Training():
         if self.student_train and self.distillation_training_mode == 'RelationMLP':
             logger.info("Adding RelationMLP parameters to optimizer")
             params.extend(self.relation_mlp.parameters())
-            
+        
         return params
     
     def get_optimizer(self, criterion,):
@@ -5228,6 +5406,723 @@ class Training():
             print(f"Nombre de visualisations générées: {len(results['plots_generated'])}")
         
         return results
+
+    def suggest_loss_params(self, trial, loss_name: str) -> dict:
+        """
+        Retourne un dict de paramètres Optuna pour la loss `loss_name`.
+        Le dict est conçu pour être passé à: LossClass(**loss_params)
+
+        - Si la loss n'a pas (ou inconnue) d'hyperparamètres explicites: retourne {}.
+        - IMPORTANT: ne met pas ici les paramètres "num_classes", "id", "weight", etc.
+        qui sont généralement gérés ailleurs dans ton code.
+        """
+        if loss_name is None:
+            return {}
+
+        name = str(loss_name).lower().strip()
+
+        # Normalisation de quelques alias
+        if name == "weightedcrossentropy-2":
+            name = "weightedcrossentropy"
+
+        params = {}
+
+        # -------------------------
+        # Losses sans params évidents -> {}
+        # (ou importées d'ailleurs, donc on évite de casser)
+        # -------------------------
+        no_param_losses = {
+            "poisson", "rmsle", "rmse", "mse", "huber", "logcosh", "tukeybiweight",
+            "exponential", "ordidice", "dice",
+            "kldivloss",
+            "egpd", "degpd", "pdegpd", "bulktail", "pdegpdcluster", "degpdcluster", "egpdroot",
+            "tailcdf", "tailcdfedges", "tailcdfall",
+            "bulktailcdf", "bulktailcdfcluster", "tailcdfcluster",
+            "gwdl",
+            "cornloss", "cornfl",  # souvent: alpha/gamma gérés ailleurs chez toi, donc on laisse vide ici
+            "bceloss",
+        }
+        if name in no_param_losses:
+            return {}
+
+        # -------------------------
+        # CDWCELoss(num_classes, alpha=0.5, weight=None)
+        # -------------------------
+        if name == "cdw":
+            # alpha est bien un paramètre du __init__ :contentReference[oaicite:1]{index=1}
+            params["alpha"] = trial.suggest_float("cdw_alpha", 0.1, 3.0, log=True)
+            return params
+
+        # -------------------------
+        # CEWKLoss(num_classes, C=1.0, C1=0.5, ...)
+        # -------------------------
+        if name == "cewk":
+            # C et C1 existent bien :contentReference[oaicite:2]{index=2}
+            params["C"]  = trial.suggest_float("cewk_C", 0.0, 1.0)
+            params["C1"] = trial.suggest_float("cewk_C1", 0.0, 1.0)
+            return params
+
+        # -------------------------
+        # MCEAndWKLoss(num_classes, C=..., learned=...)
+        # DiceAndWKLoss / OrdinalDiceLossAndWKLoss / ForegroundDiceLossAndWKLoss
+        # FocalLossAndWKLoss(num_classes, C=..., gamma=..., alpha=..., learned=...)
+        # -------------------------
+        if name in {"mcewk", "dwk", "odwk", "fdwk", "flwk"}:
+            # Ces losses ont typiquement un mélange via C (0..1) 
+            params["C"] = trial.suggest_float(f"{name}_C", 0.0, 1.0)
+
+            if name == "flwk":
+                # gamma/alpha existent dans FocalLossAndWKLoss :contentReference[oaicite:4]{index=4}
+                params["gamma"] = trial.suggest_float("flwk_gamma", 0.5, 5.0, log=True)
+                # alpha peut être float (dans ton implémentation) :contentReference[oaicite:5]{index=5}
+                alpha_type = trial.suggest_categorical("flwk_alpha_type", ["scalar", "vector"])
+
+                if alpha_type == "scalar":
+                    params["alpha"] = trial.suggest_float("flwk_alpha_scalar", 0.1, 5.0, log=True)
+
+                else:
+                    num_classes = 5
+                    vec = self.get_class_freq(self.df_train)
+                    alpha_vec = [
+                    trial.suggest_float(f"flwk_alpha_vec_{i}", vec[i], vec[i], log=True)
+                    for i in range(num_classes)
+                ]
+                    params["alpha"] = alpha_vec
+
+            return params
+
+        # -------------------------
+        # FocalWKInversionLoss(num_classes, A,B,C,gamma,alpha, inv_..., ...)
+        # -------------------------
+        if name == "flwki":
+            # A,B,C,gamma,alpha + inv_* sont dans le __init__ :contentReference[oaicite:6]{index=6}
+            # On contraint A,B,C à sommer ~1 via une parametrisation simple:
+            a = trial.suggest_float("flwki_A", 0.0, 1.0)
+            b = trial.suggest_float("flwki_B", 0.0, 1.0 - a)
+            c = 1.0 - a - b
+            params["A"] = a
+            params["B"] = b
+            params["C"] = c
+
+            params["gamma"] = trial.suggest_float("flwki_gamma", 0.5, 5.0, log=True)
+            params["alpha"] = trial.suggest_float("flwki_alpha", 0.1, 5.0, log=True)
+
+            params["inv_margin"] = trial.suggest_float("flwki_inv_margin", 0.0, 2.0)
+            params["inv_max_pairs_per_dep"] = trial.suggest_int("flwki_inv_max_pairs_per_dep", 128, 4096, log=True)
+            params["inv_weight_by_distance"] = trial.suggest_categorical("flwki_inv_weight_by_distance", [True, False])
+
+            return params
+
+        # -------------------------
+        # MonoticRiskLoss(num_classes, margin, beta_softmin, max_pairs_per_cluster, ...)
+        # -------------------------
+        if name == "monotonic":
+            # margin/beta_softmin/max_pairs_per_cluster existent :contentReference[oaicite:7]{index=7}
+            params["margin"] = trial.suggest_float("mono_margin", 0.0, 2.0)
+            params["beta_softmin"] = trial.suggest_float("mono_beta_softmin", 1.0, 50.0, log=True)
+            params["max_pairs_per_cluster"] = trial.suggest_int("mono_max_pairs_per_cluster", 16, 512, log=True)
+            return params
+
+        # -------------------------
+        # OrdinalMonotonicLossNoCoverage / WithGains / CORNWithGains (même famille)
+        #   - betasoftmin, tviolation, mushrinkalpha, gainsalpha, gainsalpha0, gainsfloorfrac, enforcegainmonotone
+        #   - lambdamu0, lambdaentropy, wmed,wmin,wneg,wviol, lambdadir, diralpha, lambdace, lambdagl
+        #   - cetype, alpha, gamma (pour la partie CORN focal) (dans CORNWithGains) :contentReference[oaicite:8]{index=8}
+        # -------------------------
+        if name in {"ordinalnocoverage", "ordinalnocoveragewithgains", "cornwithgains"}:
+            
+            if name in {"ordinalnocoveragewithgains", "cornwithgains"}:
+                params["id"] = trial.suggest_categorical(
+                    f"{name}_id",
+                    [departement_index, graph_id_index]
+                )
+
+            # paramètres structurels de la surrogate monotone 
+            b_soft = trial.suggest_float(f"{name}_betasoftmin", 1.0, 50.0, log=True)
+            t_viol = trial.suggest_float(f"{name}_tviolation", 1e-4, 0.5, log=True)
+            
+            params["betasoftmin"] = max(b_soft, 1e-6)
+            params["tviolation"] = max(t_viol, 1e-6)
+            params["mushrinkalpha"] = trial.suggest_float(f"{name}_mushrinkalpha", 0.0, 10.0)
+
+            # gains (marges) 
+            params["gainsalpha"] = trial.suggest_float(f"{name}_gainsalpha", 0.0, 3.0)
+            params["gainsalpha0"] = trial.suggest_float(f"{name}_gainsalpha0", 0.0, 3.0)
+            params["gainsfloorfrac"] = trial.suggest_float(f"{name}_gainsfloorfrac", 0.0, 0.5)
+            params["enforcegainmonotone"] = trial.suggest_categorical(f"{name}_enforcegainmonotone", [True, False])
+
+            # pondérations internes des pénalités 
+            params["wmed"]  = trial.suggest_float(f"{name}_wmed", 0.0, 2.0)
+            params["wmin"]  = trial.suggest_float(f"{name}_wmin", 0.0, 2.0)
+            params["wneg"]  = trial.suggest_float(f"{name}_wneg", 0.0, 2.0)
+            params["wviol"] = trial.suggest_float(f"{name}_wviol", 0.0, 2.0)
+
+            # termes additionnels :contentReference[oaicite:12]{index=12}
+            params["lambdamu0"] = trial.suggest_float(f"{name}_lambdamu0", 0.0, 2.0)
+            params["lambdaentropy"] = trial.suggest_float(f"{name}_lambdaentropy", 0.0, 1.0)
+            params["lambdadir"] = trial.suggest_float(f"{name}_lambdadir", 0.0, 1.0)
+            params["diralpha"] = trial.suggest_float(f"{name}_diralpha", 1.0, 2.0)
+
+            params["lambdace"] = trial.suggest_float(f"{name}_lambdace", 0.0, 2.0)
+            params["lambdagl"] = trial.suggest_float(f"{name}_lambdagl", 0.0, 2.0)
+
+            # partie CORN focal possible dans CORNWithGains (cetype='cornfl', alpha, gamma) :contentReference[oaicite:13]{index=13}
+            if name == "cornwithgains":
+                params["cetype"] = trial.suggest_categorical("cornwithgains_cetype", ["cornfl", "corn"])
+                alpha_type = trial.suggest_categorical("cornwithgains_alpha_type", ["scalar", "vector"])
+
+                if alpha_type == "scalar":
+                    params["alpha"] = trial.suggest_float("cornwithgains_alpha_scalar", 0.1, 5.0, log=True)
+
+                else:
+                    num_classes = 5
+                    vec = self.get_corn_alpha_from_train_df(self.df_train, self.target_name)
+                    alpha_vec = [
+                    trial.suggest_float(f"cornwithgains_alpha_vec_{i}", vec[i], vec[i], log=True)
+                    for i in range(num_classes - 1)
+                ]
+                    params["alpha"] = alpha_vec
+                params["gamma"] = trial.suggest_float("cornwithgains_gamma", 0.5, 5.0, log=True)
+
+            return params
+
+        # -------------------------
+        # OMMSE(lambda_mse, gainsalpha, gainsalpha0, gainsfloorfrac, enforcegainmonotone, mushrinkalpha)
+        # -------------------------
+        if name == "ommse":
+            # paramètres visibles dans __init__ 
+            params["lambda_mse"] = trial.suggest_float("ommse_lambda_mse", 0.1, 10.0, log=True)
+            params["mushrinkalpha"] = trial.suggest_float("ommse_mushrinkalpha", 0.0, 10.0)
+            params["gainsalpha"] = trial.suggest_float("ommse_gainsalpha", 0.0, 3.0)
+            params["gainsalpha0"] = trial.suggest_float("ommse_gainsalpha0", 0.0, 3.0)
+            params["gainsfloorfrac"] = trial.suggest_float("ommse_gainsfloorfrac", 0.0, 0.5)
+            params["enforcegainmonotone"] = trial.suggest_categorical("ommse_enforcegainmonotone", [True, False])
+            # addglobal existe aussi :contentReference[oaicite:15]{index=15}
+            params["addglobal"] = trial.suggest_categorical("ommse_addglobal", [True, False])
+            return params
+
+        # -------------------------
+        # CLMBinnedTransitionLoss (cllt)
+        #   beta, t, wmed, wmin, wneg, gamma
+        #   wkdecay, wkpower, wklambda, wkmin
+        #   learngains, gainsfloor
+        # -------------------------
+        if name == "cllt":
+            # Sharpness du softmin (beta grand => proche du vrai min)
+            params["beta"] = trial.suggest_float("cllt_beta", 2.0, 50.0, log=True)
+
+            # Seuil de softplus (t) – petite valeur, fine-tunable
+            params["t"] = trial.suggest_float("cllt_t", 1e-3, 0.5, log=True)
+
+            # Pondérations internes des trois pénalités par ordre de transition
+            params["wmed"] = trial.suggest_float("cllt_wmed", 0.0, 3.0)
+            params["wmin"] = trial.suggest_float("cllt_wmin", 0.0, 3.0)
+            params["wneg"] = trial.suggest_float("cllt_wneg", 0.0, 3.0)
+
+            # Sharpness de la ré-pondération des probs (gamma > 1 concentre vers les pics)
+            params["gamma"] = trial.suggest_float("cllt_gamma", 1.0, 5.0, log=True)
+
+            # Soft gate sur les probs : taugate = seuil, gatetemp = largeur de transition
+            params["taugate"] = trial.suggest_float("cllt_taugate", 0.01, 0.5, log=True)
+            params["gatetemp"] = trial.suggest_float("cllt_gatetemp", 0.005, 0.5, log=True)
+
+            # Schedule de poids wk (transitions longue portée pénalisées moins)
+            params["wkdecay"] = trial.suggest_categorical("cllt_wkdecay", ["power", "exp", "None"])
+            if params["wkdecay"] == "power":
+                params["wkpower"] = trial.suggest_float("cllt_wkpower", 0.5, 3.0)
+            elif params["wkdecay"] == "exp":
+                params["wklambda"] = trial.suggest_float("cllt_wklambda", 0.05, 2.0, log=True)
+            params["wkmin"] = trial.suggest_float("cllt_wkmin", 1e-4, 0.1, log=True)
+
+            # Gains learnables (cutpoints inter-bins) et leur floor
+            params["learngains"] = trial.suggest_categorical("cllt_learngains", [True, False])
+            if params["learngains"]:
+                params["gainsfloor"] = trial.suggest_float("cllt_gainsfloor", 0.0, 2.0)
+
+            # Focal loss terms
+            params["wfocal"] = trial.suggest_float("cllt_wfocal", 0.0, 2.0)
+            params["fgamma"] = trial.suggest_float("cllt_fgamma", 0.5, 5.0, log=True)
+            params["falpha"] = trial.suggest_float("cllt_falpha", 0.1, 0.9)
+
+            return params
+
+        # -------------------------
+        # Si on arrive ici: loss inconnue ou pas câblée explicitement
+        # => on retourne {} pour rester robuste
+        # -------------------------
+        return {}
+        
+    def train_optuna(
+        self,
+        graph,
+        PATIENCE_CNT,
+        CHECKPOINT,
+        epochs,
+        verbose=True,
+        custom_model_params=None,
+        new_model=True,
+        min_epochs=1,
+        n_trials=100,
+        warmup=5,
+        enable_pruning=True,
+    ):
+        """
+        Hyperparameter search with Optuna (multi-objective):
+        - objective = (score_k1, score_k2, score_k3, score_k4) all maximize
+        - selection at the end: choose trial that maximizes min(scores) (maximin)
+        """
+        import optuna
+        import logging
+        import numpy as np
+        import random
+        import math
+        import torch
+
+        optuna_logger = logging.getLogger("optuna")
+        optuna_logger.setLevel(logging.INFO)
+
+        # -------------------------
+        # Preprocess data arrays once (stable across trials)
+        # -------------------------
+        y_train = self.df_train[self.target_name].values
+        departement_ids = self.df_train["departement"].values if "departement" in self.df_train.columns else None
+        node_ids = self.df_train["graph_id"].values if "graph_id" in self.df_train.columns else None
+        similar_ids = self.df_train["cluster-encoder"].values if "cluster-encoder" in self.df_train.columns else None
+
+        best_models_states = {}
+        best_models_criterion_params = {}
+        best_models_loss_params = {}
+        best_models_best_scores = {}   # trial → full BEST_SCORES dict (k1..k4, recall, agg)
+
+        def objective(trial):
+            from copy import deepcopy
+            
+            # Seed for reproducibility within trial
+            trial_seed = 42 + trial.number
+            torch.manual_seed(trial_seed)
+            np.random.seed(trial_seed)
+            random.seed(trial_seed)
+
+            logger.info(f"Starting Trial {trial.number}")
+
+            # Suggest loss_name if self.loss is list, else fixed
+            if isinstance(self.loss, list):
+                loss_name = trial.suggest_categorical("loss_name", self.loss)
+            else:
+                loss_name = self.loss
+
+            # Suggest parameters for this loss
+            loss_params = self.suggest_loss_params(trial, loss_name)
+
+            # Instantiate loss
+            try:
+                criterion = self.get_loss(loss_name, loss_params)
+            except Exception as e:
+                logger.error(f"Failed to instantiate loss {loss_name} with params {loss_params}: {e}")
+                raise optuna.exceptions.TrialPruned()
+
+            # Preprocess if needed
+            if hasattr(criterion, "_preprocess"):
+                cid = getattr(criterion, "id", None) or loss_params.get("id", None)
+
+                try:
+                    if cid == departement_index and departement_ids is not None and similar_ids is not None:
+                        criterion._preprocess(y_train, departement_ids, similar_ids)
+                    elif cid == graph_id_index and node_ids is not None and similar_ids is not None:
+                        criterion._preprocess(y_train, node_ids, similar_ids)
+                    else:
+                        # fallback minimal
+                        criterion._preprocess(y_train)
+                except Exception as e:
+                    logger.warning(f"_preprocess failed for {loss_name} (id={cid}): {e}")
+
+            # Create model and optimizer
+
+            # Log current trial params
+            logger.info(f"Trial {trial.number} params: {trial.params}")
+
+            # Create model and optimizer
+
+            # Handle custom_model_params (use argument if provided, else empty dict)
+            # We use a local variable to avoid modifying the mutable default/argument in place if it's reused
+            current_custom_params = custom_model_params.copy() if custom_model_params is not None else {}
+
+            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+        
+            new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
+
+            if self.model_name == 'TFN':
+                new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx, 'd_static' : len(static_idx)}
+                    
+            current_custom_params.update(new_params)
+
+            self.model, _ = self.make_model(graph, current_custom_params)
+            
+            optimizer = self.get_optimizer(criterion)
+
+            # Track best per-objective — aligned with the saved model (BEST_SCORES epoch)
+            # best_k is NOT accumulated across epochs independently here;
+            # it is filled once we know the best epoch via is_better logic.
+
+            # Early stopping init
+            patience_cnt = 0
+            current_patience_lr = 0
+            BEST_SCORES = None
+            BEST_VAL_LOSS = math.inf
+            self.best_epoch = 0
+            best_model_state = None
+            best_criterion_params_state = []
+            self.criterion_params = []
+
+            for epoch in range(epochs):
+                self._current_epoch = epoch
+
+                # IMPORTANT: always train/update
+                val_loss, train_loss, val_loss_dict, train_loss_dict = self.func_epoch(
+                    train_loader=self.train_loader,
+                    val_loader=self.val_loader,
+                    optimizer=optimizer,
+                    criterion=criterion,
+                    do_update=True,
+                )
+
+                if math.isnan(train_loss) or math.isnan(val_loss):
+                    logger.warning(f"Trial {trial.number} pruned at epoch {epoch} because loss is NaN (train={train_loss}, val={val_loss})")
+                    raise optuna.exceptions.TrialPruned()
+
+                # Compute metrics & Update Patience
+                try:
+                    # Compare against BEST_SCORES to check for improvement
+                    current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
+
+                    if epoch > min_epochs:
+                        if is_better:
+                            BEST_SCORES = current_scores
+                            BEST_VAL_LOSS = val_loss
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                            self.best_epoch = epoch
+                            best_model_state = deepcopy(self.model.state_dict())
+                            best_criterion_params_state = deepcopy(self.criterion_params)
+                        else:
+                            patience_cnt += 1
+                    else:
+                        if epoch == min_epochs:
+                            BEST_SCORES = current_scores
+                            best_model_state = deepcopy(self.model.state_dict())
+                            best_criterion_params_state = deepcopy(self.criterion_params)
+                        patience_cnt += 1
+
+                except Exception as e:
+                    logger.warning(f"Score calculation failed at epoch {epoch}: {e}")
+                    
+                    # Fallback: loss-based
+                    if epoch > min_epochs:
+                        if val_loss < BEST_VAL_LOSS:
+                            BEST_VAL_LOSS = val_loss
+                            patience_cnt = 0
+                            current_patience_lr = 0
+                            self.best_epoch = epoch
+                            best_model_state = deepcopy(self.model.state_dict())
+                            best_criterion_params_state = deepcopy(self.criterion_params)
+                        else:
+                            patience_cnt += 1
+                    else:
+                        patience_cnt += 1
+
+                # Pruning: report agg of the CURRENT epoch (not only best) so MedianPruner
+                # can compare intermediate values across trials
+                if enable_pruning:
+                    _current_agg = float((current_scores or BEST_SCORES or {}).get('agg', -1e9))
+                    trial.report(_current_agg, step=epoch)
+                    if epoch >= warmup and trial.should_prune():
+                        raise optuna.exceptions.TrialPruned()
+
+                # Early stopping check and LR decay
+                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
+                    if current_patience_lr >= self.patience_cnt_lr:
+                        logger.info(f"Early stopping at epoch {epoch} (patience {PATIENCE_CNT}, max LR retries reached).")
+                        break
+                    else:
+                        if self.delta_lr > 0:
+                            current_patience_lr += 1
+                            logger.info(f"Patience {PATIENCE_CNT} reached. Retry {current_patience_lr}/{self.patience_cnt_lr}. Decay LR.")
+                            
+                            current_lr = optimizer.param_groups[0]['lr']
+                            new_lr = current_lr * (1 - self.delta_lr)
+                            if new_lr <= 1e-9: new_lr = 1e-9
+                            
+                            for param_group in optimizer.param_groups:
+                                param_group['lr'] = new_lr
+                            
+                            patience_cnt = 0
+                        else:
+                             # No decay defined -> stop
+                             logger.info(f"Early stopping at epoch {epoch} (patience {PATIENCE_CNT}, no delta_lr).")
+                             break
+
+                if epoch % CHECKPOINT == 0 and verbose:
+                    curr_lr = optimizer.param_groups[0]['lr']
+                    logger.info(f'Epoch {epoch}: Val loss {val_loss:.4f}, Train loss {train_loss:.4f}, Best val loss {BEST_VAL_LOSS:.4f}')
+                    logger.info(f'    LR: {curr_lr:.6f} | Patience: {patience_cnt}/{PATIENCE_CNT} | Retry: {current_patience_lr}/{self.patience_cnt_lr}')
+
+            # Save this trial's best state before exiting objective
+            from copy import deepcopy
+            if best_model_state is not None:
+                best_models_states[trial.number] = best_model_state
+                best_models_criterion_params[trial.number] = best_criterion_params_state
+            else:
+                best_models_states[trial.number] = deepcopy(self.model.state_dict())
+                best_models_criterion_params[trial.number] = deepcopy(self.criterion_params)
+            best_models_loss_params[trial.number] = deepcopy(loss_params)
+            # Store full scores for post-hoc plots
+            best_models_best_scores[trial.number] = {k: v for k, v in (BEST_SCORES or {}).items()
+                                                      if isinstance(v, (int, float))}
+
+            # Single-objective return: agg of the BEST epoch
+            if BEST_SCORES is None:
+                return -1e9
+
+            if 'iou_score' in BEST_SCORES:
+                return float(BEST_SCORES['iou_score'])
+
+            return float(BEST_SCORES.get('agg', -1e9))
+
+
+        # -------------------------
+        # Single-objective study with pruning
+        # -------------------------
+        study_name = f"optuna_{self.model_name}_{self.loss}"
+        pruner = optuna.pruners.MedianPruner(
+            n_startup_trials=max(3, n_trials // 5),
+            n_warmup_steps=warmup,
+            interval_steps=1,
+        ) if enable_pruning else optuna.pruners.NopPruner()
+        study = optuna.create_study(
+            study_name=study_name,
+            direction="maximize",
+            sampler=optuna.samplers.TPESampler(seed=42),
+            pruner=pruner,
+        )
+
+        logger.info(f"Starting Optuna search for {n_trials} trials (single-objective: agg)...")
+        study.optimize(objective, n_trials=n_trials)
+
+        logger.info("Optuna search completed!")
+        logger.info(f"Best trial: {study.best_trial.number}  agg={study.best_trial.value:.4f}")
+
+        # Single best trial
+        best_trial = study.best_trial
+        logger.info(f"Best trial params: {best_trial.params}")
+
+        self.best_loss_params = best_trial.params
+        save_object(best_trial.params, "optuna_best_params.pkl", self.dir_log)
+
+        # Save ALL completed trials
+        try:
+            trials_data = []
+            for t in study.get_trials(deepcopy=False):
+                if t.state == optuna.trial.TrialState.COMPLETE:
+                    trials_data.append({
+                        "trial": t.number,
+                        "value": t.value,   # scalar agg
+                        "params": t.params
+                    })
+            save_object(trials_data, "optuna_all_trials.pkl", self.dir_log)
+        except Exception as e:
+            logger.warning(f"Failed to save optuna all trials: {e}")
+
+
+        # Plot scores per trial (k1..k4, recall, agg)
+        try:
+            import matplotlib.pyplot as plt
+            import os
+
+            trials = study.get_trials(deepcopy=False)
+            completed_trials = [t for t in trials if t.state == optuna.trial.TrialState.COMPLETE]
+
+            if len(completed_trials) > 0:
+                tnums = [t.number for t in completed_trials]
+                _score_keys = [('score_k1','k1'), ('score_k2','k2'),
+                               ('score_k3','k3'), ('score_k4','k4'),
+                               ('recall','recall'), ('agg','agg')]
+                _colors = ['steelblue','darkorange','green','red','purple','black']
+
+                fig, ax = plt.subplots(figsize=(12, 5))
+                for (sk, slabel), col in zip(_score_keys, _colors):
+                    vals = [best_models_best_scores.get(t.number, {}).get(sk, float('nan'))
+                            for t in completed_trials]
+                    _ls = '-' if sk != 'agg' else '--'
+                    _lw = 1.0 if sk != 'agg' else 2.0
+                    ax.plot(tnums, vals, marker='o', markersize=4, label=slabel,
+                            color=col, linestyle=_ls, linewidth=_lw)
+
+                # Mark best trial
+                ax.axvline(best_trial.number, color='r', linestyle=':', alpha=0.7, label=f'best (#{best_trial.number})')
+                ax.set_title(f"Optuna scores per trial  [best=#{best_trial.number}, agg={study.best_trial.value:.4f}]")
+                ax.set_xlabel("Trial")
+                ax.set_ylabel("Score / agg")
+                ax.legend(fontsize=8, ncol=3)
+                ax.grid(True, alpha=0.3)
+                plot_path = os.path.join(self.dir_log, "optuna_scores_per_trial.png")
+                fig.savefig(plot_path, bbox_inches='tight')
+                plt.close(fig)
+                logger.info(f"Saved scores per trial plot to {plot_path}")
+        except Exception as e:
+            logger.warning(f"Failed to plot optuna scores: {e}")
+
+        # Plot param vs score for each loss parameter
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.cm as cm
+            import os
+            import numpy as np
+
+            trials = study.get_trials(deepcopy=False)
+            completed_trials = [t for t in trials if t.state == optuna.trial.TrialState.COMPLETE]
+
+            if len(completed_trials) > 1:
+
+
+                # Collect all numeric params across completed trials
+                all_param_names = set()
+                for t in completed_trials:
+                    for k, v in t.params.items():
+                        if isinstance(v, (int, float)):
+                            all_param_names.add(k)
+                all_param_names = sorted(all_param_names)
+
+                if all_param_names:
+                    params_vs_score_dir = os.path.join(self.dir_log, "params_vs_score")
+                    os.makedirs(params_vs_score_dir, exist_ok=True)
+
+                    # Score array per trial: (n_completed, 6) → k1,k2,k3,k4,recall,agg
+                    _skeys  = ['score_k1','score_k2','score_k3','score_k4','recall','agg']
+                    _slabels = ['k1','k2','k3','k4','recall','agg']
+                    trial_scores = np.array([
+                        [best_models_best_scores.get(t.number, {}).get(sk, float('nan')) for sk in _skeys]
+                        for t in completed_trials
+                    ])   # (N, 6)
+
+                    for param_name in all_param_names:
+                        # Collect param values (NaN when trial didn't suggest it)
+                        param_vals = np.array([
+                            float(t.params[param_name]) if param_name in t.params else float("nan")
+                            for t in completed_trials
+                        ])
+
+                        valid_mask = ~np.isnan(param_vals)
+                        if valid_mask.sum() < 2:
+                            continue  # not enough data
+
+                        x = param_vals[valid_mask]
+                        y_all = trial_scores[valid_mask]   # (M, 6)
+
+                        n_scores = len(_skeys)
+                        ncols = 3
+                        nrows = (n_scores + ncols - 1) // ncols
+                        fig, axes_grid = plt.subplots(nrows, ncols, figsize=(14, 4 * nrows), sharey=False)
+                        axes = axes_grid.flatten()
+                        _colors = ['steelblue','darkorange','green','red','purple','black']
+
+                        for si, (ax, slabel, color) in enumerate(zip(axes, _slabels, _colors)):
+                            y = y_all[:, si]
+                            finite_mask = np.isfinite(y)
+                            if finite_mask.sum() < 2:
+                                ax.set_title(f"{slabel}\n(no data)")
+                                continue
+
+                            xf, yf = x[finite_mask], y[finite_mask]
+
+                            # Scatter
+                            ax.scatter(xf, yf, alpha=0.5, color=color, s=20)
+
+                            # Trend: sort by x and compute rolling median (window = max(3, N//5))
+                            order = np.argsort(xf)
+                            xs, ys = xf[order], yf[order]
+                            w = max(3, len(xs) // 5)
+                            med_x, med_y = [], []
+                            for i in range(len(xs)):
+                                lo = max(0, i - w // 2)
+                                hi = min(len(xs), i + w // 2 + 1)
+                                med_x.append(xs[i])
+                                med_y.append(np.median(ys[lo:hi]))
+                            ax.plot(med_x, med_y, color=color, linewidth=1.5, alpha=0.8)
+
+                            ax.set_xlabel(param_name, fontsize=8)
+                            ax.set_ylabel("Score", fontsize=8)
+                            ax.set_title(slabel, fontsize=9)
+                            ax.grid(True, alpha=0.3)
+
+                        fig.suptitle(f"Loss param: {param_name}", fontsize=11)
+                        plt.tight_layout()
+                        safe_name = param_name.replace("/", "_").replace("\\", "_")
+                        plot_path = os.path.join(params_vs_score_dir, f"{safe_name}.png")
+                        plt.savefig(plot_path, bbox_inches="tight")
+                        plt.close(fig)
+
+
+                    logger.info(f"Saved params vs score plots to {params_vs_score_dir}/")
+        except Exception as e:
+            import traceback
+            logger.warning(f"Failed to plot params vs score: {e}\n{traceback.format_exc()}")
+
+
+        try:
+            from copy import deepcopy
+            logger.info("Restoring best model from the selected maximin trial...")
+            best_params = best_trial.params
+            
+            # Use current_custom_params to re-create exact same args as objective
+            curr_custom_params = custom_model_params.copy() if custom_model_params is not None else {}
+            static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+            new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
+            if self.model_name == 'TFN':
+                new_params['d_static'] = len(static_idx)
+            curr_custom_params.update(new_params)
+            
+            # Remake model
+            self.model, _ = self.make_model(graph, curr_custom_params)
+            
+            # Remake loss
+            if isinstance(self.loss, list):
+                loss_name = best_params.get("loss_name", self.loss[0])
+            else:
+                loss_name = self.loss
+                
+            real_loss_params = best_models_loss_params.get(best_trial.number, best_params)
+            self.criterion = self.get_loss(loss_name, real_loss_params)
+            
+            # Load best weights
+            if best_trial.number in best_models_states:
+                self.model.load_state_dict(best_models_states[best_trial.number])
+                logger.info("Successfully loaded best trial model state dict.")
+            else:
+                logger.warning(f"Could not find model state dict for trial {best_trial.number}, model uses random init.")
+            
+            # Load and plot best criterion params
+            if best_trial.number in best_models_criterion_params:
+                self.criterion_params = best_models_criterion_params[best_trial.number]
+                if has_method(self.criterion, 'plot_params'):
+                    self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+            
+            # Save best.pt
+            save_object_torch(self.model.state_dict(), 'best.pt', self.dir_log)
+            logger.info("Saved best model to best.pt")
+                
+        except Exception as e:
+            logger.warning(f"Failed to restore best model: {e}")
+
+        # Clean memory
+        try:
+            del best_models_states
+            del best_models_criterion_params
+            import gc
+            gc.collect()
+        except:
+            pass
+
+        return study
 
 ############################################ Split training ##############################################################
 

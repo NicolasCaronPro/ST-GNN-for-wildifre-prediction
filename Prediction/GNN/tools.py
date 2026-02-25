@@ -296,6 +296,7 @@ def defines_train_dates_from_exp(expe):
 
 
 allDates = find_dates_between("2017-06-12", "2025-01-01")
+allDates = find_dates_between('2015-01-01', '2025-12-31')
 
 years = list(np.unique([d.split("-")[0] for d in allDates]))
 

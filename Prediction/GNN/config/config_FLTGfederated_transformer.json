@@ -315,7 +315,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -337,7 +338,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -359,7 +361,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -381,7 +384,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -403,7 +407,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -425,7 +430,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -447,7 +453,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -469,7 +476,8 @@
             "params_to_update": [
                 "linear2"
             ],
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
@@ -480,7 +488,7 @@
         "CHECKPOINT": 25,
         "global_epochs": 60,
         "patience_count_global": 10,
-        "delta_lr": 0.2e-05,
+        "delta_lr": 2e-06,
         "PATIENCE_CNT_LR": 5
     }
 }

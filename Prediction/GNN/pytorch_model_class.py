@@ -166,7 +166,20 @@ class ModelGNN(SplitTraining):
         self.horizon = horizon
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
-        
+
+        # ── Reference FWI model (computed before any sampling) ─────────────────
+        _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
+        try:
+            self.define_reference_model(
+                df_train=df_train,
+                df_test=df_test,
+                nbsinister_col=_nbsin_col,
+            )
+        except Exception as _ref_e:
+            logger.warning(f'[define_reference_model] failed: {_ref_e}')
+            self.reference_scores = None
+        # ───────────────────────────────────────────────────────────────────
+
         #df_train = df_train[~df_train[self.target_name].isna()]
         #df_val = df_val[~df_val[self.target_name].isna()]
         #df_test = df_test[~df_test[self.target_name].isna()]
@@ -355,7 +368,9 @@ class ModelGNN(SplitTraining):
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
         #save_object_torch(self.test_loader, 'test_loader.pkl', self.dir_log)
+
         
+
     def create_test_loader(self, graph, df):
         loader = create_test_loader(graph, df,
                        self.features_name,
@@ -523,7 +538,10 @@ class ModelGNN(SplitTraining):
         criterion = self.get_loss(self.loss, {})
         if len(self.criterion_params) > 0:
             if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[self.best_epoch])
+                idx = getattr(self, 'best_epoch', -1)
+                if idx >= len(self.criterion_params):
+                    idx = -1
+                criterion.update_params(self.criterion_params[idx])
                 criterion.eval()
 
         with torch.no_grad():
@@ -667,6 +685,20 @@ class Model_Torch(SplitTraining):
         self.training_mode = training_mode
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
+
+        # ── Reference FWI model (computed before any sampling) ─────────────────
+        _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
+        try:
+            self.define_reference_model(
+                df_train=df_train,
+                df_test=df_test,
+                nbsinister_col=_nbsin_col,
+            )
+        except Exception as _ref_e:
+            logger.warning(f'[define_reference_model] failed: {_ref_e}')
+            self.reference_scores = None
+        # ───────────────────────────────────────────────────────────────────
+
         self.graph = graph
         
         #df_train = df_train[~df_train[self.target_name].isna()]

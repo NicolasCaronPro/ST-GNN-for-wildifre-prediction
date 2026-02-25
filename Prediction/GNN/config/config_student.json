@@ -318,7 +318,8 @@
             "use_log": false,
             "params": {
                 "n_group": 3
-            }
+            },
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
@@ -327,7 +328,7 @@
         "lr": 5e-05,
         "PATIENCE_CNT": 25,
         "CHECKPOINT": 25,
-        "delta_lr": 0.2e-05,
+        "delta_lr": 2e-06,
         "PATIENCE_CNT_LR": 5
     }
 }

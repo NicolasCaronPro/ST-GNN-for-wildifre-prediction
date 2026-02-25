@@ -309,7 +309,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "LSTM",
@@ -325,7 +326,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "NetMLP",
@@ -341,7 +343,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -357,7 +360,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -373,7 +377,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "LSTM",
@@ -389,7 +394,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "NetMLP",
@@ -405,7 +411,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -421,7 +428,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "GRU",
@@ -437,7 +445,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "LSTM",
@@ -453,7 +462,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "NetMLP",
@@ -469,7 +479,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "DilatedCNN",
@@ -485,7 +496,8 @@
             "out_channels": 5,
             "use_log": false,
             "n_run": 5,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
@@ -494,7 +506,7 @@
         "lr": 5e-05,
         "PATIENCE_CNT": 25,
         "CHECKPOINT": 25,
-        "delta_lr": 0.2e-05,
+        "delta_lr": 2e-06,
         "PATIENCE_CNT_LR": 5
     }
 }

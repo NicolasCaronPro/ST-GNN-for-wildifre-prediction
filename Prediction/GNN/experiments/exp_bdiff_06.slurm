@@ -16,3 +16,9 @@ module load miniconda3@4.10.3/gcc-12.1.0
 conda activate meso_test
 
 python3.9 train_model_from_config.py -c config/config_06.json
+python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cll.json
+python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_lmol.json
+python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_prls.json
+python3.9 train_model_from_config.py -c config/config_06_nbsinister_cll.json
+python3.9 train_model_from_config.py -c config/config_06_nbsinister_lmol.json
+python3.9 train_model_from_config.py -c config/config_06_nbsinister_prls.json

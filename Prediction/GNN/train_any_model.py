@@ -397,7 +397,7 @@ def main():
 
             model_name = f"{m['type']}_{info}"
         is_tree = m["type"].lower() in TREE_MODELS
-        post_process = get_post_process_model(train_dataset, 'kmeans', m['target'], 'departement', dir_log=dir_output / 'clusterers', n_clusters=5) if m.get('apply_discretization', False) else None 
+        post_process = get_post_process_model(train_dataset, 'quantile', m['target'], 'departement', dir_log=dir_output / 'clusterers', n_clusters=5) if m.get('apply_discretization', False) else None 
         global_params['post_process'] = post_process
         if is_tree:
             name = 'check_'+cfg.scaling + '/' + prefix + '/' + 'baseline'

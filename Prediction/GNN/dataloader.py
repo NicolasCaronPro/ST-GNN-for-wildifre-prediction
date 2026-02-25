@@ -1013,7 +1013,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     logger.info(f'WARNING : WE CONSIDER PRED[0] = PRED[1]')
 
     ############################################## Get daily metrics #######################################################
-    if name.find('classification') != -1 or name.find('corn') != -1:
+    if name.find('classification') != -1 or name.find('corn') != -1 or name.find('cll') != -1:
         mapping = {
             "nbsinister": "nbsinister-quantile-5-Class-Dept",
             "timeintervention": "timeintervention-quantile-5-Class-Dept",
@@ -1138,7 +1138,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
 
     y_pred = np.asarray(y_pred)
 
-    if name.find('classification') != -1 or name.find('egpd') != -1 or name.find('corn') != -1:
+    if name.find('classification') != -1 or name.find('egpd') != -1 or name.find('corn') != -1 or name.find('cll') != -1:
 
         y_true_bin = res[col_class].values > 0
         y_pred_bin = y_pred > 0
@@ -2039,6 +2039,7 @@ def test_dl_model(cfg,
         for scale in scale_unique:
             scale = int(scale)
             res_horizon = None
+            ious_per_horizon = []
             for H in range(horizon + 1):
                 logger.info(f"-------------- Horizon + {H} -----------------")
                 mask = (yAll[:, scale_index, 0] == scale)
@@ -2120,6 +2121,8 @@ def test_dl_model(cfg,
                 metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, predTensorProba, y, graphScale,
                                                     test_departement, target_name, name,
                                                     dir_output / name / f"H{H}", scale, H, pred_min = None, pred_max = None)
+                
+                ious_per_horizon.append(metrics[run].get('iou_class_hard', np.nan))
 
                 if res_horizon is None:
                     res_horizon = res
@@ -2163,6 +2166,22 @@ def test_dl_model(cfg,
                 
                 save_object(res, name+'_'+prefix_train+'_'+scaling+'_'+encoding+'_'+test_name+'_pred.pkl', dir_output / name / f"H{H}")
             
+            import matplotlib.pyplot as plt
+            try:
+                plt.figure()
+                plt.plot(range(horizon + 1), ious_per_horizon, marker='o')
+                plt.title(f'IoU Class Hard per Horizon (Scale {scale})')
+                plt.xlabel('Horizon (H)')
+                plt.ylabel('IoU Class Hard')
+                plt.xticks(range(horizon + 1))
+                plt.grid(True)
+                plot_path = dir_output / name / f'iou_class_hard_scale_{scale}.png'
+                plot_path.parent.mkdir(parents=True, exist_ok=True)
+                plt.savefig(plot_path)
+                plt.close()
+            except Exception as e:
+                logger.error(f"Failed to plot iou_class_hard: {e}")
+                
             res_horizon['model'] = model
             res_scale.append(res_horizon)
         

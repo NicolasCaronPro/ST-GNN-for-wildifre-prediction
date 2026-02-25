@@ -310,7 +310,8 @@
             "out_channels": 6,
             "n_run": 5,
             "use_log": false,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         },
         {
             "type": "graphCastGRUWithAttentionGAT",
@@ -327,7 +328,8 @@
             "out_channels": 6,
             "n_run": 5,
             "use_log": false,
-            "params": {}
+            "params": {},
+            "loss_param_search": false
         }
     ],
     "hyperparameters": {
@@ -336,7 +338,7 @@
         "lr": 5e-05,
         "PATIENCE_CNT": 25,
         "CHECKPOINT": 25,
-        "delta_lr": 0.2e-05,
+        "delta_lr": 2e-06,
         "PATIENCE_CNT_LR": 5
     }
 }

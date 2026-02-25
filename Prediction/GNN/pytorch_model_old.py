@@ -2546,6 +2546,11 @@ class Training():
         hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
         output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
 
+        is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+        if is_tfn:
+            inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
+            output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
+
         for H in range(self.horizon + 1):
 
             if hasattr(self.model, 'is_graph_or_node'):
@@ -2581,20 +2586,33 @@ class Training():
                         z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
                 else:
                     z_prev = hidden_past[-1]
-            if H == 0:
-                output, logits, hidden = self.model(inputs_horizon, z_prev=None)
-                if batch_type == 'train' and do_update:
+
+            
+            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+            
+            if is_tfn:
+                output = output_all[:, H, :]
+                logits = logits_all[:, H, :]
+                hidden = hidden_all[:, H, :]
+                if batch_type == 'train' and do_update and H == 0:
                     if has_method(criterion, 'update_after_batch'):
                         criterion.update_after_batch(logits, target)
             else:
-                if self.id_past_risk is not None:
-                    inputs_horizon[:, self.id_past_risk, -H:] = 0
-                if self.id_past_ba is not None:
-                    inputs_horizon[:, self.id_past_ba, -H:] = 0
-                if self.prev_idx is not None:
-                    inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-
-                output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+                if H == 0:
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                    if batch_type == 'train' and do_update:
+                        if has_method(criterion, 'update_after_batch'):
+                            criterion.update_after_batch(logits, target)
+                else:
+                    if self.id_past_risk is not None:
+                        inputs_horizon[:, self.id_past_risk, -H:] = 0
+                    if self.id_past_ba is not None:
+                        inputs_horizon[:, self.id_past_ba, -H:] = 0
+                    if self.prev_idx is not None:
+                        # Remplacer les valeurs de la feature par les prédictions passées (detached to prevent BPTT)
+                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack([o.detach() for o in output_past], dim=2)
+    
+                    output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
             
             hidden_past.append(hidden)
             output_past.append(output)
@@ -2854,7 +2872,7 @@ class Training():
 
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
-        best_epoch = 0
+        self.best_epoch = 0
         patience_cnt = 0
 
         val_loss_list = []
@@ -2878,7 +2896,7 @@ class Training():
                     BEST_VAL_LOSS = val_loss
                     BEST_MODEL_PARAMS = self.model.state_dict()
                     patience_cnt = 0
-                    best_epoch = epoch
+                    self.best_epoch = epoch
                 else:
                     patience_cnt += 1
                     if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
@@ -2901,11 +2919,10 @@ class Training():
             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
             plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
         
-        self.best_epoch = best_epoch
-        if best_epoch == 0:
+        if self.best_epoch == 0:
             print(val_loss)
             print(train_loss)
-        logger.info(f'Best epoch {best_epoch}, Best val loss {BEST_VAL_LOSS}')
+        logger.info(f'Best epoch {self.best_epoch}, Best val loss {BEST_VAL_LOSS}')
         ##################################### VAL #################################################
         test_output_, y_ = self._predict_test_loader(self.val_loader, output_pdf='test', calibrate=True)
         test_output_ = test_output_.detach().cpu().numpy()
@@ -3453,7 +3470,10 @@ class Training():
             criterion = self.get_loss(self.loss)
             if len(self.criterion_params) > 0:
                 if has_method(criterion, 'update_params'):
-                    criterion.update_params(self.criterion_params[self.best_epoch])
+                    idx = getattr(self, 'best_epoch', -1)
+                    if idx >= len(self.criterion_params):
+                        idx = -1
+                    criterion.update_params(self.criterion_params[idx])
                     criterion.eval()
 
             with torch.no_grad():
@@ -3496,7 +3516,10 @@ class Training():
         criterion = self.get_loss(self.loss)
         if len(self.criterion_params) > 0:
             if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[self.best_epoch])
+                idx = getattr(self, 'best_epoch', -1)
+                if idx >= len(self.criterion_params):
+                    idx = -1
+                criterion.update_params(self.criterion_params[idx])
                 criterion.eval()
 
         with torch.no_grad():
@@ -3509,6 +3532,12 @@ class Training():
 
             hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
             output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+            
+            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+            if is_tfn:
+                inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
+                output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
+
             for H in range(self.horizon + 1):
 
                 orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
@@ -3536,17 +3565,26 @@ class Training():
                             z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
                     else:
                         z_prev = hidden_past[-1]
-                if H == 0:
-                    output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+
+                
+                is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
+                
+                if is_tfn:
+                    output = output_all[:, H, :]
+                    logits = logits_all[:, H, :]
+                    hidden = hidden_all[:, H, :]
                 else:
-                    if self.id_past_risk is not None:
-                        inputs_horizon[:, self.id_past_risk, -H:] = 0
-                    if self.id_past_ba is not None:
-                        inputs_horizon[:, self.id_past_ba, -H:] = 0
-                    if self.prev_idx is not None:
-                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-                    
-                    output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
+                    if H == 0:
+                        output, logits, hidden = self.model(inputs_horizon, z_prev=None)
+                    else:
+                        if self.id_past_risk is not None:
+                            inputs_horizon[:, self.id_past_risk, -H:] = 0
+                        if self.id_past_ba is not None:
+                            inputs_horizon[:, self.id_past_ba, -H:] = 0
+                        if self.prev_idx is not None:
+                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                        
+                        output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
                 
                 hidden_past.append(hidden)
                 output_past.append(output)
