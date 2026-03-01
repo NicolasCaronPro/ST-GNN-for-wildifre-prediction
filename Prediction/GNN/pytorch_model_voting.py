@@ -353,7 +353,7 @@ class ModelKnowledgeDistillation(Training):
             for i, sub_teacher in enumerate(sub_teachers):
                 
                 if i > 0:
-                    model_params_log = self.model.state_dict()
+                    model_params_log = deepcopy(self.model.state_dict())
                     new_model = False
                 else:
                     new_model = True
@@ -391,7 +391,7 @@ class ModelKnowledgeDistillation(Training):
                 score_0 = 0
                 for sub_teacher in self.teacher.best_estimator_:
                     
-                    model_params_log = self.model.model.state_dict()
+                    model_params_log = deepcopy(self.model.model.state_dict())
                     super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
 
                     score = self.score(self.df_test, self.df_test[self.target_name])
@@ -407,7 +407,7 @@ class ModelKnowledgeDistillation(Training):
                 current_group = 0
                 for sub_teacher in self.teacher.best_estimator_:
                     
-                    model_params_log = self.model.model.state_dict()
+                    model_params_log = deepcopy(self.model.model.state_dict())
                     super().train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
                     
                     score = self.score(self.df_test, self.df_test[self.target_name])

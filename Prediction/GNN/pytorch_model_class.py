@@ -170,8 +170,8 @@ class ModelGNN(SplitTraining):
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
         self.define_reference_model(
-            df_train=df_train,
-            df_test=df_test,
+            df_train=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
+            df_test=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
             nbsinister_col=_nbsin_col,
         )
         # ───────────────────────────────────────────────────────────────────
@@ -685,8 +685,8 @@ class Model_Torch(SplitTraining):
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
         self.define_reference_model(
-            df_train=df_train,
-            df_test=df_test,
+            df_train=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
+            df_test=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
             nbsinister_col=_nbsin_col,
         )
         # ───────────────────────────────────────────────────────────────────

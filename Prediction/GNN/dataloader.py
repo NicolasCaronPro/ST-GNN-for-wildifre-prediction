@@ -1211,7 +1211,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
             else:
                 y_true_real = y_true
             
-            score_high, score_low, coverage_k, score_adj_k, score_min_class = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
+            score_high, score_low, coverage_k, score_adj_k, score_min_class, mu, mu_dense = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
             metrics['score_high'] = score_high
             metrics['score_low'] = score_low
             metrics['score'] = score_high + score_low
@@ -1249,7 +1249,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 date_summer = res['date'].values[summer_mask]
                 id_summer = res['graph_id'].values[summer_mask]
 
-                sh_sum, sl_sum, cov_sum, score_adj_sum, score_min_class_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
+                sh_sum, sl_sum, cov_sum, score_adj_sum, score_min_class_sum, mu_sum, mu_dense_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
                 
                 # Store with suffix _DFE (as requested: score_k_DFE)
                 for k, val in score_adj_sum.items():
