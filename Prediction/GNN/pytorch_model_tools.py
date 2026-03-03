@@ -3255,6 +3255,18 @@ class Training():
         if fwi_candidates is None:
             fwi_candidates = [c for c in _DEFAULTS if c in df_train.columns]
         if not fwi_candidates:
+            if getattr(self, 'target_name', '') == 'DFE':
+                if verbose:
+                    print(f"[{getattr(self, 'target_name', 'DFE')}] No FWI candidate needed. Returning dummy reference.")
+                self.reference_scores = {k: 0.001 for k in [1,2,3,4]}
+                self.baseline_scores = {k: 0.001 for k in [1,2,3,4]}
+                return {
+                    'best_config': None,
+                    'best_score': 0.0,
+                    'ref_scores': self.reference_scores,
+                    'baseline_scores': self.baseline_scores,
+                    'all_results': []
+                }
             raise ValueError("No FWI candidate column found in df_train.")
 
         for col in [date_col, zone_col]:
@@ -3433,18 +3445,25 @@ class Training():
         dff['departement']    = y_np[:, departement_index]
         dff['date']           = y_np[:, date_index]
         dff['graph_id']       = y_np[:, graph_id_index]
+        dff['weight']         = y_np[:, weight_index]
         dff[self.target_name] = y_np[:, -1]
+        dff['_pred']          = prediction
+
+        # ── Filter weight > 0 (match filter_prediction in test_dl_model) ────
+        mask = dff['weight'] > 0
+        dff  = dff[mask].reset_index(drop=True)
+        prediction_filtered = dff['_pred'].values
 
         # ── 3. Compute normalised scores via shared helper ────────────────────
         current_scores = self._compute_run_scores(
             dff[self.target_name].values,
-            prediction,
+            prediction_filtered,
             dff['date'].values,
             dff['graph_id'].values,
         )
 
         # ── Clean up ─────────────────────────────────────────────────────────
-        del dff, prediction, y_np, test_output, y, y_tensor, pred_tensor
+        del dff, prediction, prediction_filtered, y_np, test_output, y, y_tensor, pred_tensor
 
         agg = current_scores['agg']
 
@@ -3465,8 +3484,6 @@ class Training():
         """
         Train neural network model
         """
-        print(self.df_train[self.target_name].unique())
-
         self.score_per_epochs = {}
         if MLFLOW:
             existing_run = get_existing_run(f'{self.model_name}_')
@@ -3490,9 +3507,9 @@ class Training():
             loss_params.update({
                 'beta': 3.6167258754794345, 't': 0.38808363994393985, 'wmed': 2.1181338709061728, 
                 'wmin': 0.3090944162785197, 'wneg': 0.010696671944419034, 'gamma': 3.858781740471833, 
-                'taugate': 0.10621789513165877, 'gatetemp': 0.07804890070629288, 'wkdecay': 'None', 
+                'taugate': 0.10621789513165877, 'gatetemp': 0.07804890070629288, 'wkdecay': 'exp', 
                 'wklambda': 0.3495008616795649, 'wkmin': 0.0026366397418353914, 'learngains': False, 
-                'wfocal': 1.5494283305697185, 'wmu0': 0.4200314727662068, 'fgamma': 3.7215798979568424, 
+                'wfocal': 5.5, 'wmu0': 0.4200314727662068, 'fgamma': 3.7215798979568424, 
                 'falpha': 0.8563103452989596
             })
 
@@ -3753,6 +3770,10 @@ class Training():
             print('Train loss', train_loss)
         logger.info(f'Best epoch {self.best_epoch}, Best val loss {BEST_VAL_LOSS}')
 
+        if BEST_MODEL_PARAMS is not None:
+            self.update_weight(BEST_MODEL_PARAMS)
+            logger.info(f'Loaded best model (epoch {self.best_epoch}) for val/test plots.')
+
         ##################################### VAL #################################################
         test_output_, y_ = self._predict_test_loader(self.val_loader, output_pdf='test', calibrate=True)
         test_output_ = test_output_.detach().cpu().numpy()
@@ -3826,9 +3847,8 @@ class Training():
                 plt.savefig(self.dir_log / f"H{H}" / f'test_dep{dep}_graph{int(gid)}.png')
                 plt.close('all')
 
-        if BEST_MODEL_PARAMS is not None:
-            self.update_weight(BEST_MODEL_PARAMS)
-        
+
+
         if 'learnable-area' in self.loss:
             ids = y[:, 0]                       # première colonne
             values = y[:, 1:]
@@ -3951,7 +3971,7 @@ class Training():
                 logger.info(f"Distillation log/plot skipped: {_e}")
 
         self.params = BEST_MODEL_PARAMS
-        return self.score_per_epochs
+        return self.score_per_epochs, self.criterion_params, criterion
 
     def _save_distill_logs_and_plot(self):
         """Persist best/worst per-epoch logs and save a 3D scatter plot.
@@ -4093,6 +4113,27 @@ class Training():
         def _get(key): return [self.score_per_epochs[e].get(key, float('nan')) for e in epochs]
 
         best_ep = getattr(self, 'best_epoch', None)
+
+        if getattr(self, 'target_name', '') == 'DFE':
+            fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+            fig.suptitle('Score Evolution Over Epochs', fontsize=15)
+            vals = _get('iou_score')
+            if all(np.isnan(v) if isinstance(v, float) else False for v in vals):
+                vals = _get('agg')
+                
+            ax.plot(epochs, vals, marker='P', color='black', linewidth=1.5, markersize=4)
+            if best_ep is not None:
+                ax.axvline(best_ep, color='r', linestyle='--', alpha=0.6, label=f'best ep={best_ep}')
+                ax.legend(fontsize=7)
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('IoU / Agg')
+            ax.set_title('IoU Score')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(self.dir_log / 'score_evolution.png')
+            plt.close(fig)
+            logger.info(f"Score evolution plot saved to {self.dir_log / 'score_evolution.png'}")
+            return
 
         fig, axes = plt.subplots(3, 2, figsize=(13, 12))
         fig.suptitle('Score Evolution Over Epochs', fontsize=15)
@@ -4876,19 +4917,22 @@ class Training():
         self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=5):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
         original_dir_log = self.dir_log
         all_runs_scores = {}
-        
+        all_criterion_params = {}
+
         for r in range(n_runs):
+            self.criterion_params = []
             logger.info(f"============= Starting RUN {r+1}/{n_runs} =============")
             self.dir_log = original_dir_log / f"run_{r}"
             check_and_create_path(self.dir_log)
             
             # For each run we must start from scratch 
-            scores_evolution = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
+            scores_evolution, criterion_params, criterion = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
             all_runs_scores[r] = scores_evolution
-            
+            all_criterion_params[r] = criterion_params
+
         self.dir_log = original_dir_log
         
         # ── Find best run over all runs and load its model ─────────────────────
@@ -4907,10 +4951,14 @@ class Training():
             logger.info(f"============= ALL RUNS COMPLETED. BEST RUN: {best_run_idx} (agg={best_overall_agg:.4f}) =============")
             # Load the best model into current self.model
             best_model_path = original_dir_log / f"run_{best_run_idx}" / "best.pt"
+            self.criterion_params = all_criterion_params[best_run_idx]
+
+            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+
             if best_model_path.is_file():
                 import shutil
                 self._load_model_from_path(best_model_path, self.model)
-                
+
                 # Assert that the weights are correctly loaded
                 loaded_state_dict = torch.load(best_model_path, map_location=self.device, weights_only=True)
                 for name, param in self.model.named_parameters():
@@ -4920,6 +4968,7 @@ class Training():
                 shutil.copy(best_model_path, original_dir_log / "best.pt")
                 logger.info(f"Loaded and saved best model from run {best_run_idx}.")
             last_model_path = original_dir_log / f"run_{best_run_idx}" / "last.pt"
+
             if last_model_path.is_file():
                 import shutil
                 shutil.copy(last_model_path, original_dir_log / "last.pt")
@@ -4936,8 +4985,14 @@ class Training():
         import matplotlib.pyplot as plt
         import seaborn as sns
         
+        is_dfe = getattr(self, 'target_name', '') == 'DFE'
+        
         # Aggregate data
-        metrics_to_plot = ['agg', 'score_high', 'score_low', 'score_k1', 'score_k2', 'score_k3', 'score_k4', 'recall', 'score_min_class']
+        if is_dfe:
+            metrics_to_plot = ['agg', 'iou_score']
+        else:
+            metrics_to_plot = ['agg', 'score_high', 'score_low', 'score_k1', 'score_k2', 'score_k3', 'score_k4', 'recall', 'score_min_class']
+            
         data = []
         mu_data = []
         mu_dense_data = []
@@ -4951,21 +5006,33 @@ class Training():
                     row[m] = best_scores.get(m, np.nan)
                 data.append(row)
                 
-                mu_row = {'run': r}
-                for k in range(5):
-                    mu_row[k] = best_scores.get(f'mu_{k}', np.nan)
-                mu_data.append(mu_row)
-                
-                mu_dense_row = {'run': r}
-                for idx in range(50):
-                    mu_dense_row[idx] = best_scores.get(f'mu_dense_{idx}', np.nan)
-                mu_dense_data.append(mu_dense_row)
+                if not is_dfe:
+                    mu_row = {'run': r}
+                    for k in range(5):
+                        mu_row[k] = best_scores.get(f'mu_{k}', np.nan)
+                    mu_data.append(mu_row)
+                    
+                    mu_dense_row = {'run': r}
+                    for idx in range(50):
+                        mu_dense_row[idx] = best_scores.get(f'mu_dense_{idx}', np.nan)
+                    mu_dense_data.append(mu_dense_row)
                 
         if not data:
             return
             
         import pandas as pd
         df = pd.DataFrame(data)
+        
+        if is_dfe:
+            fig, ax_agg = plt.subplots(1, 1, figsize=(8, 6))
+            sns.boxplot(data=df[['agg']], ax=ax_agg, palette=["#FF9999"])
+            sns.stripplot(data=df[['agg']], ax=ax_agg, color='black', alpha=0.5, size=5)
+            ax_agg.set_title('Variabilité du Score Agrégé (IoU)', fontsize=14, fontweight='bold')
+            ax_agg.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(self.dir_log / 'runs_variance_evolution.png')
+            plt.close(fig)
+            return
         
         from matplotlib.gridspec import GridSpec
         fig = plt.figure(figsize=(18, 15))
