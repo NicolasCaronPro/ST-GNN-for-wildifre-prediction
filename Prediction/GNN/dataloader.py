@@ -1006,7 +1006,7 @@ def load_loader_test_2D(use_temporal_as_edges, image_per_node, scale, graphScale
     return loader
 
 def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, test_departement, target_name, name, dir_output, scale,
-                      horizon, pred_min=None, pred_max=None, departement_scale = False):
+                      horizon, pred_min=None, pred_max=None, departement_scale=False, scorer=None):
     
     metrics = {}
 
@@ -1211,7 +1211,8 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
             else:
                 y_true_real = y_true
             
-            score_high, score_low, coverage_k, score_adj_k, score_min_class, mu, mu_dense = evaluation_scoring(y_pred, y_true_real, res['date'], res['graph_id'])
+            _scoring_fn = scorer.evaluation_scoring if scorer is not None else evaluation_scoring
+            score_high, score_low, coverage_k, score_adj_k, score_min_class, mu, mu_dense = _scoring_fn(y_pred, y_true_real, res['date'], res['graph_id'])
             metrics['score_high'] = score_high
             metrics['score_low'] = score_low
             metrics['score'] = score_high + score_low
@@ -1249,7 +1250,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
                 date_summer = res['date'].values[summer_mask]
                 id_summer = res['graph_id'].values[summer_mask]
 
-                sh_sum, sl_sum, cov_sum, score_adj_sum, score_min_class_sum, mu_sum, mu_dense_sum = evaluation_scoring(y_pred_summer, y_true_summer, date_summer, id_summer)
+                sh_sum, sl_sum, cov_sum, score_adj_sum, score_min_class_sum, mu_sum, mu_dense_sum = _scoring_fn(y_pred_summer, y_true_summer, date_summer, id_summer)
                 
                 # Store with suffix _DFE (as requested: score_k_DFE)
                 for k, val in score_adj_sum.items():
@@ -2123,7 +2124,8 @@ def test_dl_model(cfg,
 
                 metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, predTensorProba, y, graphScale,
                                                     test_departement, target_name, name,
-                                                    dir_output / name / f"H{H}", scale, H, pred_min = None, pred_max = None)
+                                                    dir_output / name / f"H{H}", scale, H, pred_min = None, pred_max = None,
+                                                    scorer=getattr(model, 'scoring', None))
                 
                 ious_per_horizon.append(metrics[run].get('iou_class_hard', np.nan))
 

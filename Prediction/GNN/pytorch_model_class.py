@@ -681,9 +681,14 @@ class Model_Torch(SplitTraining):
         self.training_mode = training_mode
 
     def create_train_val_test_loader(self, graph, df_train, df_val, df_test, epochs, PATIENCE_CNT, CHECKPOINT, features_importance=True, custom_model_params=None, use_log=True):
-
+        
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
+
+        print(f'Train -> Unique values of raw targets: {df_train[_nbsin_col].unique()}')
+        print(f'Val -> Unique values of raw targets: {df_val[_nbsin_col].unique()}')
+        print(f'Test -> Unique values of raw targets: {df_test[_nbsin_col].unique()}')
+
         self.define_reference_model(
             df_train=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
             df_test=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),

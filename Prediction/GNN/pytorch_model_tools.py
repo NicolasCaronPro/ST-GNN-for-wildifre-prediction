@@ -30,6 +30,7 @@ from GNN.tools import (
     iou_score,
     evaluate_metrics,
     calculate_ic95,
+    Scoring,
 )
 from GNN.config import graph_id_index, departement_index, logger
 from sklearn.metrics import f1_score, jaccard_score
@@ -2020,6 +2021,7 @@ class Training():
         self.apply_discretization = post_process is not None
         self.post_process = post_process
         self.loss_param_search = loss_param_search
+        self.scoring = Scoring()
 
         if 'Past_risk' in self.features_name:
             self.id_past_risk = features_name.index('Past_risk')
@@ -3137,8 +3139,7 @@ class Training():
         score_k1..k4, recall, iou, f1, etc.
         Missing or NaN score_k{n} values are replaced with 0.0.
         """
-        from GNN.forecasting_models.sklearn.score import evaluate_metrics as _evaluate_metrics
-        metrics = _evaluate_metrics(y_true, y_pred, dates=dates, zones=zones)
+        metrics = self.scoring.evaluate_metrics(y_true, y_pred, dates=dates, zones=zones)
         for k in [1, 2, 3, 4]:
             key = f'score_k{k}'
             v = metrics.get(key)
@@ -3171,7 +3172,7 @@ class Training():
         ref = getattr(self, 'reference_scores', None)
         assert ref is not None
         s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
-
+        
         def _u(sk, raw_key):
             skr = float(s_ref_map[raw_key])
             denom = max(abs(skr) + EPS, 0.1)
@@ -3270,44 +3271,51 @@ class Training():
             raise ValueError("No FWI candidate column found in df_train.")
 
         for col in [date_col, zone_col]:
-            if col not in df_eval.columns:
+            if col not in df_train.columns:
                 raise ValueError(f"Column '{col}' not found in evaluation dataframe.")
-        if nbsinister_col not in df_train.columns or nbsinister_col not in df_eval.columns:
+        if nbsinister_col not in df_train.columns or nbsinister_col not in df_train.columns:
             raise ValueError(f"'{nbsinister_col}' not found in dataframe(s).")
 
-        # y_true: uniform quantile discretization of nbsinister fitted on df_train
-        _qs = np.quantile(
-            df_train[nbsinister_col].fillna(0).values,
-            np.linspace(0, 1, n_classes + 1)[1:-1]
-        )
-        y_true = np.searchsorted(_qs, df_eval[nbsinister_col].fillna(0).values
-                                 ).clip(0, n_classes - 1).astype(int)
-        dates  = df_eval[date_col].values
-        zones  = df_eval[zone_col].values
+        # y_true: valeurs brutes de nbsinister (pas de quantile)
+        y_true = df_train[nbsinister_col].fillna(0).values
+        dates  = df_train[date_col].values
+        zones  = df_train[zone_col].values
 
         if verbose:
             import collections
-            print(f"[ref_model] y_true dist: {dict(sorted(collections.Counter(y_true).items()))}")
+            print(f"[ref_model] y_true stats: min={y_true.min():.2f} max={y_true.max():.2f} mean={y_true.mean():.2f} n={len(y_true)}")
 
         def _discretize(s_train, s_eval, quantiles):
             qs  = np.quantile(s_train.dropna(), quantiles[1:-1])
             return np.searchsorted(qs, s_eval.fillna(s_eval.median()).values
                                    ).clip(0, n_classes - 1).astype(int)
 
-        def _scores_for(pred):
+        def _scores_for(pred, reference=False):
             """Raw scores keyed by int k + 'recall' + 'score_min_class'."""
-            raw = self._compute_raw_scores(y_true, pred, dates, zones)
+            raw = self.scoring.evaluate_metrics(y_true, pred, dates=dates, zones=zones, reference=reference)
+            for k in [1, 2, 3, 4]:
+                v = raw.get(f'score_k{k}')
+                if v is None or (isinstance(v, float) and np.isnan(v)):
+                    raw[f'score_k{k}'] = 0.0
+            if 'recall' not in raw or raw['recall'] is None:
+                raw['recall'] = 0.0
+            if 'score_min_class' not in raw or raw['score_min_class'] is None:
+                raw['score_min_class'] = 0.0
             s = {f'score_k{k}': float(raw[f'score_k{k}']) for k in [1, 2, 3, 4]}
             s['recall'] = float(raw['recall'])
             s['score_min_class'] = float(raw['score_min_class'])
             return s
 
+        self.sigma = np.std(y_true)
+        self.scoring.set_sigma(self.sigma)
+
         # Baseline: trivial predictor (all class 0)
-        s_baseline = _scores_for(np.zeros(len(df_eval), dtype=int))
+        s_baseline = _scores_for(np.zeros(len(y_true), dtype=int), reference=False)
         if verbose:
             print(f"[ref_model] baseline: {s_baseline}")
 
         _QUANTILE_GRID = [
+            ("fwi_quantiles", [0.0, 0.50, 0.75, 0.95, 0.99, 1.0]),
             ("uniform",       np.linspace(0.0, 1.0, n_classes + 1).tolist()),
             ("heavy_low",     [0.0, 0.50, 0.70, 0.83, 0.92, 1.0]),
             ("heavy_high",    [0.0, 0.08, 0.20, 0.40, 0.65, 1.0]),
@@ -3316,89 +3324,106 @@ class Training():
             ("balanced_low",  [0.0, 0.40, 0.60, 0.75, 0.88, 1.0]),
             ("extreme_tail",  [0.0, 0.60, 0.75, 0.85, 0.93, 1.0]),
             ("mild_tail",     [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]),
-            ("fwi_quantiles", [0.0, 0.50, 0.75, 0.95, 0.99, 1.0]),
         ]
 
-        ref_col    = fwi_candidates[0]
-        _, ref_q   = _QUANTILE_GRID[0]
-        s_ref      = _scores_for(_discretize(df_train[ref_col], df_eval[ref_col], ref_q))
-        
-        # ── Critical: Bootstrap the reference scores using the uniform baseline
-        self.reference_scores = {'ref_scores': s_ref}
-        if verbose:
-            print(f"[ref_model] reference (uniform/{ref_col}): {s_ref}")
+        # ── Référence : colonne précalculée {target}-quantile-5-Class-Dept ──────
+        # → y_ref_pred est la discrétisation ordinale officielle de la target (0..4)
+        # C'est ce prédicteur qui définit pair_mean_deltas (étalon de normalisation).
+        _ref_col = f"{self.target_name}-quantile-5-Class-Dept"
+        if _ref_col in df_train.columns:
+            y_ref_pred = df_train[_ref_col].fillna(0).clip(0, n_classes - 1).astype(int).values
+        else:
+            # Fallback : quantilisation manuelle sur df_train si la colonne est absente
+            _qs = np.quantile(df_train[nbsinister_col].fillna(0).values, [0.50, 0.75, 0.95, 0.99])
+            y_ref_pred = np.searchsorted(
+                _qs, df_train[nbsinister_col].fillna(0).values
+            ).clip(0, n_classes - 1).astype(int)
 
+        if verbose:
+            import collections
+            print(f"[ref_model] y_ref_pred col='{_ref_col}' dist: "
+                  f"{dict(sorted(collections.Counter(y_ref_pred).items()))}")
+
+        # Appel reference=True → peuple self.scoring.pair_mean_deltas uniquement
+        # Le return value (scores de la TARGET) n'est pas utile → ignoré
+        _scores_for(y_ref_pred, reference=True)
+        if verbose:
+            print(f"[ref_model] pair_mean_deltas (target): {self.scoring.pair_mean_deltas}")
+
+        # ── Candidat initial : premier FWI × fwi_quantiles ─────────────────────
+        # Définit le premier "meilleur candidat" → reference_scores['best_scores']
+        # pour que _compute_geometric_agg soit opérationnel dès le début de la grille.
+        _init_col    = fwi_candidates[0]
+        _, _init_q   = _QUANTILE_GRID[0]   # fwi_quantiles
+        if _init_col in df_train.columns:
+            _init_pred   = _discretize(df_train[_init_col], df_train[_init_col], _init_q)
+            _init_scores = _scores_for(_init_pred, reference=False)
+        else:
+            _init_scores = {f'score_k{k}': 0.0 for k in [1,2,3,4]}
+            _init_scores.update({'recall': 0.0, 'score_min_class': 0.0})
+
+        # Par définition, le candidat initial a agg=0 (centré sur lui-même)
+        self.reference_scores = {
+            'best_scores': _init_scores,
+            'best_score':  0.0,
+        }
+        if verbose:
+            print(f"[ref_model] Candidat initial ({_init_col} / fwi_quantiles): {_init_scores}")
+
+        # ── Grille : chaque config est comparée au candidat initial ─────────────
         all_results = []
         for fwi_col in fwi_candidates:
             if fwi_col not in df_train.columns or fwi_col not in df_eval.columns:
                 continue
             for qname, qbounds in _QUANTILE_GRID:
                 pred   = _discretize(df_train[fwi_col], df_eval[fwi_col], qbounds)
-                scores = _scores_for(pred)
-                agg, u_vals = self._compute_geometric_agg(scores)
-                mu     = float(agg)
+                scores = _scores_for(pred, reference=False)
+                agg, _ = self._compute_geometric_agg(scores)
                 cfg = {'fwi_col': fwi_col, 'quantile_name': qname,
-                       'quantiles': qbounds, 'scores': scores, 'mean_u': mu}
+                       'quantiles': qbounds, 'scores': scores, 'mean_u': float(agg)}
                 all_results.append(cfg)
                 if verbose:
-                    print(f"  {fwi_col:20s} | {qname:14s} | mean_u={mu:.4f}")
+                    k_nrm = [f"k{k}={scores.get(f'score_k{k}', 0.0):.4f}" for k in [1, 2, 3, 4]]
+                    print(f"  {fwi_col:20s} | {qname:14s} | {' '.join(k_nrm)}  | agg={agg:.4f}")
 
         if not all_results:
             raise RuntimeError("Grid search produced no valid results.")
 
+        # ── Élection du meilleur ─────────────────────────────────────────────────
         best = max(all_results, key=lambda r: r['mean_u'])
         if best['mean_u'] <= 0.0:
             if verbose:
-                print(f"[ref_model] Warning: Best agg was <= 0 ({best['mean_u']:.4f}). Falling back to uniform reference.")
+                print(f"[ref_model] Warning: Best agg={best['mean_u']:.4f} <= 0. Falling back to initial candidate.")
             best = all_results[0]
 
+        best_scores_final = best['scores']
+
         if verbose:
-            bs = best['scores']
             lines = [
                 f"\n{'─'*60}",
-                f"[ref_model] BEST CONFIG",
+                f"[ref_model] BEST FWI CONFIG",
                 f"  FWI col   : {best['fwi_col']}",
                 f"  Quantiles : {best['quantile_name']}",
                 f"  agg       : {best['mean_u']:.4f}",
                 f"{'─'*60}",
-                f"  {'Metric':<16} {'Best FWI':>10} {'Ref (uniform)':>14} {'Baseline':>10}",
-                f"  {'─'*54}",
+                f"  {'Metric':<16} {'Best FWI':>10} {'Baseline':>10}",
+                f"  {'─'*38}",
             ]
             for k in [1, 2, 3, 4]:
                 key = f'score_k{k}'
-                sk   = bs.get(key, 0.0)
-                skr  = s_ref.get(key, 0.0)
-                skb  = s_baseline.get(key, 0.0)
-                lines.append(f"  {key:<16} {sk:>10.4f} {skr:>14.4f} {skb:>10.4f}")
-            sr   = bs.get('recall', 0.0)
-            srr  = s_ref.get('recall', 0.0)
-            srb  = s_baseline.get('recall', 0.0)
-            lines.append(f"  {'recall':<16} {sr:>10.4f} {srr:>14.4f} {srb:>10.4f}")
-            smc  = bs.get('score_min_class', 0.0)
-            smcr = s_ref.get('score_min_class', 0.0)
-            smcb = s_baseline.get('score_min_class', 0.0)
-            lines.append(f"  {'score_min_class':<16} {smc:>10.4f} {smcr:>14.4f} {smcb:>10.4f}")
-            lines.append(f"{'─'*60}")
-            # Show exactly which scores will be used as reference in _compute_run_scores (tanh)
-            chosen = best['scores']
-            lines += [
-                f"[ref_model] CHOSEN REFERENCE SCORES (used for tanh normalisation)",
-                f"  {'Metric':<16} {'score':>10}   (model score will be centred on these)",
-                f"  {'─'*54}",
-            ]
-            for k in [1, 2, 3, 4]:
-                key = f'score_k{k}'
-                lines.append(f"  {key:<16} {chosen.get(key, 0.0):>10.4f}")
-            lines.append(f"  {'recall':<16} {chosen.get('recall', 0.0):>10.4f}")
-            lines.append(f"  {'score_min_class':<16} {chosen.get('score_min_class', 0.0):>10.4f}")
+                lines.append(f"  {key:<16} {best_scores_final.get(key, 0.0):>10.4f} "
+                              f"{s_baseline.get(key, 0.0):>10.4f}")
+            lines.append(f"  {'recall':<16} {best_scores_final.get('recall', 0.0):>10.4f} "
+                          f"{s_baseline.get('recall', 0.0):>10.4f}")
+            lines.append(f"  {'score_min_class':<16} {best_scores_final.get('score_min_class', 0.0):>10.4f} "
+                          f"{s_baseline.get('score_min_class', 0.0):>10.4f}")
             lines.append(f"{'─'*60}")
             print('\n'.join(lines))
 
         result = {
             'best_config':     best,
             'best_score':      best['mean_u'],
-            'best_scores':     best['scores'],      # {1: s1, 2: s2, 3: s3, 4: s4, 'recall': r}
-            'ref_scores':      s_ref,               # uniform-bins reference (first FWI col)
+            'best_scores':     best_scores_final,
             'baseline_scores': s_baseline,
             'all_results':     all_results,
         }
@@ -3476,10 +3501,6 @@ class Training():
         return current_scores, is_better, agg
 
     def train_run(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, run_idx=0):
-        
-        if self.loss_param_search:
-            self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
-            return
 
         """
         Train neural network model
@@ -3504,13 +3525,22 @@ class Training():
             loss_params = {'alpha' : self.get_class_freq(self.df_train)}
             
         if 'nbsinister' in self.target_name and 'cllt' in self.loss:
+            # loss_params.update({
+            #     'beta': 3.6167258754794345, 't': 0.38808363994393985, 'wmed': 2.1181338709061728, 
+            #     'wmin': 0.3090944162785197, 'wneg': 0.010696671944419034, 'gamma': 3.858781740471833, 
+            #     'taugate': 0.10621789513165877, 'gatetemp': 0.07804890070629288, 'wkdecay': 'None',
+            #     'wklambda': 0.3495008616795649, 'wkmin': 0.0026366397418353914, 'learngains': False, 
+            #     'wfocal': 1.5494283305697185, 'wmu0': 0.4200314727662068, 'fgamma': 3.7215798979568424, 
+            #     'falpha': 0.8563103452989596
+            # })
             loss_params.update({
-                'beta': 3.6167258754794345, 't': 0.38808363994393985, 'wmed': 2.1181338709061728, 
-                'wmin': 0.3090944162785197, 'wneg': 0.010696671944419034, 'gamma': 3.858781740471833, 
-                'taugate': 0.10621789513165877, 'gatetemp': 0.07804890070629288, 'wkdecay': 'exp', 
-                'wklambda': 0.3495008616795649, 'wkmin': 0.0026366397418353914, 'learngains': False, 
-                'wfocal': 5.5, 'wmu0': 0.4200314727662068, 'fgamma': 3.7215798979568424, 
-                'falpha': 0.8563103452989596
+                'beta': 2.33, 't': 0.0, 'wmed': 1.56, 
+                'wmin': 2.09, 'wneg': 1.01, 'gamma': 5.0, 
+                'taugate': 0.05, 'gatetemp': 0.11, 'wkdecay': 'power',
+                'wkpower': 2.06, 'wkmin': 0.02, 'wfocal': 1.76, 
+                'wmu0': 1.94, 'fgamma': 1.03, 'falpha': 0.89, 
+                'weighttype': 'None', 'mumomentum': 0.84, 'mulambdag': 0.18, 
+                'mulambdac': 1.61
             })
 
         criterion = self.get_loss(self.loss, loss_params)
@@ -3583,32 +3613,15 @@ class Training():
                 epochs_list.append(epoch)
                 
                 # Score-based early stopping with Borda Count
-                if epoch > min_epochs:
-                    try:
-                        current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
+                try:
+                    current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
 
-                        # Store scores for this epoch
-                        self.score_per_epochs[epoch] = current_scores
+                    # Store scores for this epoch
+                    self.score_per_epochs[epoch] = current_scores
 
-                        if False: # HARDCODED OVERRIDE: early stopping on val_loss
-                            is_better_loss = val_loss < BEST_VAL_LOSS
-                            if is_better_loss:
-                                prev_scores = BEST_SCORES
-                                BEST_SCORES = current_scores
-                                BEST_VAL_LOSS = val_loss
-                                import copy
-                                BEST_MODEL_PARAMS = copy.deepcopy(self.model.state_dict())
-                                patience_cnt = 0
-                                current_patience_lr = 0
-                                self.best_epoch = epoch
-
-                                logger.info(f"Epoch {epoch} [✓ NEW BEST LOSS] val_loss={val_loss:.4f} (agg={current_scores.get('agg', float('nan')):.4f})")
-                            else:
-                                patience_cnt += 1
-                                if epoch % CHECKPOINT == 0:
-                                    logger.info(f"Epoch {epoch}  val_loss={val_loss:.4f} (agg={current_scores.get('agg', float('nan')):.4f})"
-                                                f"  patience {patience_cnt}/{PATIENCE_CNT}")
-                        elif is_better:
+                    if True: # HARDCODED OVERRIDE: early stopping on val_loss
+                        is_better_loss = val_loss < BEST_VAL_LOSS
+                        if is_better_loss:
                             prev_scores = BEST_SCORES
                             BEST_SCORES = current_scores
                             BEST_VAL_LOSS = val_loss
@@ -3618,88 +3631,80 @@ class Training():
                             current_patience_lr = 0
                             self.best_epoch = epoch
 
-                            ref = getattr(self, 'reference_scores', None)
-                            s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
-
-                            # ── Log score table (new best only) ──────────────────────
-                            _lines = [
-                                f"Epoch {epoch} [✓ NEW BEST]  agg={current_scores.get('agg', float('nan')):.4f}",
-                                f"  {'metric':<10} {'score':>8} {'u (0-1)':>9} {'ref score':>10} {'prev score':>11} {'prev u':>8}",
-                                f"  {'─'*63}",
-                            ]
-                            if 'iou_score' in current_scores:
-                                _lines.append(f"  {'iou':<10} {current_scores['iou_score']:>8.4f}")
-                            else:
-                                for _k in [1, 2, 3, 4]:
-                                    _s_cur  = current_scores.get(f'score_k{_k}', float('nan'))
-                                    _u_cur  = current_scores.get(f'u_k{_k}',    float('nan'))
-                                    _s_ref  = s_ref_map.get(f'score_k{_k}', float('nan'))
-                                    _s_prev = (prev_scores or {}).get(f'score_k{_k}', float('nan'))
-                                    _u_prev = (prev_scores or {}).get(f'u_k{_k}',    float('nan'))
-                                    _lines.append(f"  {'score_k'+str(_k):<10} {_s_cur:>8.4f} {_u_cur:>9.4f} {_s_ref:>10.4f} {_s_prev:>11.4f} {_u_prev:>8.4f}")
-                                _rc   = current_scores.get('recall',   float('nan'))
-                                _urc  = current_scores.get('u_recall', float('nan'))
-                                _rc_ref = s_ref_map.get('recall', float('nan'))
-                                _rcp  = (prev_scores or {}).get('recall',   float('nan'))
-                                _urcp = (prev_scores or {}).get('u_recall', float('nan'))
-                                _lines.append(f"  {'recall':<10} {_rc:>8.4f} {_urc:>9.4f} {_rc_ref:>10.4f} {_rcp:>11.4f} {_urcp:>8.4f}")
-                                _smc  = current_scores.get('score_min_class',   float('nan'))
-                                _usmc = current_scores.get('u_score_min_class', float('nan'))
-                                _smc_ref = s_ref_map.get('score_min_class', float('nan'))
-                                _smcp = (prev_scores or {}).get('score_min_class',   float('nan'))
-                                _usmcp= (prev_scores or {}).get('u_score_min_class', float('nan'))
-                                _lines.append(f"  {'score_min':<10} {_smc:>8.4f} {_usmc:>9.4f} {_smc_ref:>10.4f} {_smcp:>11.4f} {_usmcp:>8.4f}")
-                                _lines.append(f"  {'─'*63}")
-                                _lines.append(
-                                    f"  {'agg (min)':<10} {'':>8} {current_scores.get('agg', float('nan')):>9.4f}"
-                                    f" {'':>10} {(prev_scores or {}).get('agg', float('nan')):>11.4f}"
-                                )
-                            logger.info('\n'.join(_lines))
-                            # ─────────────────────────────────────────────────────────
+                            logger.info(f"Epoch {epoch} [✓ NEW BEST LOSS] val_loss={val_loss:.4f} (agg={current_scores.get('agg', float('nan')):.4f})")
                         else:
                             patience_cnt += 1
                             if epoch % CHECKPOINT == 0:
-                                logger.info(f"Epoch {epoch}  agg={current_scores.get('agg', float('nan')):.4f}"
+                                logger.info(f"Epoch {epoch}  val_loss={val_loss:.4f} (agg={current_scores.get('agg', float('nan')):.4f})"
                                             f"  patience {patience_cnt}/{PATIENCE_CNT}")
-                    except Exception as e:
-                        import traceback
-                        logger.warning(f'Score calculation failed ({e}):\n{traceback.format_exc()}\nFalling back to loss-based early stopping')
-                        if val_loss < BEST_VAL_LOSS:
-                            BEST_VAL_LOSS = val_loss
-                            import copy
-                            BEST_MODEL_PARAMS = copy.deepcopy(self.model.state_dict())
-                            patience_cnt = 0
-                            current_patience_lr = 0
-                            self.best_epoch = epoch
+                    elif is_better:
+                        prev_scores = BEST_SCORES
+                        BEST_SCORES = current_scores
+                        BEST_VAL_LOSS = val_loss
+                        import copy
+                        BEST_MODEL_PARAMS = copy.deepcopy(self.model.state_dict())
+                        patience_cnt = 0
+                        current_patience_lr = 0
+                        self.best_epoch = epoch
+
+                        ref = getattr(self, 'reference_scores', None)
+                        s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
+
+                        # ── Log score table (new best only) ──────────────────────
+                        _lines = [
+                            f"Epoch {epoch} [✓ NEW BEST]  agg={current_scores.get('agg', float('nan')):.4f}",
+                            f"  {'metric':<10} {'score':>8} {'u (0-1)':>9} {'ref score':>10} {'prev score':>11} {'prev u':>8}",
+                            f"  {'─'*63}",
+                        ]
+                        if 'iou_score' in current_scores:
+                            _lines.append(f"  {'iou':<10} {current_scores['iou_score']:>8.4f}")
                         else:
-                            patience_cnt += 1
-                else:
-                    # First epoch or within min_epochs: just initialize
-                    if epoch == min_epochs:
-                        try:
-                            BEST_SCORES, _, _ = self.calculate_val_scores_and_compare(None)
-                            _lines = [
-                                f"Epoch {epoch} [initial scores]  agg={BEST_SCORES.get('agg', float('nan')):.4f}",
-                                f"  {'metric':<10} {'score':>8}",
-                                f"  {'─'*22}",
-                            ]
-                            if 'iou_score' in BEST_SCORES:
-                                _lines.append(f"  {'iou':<10} {BEST_SCORES['iou_score']:>8.4f}")
-                            else:
-                                for _k in [1, 2, 3, 4]:
-                                    _lines.append(f"  {'score_k'+str(_k):<10} {BEST_SCORES.get(f'score_k{_k}', float('nan')):>8.4f}")
-                                _lines.append(f"  {'recall':<10} {BEST_SCORES.get('recall', float('nan')):>8.4f}")
-                                _lines.append(f"  {'score_min':<10} {BEST_SCORES.get('score_min_class', float('nan')):>8.4f}")
-                                _lines.append(f"  {'agg':<10} {BEST_SCORES.get('agg', float('nan')):>8.4f}")
-                            logger.info('\n'.join(_lines))
-                        except Exception as e:
-                            import traceback
-                            logger.warning(f'Initial score calculation failed ({e}):\n{traceback.format_exc()}\nFalling back to loss-based early stopping')
-                            BEST_SCORES = None
-                    patience_cnt += 1
+                            for _k in [1, 2, 3, 4]:
+                                _s_cur  = current_scores.get(f'score_k{_k}', float('nan'))
+                                _u_cur  = current_scores.get(f'u_k{_k}',    float('nan'))
+                                _s_ref  = s_ref_map.get(f'score_k{_k}', float('nan'))
+                                _s_prev = (prev_scores or {}).get(f'score_k{_k}', float('nan'))
+                                _u_prev = (prev_scores or {}).get(f'u_k{_k}',    float('nan'))
+                                _lines.append(f"  {'score_k'+str(_k):<10} {_s_cur:>8.4f} {_u_cur:>9.4f} {_s_ref:>10.4f} {_s_prev:>11.4f} {_u_prev:>8.4f}")
+                            _rc   = current_scores.get('recall',   float('nan'))
+                            _urc  = current_scores.get('u_recall', float('nan'))
+                            _rc_ref = s_ref_map.get('recall', float('nan'))
+                            _rcp  = (prev_scores or {}).get('recall',   float('nan'))
+                            _urcp = (prev_scores or {}).get('u_recall', float('nan'))
+                            _lines.append(f"  {'recall':<10} {_rc:>8.4f} {_urc:>9.4f} {_rc_ref:>10.4f} {_rcp:>11.4f} {_urcp:>8.4f}")
+                            _smc  = current_scores.get('score_min_class',   float('nan'))
+                            _usmc = current_scores.get('u_score_min_class', float('nan'))
+                            _smc_ref = s_ref_map.get('score_min_class', float('nan'))
+                            _smcp = (prev_scores or {}).get('score_min_class',   float('nan'))
+                            _usmcp= (prev_scores or {}).get('u_score_min_class', float('nan'))
+                            _lines.append(f"  {'score_min':<10} {_smc:>8.4f} {_usmc:>9.4f} {_smc_ref:>10.4f} {_smcp:>11.4f} {_usmcp:>8.4f}")
+                            _lines.append(f"  {'─'*63}")
+                            _lines.append(
+                                f"  {'agg (min)':<10} {'':>8} {current_scores.get('agg', float('nan')):>9.4f}"
+                                f" {'':>10} {(prev_scores or {}).get('agg', float('nan')):>11.4f}"
+                            )
+                        logger.info('\n'.join(_lines))
+                        # ─────────────────────────────────────────────────────────
+                    else:
+                        patience_cnt += 1
+                        if epoch % CHECKPOINT == 0:
+                            logger.info(f"Epoch {epoch}  agg={current_scores.get('agg', float('nan')):.4f}"
+                                        f"  patience {patience_cnt}/{PATIENCE_CNT}")
+                except Exception as e:
+                    import traceback
+                    logger.warning(f'Score calculation failed ({e}):\n{traceback.format_exc()}\nFalling back to loss-based early stopping')
+                    if val_loss < BEST_VAL_LOSS:
+                        BEST_VAL_LOSS = val_loss
+                        import copy
+                        BEST_MODEL_PARAMS = copy.deepcopy(self.model.state_dict())
+                        patience_cnt = 0
+                        current_patience_lr = 0
+                        self.best_epoch = epoch
+                    else:
+                        patience_cnt += 1
                     
                 # Early stopping and LR decay logic - must run on every epoch
-                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
+                if patience_cnt >= PATIENCE_CNT:
                     # Check if we can reduce LR (have we used all retries?)
                     # PATIENCE_CNT_LR is the number of allowed reductions/retries
                     if current_patience_lr >= self.patience_cnt_lr:
@@ -4918,6 +4923,11 @@ class Training():
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
+
+        if self.loss_param_search:
+            self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
+            return
+
         original_dir_log = self.dir_log
         all_runs_scores = {}
         all_criterion_params = {}
@@ -4953,7 +4963,8 @@ class Training():
             best_model_path = original_dir_log / f"run_{best_run_idx}" / "best.pt"
             self.criterion_params = all_criterion_params[best_run_idx]
 
-            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+            if has_method(criterion, 'plot_params'):
+                criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
 
             if best_model_path.is_file():
                 import shutil
@@ -5956,10 +5967,50 @@ class Training():
 
             return params
 
-        # -------------------------
+        # ─────────────────────────────────────────────────────────────────────
+        # ClusterCLMBinnedTransitionLoss (ccllt)
+        #   Extends cllt with cluster-specific hypers:
+        #     scaleagg, weighttype, alphatype, mumomentum, mulambdag, mulambdac
+        # ─────────────────────────────────────────────────────────────────────
+        if "ccllt" in name:
+            # ── Shared with cllt ──────────────────────────────────────────────
+            params["beta"]  = trial.suggest_float("ccllt_beta", 2.0, 50.0, log=True)
+            params["t"]     = trial.suggest_float("ccllt_t", 1e-3, 0.5, log=True)
+
+            params["wmed"]  = trial.suggest_float("ccllt_wmed", 0.0, 3.0)
+            params["wmin"]  = trial.suggest_float("ccllt_wmin", 0.0, 3.0)
+            params["wneg"]  = trial.suggest_float("ccllt_wneg", 0.0, 3.0)
+
+            params["gamma"]    = trial.suggest_float("ccllt_gamma", 1.0, 5.0, log=True)
+            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5, log=True)
+            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.005, 0.5, log=True)
+
+            params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["power", "exp", "None"])
+            if params["wkdecay"] == "power":
+                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.5, 3.0)
+            elif params["wkdecay"] == "exp":
+                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.05, 2.0, log=True)
+            params["wkmin"] = trial.suggest_float("ccllt_wkmin", 1e-4, 0.1, log=True)
+
+            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 2.0)
+            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 2.0)
+            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.5, 5.0, log=True)
+            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 0.9)
+
+            # ── Spécifiques cluster ────────────────────────────────────────────
+            # Pondération de la contribution de chaque cluster
+            params["weighttype"] = trial.suggest_categorical("ccllt_weighttype", ["viol", "distance", "None"])
+
+            # EMA du mu prior local: momentum + regularisation vers le global et intra-classe
+            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.8, 0.999, log=True)
+            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.0, 2.0)
+            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.0, 2.0)
+
+            return params
+
+        # ─────────────────────────────────────────────────────────────────────
         # Si on arrive ici: loss inconnue ou pas câblée explicitement
-        # => on retourne {} pour rester robuste
-        # -------------------------
+        # ─────────────────────────────────────────────────────────────────────
         return {}
         
     def train_optuna(
@@ -5974,7 +6025,7 @@ class Training():
         min_epochs=1,
         n_trials=75,
         warmup=5,
-        enable_pruning=True,
+        enable_pruning=False,
     ):
         """
         Hyperparameter search with Optuna (multi-objective):
@@ -6021,6 +6072,9 @@ class Training():
 
             # Suggest parameters for this loss
             loss_params = self.suggest_loss_params(trial, loss_name)
+            # Round float params to 2 decimal places for readability
+            loss_params = {k: round(v, 2) if isinstance(v, float) else v
+                           for k, v in loss_params.items()}
 
             # Instantiate loss
             try:
@@ -6122,82 +6176,109 @@ class Training():
                         logger.warning(f"Trial {trial.number}, Run {optuna_run} pruned at epoch {epoch} because loss is NaN (train={train_loss}, val={val_loss})")
                         raise optuna.exceptions.TrialPruned()
     
-                    # Compute metrics & Update Patience
-                    try:
-                        # Compare against BEST_SCORES to check for improvement
-                        current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
+                    # Compare against BEST_SCORES to check for improvement
+                    current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
     
-                        if epoch > min_epochs:
-                            if is_better:
-                                BEST_SCORES = current_scores
-                                BEST_VAL_LOSS = val_loss
-                                patience_cnt = 0
-                                current_patience_lr = 0
-                                self.best_epoch = epoch
-                                best_model_state = deepcopy(self.model.state_dict())
-                                best_criterion_params_state = deepcopy(self.criterion_params)
-                            else:
-                                patience_cnt += 1
-                        else:
-                            if epoch == min_epochs:
-                                BEST_SCORES = current_scores
-                                best_model_state = deepcopy(self.model.state_dict())
-                                best_criterion_params_state = deepcopy(self.criterion_params)
-                            patience_cnt += 1
-
-                    except Exception as e:
-                        logger.warning(f"Score calculation failed at epoch {epoch}: {e}")
-                        
-                        # Fallback: loss-based
-                        if epoch > min_epochs:
-                            if val_loss < BEST_VAL_LOSS:
-                                BEST_VAL_LOSS = val_loss
-                                patience_cnt = 0
-                                current_patience_lr = 0
-                                self.best_epoch = epoch
-                                best_model_state = deepcopy(self.model.state_dict())
-                                best_criterion_params_state = deepcopy(self.criterion_params)
-                            else:
-                                patience_cnt += 1
-                        else:
-                            patience_cnt += 1
-    
-                # Pruning: report agg of the CURRENT epoch (not only best) so MedianPruner
-                # can compare intermediate values across trials, but ONLY on the first run of the 5 runs
-                if enable_pruning and optuna_run == 0:
-                    _current_agg = float((current_scores or BEST_SCORES or {}).get('agg', -1e9))
-                    trial.report(_current_agg, step=epoch)
-                    if epoch >= warmup and trial.should_prune():
-                        raise optuna.exceptions.TrialPruned()
-    
-                # Early stopping check and LR decay
-                if patience_cnt >= PATIENCE_CNT and epoch >= min_epochs:
-                    if current_patience_lr >= self.patience_cnt_lr:
-                        logger.info(f"Early stopping at epoch {epoch} (patience {PATIENCE_CNT}, max LR retries reached).")
-                        break
-                    else:
-                        if self.delta_lr > 0:
-                            current_patience_lr += 1
-                            logger.info(f"Patience {PATIENCE_CNT} reached. Retry {current_patience_lr}/{self.patience_cnt_lr}. Decay LR.")
-                            
-                            current_lr = optimizer.param_groups[0]['lr']
-                            new_lr = current_lr * (1 - self.delta_lr)
-                            if new_lr <= 1e-9: new_lr = 1e-9
-                            
-                            for param_group in optimizer.param_groups:
-                                param_group['lr'] = new_lr
-                            
+                    if epoch > min_epochs:
+                        if is_better:
+                            prev_scores = BEST_SCORES
+                            BEST_SCORES = current_scores
+                            BEST_VAL_LOSS = val_loss
                             patience_cnt = 0
+                            current_patience_lr = 0
+                            self.best_epoch = epoch
+                            best_model_state = deepcopy(self.model.state_dict())
+                            best_criterion_params_state = deepcopy(self.criterion_params)
+
+                            ref = getattr(self, 'reference_scores', None)
+                            s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
+
+                            _lines = [
+                                f"[T{trial.number}/R{optuna_run}] Epoch {epoch} [✓ NEW BEST]  agg={current_scores.get('agg', float('nan')):.4f}  val_loss={val_loss:.4f}",
+                                f"  {'metric':<10} {'score':>8} {'u (0-1)':>9} {'ref score':>10} {'prev score':>11} {'prev u':>8}",
+                                f"  {'─'*63}",
+                            ]
+                            if 'iou_score' in current_scores:
+                                _lines.append(f"  {'iou':<10} {current_scores['iou_score']:>8.4f}")
+                            else:
+                                for _k in [1, 2, 3, 4]:
+                                    _s_cur  = current_scores.get(f'score_k{_k}', float('nan'))
+                                    _u_cur  = current_scores.get(f'u_k{_k}',    float('nan'))
+                                    _s_ref  = s_ref_map.get(f'score_k{_k}', float('nan'))
+                                    _s_prev = (prev_scores or {}).get(f'score_k{_k}', float('nan'))
+                                    _u_prev = (prev_scores or {}).get(f'u_k{_k}',    float('nan'))
+                                    _lines.append(f"  {'score_k'+str(_k):<10} {_s_cur:>8.4f} {_u_cur:>9.4f} {_s_ref:>10.4f} {_s_prev:>11.4f} {_u_prev:>8.4f}")
+                                _rc   = current_scores.get('recall',   float('nan'))
+                                _urc  = current_scores.get('u_recall', float('nan'))
+                                _rc_ref = s_ref_map.get('recall', float('nan'))
+                                _rcp  = (prev_scores or {}).get('recall',   float('nan'))
+                                _urcp = (prev_scores or {}).get('u_recall', float('nan'))
+                                _lines.append(f"  {'recall':<10} {_rc:>8.4f} {_urc:>9.4f} {_rc_ref:>10.4f} {_rcp:>11.4f} {_urcp:>8.4f}")
+                                _smc  = current_scores.get('score_min_class',   float('nan'))
+                                _usmc = current_scores.get('u_score_min_class', float('nan'))
+                                _smc_ref = s_ref_map.get('score_min_class', float('nan'))
+                                _smcp = (prev_scores or {}).get('score_min_class',   float('nan'))
+                                _usmcp= (prev_scores or {}).get('u_score_min_class', float('nan'))
+                                _lines.append(f"  {'score_min':<10} {_smc:>8.4f} {_usmc:>9.4f} {_smc_ref:>10.4f} {_smcp:>11.4f} {_usmcp:>8.4f}")
+                                _lines.append(f"  {'─'*63}")
+                                _lines.append(
+                                    f"  {'agg (min)':<10} {'':<8} {current_scores.get('agg', float('nan')):>9.4f}"
+                                    f" {'':<10} {(prev_scores or {}).get('agg', float('nan')):>11.4f}"
+                                )
+                            logger.info('\n'.join(_lines))
                         else:
-                             # No decay defined -> stop
-                             logger.info(f"Early stopping at epoch {epoch} (patience {PATIENCE_CNT}, no delta_lr).")
-                             break
-    
-                if epoch % CHECKPOINT == 0 and verbose:
-                    curr_lr = optimizer.param_groups[0]['lr']
-                    logger.info(f'Epoch {epoch}: Val loss {val_loss:.4f}, Train loss {train_loss:.4f}, Best val loss {BEST_VAL_LOSS:.4f}')
-                    logger.info(f'    LR: {curr_lr:.6f} | Patience: {patience_cnt}/{PATIENCE_CNT} | Retry: {current_patience_lr}/{self.patience_cnt_lr}')
-    
+                            patience_cnt += 1
+                            if epoch % CHECKPOINT == 0:
+                                logger.info(f"[T{trial.number}/R{optuna_run}] Epoch {epoch}  agg={current_scores.get('agg', float('nan')):.4f}"
+                                            f"  patience {patience_cnt}/{PATIENCE_CNT}")
+                    else:
+                        if epoch == min_epochs:
+                            BEST_SCORES = current_scores
+                            best_model_state = deepcopy(self.model.state_dict())
+                            best_criterion_params_state = deepcopy(self.criterion_params)
+                        patience_cnt += 1
+        
+                    # Early stopping and LR decay logic - must run on every epoch
+                    if patience_cnt >= PATIENCE_CNT:
+                        break
+                        # Check if we can reduce LR (have we used all retries?)
+                        # PATIENCE_CNT_LR is the number of allowed reductions/retries
+                        if current_patience_lr >= self.patience_cnt_lr:
+                            logger.info(f'Loss has not increased for {patience_cnt} epochs AND max LR reductions ({self.patience_cnt_lr}) reached.')
+                            logger.info(f'Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
+                            break
+                        else:
+                            # Reduce LR and reset patience_cnt
+                            if self.delta_lr > 0:
+                                current_patience_lr += 1
+                                logger.info(f"Patience {PATIENCE_CNT} reached (Retry {current_patience_lr}/{self.patience_cnt_lr}). Decay LR by factor {self.delta_lr}.")
+
+                                current_lr = optimizer.param_groups[0]['lr']
+                                new_lr = current_lr * (1 - self.delta_lr)
+                                if new_lr <= 1e-9:
+                                    new_lr = 1e-9
+                                    logger.warning("Learning rate reached floor (1e-9).")
+
+                                logger.info(f"Reducing LR from {current_lr:.6f} to {new_lr:.6f}")
+
+                                for param_group in optimizer.param_groups:
+                                    param_group['lr'] = new_lr
+
+                                # Reset patience_cnt to give model time to improve with new LR
+                                patience_cnt = 0
+                            else:
+                                # No delta_lr defined, stop normal
+                                logger.info(f'Loss has not increased for {patience_cnt} epochs. No delta_lr defined.')
+                                break
+
+                    if epoch % CHECKPOINT == 0 and verbose:
+                        curr_lr = optimizer.param_groups[0]['lr']
+                        _cur_agg = (current_scores or {}).get('agg', float('nan'))
+                        _best_agg = (BEST_SCORES or {}).get('agg', float('nan'))
+                        logger.info(f'[T{trial.number}/R{optuna_run}] Ep {epoch}: '
+                                    f'val={val_loss:.4f} train={train_loss:.4f} | '
+                                    f'agg={_cur_agg:.4f} best_agg={_best_agg:.4f} (best_ep={self.best_epoch} LR={curr_lr:.2e} | Patience: {patience_cnt}/{PATIENCE_CNT} | LR-retry: {current_patience_lr}/{self.patience_cnt_lr})')
+
             if BEST_SCORES is not None:
                 # Save run scores mapping to average them identically as update_metrics_as_arrays does
                 for k in [1, 2, 3, 4]:
@@ -6210,6 +6291,15 @@ class Training():
             
             # Keep the best state out of the n_optuna_runs to represent this Trial's best model
             current_agg = BEST_SCORES.get('agg', -1e9) if BEST_SCORES is not None else -1e9
+
+            # Pruning: report agg of the CURRENT epoch (not only best) so MedianPruner
+            # can compare intermediate values across trials, but ONLY on the first run of the 5 runs
+            if enable_pruning and optuna_run == 0:
+                _current_agg = float((current_scores or BEST_SCORES or {}).get('agg', -1e9))
+                trial.report(_current_agg, step=epoch)
+                if epoch >= warmup and trial.should_prune():
+                    raise optuna.exceptions.TrialPruned()
+
             if current_agg > best_run_agg:
                     best_run_agg = current_agg
                     from copy import deepcopy
@@ -6444,7 +6534,6 @@ class Training():
             import traceback
             logger.warning(f"Failed to plot params vs score: {e}\n{traceback.format_exc()}")
 
-
         try:
             from copy import deepcopy
             logger.info("Restoring best model from the selected maximin trial...")
@@ -6489,6 +6578,16 @@ class Training():
                 
         except Exception as e:
             logger.warning(f"Failed to restore best model: {e}")
+            real_loss_params = best_trial.params
+
+        # Ensure the real parameters are captured for JSON saving
+        if 'real_loss_params' not in locals():
+            real_loss_params = best_models_loss_params.get(best_trial.number, best_trial.params)
+
+        with open(os.path.join(self.dir_log, "best_loss_params.json"), "w") as f:
+            json.dump(real_loss_params, f, indent=4)
+
+        logger.info(f"====== BEST OPTUNA LOSS PARAMS ======\n{json.dumps(real_loss_params, indent=4)}")
 
         # Clean memory
         try:
@@ -6950,14 +7049,14 @@ class SplitTraining(Training):
                 pred_val, y_val = model_copy._predict_test_loader(model_copy.val_loader, output_pdf="val")
                 y_val_np = y_val.detach().cpu().numpy()[:, -1]
                 pred_val_np = pred_val.detach().cpu().numpy()
-                metrics_val = evaluate_metrics(y_val_np, pred_val_np, zones=y_val_np[:, graph_id_index], dates=y_val_np[:, date_index])
+                metrics_val = self.scoring.evaluate_metrics(y_val_np, pred_val_np, zones=y_val_np[:, graph_id_index], dates=y_val_np[:, date_index])
                 metrics_combo['iou_val'].append(metrics_val['iou'])
 
                 pred_test, y_test = model_copy._predict_test_loader(model_copy.test_loader, output_pdf="test")
 
                 y_test_np = y_test.detach().cpu().numpy()[:, -1]
                 pred_test_np = pred_test.detach().cpu().numpy()
-                metrics_test = evaluate_metrics(y_test_np, pred_test_np, zones=y_test_np[:, graph_id_index], dates=y_test_np[:, date_index])
+                metrics_test = self.scoring.evaluate_metrics(y_test_np, pred_test_np, zones=y_test_np[:, graph_id_index], dates=y_test_np[:, date_index])
 
                 metrics_combo['iou'].append(metrics_test['iou'])
                 metrics_combo['f1'].append(metrics_test['f1'])
@@ -7126,7 +7225,7 @@ class DualTraining:
             dff[self.target_name] = y[:, -1]
             y = y[:, -1]
 
-            metrics_run = evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+            metrics_run = self.scoring.evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
