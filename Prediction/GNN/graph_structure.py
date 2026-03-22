@@ -970,7 +970,7 @@ class GraphStructure():
 
             if not dfe_df is None:
                 graph_ids = np.unique(mask)
-                graph_ids = graph_ids[(graph_ids > 0) & ~(np.isnan(graph_ids))]
+                graph_ids = graph_ids[(graph_ids >= np.sort(np.unique(mask))[1]) & ~(np.isnan(graph_ids))]
                 graph_ids = np.sort(graph_ids)
                 dfe_df = num_zone2_graph_id_dep6(dfe_df, graph_ids)
                 datacube = self.add_dfe_variable(datacube, dfe_df)

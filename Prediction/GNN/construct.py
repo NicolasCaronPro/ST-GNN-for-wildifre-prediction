@@ -666,7 +666,7 @@ def init(args, dir_output, script):
                                     train_departements=train_departements,
                                     test_departements=test_departements,
                                     scale=scale,
-                                     maxDist=maxDist[scale],
+                                    maxDist=maxDist[scale],
                                     sinister=sinister,
                                     dataset_name=dataset_name,
                                     sinister_encoding=sinister_encoding,
@@ -757,6 +757,8 @@ def init(args, dir_output, script):
                                             resolution,
                                             trainDate,
                                             name_exp)
+        
+        df = df[df['date'].isin(all_train_dates + all_val_dates + all_test_dates)]
         
         save_object(df, 'df_feat_'+prefix+'.pkl', dir_output)
         #save_object(Y, 'Y_'+prefix+'.pkl', dir_output)

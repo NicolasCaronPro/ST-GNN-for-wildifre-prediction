@@ -1329,149 +1329,34 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     y_pred_ez[mask_unknowed_sample] = 0
     iou_dict = calculate_signal_scores(y_pred_ez, y_true, res['nbsinister'].values, res['graph_id'].values, res['saison'].values, res['departement'].values)
 
-    ####################################### Linear Fit Analysis ########################################
+    ####################################### Scoring Fit Plot ########################################
     try:
-        # Prepare data for statsmodels
-        df_stats = res.copy()
-        target_col = target_name.split('-')[0]
-        
-        if target_col == 'timeintervention':
-            target_col = 'time_intervention'
-        
-        pred_col = f'prediction_{target_name}_{horizon}'
-        
-        # Rename for formula
-        df_stats = df_stats.rename(columns={target_col: 'Y', pred_col: 'score', 'graph_id': 'num_zone'})
-        
-        # Ensure types
-        # df_stats['date'] is already in res['date']
-        # df_stats['num_zone'] is already in res['graph_id']
-        
-        # 1. Estimate Linear Delta (with FE)
-        # Y ~ score + C(num_zone) + C(date)
-        
-        #q10, q90 = df_stats["score"].quantile([0.05, 0.95])
-        q10 = np.min(df_stats['score'])
-        q90 = np.max(df_stats['score'])
-        spread = float(q90 - q10)
-        
-        formula = "Y ~ score + C(num_zone) + C(date)"
-        fit = smf.ols(formula, data=df_stats).fit(cov_type="HC1")
-        
-        b = float(fit.params.get("score", np.nan))
-        delta = float(b * spread)
-        
-        metrics['linear_b'] = b
-        metrics['linear_delta'] = delta
-        metrics['linear_q10'] = float(q10)
-        metrics['linear_q90'] = float(q90)
-        
-        logger.info(f"Linear Fit: b={b:.4f}, delta={delta:.4f} (q10={q10:.2f}, q90={q90:.2f})")
-        
-        # 2. Plotting (Simple Linear Fit for visualization)
-        plt.figure(figsize=(10, 6))
-        sns.regplot(
-            data=df_stats, x="score", y="Y",
-            scatter_kws={"alpha": 0.25, "s": 20},
-            line_kws={"color": "red", "linewidth": 2}
-        )
-        
-        # Simple fit for annotation
-        simple_fit = smf.ols("Y ~ score", data=df_stats).fit()
-        b_simple = simple_fit.params.get("score", np.nan)
-        a_simple = simple_fit.params.get("Intercept", np.nan)
-        r2_simple = simple_fit.rsquared
-        
-        plt.title(f"{target_name} - Linear Fit\nY = {a_simple:.3f} + {b_simple:.3f} * score | R2 = {r2_simple:.3f}")
-        plt.xlabel(f"Prediction ({pred_col})")
-        plt.ylabel("Observed nbsinister")
+        if scorer is not None:
+            target_col = target_name.split('-')[0]
+            if target_col == 'timeintervention':
+                target_col = 'time_intervention'
 
-        plot_path = dir_output / f"{name}_linear_fit.png"
-        plt.savefig(plot_path)
-        plt.close()
-        
-        # Prepare data for statsmodels
-        df_stats = res.copy()
-        target_col = target_name.split('-')[0]
+            if target_col in res.columns:
+                y_true_plot = res[target_col].values
+            else:
+                y_true_plot = res[target_name].values
 
-        if target_col == 'timeintervention':
-            target_col = 'time_intervention'
-            
-        pred_col = f'prediction_{target_name}_{horizon}'
-        
-        # Rename for formula
-        df_stats = df_stats.rename(columns={target_col: 'Y', pred_col: 'score', 'graph_id': 'num_zone'})
+            y_pred_plot = res[f'prediction_{target_name}_{horizon}'].values
+            dates_plot = res['date'].values
+            zones_plot = res['graph_id'].values
 
-        # Safety: score bounds (important with splines)
-        df_stats["score"] = pd.to_numeric(df_stats["score"], errors="coerce")
-        df_stats["Y"] = pd.to_numeric(df_stats["Y"], errors="coerce")
-        df_stats = df_stats.dropna(subset=["score", "Y", "num_zone", "date"])
-
-        # If your scores are ordinal 0..4, this prevents patsy knot issues
-        SCORE_LB, SCORE_UB = 0.0, 4.0
-        df_stats["score"] = df_stats["score"].clip(SCORE_LB, SCORE_UB)
-
-        # -----------------------------
-        # 1) Estimate Spline Delta (with FE)
-        # -----------------------------
-        q10, q90 = df_stats["score"].quantile([0.05, 0.95])
-
-        # Spline + fixed effects
-        df_spline = 5
-        formula = (
-            f"Y ~ bs(score, df={df_spline}, degree=3, include_intercept=False, "
-            f"lower_bound={SCORE_LB}, upper_bound={SCORE_UB}) "
-            f"+ C(num_zone) + C(date)"
-        )
-        fit = smf.ols(formula, data=df_stats).fit(cov_type="HC1")
-
-        # Counterfactual predictions for delta
-        df_low = df_stats.copy()
-        df_high = df_stats.copy()
-        df_low["score"] = float(q10)
-        df_high["score"] = float(q90)
-
-        mu_low = float(fit.predict(df_low).mean())
-        mu_high = float(fit.predict(df_high).mean())
-        delta = float(mu_high - mu_low)
-
-        metrics["spline_df"] = df_spline
-        metrics["spline_delta"] = delta
-        metrics["spline_q10"] = float(q10)
-        metrics["spline_q90"] = float(q90)
-
-        logger.info(
-            f"Spline Fit (df={df_spline}): delta={delta:.4f} "
-            f"(q10={q10:.2f}, q90={q90:.2f})"
-        )
-
-        # -----------------------------
-        # 2) Plot spline effect curve (partial dependence style)
-        #    E[Y | score=s] averaged over observed (zone,date)
-        # -----------------------------
-        grid = np.linspace(SCORE_LB, SCORE_UB, 81)
-        template = df_stats[["score", "num_zone", "date"]].copy()
-
-        preds = []
-        for s in grid:
-            tmp = template.copy()
-            tmp["score"] = float(s)
-            preds.append(float(fit.predict(tmp).mean()))
-        preds = np.array(preds)
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(grid, preds, linewidth=2)
-        plt.xlim(SCORE_LB, SCORE_UB)
-        plt.xlabel(f"Prediction ({pred_col})")
-        plt.ylabel(f"E[{target_col}] estimée")
-        plt.title(f"{target_name} - Spline Effect (df={df_spline})")
-
-        plot_path = dir_output / f"{name}_spline_effect.png"
-        plt.savefig(plot_path)
-        plt.close()
-        
+            scorer._plot(
+                ypred=y_pred_plot,
+                ytrue=y_true_plot,
+                dates=dates_plot,
+                zones=zones_plot,
+                title=f"{name} - Scoring Fit",
+                dir_output=dir_output / name,
+            )
+        else:
+            logger.info("No scorer provided, skipping scoring fit plot.")
     except Exception as e:
-        logger.error(f"Failed to run fit analysis: {e}")
+        logger.error(f"Failed to run scoring fit plot: {e}")
 
     ########################################## Gte normalized score ####################################
     # Sauvegarder toutes les métriques calculées dans le dictionnaire metrics
@@ -1957,6 +1842,9 @@ def test_dl_model(cfg,
 
         model_dir = dir_train / name_exp / f'check_{scaling}' / prefix_train / read_name
         model = read_object(f'{read_name}.pkl', model_dir)
+
+        print(model.df_train.departement.unique())
+        print(model.df_train[model.df_train['departement'] == 25].weight.unique())
         
         if model is None:
             logger.info(f'{model_dir}/{read_name}.pkl not found')

@@ -2238,7 +2238,7 @@ class Training():
             
         return inputs_horizon
     
-    def compute_single_loss(self, out, tar, wei, clusters_ids=None, tolong=False, areas=None, criterion=None):
+    def compute_single_loss(self, out, tar, wei, clusters_ids=None, tolong=False, areas=None, criterion=None, departement_ids=None):
         if self.task_type == 'regression':
             tar = tar.view(out.shape[0])
             wei = wei.view(out.shape[0])
@@ -2267,6 +2267,9 @@ class Training():
         
         if areas is not None:
             additionnal_params['areas'] = areas
+
+        if departement_ids is not None:
+            additionnal_params['departement_ids'] = departement_ids
         
         try:
             additionnal_params['sample_weight'] = wei
@@ -2277,7 +2280,9 @@ class Training():
             return criterion(out, tar)
 
     def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
-
+        
+        departement_ids = None
+        
         if 'clusters_ids' in required_params(criterion.forward):
             if hasattr(criterion, 'id') and criterion.id is not None:
                 if criterion.id == -1 :
@@ -2291,13 +2296,16 @@ class Training():
         else:
             clusters_ids = None
 
+        if 'departement_ids' in required_params(criterion.forward):
+            departement_ids = label[:, departement_index, -1]
+
         if 'areas' in required_params(criterion.forward):
             areas = label[:, area_index, -1]
-        
+
         else:
             areas = None
             
-        base_loss = self.compute_single_loss(output, target, weights, clusters_ids, tolong, areas, criterion)
+        base_loss = self.compute_single_loss(output, target, weights, clusters_ids, tolong, areas, criterion, departement_ids=departement_ids)
         
         if 'area' in self.loss and False: # Calculate area loss (specify loss-area)
             area_mask = label[:, graph_id_index, -1]
@@ -2877,14 +2885,17 @@ class Training():
                 print(f'loss is does not required grad {loss}')
                 continue
             
-            if optimizer is not None:
-                optimizer.zero_grad()
-                try:
-                    loss.backward()
+            #if optimizer is not None:
+            #    optimizer.zero_grad()
+            #    try:
+            #        loss.backward()
                     # Clip gradients to prevent exploding gradients causing NaN weights
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                except:
-                    continue
+            #        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+            #    except:
+            #        continue
+
+            optimizer.zero_grad()
+            loss.backward()
             
             if 'res_loss' in locals():
                 res_loss += loss.item()
@@ -3524,7 +3535,7 @@ class Training():
         elif 'fl' in self.loss: # Use focal loss
             loss_params = {'alpha' : self.get_class_freq(self.df_train)}
             
-        if 'nbsinister' in self.target_name and 'cllt' in self.loss:
+        if 'nbsinister' in self.target_name and 'ccllt' in self.loss:
             # loss_params.update({
             #     'beta': 3.6167258754794345, 't': 0.38808363994393985, 'wmed': 2.1181338709061728, 
             #     'wmin': 0.3090944162785197, 'wneg': 0.010696671944419034, 'gamma': 3.858781740471833, 
@@ -3539,7 +3550,18 @@ class Training():
                 'taugate': 0.05, 'gatetemp': 0.11, 'wkdecay': 'power',
                 'wkpower': 2.06, 'wkmin': 0.02, 'wfocal': 1.76, 
                 'wmu0': 1.94, 'fgamma': 1.03, 'falpha': 0.89, 
-                'weighttype': 'None', 'mumomentum': 0.84, 'mulambdag': 0.18, 
+                'mumomentum': 0.84, 'mulambdag': 0.18, 
+                'mulambdac': 1.61
+            })
+
+        elif 'ressource' in self.target_name and 'ccllt' in self.loss:
+            loss_params.update({
+                'beta': 2.33, 't': 0.0, 'wmed': 0.0, 
+                'wmin': 0.0, 'wneg': 1.01, 'gamma': 5.0, 
+                'taugate': 0.05, 'gatetemp': 0.11, 'wkdecay': 'power',
+                'wkpower': 2.06, 'wkmin': 0.02, 'wfocal': 1.76, 
+                'wmu0': 1.94, 'fgamma': 1.03, 'falpha': 0.89, 
+                'mumomentum': 0.84, 'mulambdag': 0.18, 
                 'mulambdac': 1.61
             })
 
@@ -3707,7 +3729,7 @@ class Training():
                 if patience_cnt >= PATIENCE_CNT:
                     # Check if we can reduce LR (have we used all retries?)
                     # PATIENCE_CNT_LR is the number of allowed reductions/retries
-                    if current_patience_lr >= self.patience_cnt_lr:
+                    if current_patience_lr >= self.patience_cnt_lr or self.patience_cnt_lr == 0:
                         logger.info(f'Loss has not increased for {patience_cnt} epochs AND max LR reductions ({self.patience_cnt_lr}) reached.')
                         logger.info(f'Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
                         save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
@@ -3798,7 +3820,8 @@ class Training():
                 f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
                 iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-                print(f'Horizon {H} -> Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+                _agg_val = BEST_SCORES.get('agg', float('nan')) if BEST_SCORES else float('nan')
+                print(f'Horizon {H} -> Val -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou}, f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}, agg {_agg_val}')
 
                 med_deps = [4, 5, 6, 7, 11, 13, 26, 30, 34, 48, 66, 83, 84]
                 for gid in np.unique(y[:, graph_id_index]):
@@ -3833,7 +3856,8 @@ class Training():
             f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
             iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
-            print(f'Horizon {H} -> Test {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}')
+            _agg_test = BEST_SCORES.get('agg', float('nan')) if BEST_SCORES else float('nan')
+            print(f'Horizon {H} -> Test {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}, agg {_agg_test}')
 
             # Test plots per graph_id (Mediterranean only)
             med_deps = [4, 5, 6, 7, 11, 13, 26, 30, 34, 48, 66, 83, 84]
@@ -4356,7 +4380,7 @@ class Training():
             doSearch = True
             if data_log is not None and 'test_percentage' in data_log:
                 self.metrics = data_log
-                scores = np.asarray(self.metrics['test_percentage'])
+                test_percentage = np.asarray(self.metrics['test_percentage'])
                     
                 # Find the first test_percentage value missing from data_log.
                 # If all values are present → no need to search further.
@@ -4380,7 +4404,10 @@ class Training():
             tolerance = 0.03
             
             if doSearch:
-                last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['iou_val'])
+                if start_test != 0:
+                    last_keys = test_percentage[start_test - 1]
+
+                last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['mean_u_val'])
                 y_ori = df_train[self.target_name].values
                 for i in range(start_test, test_percentage.shape[0]):
                     tp = round(test_percentage[i], 2)
@@ -4557,6 +4584,11 @@ class Training():
                     # ── Per-tp score summary ─────────────────────────────────────────────
                     # Compute mean_u for this tp using the same shared helper logic
                     def _mean_u_agg(m_dict, suffix='_val'):
+                        #if getattr(self, 'loss', '') == 'bceloss':
+                        #if True:
+                        #    iou_vals = np.atleast_1d(m_dict.get(f'iou{suffix}', [0.0]))
+                        #    return float(np.nanmean(iou_vals)) if len(iou_vals) else 0.0
+                            
                         # Build a dictionary looking like raw metric output
                         mapped_dict = {}
                         for k in [1, 2, 3, 4]:
@@ -4579,6 +4611,9 @@ class Training():
 
                     mu_val  = _mean_u_agg(self.metrics[tp], '_val')
                     mu_test = _mean_u_agg(self.metrics[tp], '_test')
+
+                    self.metrics[tp]['mean_u_val'] = mu_val
+                    self.metrics[tp]['mean_u_test'] = mu_test
 
                     def _fmt_score(m_dict, key):
                         vals = np.atleast_1d(m_dict.get(key, [float('nan')]))
@@ -4608,10 +4643,11 @@ class Training():
                     # CHANGED: We now want to scan ALL candidates for Rank-Based Selection. 
                     # So we update last_score for logging but DO NOT BREAK early.
                     
-                    tolerance = 0.0
                     if current_agg >= last_score - tolerance:
-                        last_score = current_agg
+                        if current_agg > last_score:
+                            last_score = current_agg
                     else:
+                        break
                         print(f'Last score {last_score} current score {current_agg} (Continuing search for Rank Selection)')
                         # break  <-- COMMENTED OUT TO TEST ALL CANDIDATES
             
@@ -4642,10 +4678,14 @@ class Training():
                 sk_smc = float(np.nanmean(smc_vals)) if len(smc_vals) else 0.0
                 mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
 
+                #if getattr(self, 'loss', '') == 'bceloss':
+                #    iou_vals = np.atleast_1d(metric_dict.get('iou_val', [0.0]))
+                #    mean_u_per_tp[tp] = float(np.nanmean(iou_vals)) if len(iou_vals) else 0.0
+                #else:
                 agg, u_vals = self._compute_geometric_agg(mapped_dict)
-
                 # Consistent with early stopping behavior for the selection criterion:
                 mean_u_per_tp[tp] = float(agg)
+                
                 tp_candidates.append(tp)
 
             if not tp_candidates:
@@ -4664,7 +4704,6 @@ class Training():
                 logger.info("--- Reference-Normalised Selection Results ---")
                 for tp in sorted(tp_candidates):
                     logger.info(f"tp={tp}: mean_u={mean_u_per_tp[tp]:.4f}")
-
 
             logger.info(f'Best tp {best_tp} (Rank-Based)')
             self.metrics['iou_score'] = iou_scores # Keep legacy key name or update? Let's keep data but variable name is misleading. It's actually score history list but variable iou_scores was empty anyway here
@@ -4872,7 +4911,9 @@ class Training():
                         output = criterion.transform(**params)
                         
                 if hasattr(criterion, 'score_to_class'):
-                    output = criterion.score_to_class(output)
+                    clusters_ids = orilabels[:, criterion.id].long()
+                    departement_ids = orilabels[:, departement_index].long()
+                    output = criterion.score_to_class(output, clusters_ids, departement_ids)
                         
                 if prediction_type == 'Class':
                     
@@ -4922,7 +4963,7 @@ class Training():
         self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=5):
 
         if self.loss_param_search:
             self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
@@ -5329,6 +5370,8 @@ class Training():
         self.model = deepcopy(model)
 
     def get_loss(self, loss_name, loss_params):
+        if 'ccllt' in loss_name:
+            loss_params['ndepartements'] = self.udepts.shape[0]
         loss_params.update({'num_classes' : 5})
         return get_loss_function(loss_name, **loss_params)
 
@@ -6180,7 +6223,7 @@ class Training():
                     current_scores, is_better, rank_sum = self.calculate_val_scores_and_compare(BEST_SCORES)
     
                     if epoch > min_epochs:
-                        if is_better:
+                        if val_loss < BEST_VAL_LOSS: # Early stopping calculation on loss and not original score
                             prev_scores = BEST_SCORES
                             BEST_SCORES = current_scores
                             BEST_VAL_LOSS = val_loss
@@ -6194,7 +6237,7 @@ class Training():
                             s_ref_map = (ref.get('best_scores') or ref.get('ref_scores', {})) if ref is not None else {}
 
                             _lines = [
-                                f"[T{trial.number}/R{optuna_run}] Epoch {epoch} [✓ NEW BEST]  agg={current_scores.get('agg', float('nan')):.4f}  val_loss={val_loss:.4f}",
+                                f"[T{trial.number}/R{optuna_run}] Epoch {epoch} [✓ NEW BEST LOSS]  agg={current_scores.get('agg', float('nan')):.4f}  val_loss={val_loss:.4f}",
                                 f"  {'metric':<10} {'score':>8} {'u (0-1)':>9} {'ref score':>10} {'prev score':>11} {'prev u':>8}",
                                 f"  {'─'*63}",
                             ]

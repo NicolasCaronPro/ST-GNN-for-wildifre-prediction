@@ -235,8 +235,12 @@ def defines_train_dates(cfg):
     def _expand_years(years):
         dates = []
         for y in years:
-            start = f"{y}-01-01"
-            end = f"{y}-12-31"
+            if "summer" in cfg.name:
+                start = f"{y}-06-01"
+                end = f"{y}-09-30"
+            else:
+                start = f"{y}-01-01"
+                end = f"{y}-12-31"
             if y == 2017:
                 start = "2017-06-12"
             dates += find_dates_between(start, end)
@@ -247,7 +251,6 @@ def defines_train_dates(cfg):
     all_test_dates = _expand_years(cfg.test_years)
 
     return all_train_dates, all_val_dates, all_test_dates
-
 
 def defines_train_dates_from_exp(expe):
     """Backward compatible behaviour based on experiment name."""
@@ -294,12 +297,10 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-
 allDates = find_dates_between("2017-06-12", "2025-01-01")
-allDates = find_dates_between('2015-01-01', '2025-12-31')
+#allDates = find_dates_between('2015-01-01', '2025-12-31')
 
 years = list(np.unique([d.split("-")[0] for d in allDates]))
-
 
 def save_object(obj, filename: str, path: Path):
     check_and_create_path(path)

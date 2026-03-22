@@ -25,6 +25,10 @@ class ModelCNN(SplitTraining):
         df_train = df_train[~df_train[self.target_name].isna()]
         df_val = df_val[~df_val[self.target_name].isna()]
         df_test = df_test[~df_test[self.target_name].isna()]
+
+        depts = np.union1d(df_train['departement'].unique(), df_val['departement'].unique())
+        depts = np.union1d(depts, df_test['departement'].unique())
+        self.udepts = np.unique(depts)
         
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
@@ -181,6 +185,11 @@ class ModelGNN(SplitTraining):
         #df_test = df_test[~df_test[self.target_name].isna()]
         
         self.graph = graph
+
+        depts = np.union1d(df_train['departement'].unique(), df_val['departement'].unique())
+        depts = np.union1d(depts, df_test['departement'].unique())
+        self.udepts = np.unique(depts)
+        
         if self.mesh and self.graph_mesh is None:
             
             df = pd.concat((df_train, df_val, df_test))
@@ -695,6 +704,10 @@ class Model_Torch(SplitTraining):
             nbsinister_col=_nbsin_col,
         )
         # ───────────────────────────────────────────────────────────────────
+
+        depts = np.union1d(df_train['departement'].unique(), df_val['departement'].unique())
+        depts = np.union1d(depts, df_test['departement'].unique())
+        self.udepts = np.unique(depts)
 
         self.graph = graph
         
