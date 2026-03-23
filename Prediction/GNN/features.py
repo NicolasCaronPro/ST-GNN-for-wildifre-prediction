@@ -1712,15 +1712,45 @@ def get_sub_nodes_feature_with_geodataframe(
 
         if "foret_encoder" in features:
             save_value_with_encoding(geo["forest_landcover"].values, "foret_encoder", index, maskNode, encoder_foret)
+            save_value_with_encoding(geo["forest_landcover"].values, "foret_encoder_BA", index, maskNode, encoder_ba_foret)
+            save_value_with_encoding(geo["forest_landcover"].values, "foret_encoder_T", index, maskNode, encoder_T_foret)
+            save_value_with_encoding(geo["forest_landcover"].values, "foret_encoder_R", index, maskNode, encoder_R_foret)
+
+        if "highway_encoder" in features:
+            save_value_with_encoding(geo["highway_landcover"].values, "highway_encoder", index, maskNode, encoder_osmnx)
+            save_value_with_encoding(geo["highway_landcover"].values, "highway_encoder_BA", index, maskNode, encoder_ba_osmnx)
+            save_value_with_encoding(geo["highway_landcover"].values, "highway_encoder_T", index, maskNode, encoder_T_osmnx)
+            save_value_with_encoding(geo["highway_landcover"].values, "highway_encoder_R", index, maskNode, encoder_R_osmnx)
+
+        if "argile_encoder" in features:
+            save_value_with_encoding(geo["argile"].values, "argile_encoder", index, maskNode, encoder_argile)
+            save_value_with_encoding(geo["argile"].values, "argile_encoder_BA", index, maskNode, encoder_ba_argile)
+            save_value_with_encoding(geo["argile"].values, "argile_encoder_T", index, maskNode, encoder_T_argile)
+            save_value_with_encoding(geo["argile"].values, "argile_encoder_R", index, maskNode, encoder_R_argile)
+
+        if "cosia_encoder" in features:
+            save_value_with_encoding(geo["cosia_landcover"].values, "cosia_encoder", index, maskNode, encoder_cosia)
+            save_value_with_encoding(geo["cosia_landcover"].values, "cosia_encoder_BA", index, maskNode, encoder_ba_cosia)
+            save_value_with_encoding(geo["cosia_landcover"].values, "cosia_encoder_T", index, maskNode, encoder_T_cosia)
+            save_value_with_encoding(geo["cosia_landcover"].values, "cosia_encoder_R", index, maskNode, encoder_R_cosia)
 
         if "corine_encoder" in features:
             save_value_with_encoding(geo["corine_landcover"].values, "corine_encoder", index, maskNode, encoder_corine)
+            save_value_with_encoding(geo["corine_landcover"].values, "corine_encoder_BA", index, maskNode, encoder_ba_corine)
+            save_value_with_encoding(geo["corine_landcover"].values, "corine_encoder_T", index, maskNode, encoder_T_corine)
+            save_value_with_encoding(geo["corine_landcover"].values, "corine_encoder_R", index, maskNode, encoder_R_corine)
 
         if "bdroute_encoder" in features:
             save_value_with_encoding(geo["route_landcover"].values, "bdroute_encoder", index, maskNode, encoder_bdroute)
+            save_value_with_encoding(geo["route_landcover"].values, "bdroute_encoder_BA", index, maskNode, encoder_ba_bdroute)
+            save_value_with_encoding(geo["route_landcover"].values, "bdroute_encoder_T", index, maskNode, encoder_T_bdroute)
+            save_value_with_encoding(geo["route_landcover"].values, "bdroute_encoder_R", index, maskNode, encoder_R_bdroute)
 
         if "id_encoder" in features:
             save_value_with_encoding(geo["id"].values, "id_encoder", index, maskNode, encoder_id)
+            save_value_with_encoding(geo["id"].values, "id_encoder_BA", index, maskNode, encoder_ba_id)
+            save_value_with_encoding(geo["id"].values, "id_encoder_T", index, maskNode, encoder_T_id)
+            save_value_with_encoding(geo["id"].values, "id_encoder_R", index, maskNode, encoder_R_id)
 
     LOGGER.info("Sentinel Dynamic World")
     for node in subNode:
@@ -1808,10 +1838,14 @@ def get_sub_nodes_feature_with_geodataframe(
         ugraph = np.unique(nodeDepartement[:, graph_id_index])
         for graphid in ugraph:
             index = np.argwhere(subNode[:, graph_id_index] == graphid)
-            X[index, features_name.index("cluster_encoder")] = encoder_cluster.transform(
-                [graph.node_cluster[graphid]]
-            ).values[0]
-            # X[index, features_name.index('cluster_encoder')] = 0
+            val = encoder_cluster.transform([graph.node_cluster[graphid]]).values[0]
+            X[index, features_name.index("cluster_encoder")] = val
+            if "cluster_encoder_BA" in features_name:
+                X[index, features_name.index("cluster_encoder_BA")] = val
+            if "cluster_encoder_T" in features_name:
+                X[index, features_name.index("cluster_encoder_T")] = val
+            if "cluster_encoder_R" in features_name:
+                X[index, features_name.index("cluster_encoder_R")] = val
 
     return X, features_name
 
