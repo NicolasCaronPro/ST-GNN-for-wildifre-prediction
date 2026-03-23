@@ -7031,7 +7031,7 @@ class SplitTraining(Training):
 
         Parameters
         ----------
-        graph : dgl.DGLGraph
+        graph : "Any"
             Graph used for training.
         df_train, df_val, df_test : pandas.DataFrame
             Datasets containing a ``self.federated_cluster`` column.

@@ -28,7 +28,13 @@ from GNN.tools import (
 from GNN.config import graph_id_index, departement_index
 from sklearn.metrics import f1_score, jaccard_score
 
-import dgl
+try:
+    try:
+        import dgl
+    except ImportError:
+        pass
+except ImportError:
+    pass
 
 from GNN.graph_builder import *
 from GNN.tools import check_and_create_path, save_object, read_object
@@ -4456,7 +4462,7 @@ class SplitTraining(Training):
 
         Parameters
         ----------
-        graph : dgl.DGLGraph
+        graph : "Any"
             Graph used for training.
         df_train, df_val, df_test : pandas.DataFrame
             Datasets containing a ``self.federated_cluster`` column.

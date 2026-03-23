@@ -5,7 +5,6 @@ import torch
 import numpy as np
 import logging
 import gzip
-from dgl import DGLGraph
 
 from torch import Tensor
 from sklearn.neighbors import NearestNeighbors
@@ -13,9 +12,21 @@ from sklearn.neighbors import NearestNeighbors
 from typing import List
 import numpy as np
 import torch
-import dgl
+try:
+    try:
+        import dgl
+    except ImportError:
+        pass
+except ImportError:
+    pass
 from torch import Tensor, testing
-from dgl.convert import heterograph
+try:
+    try:
+        from dgl.convert import heterograph
+    except ImportError:
+        pass
+except ImportError:
+    pass
 import math
 
 def get_edge_len(edge_src: Tensor, edge_dst: Tensor, axis: int = 1):
@@ -63,7 +74,7 @@ def create_graph(
     to_bidirected: bool = True,
     add_self_loop: bool = False,
     dtype: torch.dtype = torch.int32,
-) -> dgl.DGLGraph:
+) -> "Any":
     """
     Creates a DGL graph from an adj matrix in COO format.
 
@@ -82,7 +93,7 @@ def create_graph(
 
     Returns
     -------
-    DGLGraph
+    "Any"
         The dgl Graph.
     """
     graph = dgl.graph((src, dst), idtype=dtype)
@@ -95,7 +106,7 @@ def create_graph(
 
 def create_heterograph(
     src: List, dst: List, labels: str, dtype: torch.dtype = torch.int32
-) -> dgl.DGLGraph:
+) -> "Any":
     """Creates a heterogeneous DGL graph from an adj matrix in COO format.
 
     Parameters
@@ -111,7 +122,7 @@ def create_heterograph(
 
     Returns
     -------
-    DGLGraph
+    "Any"
         The dgl Graph.
     """
     graph = heterograph({labels: ("coo", (src, dst))}, idtype=dtype)
@@ -119,13 +130,13 @@ def create_heterograph(
 
 
 def add_edge_features(
-    graph: dgl.DGLGraph, pos: Tensor, normalize: bool = True
-) -> dgl.DGLGraph:
+    graph: "Any", pos: Tensor, normalize: bool = True
+) -> "Any":
     """Adds edge features to the graph.
 
     Parameters
     ----------
-    graph : DGLGraph
+    graph : "Any"
         The graph to add edge features to.
     pos : Tensor
         The node positions.
@@ -134,7 +145,7 @@ def add_edge_features(
 
     Returns
     -------
-    DGLGraph
+    "Any"
         The graph with edge features.
     """
 
@@ -190,20 +201,20 @@ def add_edge_features(
         graph.edata["x"] = torch.cat((disp, disp_norm), dim=-1)
     return graph
 
-def add_node_features(graph: dgl.DGLGraph, pos: Tensor) -> dgl.DGLGraph:
+def add_node_features(graph: "Any", pos: Tensor) -> "Any":
     """Adds cosine of latitude, sine and cosine of longitude as the node features
     to the graph.
 
     Parameters
     ----------
-    graph : DGLGraph
+    graph : "Any"
         The graph to add node features to.
     pos : Tensor
         The node positions.
 
     Returns
     -------
-    graph : DGLGraph
+    graph : "Any"
         The graph with node features.
     """
     latlon = xyz2latlon(pos)
@@ -488,7 +499,7 @@ class GraphBuilder:
         self._g2m_src = None  # grid indices (numpy int64)
         self._g2m_dst = None  # mesh indices (numpy int64)
 
-    def create_mesh_graph(self, last_graph=None) -> DGLGraph:
+    def create_mesh_graph(self, last_graph=None) -> "Any":
         if self.doPrint:
             print("Creating bi-directional mesh graph")
 
@@ -526,7 +537,7 @@ class GraphBuilder:
         
         return mesh_graph
 
-    def create_g2m_graph_old(self, last_graph=None, mesh_graph=None) -> DGLGraph:
+    def create_g2m_graph_old(self, last_graph=None, mesh_graph=None) -> "Any":
         if self.doPrint:
             print("Creating grid2mesh bipartite graph")
 
@@ -603,7 +614,7 @@ class GraphBuilder:
 
         return (g2m_graph, mesh_graph) if mesh_graph is not None else g2m_graph
 
-    def create_m2g_graph_old(self, last_graph=None) -> DGLGraph:
+    def create_m2g_graph_old(self, last_graph=None) -> "Any":
         if self.doPrint:
             print("Creating mesh2grid bipartite graph")
 
@@ -711,7 +722,7 @@ class GraphBuilder:
 
         return src, dst, node_max, cartesian_grid
 
-    def create_g2m_graph(self, last_graph=None, mesh_graph=None) -> DGLGraph:
+    def create_g2m_graph(self, last_graph=None, mesh_graph=None) -> "Any":
         if self.doPrint:
             print("Creating grid2mesh bipartite graph (face-based, 3 edges/grid)")
 
@@ -752,7 +763,7 @@ class GraphBuilder:
 
         return (g2m_graph, mesh_graph) if mesh_graph is not None else g2m_graph
 
-    def create_m2g_graph(self, last_graph=None) -> DGLGraph:
+    def create_m2g_graph(self, last_graph=None) -> "Any":
         if self.doPrint:
             print("Creating mesh2grid bipartite graph (derived from g2m edges)")
 

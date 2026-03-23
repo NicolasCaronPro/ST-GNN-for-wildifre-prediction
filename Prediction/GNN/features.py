@@ -1493,13 +1493,53 @@ def get_sub_nodes_feature_with_geodataframe(
     X[:, : subNode.shape[1]] = subNode
     dir_encoder = path / "Encoder"
 
+    encoder_landcover = read_object(f'encoder_landcover_{name_expe}.pkl', dir_encoder)
+    encoder_osmnx = read_object(f'encoder_osmnx_{name_expe}.pkl', dir_encoder)
     encoder_foret = read_object(f'encoder_foret_{name_expe}.pkl', dir_encoder)
+    encoder_argile = read_object(f'encoder_argile_{name_expe}.pkl', dir_encoder)
     encoder_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
+    encoder_cosia = read_object(f'encoder_cosia_{name_expe}.pkl', dir_encoder)
     encoder_corine = read_object(f'encoder_corine_{name_expe}.pkl', dir_encoder)
     encoder_bdroute = read_object(f'encoder_route_{name_expe}.pkl', dir_encoder)
     encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
     encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
     encoder_geo = read_object(f'encoder_geo_{name_expe}.pkl', dir_encoder)
+
+    encoder_ba_landcover = read_object(f'encoder_landcover_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_osmnx = read_object(f'encoder_osmnx_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_foret = read_object(f'encoder_foret_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_argile = read_object(f'encoder_argile_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_cosia = read_object(f'encoder_cosia_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_corine = read_object(f'encoder_corine_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_bdroute = read_object(f'encoder_route_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_calendar = read_object(f'encoder_calendar_{name_expe}_BA.pkl', dir_encoder)
+    encoder_ba_geo = read_object(f'encoder_geo_{name_expe}_BA.pkl', dir_encoder)
+
+    encoder_T_landcover = read_object(f'encoder_landcover_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_osmnx = read_object(f'encoder_osmnx_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_foret = read_object(f'encoder_foret_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_argile = read_object(f'encoder_argile_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_cosia = read_object(f'encoder_cosia_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_corine = read_object(f'encoder_corine_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_bdroute = read_object(f'encoder_route_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_calendar = read_object(f'encoder_calendar_{name_expe}_T.pkl', dir_encoder)
+    encoder_T_geo = read_object(f'encoder_geo_{name_expe}_T.pkl', dir_encoder)
+
+    encoder_R_landcover = read_object(f'encoder_landcover_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_osmnx = read_object(f'encoder_osmnx_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_foret = read_object(f'encoder_foret_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_argile = read_object(f'encoder_argile_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_cosia = read_object(f'encoder_cosia_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_corine = read_object(f'encoder_corine_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_bdroute = read_object(f'encoder_route_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_calendar = read_object(f'encoder_calendar_{name_expe}_R.pkl', dir_encoder)
+    encoder_R_geo = read_object(f'encoder_geo_{name_expe}_R.pkl', dir_encoder)
 
     size_calendar = len(calendar_variables)
 
@@ -1530,34 +1570,37 @@ def get_sub_nodes_feature_with_geodataframe(
     if "Calendar" in features:
         unDate = np.unique(subNode[:, date_index]).astype(int)
         band = calendar_variables[0]
+        encoders_dict = {
+            "": encoder_calendar,
+            "_T": encoder_T_calendar,
+            "_R": encoder_R_calendar,
+            "_ba": encoder_ba_calendar,
+        }
         for unDate in unDate:
             date = dates[unDate]
             ddate = dt.datetime.strptime(date, "%Y-%m-%d")
             index = np.argwhere(subNode[:, date_index] == unDate)
-            X[index, features_name.index(band)] = int(date.split("-")[1])  # month
-            X[index, features_name.index(band) + 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday)  # dayofyear
-            X[index, features_name.index(band) + 2] = ddate.weekday()  # dayofweek
-            X[index, features_name.index(band) + 3] = ddate.weekday() >= 5  # isweekend
-            X[index, features_name.index(band) + 4] = pendant_couvrefeux(ddate)  # couvrefeux
-            X[index, features_name.index(band) + 5] = (
-                1 if (
-                        dt.datetime(2020, 3, 17, 12) <= ddate <= dt.datetime(2020, 5, 11)
-                        or dt.datetime(2020, 10, 30) <= ddate <= dt.datetime(2020, 12, 15)
-                    ) else 0
-            )  # confinement
-            X[index, features_name.index(band) + 6] = (
+            
+            stop_calendar = 9
+            raw_vals = np.zeros((1, stop_calendar))
+            raw_vals[0, 0] = int(date.split("-")[1])  # month
+            raw_vals[0, 1] = ajuster_jour_annee(ddate, ddate.timetuple().tm_yday)  # dayofyear
+            raw_vals[0, 2] = ddate.weekday()  # dayofweek
+            raw_vals[0, 3] = ddate.weekday() >= 5  # isweekend
+            # couvrefeux and confinement are omitted to match xarray implementation
+            raw_vals[0, 4] = (
                 1 if convertdate.islamic.from_gregorian(ddate.year, ddate.month, ddate.day)[1] == 9 else 0
             )  # ramadan
-            X[index, features_name.index(band) + 7] = 1 if ddate in jours_feries else 0  # bankHolidays
-            X[index, features_name.index(band) + 8] = 1 if ddate in veille_jours_feries else 0  # bankHolidaysEve
-            X[index, features_name.index(band) + 9] = (
+            raw_vals[0, 5] = 1 if ddate in jours_feries else 0  # bankHolidays
+            raw_vals[0, 6] = 1 if ddate in veille_jours_feries else 0  # bankHolidaysEve
+            raw_vals[0, 7] = (
                 1
                 if vacances_scolaire.is_holiday_for_zone(
                     ddate.date(), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)
                 )
                 else 0
             )  # holidays
-            X[index, features_name.index(band) + 10] = (
+            raw_vals[0, 8] = (
                 1
                 if vacances_scolaire.is_holiday_for_zone(
                     ddate.date() + dt.timedelta(days=1), get_academic_zone(ACADEMIES[str(name2int[departement])], ddate)
@@ -1571,38 +1614,30 @@ def get_sub_nodes_feature_with_geodataframe(
                 else 0
             )  # holidaysBorder
 
-            stop_calendar = 11
+            for suffix, encoder in encoders_dict.items():
+                try:
+                    start_idx = features_name.index(f"{band}{suffix}")
+                except ValueError:
+                    continue
 
-            X[index, features_name.index(band) : features_name.index(band) + stop_calendar] = np.round(
-                encoder_calendar.transform(
-                    np.moveaxis(
-                        X[index, features_name.index(band) : features_name.index(band) + stop_calendar], 1, 2
-                    ).reshape(-1, stop_calendar)
-                ).values.reshape(-1, 1, stop_calendar),
-                3,
-            )
+                encoded_vals = encoder.transform(raw_vals).values
+                encoded_vals = np.round(np.nan_to_num(encoded_vals, nan=0.0), 3)
 
-            for ir in range(stop_calendar, size_calendar):
-                var_ir = calendar_variables[ir]
-                if var_ir == "calendar_mean":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.mean(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_max":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.max(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_min":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.min(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                elif var_ir == "calendar_sum":
-                    X[index, features_name.index(band) + ir] = round(
-                        np.sum(X[index, features_name.index(band) : features_name.index(band) + stop_calendar]), 3
-                    )
-                else:
-                    LOGGER.info(f"Unknow operation {var_ir}")
-                    exit(1)
+                X[index, start_idx : start_idx + stop_calendar] = encoded_vals.reshape(1, 1, stop_calendar)
+
+                for ir in range(stop_calendar, size_calendar):
+                    var_ir = calendar_variables[ir]
+                    if var_ir == "calendar_mean":
+                        X[index, start_idx + ir] = round(np.mean(encoded_vals), 3)
+                    elif var_ir == "calendar_max":
+                        X[index, start_idx + ir] = round(np.max(encoded_vals), 3)
+                    elif var_ir == "calendar_min":
+                        X[index, start_idx + ir] = round(np.min(encoded_vals), 3)
+                    elif var_ir == "calendar_sum":
+                        X[index, start_idx + ir] = round(np.sum(encoded_vals), 3)
+                    else:
+                        LOGGER.info(f"Unknow operation {var_ir}")
+                        exit(1)
     ### Geo spatial
     LOGGER.info("Geo")
     if "Geo" in features:
