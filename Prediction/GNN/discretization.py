@@ -1192,17 +1192,21 @@ class ScalerClassRisk:
 
         if self.class_risk is not None:
             predictions = np.zeros_like(ids, dtype=int)
-        else:    
+        else:
             predictions = np.zeros_like(ids, dtype=np.float32)
 
         for unique_id, model in self.models_by_id.items():
-            if unique_id not in np.unique(ids):
-                continue
-
-            mask = ids == unique_id
+            try:
+                if not np.any(np.isclose(unique_id, np.unique(ids), rtol=1e-05, atol=1e-08)):
+                    continue
+                mask = np.isclose(ids, unique_id, rtol=1e-05, atol=1e-08)
+            except (TypeError, ValueError, NotImplementedError):
+                if unique_id not in np.unique(ids):
+                    continue
+                mask = ids == unique_id
             scaler = model['scaler']
             class_risk = model['class_risk']
-
+            
             # Scale data if scaler exists
             if scaler is not None:
                 X_scaled = scaler.transform(X[mask].reshape(-1,1))
@@ -1217,7 +1221,7 @@ class ScalerClassRisk:
             else:
                 predictions[mask] = X_scaled.astype(np.float32).reshape(-1)
         
-        if class_risk is not None:
+        if self.class_risk is not None:
             predictions[predictions >= self.n_clusters] = self.n_clusters - 1
 
         # Define the lambda function
@@ -1256,10 +1260,14 @@ class ScalerClassRisk:
         predictions = np.zeros(X.shape[0])
 
         for unique_id, model in self.models_by_id.items():
-            if unique_id not in np.unique(ids):
-                continue
-
-            mask = ids == unique_id
+            try:
+                if not np.any(np.isclose(unique_id, np.unique(ids), rtol=1e-05, atol=1e-08)):
+                    continue
+                mask = np.isclose(ids, unique_id, rtol=1e-05, atol=1e-08)
+            except (TypeError, ValueError, NotImplementedError):
+                if unique_id not in np.unique(ids):
+                    continue
+                mask = ids == unique_id
             
             stats = model[stat_key]
             predictions[mask] = np.array([stats[int(cls)] for cls in X[mask]])
@@ -1628,6 +1636,301 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     return res, train_dataset, val_dataset, test_dataset, new_cols
 
+
+def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_post_process, graph, n_clusters=5):
+
+    graph_method = graph.graph_method
+
+    new_cols = []
+
+    if graph_method == 'node':
+        train_dataset_ = train_dataset.copy(deep=True)
+        val_dataset_ = val_dataset.copy(deep=True)
+        test_dataset_ = test_dataset.copy(deep=True)
+    else:
+        def keep_one_per_pair(dataset):
+            # Supprime les doublons en gardant uniquement la première occurrence par paire (graph_id, date)
+            return dataset.drop_duplicates(subset=['graph_id', 'date'], keep='first')
+
+        train_dataset_ = keep_one_per_pair(train_dataset)
+        val_dataset_ = keep_one_per_pair(val_dataset)
+        test_dataset_ = keep_one_per_pair(test_dataset)
+
+    res = {}
+
+    evaluate = {'name' : [], 'spearman' : [], 'kendall' : [], 'pearson' : [], 'ss' : []}
+    
+    classifier = ['quantile']
+    class_risk_dict = {'egpd' : eGPDRisk(),
+                       'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters, log=True)}
+    
+    group_col = ['Cluster', 'Season', 'Dept']
+    group_col_dict = {'Dept' : 'departement', 'Cluster' : 'cluster_encoder', 'Season' : 'saison'}
+
+    targets = ['nbsinister']
+    
+    for cls, col, tar in itertools.product(classifier, group_col, targets):
+        
+        #if f'{tar}-{cls}-{n_clusters}-Class-{col}' in train_dataset_.columns and cls != 'egpd':
+        if False:
+            continue
+        
+        class_risk = class_risk_dict[cls]
+        if cls == 'quantile':
+            class_risk.tar = f'{tar}-{col}'
+        col_name = group_col_dict[col]
+        
+        if cls == 'egpd':
+            if tar != 'nbsinister':
+                class_risk.discrete = False
+            else:
+                class_risk.discrete = True
+        
+        obj2 = ScalerClassRisk(col_id=col_name, dir_output = dir_post_process, target=tar, scaler=None, class_risk=class_risk)
+
+        obj2.fit(train_dataset_[tar].values, train_dataset_[tar].values, train_dataset_[col_name].values)
+        
+        print(col)
+        train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(train_dataset_[tar].values,  train_dataset_[tar].values, train_dataset_[col_name].values)
+        val_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(val_dataset_[tar].values,  val_dataset_[tar].values, val_dataset_[col_name].values)
+        test_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'] = obj2.predict(test_dataset_[tar].values,  test_dataset_[tar].values, test_dataset_[col_name].values)
+        
+        res[obj2.name] = obj2
+        
+        new_cols.append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
+
+        ######################################################################################
+
+        """spearm = spearman_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        pears = pearson_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        kend = kendall_coefficient(train_dataset_[tar].values, train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'])
+        print(np.unique(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values))
+        ss = silhouette_score_with_plot(train_dataset_[f'{tar}-{cls}-{n_clusters}-Class-{col}'].values.reshape(-1,1), train_dataset_[tar].values.reshape(-1,1), f'{tar}-{cls}-{n_clusters}-Class-{col}', dir_output=None)
+        evaluate['name'].append(f'{tar}-{cls}-{n_clusters}-Class-{col}')
+        evaluate['spearman'].append(spearm)
+        evaluate['pearson'].append(pears)
+        evaluate['kendall'].append(kend)
+        evaluate['ss'].append(ss)"""
+        
+    """df_evaluate = pd.DataFrame.from_dict(evaluate)
+    df_evaluate.sort_values(by='ss', inplace=True, ascending=False)
+    logger.info(df_evaluate.head())
+    df_evaluate.to_csv('risk_clustering_evaluation.csv', index=False)"""
+
+    ###############################################################################
+
+    departement_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'departement')
+    cluster_sequence_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'cluster-encoder')
+
+    sequences = {'Dept' : departement_sequence, 'Cluster' : cluster_sequence_sequence}
+
+    conv_types = ['cubic']
+
+    kernels = ['Specialized']
+    
+    targets = ['nbsinister']
+
+    class_risk_dict = {'egpd' : eGPDRisk(),
+                       'kmeans': KMeansRiskZerosHandle(n_clusters), 
+                       "gm" : GMMRiskZerosHandle(n_clusters=n_clusters),
+                       'quantile' : QuantileRiskZerosHandle(n_clusters=n_clusters, log=False)}
+    
+    ###############################################################################
+
+    evaluate = {'name' : [], 'spearman' : []}
+    group_col = ['Dept']
+
+    for conv_type, kernel, cls, col, tar in itertools.product(conv_types, kernels, classifier, group_col, targets):
+        
+        if f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}" in train_dataset_.columns:
+            continue
+        
+        logger.info(f"Testing with convolution type: {conv_type} {kernel} {cls} {col} {tar}")
+
+        class_risk = class_risk_dict[cls]
+        col_name = group_col_dict[col]
+        seq = sequences[col]
+
+        # Sélection du préprocesseur
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name])
+
+        # Définition de l'objet ScalerClassRisk            
+        obj = ScalerClassRisk(
+            col_id=col_name,
+            dir_output=dir_post_process,
+            target=tar,
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
+
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_[tar].values,
+            train_dataset_[tar].values,
+            train_dataset_[col_name].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        train_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
+        val_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
+        test_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
+
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_[tar].values,
+            train_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            train_dataset_[col_name].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        val_dataset_[val_col] = obj.predict(
+            val_dataset_[tar].values,
+            val_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            val_dataset_[col_name].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[test_col] = obj.predict(
+            test_dataset_[tar].values,
+            test_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
+            test_dataset_[col_name].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        # Stockage des résultats
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
+
+        train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+
+        # Sélection du préprocesseur
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name], persistence=True)
+
+        # Définition de l'objet ScalerClassRisk
+        class_risk = KMeansRisk(n_clusters=n_clusters)
+        obj = ScalerClassRisk(
+            col_id='departement',
+            dir_output=dir_post_process,
+            target='burnedareaDaily',
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
+
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['burnedareaDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        val_dataset_[train_col] = obj.predict(
+            val_dataset_['burnedareaDaily'].values,
+            val_dataset_['burnedareaDaily'].values,
+            val_dataset_['departement'].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[train_col] = obj.predict(
+            test_dataset_['burnedareaDaily'].values,
+            test_dataset_['burnedareaDaily'].values,
+            test_dataset_['departement'].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
+
+        train_col = f"nbsinisterDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
+
+        class_risk = KMeansRisk(n_clusters=n_clusters)
+        obj = ScalerClassRisk(
+            col_id='departement',
+            dir_output=dir_post_process,
+            target='nbsinisterDaily',
+            scaler=None,
+            class_risk=class_risk,
+            preprocessor=preprocessor
+        )
+
+        # Application du fit et prédictions
+        obj.fit(
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+
+        train_dataset_[train_col] = obj.predict(
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['nbsinisterDaily'].values,
+            train_dataset_['departement'].values,
+            train_dataset_[['month_non_encoder', col_name]].values
+        )
+        
+        val_dataset_[train_col] = obj.predict(
+            val_dataset_['nbsinisterDaily'].values,
+            val_dataset_['nbsinisterDaily'].values,
+            val_dataset_['departement'].values,
+            val_dataset_[['month_non_encoder', col_name]].values
+        )
+        test_dataset_[train_col] = obj.predict(
+            test_dataset_['nbsinisterDaily'].values,
+            test_dataset_['nbsinisterDaily'].values,
+            test_dataset_['departement'].values,
+            test_dataset_[['month_non_encoder', col_name]].values
+        )
+        
+        res[obj.name] = deepcopy(obj)
+        new_cols.append(train_col)
+
+    #df_evaluate = pd.DataFrame.from_dict(evaluate)
+    #df_evaluate.sort_values(by='spearman', inplace=True, ascending=False)
+    #logger.info(df_evaluate.head())
+
+    ################################################
+
+    logger.info(f'Post process Model -> {res}')
+
+    if graph_method == 'node':
+        train_dataset = train_dataset_
+        val_dataset = val_dataset_
+        test_dataset = test_dataset_
+    else:
+        def join_on_index_with_new_cols(original_dataset, updated_dataset, new_cols):
+            """
+            Effectue un join sur les index (graph_id, date) pour ajouter de nouvelles colonnes.
+            :param original_dataset: DataFrame original
+            :param updated_dataset: DataFrame avec les index et colonnes à joindre
+            :param new_cols: Liste des colonnes à ajouter
+            :return: DataFrame mis à jour avec les nouvelles colonnes
+            """
+            # Joindre les deux DataFrames sur leurs index
+            original_dataset.reset_index(drop=True, inplace=True)
+            updated_dataset.reset_index(drop=True, inplace=True)
+
+            joined_dataset = original_dataset.set_index(['graph_id', 'date']).join(
+                updated_dataset.set_index(['graph_id', 'date'])[new_cols],
+                on=['graph_id', 'date'],
+                how='left'
+            ).reset_index()
+            return joined_dataset
+
+        # Mise à jour des datasets
+        train_dataset = join_on_index_with_new_cols(train_dataset, train_dataset_, new_cols)
+        val_dataset = join_on_index_with_new_cols(val_dataset, val_dataset_, new_cols)
+        test_dataset = join_on_index_with_new_cols(test_dataset, test_dataset_, new_cols)
+
+    return res, train_dataset, val_dataset, test_dataset, new_cols
+
 class KSGraphDiscretizer(BaseEstimator):
     def __init__(self, thresholds_ks, score_col='ks_stat', thresh_col='optimal_score', dir_output=Path('./')):
         self.thresholds_ks = thresholds_ks
@@ -1862,8 +2165,6 @@ def discretization(method, test_window, y_pred, pred_max, pred_min, col, target_
 
     else:
         raise ValueError(f'{method} unknow')
-
-def post_process_model_inference(train_dataset, test_dataset, dir_post_process, graph):
 
     graph_method = graph.graph_method
 

@@ -2123,6 +2123,7 @@ def get_loss_function(loss_name, **loss_params):
             "prls" :                       lambda: PairwiseMarginRankingLoss(**loss_params),
             "cllt" :                       lambda: CLMBinnedTransitionLoss(**loss_params),
             "ccllt" :                       lambda: ClusterCLMBinnedTransitionLoss(**loss_params),
+            "ccllt2" :                       lambda: ClusterCLMBinnedTransitionLoss2(**loss_params),
         }
 
     try:

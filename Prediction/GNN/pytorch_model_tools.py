@@ -1417,27 +1417,27 @@ def get_numpy_data(graph, df,
                        use_temporal_as_edges : bool,
                        ks :int,
                        horizon:int,
-                       
                        ):
 
-    Xset = df[ids_columns + features_name].values
+    Xset, Yset = df[ids_columns + features_name].values, df[ids_columns + targets_columns].values
 
     X = []
     E = []
-    Yset = None
+    Y = []
 
     graphId = np.unique(Xset[:, date_index])
     for date in graphId:
         if use_temporal_as_edges is None:
-            x, _ = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
+            x, y = construct_time_series(date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
             if x is not None:
                 for i in range(x.shape[0]):
                     X.append(x[i])
+                    Y.append(y[i])
             continue
         elif use_temporal_as_edges:
-            x, _, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
+            x, y, e = construct_graph_set(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
         else:
-            x, _, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
+            x, y, e = construct_graph_with_time_series(graph, date, Xset, Yset, ks, horizon, len(ids_columns), 1.0)
 
         if x is None:
             continue
@@ -1446,10 +1446,11 @@ def get_numpy_data(graph, df,
             continue
 
         X.append(x)
+        Y.append(y)
         if 'e' in locals():
             E.append(e)
 
-    return np.asarray(X), np.asarray(E)
+    return np.asarray(X), np.asarray(Y), np.asarray(E)
 
 def create_test_loader(graph, df,
                        features_name,
@@ -1954,19 +1955,21 @@ def build_dataframe(
     return df
 
 class WrapperModel(torch.nn.Module):
-    def __init__(self, original_model, F, T, edges, horizon=0):
+    def __init__(self, original_model, F, T, edges, y_background, horizon=0):
         super().__init__()
         self.model = original_model
         self.F = F
         self.T = T
         self.edges = edges
-
+        self.y_background = y_background
         self.horizon = horizon
 
     def forward(self, x_flat):
         # reshape x_flat (B, F*T) vers (B, F, T)
         x_orig = x_flat.reshape(-1, self.F, self.T)
-        return self.model(x_orig, self.edges)
+
+        logits, y = self.model._predict_tensor((x_orig, self.y_background, self.edges), prediction_type="RawFormulaVal", use_grad=True)
+        return logits
 
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
@@ -2679,17 +2682,16 @@ class Training():
             return 0, 0
 
         band = -1
+        total_loss = 0
         
         hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
         output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
 
-        is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
-        if is_tfn:
-            inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
-            output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
-
+        is_tfn = self.model_name in ['TFN', 'itransformer']
+        output_all = logits_all = hidden_all = None
+        
         for H in range(self.horizon + 1):
-
+            
             if hasattr(self.model, 'is_graph_or_node'):
                 is_graph_or_node = self.model.is_graph_or_node
             else:
@@ -2700,50 +2702,49 @@ class Training():
             if self.loss not in ['kldivloss']: # works on probability
                 target = target.long()
 
-            if H == 0:
-                inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current")
-                # Store the current features for persistence
-                inputs_horizon_persistent = inputs_horizon.clone()
-                z_prev = None
-            else:
-                # Use persistence (features from H=0)
-                inputs_horizon = inputs_horizon_persistent.clone()
-                if self.ks > 0:
-                    # on prend les ks derniers états cachés déjà vus (detached to prevent BPTT from H>0 to H=0)
-                    history = [h.detach() for h in hidden_past[-(self.ks + 1):]]
-                    # empilement (B, D, L) avec L = len(history)
-                    z_prev = torch.stack(history, dim=2)  # (B, D, L)
-
-                    # padding à gauche si L < ks
-                    L = z_prev.size(2)
-                    if L < (self.ks + 1):
-                        B, D = z_prev.size(0), z_prev.size(1)
-                        pad = torch.zeros(
-                            (B, D, self.ks + 1 - L),
-                            device=z_prev.device,
-                            dtype=z_prev .dtype
-                        )
-                        z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                else:
-                    z_prev = hidden_past[-1]
-
-            
-            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
-            
             if is_tfn:
+                if H == 0:
+                    # Appel unique du modèle — toutes les prédictions d'horizons retournées d'un coup
+                    inputs_horizon = self.compute_inputs(inputs, -1 - self.horizon, "current")
+                    output_all, logits_all, hidden_all = self.model(inputs_horizon, z_prev=None)
+                    if do_update and has_method(criterion, 'update_after_batch'):
+                        criterion.update_after_batch(logits_all[:, 0, :], target)
+                # Extraction du slice correspondant à l'horizon H
                 output = output_all[:, H, :]
                 logits = logits_all[:, H, :]
                 hidden = hidden_all[:, H, :]
-                
-                if H == 0 and do_update and has_method(criterion, 'update_after_batch'):
-                    criterion.update_after_batch(logits, target)
             else:
                 if H == 0:
+                    inputs_horizon = self.compute_inputs(inputs, -1 - (self.horizon - H), "current")
+                    # Store the current features for persistence
+                    inputs_horizon_persistent = inputs_horizon.clone()
+                    z_prev = None
                     output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                     if do_update:
                         if has_method(criterion, 'update_after_batch'):
                             criterion.update_after_batch(logits, target)
                 else:
+                    # Use persistence (features from H=0)
+                    inputs_horizon = inputs_horizon_persistent.clone()
+                    if self.ks > 0:
+                        # on prend les ks derniers états cachés déjà vus (detached to prevent BPTT from H>0 to H=0)
+                        history = [h.detach() for h in hidden_past[-(self.ks + 1):]]
+                        # empilement (B, D, L) avec L = len(history)
+                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                        # padding à gauche si L < ks
+                        L = z_prev.size(2)
+                        if L < (self.ks + 1):
+                            B, D = z_prev.size(0), z_prev.size(1)
+                            pad = torch.zeros(
+                                (B, D, self.ks + 1 - L),
+                                device=z_prev.device,
+                                dtype=z_prev.dtype
+                            )
+                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                    else:
+                        z_prev = hidden_past[-1]
+
                     if self.id_past_risk is not None:
                         inputs_horizon[:, self.id_past_risk, -H:] = 0
                     if self.id_past_ba is not None:
@@ -2822,11 +2823,8 @@ class Training():
             if self.model_name in ['BayesianMLP', 'BayesianCNN', 'BayesianRNN']:
                 loss += self.model.kl_loss()
             
-            if 'total_loss' not in locals():
-                total_loss = loss
-            else:
-                total_loss += loss
-
+            total_loss = total_loss + loss
+                
         # Clean up intermediate tensors before returning
         try:
             del inputs, labels, target, weights
@@ -4353,6 +4351,26 @@ class Training():
 
         self.metrics['iou_scores'] = []
  
+        def _mean_u_agg(m_dict, suffix='_val'):
+            # Build a dictionary looking like raw metric output
+            mapped_dict = {}
+            for k in [1, 2, 3, 4]:
+                vals = np.atleast_1d(m_dict.get(f'score_k{k}{suffix}', [0.0]))
+                sk = float(np.nanmean(vals)) if len(vals) else 0.0
+                mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
+            
+            rv = np.atleast_1d(m_dict.get(f'recall{suffix}', [0.0]))
+            sk_r = float(np.nanmean(rv)) if len(rv) else 0.0
+            mapped_dict['recall'] = sk_r if not np.isnan(sk_r) else 0.0
+            
+            smcv = np.atleast_1d(m_dict.get(f'score_min_class{suffix}', [0.0]))
+            sk_smc = float(np.nanmean(smcv)) if len(smcv) else 0.0
+            mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
+            
+            # We output `agg` (the true geometric mean of U converted back dynamically, or the direct index, depending on how agg works).
+            agg, _ = self._compute_geometric_agg(mapped_dict)
+            return float(agg)
+ 
         try:
             tracemalloc.start()
             self.log_memory("Start search_samples_proportion")
@@ -4376,38 +4394,51 @@ class Training():
                                 data_log = read_object('metrics.pkl', self.dir_log / '..'/ other_model)
                             if data_log is not None:
                                 break
-    
-            doSearch = True
-            if data_log is not None and 'test_percentage' in data_log:
-                self.metrics = data_log
-                test_percentage = np.asarray(self.metrics['test_percentage'])
-                    
-                # Find the first test_percentage value missing from data_log.
-                # If all values are present → no need to search further.
-                start_test = 0
-                for i, tp_val in enumerate(test_percentage):
-                    if tp_val not in data_log:
-                        # First missing value: resume search from here
-                        start_test = i
-                        doSearch = True
-                        print(f'Resuming search from tp={tp_val} (first missing in data_log, index {i})')
-                        break
-                else:
-                    # All percentages found in data_log → skip search
-                    doSearch = False
-                    start_test = len(test_percentage)  # nothing to run
-                    print(f'All test_percentage values found in data_log → doSearch=False')
-    
-            else:
-                start_test = 0
-    
-            tolerance = 0.03
+                                            
+            tolerance = 0.1
+            doSearch = False
+            last_score = -math.inf
+            start_test = 0
             
+            if find_log and use_log:
+                if data_log is not None and 'test_percentage' in data_log:
+                    self.metrics = data_log
+                    test_percentage = np.asarray(self.metrics['test_percentage'])
+                    
+                    doSearch = True
+                    for i, tp_val in enumerate(test_percentage):
+                        tp_val = round(tp_val, 2)
+                        if tp_val in self.metrics:
+                            current_agg = _mean_u_agg(self.metrics[tp_val], '_val')
+                            if current_agg >= last_score - tolerance:
+                                if current_agg > last_score:
+                                    last_score = current_agg
+                            else:
+                                print(f'Stopping search: scores declining in logs (last_score={last_score:.4f}, current_agg={current_agg:.4f})')
+                                doSearch = False
+                                break
+                        else:
+                            start_test = i
+                            doSearch = True
+                            print(f'Resuming search from tp={tp_val} (first missing in data_log, index {i})')
+                            break
+                    else:
+                        # All percentages found in data_log and they were "good enough"
+                        # but we still stop because there is nothing left to search.
+                        doSearch = False
+                        print(f'All test_percentage values found in data_log → doSearch=False')
+            else:
+                doSearch = True
+                if not use_log:
+                    logger.info("Search disabled (use_log=False)")
+                elif not find_log:
+                    logger.info("Search disabled (No logs found and use_log=True)")
+                    
             if doSearch:
                 if start_test != 0:
                     last_keys = test_percentage[start_test - 1]
 
-                last_score = -math.inf if start_test == 0 else np.mean(self.metrics[last_keys]['mean_u_val'])
+                # last_score initialized above during log check
                 y_ori = df_train[self.target_name].values
                 for i in range(start_test, test_percentage.shape[0]):
                     tp = round(test_percentage[i], 2)
@@ -4421,12 +4452,12 @@ class Training():
                         nb = int(tp * y_ori[y_ori == 0].shape[0])
                     else:
                         nb = int(tp * len(X[(X['potential_risk'] > 0) & (y_ori == 0)]))
-    
+                        
                     logger.info(f'Trained with {tp} -> {nb} sample of class 0')
                     self.log_memory(f"Before Run Loop (tp={tp})")
     
                     for run in range(self.n_run):
-    
+                        
                         df_combined = self.split_dataset(df_train_copy, nb, reset=False)
     
                         # Mettre à jour df_train pour l'entraînement
@@ -4583,31 +4614,7 @@ class Training():
 
                     # ── Per-tp score summary ─────────────────────────────────────────────
                     # Compute mean_u for this tp using the same shared helper logic
-                    def _mean_u_agg(m_dict, suffix='_val'):
-                        #if getattr(self, 'loss', '') == 'bceloss':
-                        #if True:
-                        #    iou_vals = np.atleast_1d(m_dict.get(f'iou{suffix}', [0.0]))
-                        #    return float(np.nanmean(iou_vals)) if len(iou_vals) else 0.0
-                            
-                        # Build a dictionary looking like raw metric output
-                        mapped_dict = {}
-                        for k in [1, 2, 3, 4]:
-                            vals = np.atleast_1d(m_dict.get(f'score_k{k}{suffix}', [0.0]))
-                            sk = float(np.nanmean(vals)) if len(vals) else 0.0
-                            mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
-                        
-                        rv = np.atleast_1d(m_dict.get(f'recall{suffix}', [0.0]))
-                        sk_r = float(np.nanmean(rv)) if len(rv) else 0.0
-                        mapped_dict['recall'] = sk_r if not np.isnan(sk_r) else 0.0
-                        
-                        smcv = np.atleast_1d(m_dict.get(f'score_min_class{suffix}', [0.0]))
-                        sk_smc = float(np.nanmean(smcv)) if len(smcv) else 0.0
-                        mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
-                        
-                        # We output `agg` (the true geometric mean of U converted back dynamically, or the direct index, depending on how agg works).
-                        # We return agg to exactly match early stopping's output behavior
-                        agg, _ = self._compute_geometric_agg(mapped_dict)
-                        return float(agg)
+                    # mu_val and mu_test computed below using global _mean_u_agg
 
                     mu_val  = _mean_u_agg(self.metrics[tp], '_val')
                     mu_test = _mean_u_agg(self.metrics[tp], '_test')
@@ -4796,7 +4803,7 @@ class Training():
                     
             return pred, y
             
-    def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
+    def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False, use_grad=False) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
         criterion = self.get_loss(self.loss, {})
@@ -4808,7 +4815,11 @@ class Training():
                 criterion.update_params(self.criterion_params[idx])
                 criterion.eval()
 
-        with torch.no_grad():
+        if use_grad:
+            func = torch.enable_grad
+        else:
+            func = torch.no_grad
+        with func():
                 
             inputs, orilabels_, _ = X
 
@@ -4819,47 +4830,48 @@ class Training():
             hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
             output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
             
-            is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
-            if is_tfn:
-                inputs_horizon_0 = self.compute_inputs(inputs, -1 - self.horizon, "current")
-                output_all, logits_all, hidden_all = self.model(inputs_horizon_0, z_prev=None)
+            is_tfn = self.model_name in ['TFN', 'itransformer']
+            print('is_tfn:', is_tfn)
+            output_all = logits_all = hidden_all = None
 
             for H in range(self.horizon + 1):
-
                 orilabels = orilabels_[:, :, -1 - (self.horizon - H)]
                 orilabels[:, -1] = orilabels[:,  -1 ] > 0 if self.task_type == 'binary' else orilabels[:,  -1 ]
-                inputs_horizon = self.compute_inputs(inputs,  -1 - (self.horizon - H), "current" if H == 0 else "futur")
-                
-                if H == 0:
-                    z_prev = None
-                else:
-                    if self.ks > 0:
-                        # on prend les ks derniers états cachés déjà vus
-                        history = hidden_past[-(self.ks + 1):]
-                        # empilement (B, D, L) avec L = len(history)
-                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
-
-                        # padding à gauche si L < ks
-                        L = z_prev.size(2)
-                        if L < (self.ks + 1):
-                            B, D = z_prev.size(0), z_prev.size(1)
-                            pad = torch.zeros(
-                                (B, D, self.ks + 1 - L),
-                                device=z_prev.device,
-                                dtype=z_prev.dtype
-                            )
-                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                    else:
-                        z_prev = hidden_past[-1]
-
-                
-                is_tfn = hasattr(self.model.module if hasattr(self.model, 'module') else self.model, 'is_tfn')
                 
                 if is_tfn:
+                    if H == 0:
+                        # Appel unique du modèle — toutes les prédictions d'horizons retournées d'un coup
+                        inputs_horizon = self.compute_inputs(inputs, -1 - self.horizon, "current")
+                        output_all, logits_all, hidden_all = self.model(inputs_horizon, z_prev=None)
+                    # Extraction du slice correspondant à l'horizon H
                     output = output_all[:, H, :]
                     logits = logits_all[:, H, :]
                     hidden = hidden_all[:, H, :]
                 else:
+                    inputs_horizon = self.compute_inputs(inputs, -1 - (self.horizon - H), "current" if H == 0 else "futur")
+                    
+                    if H == 0:
+                        z_prev = None
+                    else:
+                        if self.ks > 0:
+                            # on prend les ks derniers états cachés déjà vus
+                            history = hidden_past[-(self.ks + 1):]
+                            # empilement (B, D, L) avec L = len(history)
+                            z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                            # padding à gauche si L < ks
+                            L = z_prev.size(2)
+                            if L < (self.ks + 1):
+                                B, D = z_prev.size(0), z_prev.size(1)
+                                pad = torch.zeros(
+                                    (B, D, self.ks + 1 - L),
+                                    device=z_prev.device,
+                                    dtype=z_prev.dtype
+                                )
+                                z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                        else:
+                            z_prev = hidden_past[-1]
+
                     if H == 0:
                         output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                     else:
@@ -4910,7 +4922,7 @@ class Training():
                         params['prediction_type'] = prediction_type
                         output = criterion.transform(**params)
                         
-                if hasattr(criterion, 'score_to_class'):
+                if hasattr(criterion, 'score_to_class') and prediction_type == 'Class':
                     clusters_ids = orilabels[:, criterion.id].long()
                     departement_ids = orilabels[:, departement_index].long()
                     output = criterion.score_to_class(output, clusters_ids, departement_ids)
@@ -4928,7 +4940,7 @@ class Training():
                     
                 pred_horizon.append(output[:, None])
                 labels_horizon.append(orilabels[:, :, None])
-                
+
         pred = torch.cat(pred_horizon, dim=1)
         y = torch.cat(labels_horizon, dim=2)
 
@@ -5439,7 +5451,6 @@ class Training():
         #optimizer = optim.SGD(parameters, lr=self.lr, momentum=0.9)
         return optimizer
     
-    
     def shapley_additive_explanation(self, df, outname, dir_output, mode='beeswarm', figsize=(15, 25), samples=None, samples_name=None, horizon_shap=0, plot=True):
         """
         Visualisation des valeurs SHAP pour expliquer les prédictions.
@@ -5451,6 +5462,7 @@ class Training():
         :param samples: Échantillons spécifiques à analyser.
         :param samples_name: Noms des échantillons à afficher.
         """
+
         # Utiliser un backend non-interactif pour éviter les erreurs Qt
         import matplotlib
         matplotlib.use('Agg')
@@ -5460,8 +5472,9 @@ class Training():
         else:
             use_temporal_as_edges = None
 
-        Xst, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
+        Xst, y, e = get_numpy_data(self.graph, df, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         Xst = torch.Tensor(Xst).to(self.device)
+        y_test = torch.Tensor(y).to(self.device)
         B, F, T = Xst.shape
         
         Xst_horizon = self.compute_inputs(Xst,  -1 - (self.horizon - horizon_shap), "current" if horizon_shap == 0 else "futur")
@@ -5481,32 +5494,39 @@ class Training():
             
         background_data_train = self.df_train
                         
-        background_data_train, e = get_numpy_data(self.graph, background_data_train, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
+        background_data_train, y_background, e = get_numpy_data(self.graph, background_data_train, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         background_data_train = torch.Tensor(background_data_train).to(self.device)
+        y_background = torch.Tensor(y_background).to(self.device)
         B_train, F_train, T_train = background_data_train.shape
-        
+
         background_data_train = background_data_train.reshape((B_train, F_train*T_train))
-        
+        wm = WrapperModel(self, F, T, e, y_background, horizon_shap).to(self.device)
+
         # SHAP DeepExplainer avec wrapper du modèle
         self.model.eval()
-        self.explainer = shap.DeepExplainer(WrapperModel(self, F, T, e, horizon_shap, return_logits=True).to(self.device), background_data_train)
+        if not hasattr(self, 'explainer') or self.explainer is None:
+            self.explainer = shap.DeepExplainer(wm, background_data_train)
+        else:
+            print('Explainer already exists')
+            
         self.model.eval()
+        wm.y_background = y_test
         shap_values = self.explainer.shap_values(Xst_flat, check_additivity=False)
         
         n_classes = self.out_channels
-        
+
         # Vérifier la forme des valeurs SHAP pour débogage
         print(f"SHAP values type: {type(shap_values)}")
         print(f"SHAP values shape (before processing): {np.asarray(shap_values).shape if isinstance(shap_values, (list, np.ndarray)) else 'N/A'}")
-
+        
         # Vérifier si la sortie SHAP est multi-classes
         if n_classes == 1:
             shap_values = shap_values[:, :, np.newaxis]
-                
+
         shap_values = np.moveaxis(shap_values, 0, 2)
         
         shap_values = np.asarray(shap_values)
-        
+
         # Vérification de dimensions pour éviter les erreurs de reshape
         expected_shape = (B, F, T, n_classes)
         try:
@@ -5602,10 +5622,11 @@ class Training():
         # Sauvegarder l'explainer séparément (peut être volumineux)
         explainer_data = {
             'explainer': self.explainer,
-            'wrapper_model': WrapperModel(self, F, T, e, horizon_shap),
+            'wrapper_model': WrapperModel(self, F, T, e, y_background, horizon_shap),
             'F': F,
             'T': T,
             'e': e,
+            'y' : y_background,
             'horizon_shap': horizon_shap
         }
         #save_object(explainer_data, f'{outname}_shap_explainer.pkl', dir_output)
@@ -6977,7 +6998,7 @@ class SplitTraining(Training):
                 return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         except:
                 return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
-        
+            
         if graph is None:
             graph = self.graph
 

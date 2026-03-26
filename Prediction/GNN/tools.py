@@ -3348,8 +3348,14 @@ def get_features_name_list(scale, features, methods):
 
         elif var == "air":
             features_name += air_variables
-        elif var in landcover_variables:
-            features_name += [f"{var}_{met}" for met in methods]
+        elif var in landcover_variables or var in ["id_encoder", "highway_encoder", "landcover_encoder"]:
+            if var.endswith(('_ba', '_BA', '_T', '_R')):
+                features_name += [f"{var}_{met}" for met in methods]
+            else:
+                features_name += [f"{var}_{met}" for met in methods]
+                features_name += [f"{var}_BA_{met}" for met in methods]
+                features_name += [f"{var}_T_{met}" for met in methods]
+                features_name += [f"{var}_R_{met}" for met in methods]
         elif var == "sentinel":
             features_name += [
                 f"{v}_{met}" for v in sentinel_variables for met in methods
@@ -3411,14 +3417,16 @@ def get_features_name_list(scale, features, methods):
         elif var.find("frequencyratio") != -1:
             features_name += [var]
         elif var in cluster_encoder:
-            features_name += [var]
+            if var.endswith(('_BA', '_T', '_R')):
+                features_name += [var]
+            else:
+                features_name += [var, f"{var}_BA", f"{var}_T", f"{var}_R"]
         elif var == "Past_risk" or var == "Past_burnedarea":
             features_name += [var]
         else:
             features_name += [f"{var}_{met}" for met in methods]
 
     return features_name, len(features_name)
-
 
 def get_features_name_list_old(scale, features, methods):
     features_name = []

@@ -507,6 +507,11 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         X[indexNode[:, 0], indexVar] = np.nansum(array[mask])
 
     def save_values_with_encoding(array, band, indexNode, mask, encoder):
+        if encoder is None:
+            for imet, metstr in enumerate(methods):
+                X[indexNode[:, 0], indexVar+imet] = 0.0
+            return
+
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         indexVar = features_name.index(f'{band}_mean')
@@ -1030,16 +1035,20 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
         if len(values) == 0 or np.all(np.isnan(values)):
             return  # rien à faire si le masque est vide ou NaN
 
-        encoded_values = encoder.transform(values).values.squeeze()
+        if encoder is not None:
+            encoded_values = encoder.transform(values).values.squeeze()
 
         # Initialiser les variables dans le Dataset si elles n'existent pas
         for metstr in methods:
             var_name = f"{band}_{metstr}"
             if var_name not in datacube.data_vars:
                 datacube[var_name] = (('departement', 'id', 'date'), np.full((datacube.sizes['departement'], datacube.sizes['id'], datacube.sizes['date']), np.nan))
-
+        
         # Calcul des statistiques et insertion dans le Dataset
         for metstr in methods:
+            if encoder is None:
+                datacube[f"{band}_{metstr}"].loc[dict(id=id_)] = 0
+                continue
             if metstr == 'mean':
                 val = np.nanmean(encoded_values)
             elif metstr == 'min':
@@ -1064,6 +1073,9 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
         )
 
     def save_value_with_encoding(array, band, indexNode, mask, encoder):
+        if encoder is None:
+            datacube[f'{band}'] = 0
+            return    
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
         datacube[f'{band}'] = round(np.nanmean(encode_values), 3)
@@ -1212,30 +1224,40 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
             }
 
             for enc_tag, encoder in encoders.items():
+                
+                if encoder is None:
+                    datacube[f"calendar_mean{suffix}"] = 0
+                    datacube[f"calendar_max{suffix}"] = 0
+                    datacube[f"calendar_min{suffix}"] = 0
+                    datacube[f"calendar_sum{suffix}"] = 0
 
-                # --- Étape 4 : encodage
-                calendar_encoded = (
-                    encoder
-                    .transform(calendar_flat)
-                    .values
-                )
+                else:
+                    # --- Étape 4 : encodage
+                    calendar_encoded = (
+                        encoder
+                        .transform(calendar_flat)
+                        .values
+                    )
 
-                # Remplacement des NaN par 0
-                calendar_encoded = np.nan_to_num(calendar_encoded, nan=0.0)
+                    # Remplacement des NaN par 0
+                    calendar_encoded = np.nan_to_num(calendar_encoded, nan=0.0)
 
-                # Reshape final
-                calendar_encoded = calendar_encoded.reshape(n_date, -1)
+                    # Reshape final
+                    calendar_encoded = calendar_encoded.reshape(n_date, -1)
 
                 # Suffixe de nommage (pas de suffixe pour l'encodeur par défaut)
                 suffix = f"_{enc_tag}" if enc_tag else ""
 
                 # --- Étape 5 : injection variable par variable (avec suffixe)
                 for i, var in enumerate(calendar_vars_raw):
+                    if encoder is None:
+                        datacube[f"{var}{suffix}"] = 0
+                        continue
                     datacube[f"{var}{suffix}"] = (
                         ("id", "date"),
                         expand_to_2d(calendar_encoded[:, i])
                     )
-
+                
                 # --- Étape 6 : features agrégées (par encodeur)
                 datacube[f"calendar_mean{suffix}"] = (
                     ("id", "date"),
@@ -1471,6 +1493,9 @@ def get_sub_nodes_feature_with_geodataframe(
         indexVar = features_name.index(f"{band}_mean")
         if graph.scale == "departement" or graph.scale > 0:
             for imet, metstr in enumerate(methods):
+                if values.shape[0] == 0:
+                    X[indexNode[:, 0], indexVar + imet] = np.nan
+                    continue
                 if metstr == "mean":
                     X[indexNode[:, 0], indexVar + imet] = round(np.nanmean(encode_values), 3)
                 elif metstr == "min":

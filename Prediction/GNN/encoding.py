@@ -169,64 +169,53 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
     else:
         suffix = ''
 
-    # Calendar
-    encoder = CatBoostEncoder(cols=np.arange(0, stop_calendar))
-    encoder.fit(calendar_array, temporalValues)
-    save_object(encoder, f'encoder_calendar_{expe}{suffix}.pkl', dir_output)
+    def _fit_and_save_encoder(X, y, cols, filename, dir_output):
+        encoder = None
+        if (
+            X is not None
+            and y is not None
+            and hasattr(X, "shape")
+            and hasattr(y, "shape")
+            and X.shape[0] > 0
+            and y.shape[0] > 0
+            and X.shape[0] == y.shape[0]
+        ):
+            encoder = CatBoostEncoder(cols=cols)
+            encoder.fit(X, y)
+        save_object(encoder, filename, dir_output)
 
-    if landcover.shape == spatialValues.shape:
-        # Landcover
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(landcover, spatialValues)
-        save_object(encoder, f'encoder_landcover_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(calendar_array, temporalValues, np.arange(0, stop_calendar),
+                        f'encoder_calendar_{expe}{suffix}.pkl', dir_output)
 
-    if foret.shape == spatialValues.shape:
-        # Foret
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(foret, spatialValues)
-        save_object(encoder, f'encoder_foret_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(landcover, spatialValues, np.arange(0, 1),
+                        f'encoder_landcover_{expe}{suffix}.pkl', dir_output)
 
-    if osmnx.shape == spatialValues.shape:
-        # OSMNX
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(osmnx, spatialValues)
-        save_object(encoder, f'encoder_osmnx_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(foret, spatialValues, np.arange(0, 1),
+                        f'encoder_foret_{expe}{suffix}.pkl', dir_output)
 
-    if argile_value.shape == spatialValues.shape:
-        # OSMNX
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(argile_value, spatialValues)
-        save_object(encoder, f'encoder_argile_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(osmnx, spatialValues, np.arange(0, 1),
+                        f'encoder_osmnx_{expe}{suffix}.pkl', dir_output)
 
-    if ids_value.shape == spatialValues.shape:
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(ids_value, spatialValues)
-        save_object(encoder, f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(argile_value, spatialValues, np.arange(0, 1),
+                        f'encoder_argile_{expe}{suffix}.pkl', dir_output)
 
-    if cluster_value.shape == spatialValues.shape:
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(cluster_value, spatialValues)
-        save_object(encoder, f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(ids_value, spatialValues, np.arange(0, 1),
+                        f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}{suffix}.pkl', dir_output)
 
-    if cosia.shape == spatialValues.shape:
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(cosia, spatialValues)
-        save_object(encoder, f'encoder_cosia_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(cluster_value, spatialValues, np.arange(0, 1),
+                        f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{expe}{suffix}.pkl', dir_output)
 
-    if corine.shape == spatialValues.shape:
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(corine, spatialValues)
-        save_object(encoder, f'encoder_corine_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(cosia, spatialValues, np.arange(0, 1),
+                        f'encoder_cosia_{expe}{suffix}.pkl', dir_output)
 
-    if route.shape == spatialValues.shape:
-        encoder = CatBoostEncoder(cols=np.arange(0, 1))
-        encoder.fit(route, spatialValues)
-        save_object(encoder, f'encoder_route_{expe}{suffix}.pkl', dir_output)
-    
-    # Geo
-    encoder = CatBoostEncoder(cols=np.arange(0, 1))
-    encoder.fit(geo_array, temporalValues)
-    save_object(encoder, f'encoder_geo_{expe}{suffix}.pkl', dir_output)
+    _fit_and_save_encoder(corine, spatialValues, np.arange(0, 1),
+                        f'encoder_corine_{expe}{suffix}.pkl', dir_output)
+
+    _fit_and_save_encoder(route, spatialValues, np.arange(0, 1),
+                        f'encoder_route_{expe}{suffix}.pkl', dir_output)
+
+    _fit_and_save_encoder(geo_array, temporalValues, np.arange(0, 1),
+                        f'encoder_geo_{expe}{suffix}.pkl', dir_output)
 
 from ast import arg
 from GNN.features_2D import *

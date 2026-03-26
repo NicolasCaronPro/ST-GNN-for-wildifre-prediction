@@ -132,6 +132,9 @@ def num_zone2_graph_id_dep6(df, graph_ids):
 
     num_zone = [65, 62, 64, 61, 66, 67, 63]
 
+    if len(graph_ids) != len(num_zone):
+        graph_ids = graph_ids[1:]
+
     assert len(num_zone) == len(graph_ids), f'The size of {graph_ids} must match the size of {num_zone}'
 
     # Mapping inversé : num_zone -> graph_id
@@ -967,7 +970,7 @@ class GraphStructure():
                 dfe_df = load_dfe_for_06(rootDisk / 'csv')
             else:
                 dfe_df = None
-
+            
             if not dfe_df is None:
                 graph_ids = np.unique(mask)
                 graph_ids = graph_ids[(graph_ids >= np.sort(np.unique(mask))[1]) & ~(np.isnan(graph_ids))]
