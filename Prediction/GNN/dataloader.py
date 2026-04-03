@@ -1006,9 +1006,10 @@ def load_loader_test_2D(use_temporal_as_edges, image_per_node, scale, graphScale
     return loader
 
 def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, test_departement, target_name, name, dir_output, scale,
-                      horizon, pred_min=None, pred_max=None, departement_scale=False, scorer=None):
+                      horizon, pred_min=None, pred_max=None, departement_scale=False, model=None):
     
     metrics = {}
+    scorer = model.scoring
 
     logger.info(f'WARNING : WE CONSIDER PRED[0] = PRED[1]')
 
@@ -1412,6 +1413,50 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
 
     metrics['nbsinister'] = res['nbsinister'].sum()
 
+    ########################################## AGG Score (compute_agg) ####################################
+    try:
+        if model is not None and hasattr(model, '_compute_run_scores'):
+            # Determine y_true_real for AGG scoring (same logic as monotonic scoring above)
+            if 'timeintervention' in target_name:
+                y_true_agg = res['time_intervention'].values
+            elif 'ressource' in target_name:
+                y_true_agg = res['ressource'].values
+            elif 'burnedareaRoot' in target_name:
+                y_true_agg = res['burnedareaRoot'].values
+            elif 'nbsinister' in target_name:
+                y_true_agg = res['nbsinister'].values
+            else:
+                y_true_agg = res[target_name].values
+
+            y_pred_agg = res[f'prediction_{target_name}_{horizon}'].values
+
+            agg_scores = model._compute_run_scores(
+                y_true_agg,
+                y_pred_agg,
+                res['date'].values,
+                res['graph_id'].values,
+            )
+            metrics['agg'] = agg_scores['agg']
+            for k in [1, 2, 3, 4]:
+                metrics[f'agg_score_k{k}'] = agg_scores.get(f'score_k{k}', np.nan)
+            metrics['agg_recall'] = agg_scores.get('recall', np.nan)
+            metrics['agg_score_min_class'] = agg_scores.get('score_min_class', np.nan)
+
+            print(f'[evaluate_pipeline] AGG score : {metrics["agg"]:.4f} '
+                  f'| score_k1={metrics.get("agg_score_k1", float("nan")):.4f} '
+                  f'| score_k2={metrics.get("agg_score_k2", float("nan")):.4f} '
+                  f'| score_k3={metrics.get("agg_score_k3", float("nan")):.4f} '
+                  f'| score_k4={metrics.get("agg_score_k4", float("nan")):.4f} '
+                  f'| recall={metrics.get("agg_recall", float("nan")):.4f} '
+                  f'| score_min_class={metrics.get("agg_score_min_class", float("nan")):.4f}')
+            logger.info(f'AGG score = {metrics["agg"]:.4f}')
+        else:
+            logger.info('No scorer with _compute_run_scores provided, skipping AGG score computation.')
+            metrics['agg'] = np.nan
+    except Exception as e:
+        logger.warning(f'AGG score computation failed in evaluate_pipeline: {e}')
+        metrics['agg'] = np.nan
+
     return metrics, res
 
 def test_fire_index_model(args,
@@ -1639,7 +1684,8 @@ def test_sklearn_api_model(cfg,
 
         metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, None, y, graphScale,
                                                test_departement, target_name, name,
-                                               dir_output / name, scale=scale, horizon=0, pred_min = pred_min, pred_max = pred_max)
+                                               dir_output / name, scale=scale, horizon=0, pred_min = pred_min, pred_max = pred_max,
+                                               model = model)
         
         if MLFLOW:
             log_metrics_recursively(metrics[name], prefix='')
@@ -2013,7 +2059,7 @@ def test_dl_model(cfg,
                 metrics[run], res = evaluate_pipeline(dir_train, prefix_config, test_dataset_dept, pred, predTensorProba, y, graphScale,
                                                     test_departement, target_name, name,
                                                     dir_output / name / f"H{H}", scale, H, pred_min = None, pred_max = None,
-                                                    scorer=getattr(model, 'scoring', None))
+                                                    model=model)
                 
                 ious_per_horizon.append(metrics[run].get('iou_class_hard', np.nan))
 

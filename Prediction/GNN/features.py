@@ -983,11 +983,11 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
     res = []
 
     def save_values(array, band, id_, mask):
-
+        
         values = array[mask]
         if len(values) == 0 or np.all(np.isnan(values)):
             return  # Rien à faire
-
+        
         for metstr in methods:
             var_name = f"{band}_{metstr}"
             if var_name not in datacube.data_vars:
@@ -1225,6 +1225,9 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
 
             for enc_tag, encoder in encoders.items():
                 
+                # Suffixe de nommage (pas de suffixe pour l'encodeur par défaut)
+                suffix = f"_{enc_tag}" if enc_tag else ""
+                
                 if encoder is None:
                     datacube[f"calendar_mean{suffix}"] = 0
                     datacube[f"calendar_max{suffix}"] = 0
@@ -1245,9 +1248,6 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
                     # Reshape final
                     calendar_encoded = calendar_encoded.reshape(n_date, -1)
 
-                # Suffixe de nommage (pas de suffixe pour l'encodeur par défaut)
-                suffix = f"_{enc_tag}" if enc_tag else ""
-
                 # --- Étape 5 : injection variable par variable (avec suffixe)
                 for i, var in enumerate(calendar_vars_raw):
                     if encoder is None:
@@ -1257,6 +1257,9 @@ def get_sub_nodes_features_from_xarray(graph, datacubes: xr.DataArray,
                         ("id", "date"),
                         expand_to_2d(calendar_encoded[:, i])
                     )
+                    
+                if encoder is None:
+                    continue
                 
                 # --- Étape 6 : features agrégées (par encodeur)
                 datacube[f"calendar_mean{suffix}"] = (

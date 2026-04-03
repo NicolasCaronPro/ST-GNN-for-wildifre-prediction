@@ -29,7 +29,7 @@ class ModelCNN(SplitTraining):
         depts = np.union1d(df_train['departement'].unique(), df_val['departement'].unique())
         depts = np.union1d(depts, df_test['departement'].unique())
         self.udepts = np.unique(depts)
-        
+
         if features_importance:
             importance_df = calculate_and_plot_feature_importance(df_train[self.features_1D], df_train[self.target_name], self.features_1D, self.dir_log / '../importance', self.target_name)
             #importance_df = calculate_and_plot_feature_importance_shapley(df_train[self.features], df_train[self.target_name], self.features, self.dir_log / '../importance', self.target_name)

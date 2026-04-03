@@ -297,8 +297,8 @@ def defines_train_dates_from_exp(expe):
         all_test_dates = []
     return all_train_dates, all_val_dates, all_test_dates
 
-allDates = find_dates_between("2017-06-12", "2025-01-01")
-#allDates = find_dates_between('2015-01-01', '2025-12-31')
+#allDates = find_dates_between("2017-06-12", "2025-01-01")
+allDates = find_dates_between('2017-06-12', '2025-12-31')
 
 years = list(np.unique([d.split("-")[0] for d in allDates]))
 
@@ -307,22 +307,18 @@ def save_object(obj, filename: str, path: Path):
     with open(path / filename, "wb") as outp:  # Overwrites any existing file.
         pickle.dump(obj, outp, pickle.HIGHEST_PROTOCOL)
 
-
 def save_object_torch(obj, filename: str, path: Path):
     check_and_create_path(path)
     torch.save(obj, path / filename)
-
-
+    
 def read_object(filename: str, path: Path):
     if not (path / filename).is_file():
         logger.info(f"{path / filename} not found")
         return None
     return pickle.load(open(path / filename, "rb"))
 
-
 def read_object_torch(filename: str, path: Path):
     return torch.load(open(path / filename, "rb"))
-
 
 def check_and_create_path(path: Path):
     """

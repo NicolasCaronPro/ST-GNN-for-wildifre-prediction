@@ -6,7 +6,7 @@ from sklearn.linear_model import LinearRegression, LogisticRegression
 from pygam import s, te, f, intercept, l
 from torch.nn import KLDivLoss
 from torch.nn import KLDivLoss
-from GNN.forecasting_models.pytorch.ordinal_loss import CumulativeLinkLoss, LargeMarginOrdinalLoss, PairwiseMarginRankingLoss
+from GNN.forecasting_models.pytorch.ordinal_loss import CumulativeLinkLoss, LargeMarginOrdinalLoss, PairwiseMarginRankingLoss, ClusterDepartmentRankNetLoss, CLMBinnedTransitionLoss, ClusterCLMBinnedTransitionLoss, ClusterDepartmentRankNetLoss
 
 ############################################## Some tools ###############################################
 
@@ -436,24 +436,27 @@ def fit(params):
     if isinstance(model, ModelVoting) or isinstance(model, ModelStacking):
         logger.info(f'Fitting model {name}')
 
-        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + target],
-                  X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + target],
-                  X_test=df_test[features], y_test=df_test[ids_columns + target],
+        model.fit(df_features=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + target],
+                  df_features_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + target],
+                  df_features_test=df_test[features], y_test=df_test[ids_columns + target],
                     optimization=parameter_optimization_method,
                     grid_params_list=grid_params, fit_params_list=fit_params,
-                    id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values), ('month_non_encoder', df_val['month_non_encoder'].values)], ids_columns = ids_columns)
+                    id_col=[('departement', df_val['departement'].values), ('graph_id', df_val['graph_id'].values),
+                            ('month_non_encoder', df_val['month_non_encoder'].values)], ids_columns = ids_columns,
+                    features=features)
     else:
         logger.info(f'Fitting model {name}')
-        model.fit(X=df_train[features + ['weight', 'potential_risk']], y=df_train[ids_columns + [target]],
-                    X_val=df_val[features + ['weight', 'potential_risk']], y_val=df_val[ids_columns + [target]],
-                    X_test=df_test[features], y_test=df_test[ids_columns + [target]],
+        model.fit(df_features=df_train, y=df_train[ids_columns + [target]],
+                    df_features_val=df_val, y_val=df_val[ids_columns + [target]],
+                    df_features_test=df_test, y_test=df_test[ids_columns + [target]],
                     y_test_score=df_test[target],
                     y_train_score=df_train[target],
                     y_val_score=df_val[target],
                     training_mode=training_mode,
                     optimization=parameter_optimization_method,
-                    grid_params=grid_params, fit_params=fit_params)
-
+                    grid_params=grid_params, fit_params=fit_params,
+                    features=features)
+        
     check_and_create_path(dir_output / name)
     
     save_object(model, name + '.pkl', dir_output / name)
@@ -2124,6 +2127,7 @@ def get_loss_function(loss_name, **loss_params):
             "cllt" :                       lambda: CLMBinnedTransitionLoss(**loss_params),
             "ccllt" :                       lambda: ClusterCLMBinnedTransitionLoss(**loss_params),
             "ccllt2" :                       lambda: ClusterCLMBinnedTransitionLoss2(**loss_params),
+            "ranknet" :                      lambda: ClusterDepartmentRankNetLoss(**loss_params),
         }
 
     try:

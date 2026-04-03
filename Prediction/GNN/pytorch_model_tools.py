@@ -32,7 +32,7 @@ from GNN.tools import (
     calculate_ic95,
     Scoring,
 )
-from GNN.config import graph_id_index, departement_index, logger
+from GNN.config import graph_id_index, departement_index, date_index, logger
 from sklearn.metrics import f1_score, jaccard_score
 
 from GNN.graph_builder import *
@@ -2018,6 +2018,7 @@ class Training():
         self.distill_best_log = []   # list of dicts: {epoch, graph_id, loss}
         self.distill_worst_log = []  # list of dicts: {epoch, graph_id, loss}
         self.criterion_params = []
+        self.criterion = None
         self._current_epoch = None
         self.seed = None
         self.horizon = horizon
@@ -2109,14 +2110,14 @@ class Training():
         del self.graph
         
     def clean(self):
-        try:
+        """try:
             del self.df_train
         except:
             pass
         try:
             del self.df_val
         except:
-            pass
+            pass"""
         try:
             del self.df_test
         except:
@@ -2154,7 +2155,7 @@ class Training():
             pass
         
         # Delete dataframes
-        try:
+        """try:
             del self.df_train
         except:
             pass
@@ -2165,7 +2166,7 @@ class Training():
         try:
             del self.df_test
         except:
-            pass
+            pass"""
         
         # Delete graph
         try:
@@ -2759,6 +2760,12 @@ class Training():
             output_past.append(output)
             
             loss_res = self.calculate_loss(criterion, logits, target, weights, labels)
+            
+            #if torch.isnan(loss_res):
+            #    print('####################################')
+            #    print('output', torch.unique(output))
+            #    print('logits', torch.unique(logits))
+            #    print('target', torch.unique(target))
 
             if isinstance(loss_res, dict):
                 loss = loss_res['total_loss']
@@ -3002,7 +3009,9 @@ class Training():
             for i, data in enumerate(loader, 0):
                 
                 loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=True)
-
+                if torch.isnan(loss):
+                    continue
+                
                 if loss is not None:
                     if torch.is_tensor(loss):
                         total_loss += loss.item()
@@ -3533,48 +3542,100 @@ class Training():
         elif 'fl' in self.loss: # Use focal loss
             loss_params = {'alpha' : self.get_class_freq(self.df_train)}
             
-        if 'nbsinister' in self.target_name and 'ccllt' in self.loss:
-            # loss_params.update({
-            #     'beta': 3.6167258754794345, 't': 0.38808363994393985, 'wmed': 2.1181338709061728, 
-            #     'wmin': 0.3090944162785197, 'wneg': 0.010696671944419034, 'gamma': 3.858781740471833, 
-            #     'taugate': 0.10621789513165877, 'gatetemp': 0.07804890070629288, 'wkdecay': 'None',
-            #     'wklambda': 0.3495008616795649, 'wkmin': 0.0026366397418353914, 'learngains': False, 
-            #     'wfocal': 1.5494283305697185, 'wmu0': 0.4200314727662068, 'fgamma': 3.7215798979568424, 
-            #     'falpha': 0.8563103452989596
-            # })
+        if 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
+            print('Using optimal parameters for nbsinister-constrained regions')
+            
             loss_params.update({
-                'beta': 2.33, 't': 0.0, 'wmed': 1.56, 
-                'wmin': 2.09, 'wneg': 1.01, 'gamma': 5.0, 
-                'taugate': 0.05, 'gatetemp': 0.11, 'wkdecay': 'power',
-                'wkpower': 2.06, 'wkmin': 0.02, 'wfocal': 1.76, 
-                'wmu0': 1.94, 'fgamma': 1.03, 'falpha': 0.89, 
-                'mumomentum': 0.84, 'mulambdag': 0.18, 
-                'mulambdac': 1.61
-            })
-
-        elif 'ressource' in self.target_name and 'ccllt' in self.loss:
+                "gainsfloor": 4.81,
+                "wkdecay": "exp",
+                "wklambda": 0.94,
+                "gamma": 8.14,
+                "taugate": 0.26,
+                "gatetemp": 0.73,
+                "wfocal": 2.83,
+                "wmu0": 0.81,
+                "fgamma": 1.1,
+                "falpha": 0.73,
+                "massupdate": 0.88,
+                "mumomentum": 0.95,
+                "mulambdag": 0.74,
+                "mulambdac": 4.46,
+                "wmid": 0.08,
+                "wtrans": 3.4,
+                })
+                        
+        elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
+            print('Using optimal parameters for ressource-constrained regions')
+        
             loss_params.update({
-                'beta': 2.33, 't': 0.0, 'wmed': 0.0, 
-                'wmin': 0.0, 'wneg': 1.01, 'gamma': 5.0, 
-                'taugate': 0.05, 'gatetemp': 0.11, 'wkdecay': 'power',
-                'wkpower': 2.06, 'wkmin': 0.02, 'wfocal': 1.76, 
-                'wmu0': 1.94, 'fgamma': 1.03, 'falpha': 0.89, 
-                'mumomentum': 0.84, 'mulambdag': 0.18, 
-                'mulambdac': 1.61
+                "gamma": 2.07,
+                "taugate": 0.36,
+                "gatetemp": 0.02,
+                "wkdecay": "None",
+                "wfocal": 1.23,
+                "wmu0": 1.85,
+                "fgamma": 3.19,
+                "falpha": 0.56,
+                "mumomentum": 0.82,
+                "mulambdag": 1.13,
+                "mulambdac": 0.83,
+                "num_classes": 5
             })
+            
+        elif 'timeintervention' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
+             loss_params.update({
+                    "gainsfloor": 3.18,
+                    "wkdecay": "power",
+                    "wkpower": 2.56,
+                    "gamma": 8.28,
+                    "taugate": 0.3,
+                    "gatetemp": 0.85,
+                    "wfocal": 2.5,
+                    "wmu0": 0.8,
+                    "fgamma": 0.63,
+                    "falpha": 0.36,
+                    "massupdate": 0.38,
+                    "mumomentum": 0.94,
+                    "mulambdag": 2.69,
+                    "mulambdac": 2.64,
+                    "wmid": 4.86,
+                    "wtrans": 1.6,
+                    "num_classes": 5
+            })
+        
+        elif 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
+            pass
+        
+        elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
+            print('Using optimal parameters for burnedareaRoot-constrained regions')
+            loss_params.update({
+                    "gamma": 1.76,
+                    "taugate": 0.35,
+                    "gatetemp": 0.44,
+                    "wkdecay": "power",
+                    "wkpower": 2.42,
+                    "wfocal": 0.84,
+                    "wmu0": 0.22,
+                    "fgamma": 3.69,
+                    "falpha": 0.22,
+                    "mumomentum": 0.92,
+                    "mulambdag": 1.19,
+                    "mulambdac": 1.47,
+                    "num_classes": 5
+                    })
+    
+        self.criterion = self.get_loss(self.loss, loss_params)
 
-        criterion = self.get_loss(self.loss, loss_params)
-
-        if has_method(criterion, '_preprocess'):
+        if has_method(self.criterion, '_preprocess'):
             if 'id{departement}' in self.loss:
-                criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
+                self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
             elif 'id{node}' in self.loss:
-                criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+                self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
 
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
         
         new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
-
+        
         if self.model_name == 'TFN':
             new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx, 'd_static' : len(static_idx)}
                 
@@ -3598,7 +3659,7 @@ class Training():
         init_weight_sum = sum(p.sum().item() for p in self.model.parameters())
         print(f"[TRAIN] Initial model weights sum: {init_weight_sum}")
         
-        optimizer = self.get_optimizer(criterion)
+        optimizer = self.get_optimizer(self.criterion)
 
         BEST_VAL_LOSS = math.inf
         BEST_MODEL_PARAMS = None
@@ -3624,7 +3685,7 @@ class Training():
                 # Expose current epoch to subroutines for logging
                 self._current_epoch = epoch
                 val_loss, train_loss, val_loss_dict, train_loss_dict = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
-                                                    optimizer=optimizer, criterion=criterion, do_update=True)
+                                                    optimizer=optimizer, criterion=self.criterion, do_update=True)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
@@ -3874,8 +3935,6 @@ class Training():
                 plt.savefig(self.dir_log / f"H{H}" / f'test_dep{dep}_graph{int(gid)}.png')
                 plt.close('all')
 
-
-
         if 'learnable-area' in self.loss:
             ids = y[:, 0]                       # première colonne
             values = y[:, 1:]
@@ -3888,16 +3947,19 @@ class Training():
             self.plot_area_parameter(epochs_list, y[:, 0], sums[:, -1])
             save_object(self.area_parameters_log, 'area_parameters_log.pkl' ,self.dir_log)
 
-        if has_method(criterion, 'plot_params'):
-            if has_method(criterion, 'update_params'):
-                criterion.update_params(self.criterion_params[self.best_epoch])
-            criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+        if has_method(self.criterion, 'update_params'):
+            print(f'Update criterion params with {self.criterion_params[self.best_epoch]}')
+            self.criterion.update_params(self.criterion_params[self.best_epoch])
 
-        # --- LOG LOSS COMPONENTS ---
+        if has_method(self.criterion, 'plot_params'):
+            print(f'Launch criterion params plot')
+            self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+
+        """# --- LOG LOSS COMPONENTS ---
         # "Je veux les valeurs brutes, sans les multiplications par les lambda"
-        if hasattr(criterion, 'epoch_stats'):
-            est_g = criterion.epoch_stats.get('global', {})
-            if criterion.epoch_stats:
+        if hasattr(self.criterion, 'epoch_stats'):
+            est_g = self.criterion.epoch_stats.get('global', {})
+            if self.criterion.epoch_stats:
                 # We take the mean of the values collected during the epoch for the global component
                 # Note: epoch_stats accumulates values at each batch.
                 # Ideally we want the average over the epoch.
@@ -3912,7 +3974,7 @@ class Training():
                     # Fallback: aggregate from cluster stats if global is missing the key
                     # OR specific for 'loss_trans' if we want cluster average separate from global
                     all_vals = []
-                    for k, v in criterion.epoch_stats.items():
+                    for k, v in self.criterion.epoch_stats.items():
                         if k == 'global': continue
                         if isinstance(v, dict) and key in v and v[key]:
                             all_vals.extend(v[key])
@@ -3925,7 +3987,7 @@ class Training():
                 # Specific extraction for cluster average vs global
                 # loss_trans (cluster avg)
                 loss_trans_cluster = []
-                for k, v in criterion.epoch_stats.items():
+                for k, v in self.criterion.epoch_stats.items():
                      if k == 'global': continue
                      if isinstance(v, dict) and 'loss_trans' in v and v['loss_trans']:
                           loss_trans_cluster.extend(v['loss_trans'])
@@ -3933,8 +3995,8 @@ class Training():
 
                 # global_loss_trans (from 'global' key)
                 l_trans_glob = 0.0
-                if 'global' in criterion.epoch_stats:
-                     g_stats = criterion.epoch_stats['global']
+                if 'global' in self.criterion.epoch_stats:
+                     g_stats = self.criterion.epoch_stats['global']
                      if 'loss_trans' in g_stats and g_stats['loss_trans']:
                           l_trans_glob = np.mean(g_stats['loss_trans'])
 
@@ -3980,7 +4042,7 @@ class Training():
                 
                 # Plot
                 self.plot_loss_decomposition()
-                self.plot_scaling_decomposition()
+                self.plot_scaling_decomposition()"""
         
         # Plot score evolution
         try:
@@ -3998,7 +4060,7 @@ class Training():
                 logger.info(f"Distillation log/plot skipped: {_e}")
 
         self.params = BEST_MODEL_PARAMS
-        return self.score_per_epochs, self.criterion_params, criterion
+        return self.score_per_epochs, self.criterion_params
 
     def _save_distill_logs_and_plot(self):
         """Persist best/worst per-epoch logs and save a 3D scatter plot.
@@ -4664,7 +4726,7 @@ class Training():
 
             tp_candidates = []
             mean_u_per_tp = {}
-
+            
             for tp, metric_dict in self.metrics.items():
                 if not isinstance(tp, float):
                     continue
@@ -4755,19 +4817,15 @@ class Training():
         
         return iou_score(y, y_pred)
 
-
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
             assert self.model is not None
             self.model.eval()
-            criterion = self.get_loss(self.loss, {})
-            if len(self.criterion_params) > 0:
-                if has_method(criterion, 'update_params'):
-                    idx = getattr(self, 'best_epoch', -1)
-                    if idx >= len(self.criterion_params):
-                        idx = -1
-                    criterion.update_params(self.criterion_params[idx])
-                    criterion.eval()
-
+            if self.criterion is None:
+                print(f'Model cannot predict')
+                return None
+            
+            criterion = self.criterion
+            
             with torch.no_grad():
                 pred = []
                 y = []
@@ -4775,10 +4833,10 @@ class Training():
                 for _, data in enumerate(X, 0):
                     
                     pred_horizon, labels_horizon = self._predict_tensor(data, prediction_type=prediction_type, output_pdf=output_pdf, calibrate=calibrate)
-                        
+                    
                     pred.append(pred_horizon)
                     y.append(labels_horizon)
-
+                    
                 y = torch.cat(y, 0)
                 pred = torch.cat(pred, 0)
 
@@ -4806,15 +4864,13 @@ class Training():
     def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False, use_grad=False) -> torch.tensor:
         assert self.model is not None
         self.model.eval()
-        criterion = self.get_loss(self.loss, {})
-        if len(self.criterion_params) > 0:
-            if has_method(criterion, 'update_params'):
-                idx = getattr(self, 'best_epoch', -1)
-                if idx >= len(self.criterion_params):
-                    idx = -1
-                criterion.update_params(self.criterion_params[idx])
-                criterion.eval()
 
+        if self.criterion is None:
+            print(f'Model cannot predict')
+            return None
+            
+        criterion = self.criterion
+                
         if use_grad:
             func = torch.enable_grad
         else:
@@ -4831,7 +4887,6 @@ class Training():
             output_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
             
             is_tfn = self.model_name in ['TFN', 'itransformer']
-            print('is_tfn:', is_tfn)
             output_all = logits_all = hidden_all = None
 
             for H in range(self.horizon + 1):
@@ -4923,15 +4978,45 @@ class Training():
                         output = criterion.transform(**params)
                         
                 if hasattr(criterion, 'score_to_class') and prediction_type == 'Class':
+                    
+                    self.ccllt_diff_params = {'graph_id': [], 'date': [], 'pred_bin': [], 'pred_argmax': []}
+                    
                     clusters_ids = orilabels[:, criterion.id].long()
                     departement_ids = orilabels[:, departement_index].long()
+                    
+                    probs = output.detach().clone()
+                    
+                    pred_bin = criterion.score_to_class(
+                        output,
+                        clusters_ids=clusters_ids,
+                        departement_ids=departement_ids
+                    ).detach().cpu()
+
+                    pred_argmax = probs.argmax(dim=1).detach().cpu()
+                    
                     output = criterion.score_to_class(output, clusters_ids, departement_ids)
-                        
+
+                    diff_mask = (output.detach().cpu() != pred_argmax)
+                    diff_mean = diff_mask.float().mean().item()
+                    self.diff_bin_argmax = diff_mean
+                    if self.metrics is None:
+                        self.metrics = {}
+                    self.metrics['diff_bin_argmax'] = self.diff_bin_argmax
+                    
+                    if diff_mask.any():
+                        indices = torch.where(diff_mask)[0]
+                        for idx in indices:
+                            idx_item = idx.item()
+                            self.ccllt_diff_params['graph_id'].append(orilabels[idx_item, graph_id_index].item())
+                            self.ccllt_diff_params['date'].append(orilabels[idx_item, date_index].item())
+                            self.ccllt_diff_params['pred_bin'].append(output[idx_item].item())
+                            self.ccllt_diff_params['pred_argmax'].append(pred_argmax[idx_item].item())
+                                            
                 if prediction_type == 'Class':
                     
                     if self.task_type == 'classification' or self.task_type == 'binary' or self.task_type == 'corn':
                         output = torch.argmax(output, dim=1)
-
+                        
                     elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
                         output = torch.argmax(output, dim=1)
 
@@ -4975,7 +5060,7 @@ class Training():
         self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=5):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
 
         if self.loss_param_search:
             self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
@@ -4984,6 +5069,7 @@ class Training():
         original_dir_log = self.dir_log
         all_runs_scores = {}
         all_criterion_params = {}
+        all_run_criteria = {}
 
         for r in range(n_runs):
             self.criterion_params = []
@@ -4992,9 +5078,10 @@ class Training():
             check_and_create_path(self.dir_log)
             
             # For each run we must start from scratch 
-            scores_evolution, criterion_params, criterion = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
+            scores_evolution, criterion_params = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
             all_runs_scores[r] = scores_evolution
             all_criterion_params[r] = criterion_params
+            all_run_criteria[r] = deepcopy(self.criterion)
 
         self.dir_log = original_dir_log
         
@@ -5015,9 +5102,12 @@ class Training():
             # Load the best model into current self.model
             best_model_path = original_dir_log / f"run_{best_run_idx}" / "best.pt"
             self.criterion_params = all_criterion_params[best_run_idx]
+            self.criterion = all_run_criteria.get(best_run_idx, self.criterion)
+            
+            print(criterion.alpha)
 
-            if has_method(criterion, 'plot_params'):
-                criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+            if has_method(self.criterion, 'plot_params'):
+                self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
 
             if best_model_path.is_file():
                 import shutil
@@ -5027,7 +5117,7 @@ class Training():
                 loaded_state_dict = torch.load(best_model_path, map_location=self.device, weights_only=True)
                 for name, param in self.model.named_parameters():
                     if name in loaded_state_dict:
-                        assert torch.allclose(param.data, loaded_state_dict[name].to(self.device).data, atol=1e-5), f"Model loading failed: weights do not match for {name}"
+                        assert torch.allclose(param.data.cpu(), loaded_state_dict[name].cpu(), atol=1e-5), f"Model loading failed: weights do not match for {name}"
                 
                 shutil.copy(best_model_path, original_dir_log / "best.pt")
                 logger.info(f"Loaded and saved best model from run {best_run_idx}.")
@@ -5382,8 +5472,10 @@ class Training():
         self.model = deepcopy(model)
 
     def get_loss(self, loss_name, loss_params):
-        if 'ccllt' in loss_name:
-            loss_params['ndepartements'] = self.udepts.shape[0]
+        
+        if 'ccllt' in loss_name or "ranknet" in loss_name:
+            loss_params['ndepartements'] = self.df_train['departement'].unique().shape[0]
+            
         loss_params.update({'num_classes' : 5})
         return get_loss_function(loss_name, **loss_params)
 
@@ -6037,41 +6129,33 @@ class Training():
         #     scaleagg, weighttype, alphatype, mumomentum, mulambdag, mulambdac
         # ─────────────────────────────────────────────────────────────────────
         if "ccllt" in name:
-            # ── Shared with cllt ──────────────────────────────────────────────
-            params["beta"]  = trial.suggest_float("ccllt_beta", 2.0, 50.0, log=True)
-            params["t"]     = trial.suggest_float("ccllt_t", 1e-3, 0.5, log=True)
-
-            params["wmed"]  = trial.suggest_float("ccllt_wmed", 0.0, 3.0)
-            params["wmin"]  = trial.suggest_float("ccllt_wmin", 0.0, 3.0)
-            params["wneg"]  = trial.suggest_float("ccllt_wneg", 0.0, 3.0)
-
-            params["gamma"]    = trial.suggest_float("ccllt_gamma", 1.0, 5.0, log=True)
-            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5, log=True)
-            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.005, 0.5, log=True)
-
-            params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["power", "exp", "None"])
+            # Parameters for ClusterCLMBinnedTransitionLoss aligned with test_ciol_convergnce_optuna.ipynb
+            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 0.0, 5.0)
+            
+            params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["None", "power", "exp"])
             if params["wkdecay"] == "power":
-                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.5, 3.0)
+                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.0, 5.0)
             elif params["wkdecay"] == "exp":
-                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.05, 2.0, log=True)
-            params["wkmin"] = trial.suggest_float("ccllt_wkmin", 1e-4, 0.1, log=True)
-
-            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 2.0)
-            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 2.0)
-            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.5, 5.0, log=True)
-            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 0.9)
-
-            # ── Spécifiques cluster ────────────────────────────────────────────
-            # Pondération de la contribution de chaque cluster
-            params["weighttype"] = trial.suggest_categorical("ccllt_weighttype", ["viol", "distance", "None"])
-
-            # EMA du mu prior local: momentum + regularisation vers le global et intra-classe
-            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.8, 0.999, log=True)
-            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.0, 2.0)
-            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.0, 2.0)
+                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.01, 2.0)
+            
+            params["gamma"]    = trial.suggest_float("ccllt_gamma", 0.1, 10.0)
+            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5)
+            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.01, 1.0)
+            
+            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 5.0)
+            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 5.0)
+            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.1, 5.0)
+            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 1.0)
+            
+            params["massupdate"] = trial.suggest_float("ccllt_massupdate", 0.01, 0.9)
+            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.5, 0.9999)
+            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.01, 5.0)
+            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.01, 5.0)
+            params["wmid"]       = trial.suggest_float("ccllt_wmid", 0.01, 5.0)
+            params["wtrans"]     = trial.suggest_float("ccllt_wtrans", 0.01, 5.0)
 
             return params
-
+        
         # ─────────────────────────────────────────────────────────────────────
         # Si on arrive ici: loss inconnue ou pas câblée explicitement
         # ─────────────────────────────────────────────────────────────────────
@@ -6087,7 +6171,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=75,
+        n_trials=500,
         warmup=5,
         enable_pruning=False,
     ):
@@ -6143,6 +6227,7 @@ class Training():
             # Instantiate loss
             try:
                 criterion = self.get_loss(loss_name, loss_params)
+                self.criterion = criterion  # expose to _predict_test_loader / _predict_tensor
             except Exception as e:
                 logger.error(f"Failed to instantiate loss {loss_name} with params {loss_params}: {e}")
                 raise optuna.exceptions.TrialPruned()
@@ -6652,6 +6737,56 @@ class Training():
             json.dump(real_loss_params, f, indent=4)
 
         logger.info(f"====== BEST OPTUNA LOSS PARAMS ======\n{json.dumps(real_loss_params, indent=4)}")
+
+        # -------------------------
+        # Optuna Visualizations
+        # -------------------------
+        try:
+            import optuna.visualization as vis
+            
+            # Optimization history
+            fig = vis.plot_optimization_history(study)
+            fig.write_html(os.path.join(self.dir_log, "optuna_optimization_history.html"))
+            try:
+                fig.write_image(os.path.join(self.dir_log, "optuna_optimization_history.png"))
+            except:
+                pass
+            if verbose:
+                fig.show()
+
+            # Parameter importance
+            fig = vis.plot_param_importances(study)
+            fig.write_html(os.path.join(self.dir_log, "optuna_param_importances.html"))
+            try:
+                fig.write_image(os.path.join(self.dir_log, "optuna_param_importances.png"))
+            except:
+                pass
+            if verbose:
+                fig.show()
+
+            # Parallel coordinate plot
+            fig = vis.plot_parallel_coordinate(study)
+            fig.write_html(os.path.join(self.dir_log, "optuna_parallel_coordinate.html"))
+            try:
+                fig.write_image(os.path.join(self.dir_log, "optuna_parallel_coordinate.png"))
+            except:
+                pass
+            if verbose:
+                fig.show()
+
+            # Contour plot
+            fig = vis.plot_contour(study)
+            fig.write_html(os.path.join(self.dir_log, "optuna_contour.html"))
+            try:
+                fig.write_image(os.path.join(self.dir_log, "optuna_contour.png"))
+            except:
+                pass
+            if verbose:
+                fig.show()
+                
+            logger.info(f"Saved Optuna visualizations (HTML/PNG) to {self.dir_log}/")
+        except Exception as e:
+            logger.warning(f"Failed to generate Optuna visualizations: {e}")
 
         # Clean memory
         try:
