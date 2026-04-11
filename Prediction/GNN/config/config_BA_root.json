@@ -258,7 +258,7 @@
         "departement-95-val-d-oise"
     ],
     "dataset": "bdiff",
-    "name": "default",
+    "name": "default_2024",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -307,7 +307,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -324,7 +324,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -341,7 +341,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -358,7 +358,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false

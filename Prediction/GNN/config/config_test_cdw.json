@@ -308,7 +308,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -325,7 +325,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -342,7 +342,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -359,7 +359,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -376,7 +376,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -393,7 +393,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -410,7 +410,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -427,7 +427,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -444,7 +444,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -461,7 +461,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -478,7 +478,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -495,7 +495,7 @@
             "loss": "cdw",
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         }

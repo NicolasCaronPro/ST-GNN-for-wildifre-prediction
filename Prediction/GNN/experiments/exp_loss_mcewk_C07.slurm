@@ -8,7 +8,7 @@
 #SBATCH -t 180:00:00
 #SBATCH --partition=bigmem
 #SBATCH -c 8  ## request 16 cores (MAX is 32)
-#SBATCH --mem=150G ## (MAX is 250G)
+#SBATCH --mem=75G ## (MAX is 250G)
 
 module purge
 module load miniconda3@4.10.3/gcc-12.1.0

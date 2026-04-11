@@ -258,7 +258,7 @@
         "departement-95-val-d-oise"
     ],
     "dataset": "bdiff",
-    "name": "default",
+    "name": "default_2024",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -307,7 +307,7 @@
             "task": "classification",
             "loss": "wkloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "horizon": 0,
             "use_log": true,
             "aggregation_method": "weighted",

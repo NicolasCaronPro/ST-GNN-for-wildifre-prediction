@@ -307,7 +307,7 @@
             "task": "classification",
             "loss": "l2",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -324,7 +324,7 @@
             "task": "classification",
             "loss": "softmax",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -341,7 +341,7 @@
             "task": "classification",
             "loss": "softmax",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false

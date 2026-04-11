@@ -309,7 +309,7 @@
             "min_epochs": 10,
             "use_log": false,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -327,7 +327,7 @@
             "use_log": false,
             "min_epochs": 10,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -345,7 +345,7 @@
             "use_log": false,
             "min_epochs": 10,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -363,7 +363,7 @@
             "use_log": false,
             "min_epochs": 10,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -381,7 +381,7 @@
             "use_log": false,
             "min_epochs": 10,
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         }

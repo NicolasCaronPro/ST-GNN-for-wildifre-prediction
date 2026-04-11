@@ -314,7 +314,7 @@
             "temperature": 6.0,
             "distillation_training_mode": "normal",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {
                 "n_group": 3

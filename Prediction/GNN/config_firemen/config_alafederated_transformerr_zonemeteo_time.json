@@ -79,7 +79,7 @@
         "departement-78-yvelines"
     ],
     "dataset": "firemen",
-    "name": "default",
+    "name": "01_06_25_summer",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -109,7 +109,7 @@
     "days_in_futur": 0,
     "k_days": 0,
     "scaling": "z-score",
-    "graphConstruct": "risk-size-zonemeteo-degree-a3-r5-t0.3",
+    "graphConstruct": "zonemeteo",
     "sinisterEncoding": "occurence",
     "sinister": "firepoint",
     "graph_method": "node",
@@ -128,7 +128,7 @@
             "task": "classification",
             "loss": "wkloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "horizon": 10,
             "use_log": false,
             "aggregation_method": "weighted",
@@ -149,6 +149,7 @@
         "global_epochs": 60,
         "patience_count_global": 10,
         "delta_lr": 2e-06,
-        "PATIENCE_CNT_LR": 5
-    }
+        "PATIENCE_CNT_LR": 0
+    },
+    "use_log": false
 }

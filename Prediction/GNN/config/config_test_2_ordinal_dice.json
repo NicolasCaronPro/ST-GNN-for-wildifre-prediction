@@ -307,7 +307,7 @@
             "task": "classification",
             "loss": "ordidice",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -323,7 +323,7 @@
             "task": "classification",
             "loss": "ordidice",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -339,7 +339,7 @@
             "task": "classification",
             "loss": "ordidice",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -355,7 +355,7 @@
             "task": "classification",
             "loss": "ordidice",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         }

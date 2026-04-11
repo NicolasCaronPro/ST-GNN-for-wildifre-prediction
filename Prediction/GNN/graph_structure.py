@@ -234,7 +234,7 @@ class GraphStructure():
             logger.info(f'######################### {dept} ####################')
             if self.scale == 'departement':
                 assert self.base == 'None'
-                dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+                dir_raster = root_target / sinister / dataset_name / 'raster' / resolution
                 raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
                 assert raster is not None
                 raster = raster[0]
@@ -279,10 +279,9 @@ class GraphStructure():
 
     def create_geometry_with_clustering(self, dept, vec_base, path, sinister, dataset_name, sinister_encoding, resolution, mask, node_already_predicted, train_date):
 
-        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+        dir_raster = root_target / sinister / dataset_name / 'raster' / resolution
         dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
-        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
-        dir_target_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution
+        dir_datacube = root_target / sinister / dataset_name / 'datacube'
         raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
 
         self.max_target_value = None
@@ -298,13 +297,15 @@ class GraphStructure():
 
         #raster = remove_0_risk_pixel(dir_target, dir_target_bin, raster, dept, 'risk', 0)
         valid_mask = (raster != -1) & (~np.isnan(raster))
+        
+        dir_datacube_dept = dir_datacube / dept / resolution
 
-        data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+        data, GT = self._process_base_data(vb, dept, dir_datacube_dept, dir_data, valid_mask, raster, train_date, path)
         pred_GT = None
         if data is None:
             logger.info(f'Can t find {vb}')
             exit(1)
-
+            
         if self.max_target_value is None:
             self.max_target_value = np.nanmax(data)
         else:
@@ -363,7 +364,8 @@ class GraphStructure():
         self._save_feature_image(path, dept, 'pred_risk', risk_image, raster)
 
         pred[~valid_mask] = -1
-        bin_data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
+        datacube = read_object(f'datacube.pkl', dir_datacube_dept)
+        bin_data = datacube['occurence'].values
         assert bin_data is not None
 
         if self.scale == -1:
@@ -491,7 +493,7 @@ class GraphStructure():
     def create_geometry_with_companie(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):
             
-            dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+            dir_raster = root_target / sinister / dataset_name / 'raster' / resolution
             dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
             companie_geo = gpd.GeoDataFrame(dir_geo / 'companie.geojson')
             pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'companie', dir_output='')
@@ -504,7 +506,7 @@ class GraphStructure():
     def create_geometry_with_meteo_zone(self, dept, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted):
             
-            dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+            dir_raster = root_target / sinister / dataset_name / 'raster' / resolution
             dir_geo = rootDisk / 'csv' / dept / 'data' / 'geo'
             #pred, _,_ = rasterization(companie_geo, resolutions[self.resolution]['x'], resolutions[self.resolution]['y'], 'SECT_METEO', dir_output=Path(''))
             pred = read_object("zones_meteo.pkl", dir_geo)
@@ -521,10 +523,10 @@ class GraphStructure():
     def create_geometry_with_watershed(self, dept, vec_base, path, sinister, dataset_name,
                                        sinister_encoding, resolution, mask, node_already_predicted, train_date):
         
-        dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
+        dir_raster = root_target / sinister / dataset_name / 'raster' / resolution
         dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
-        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
-        dir_target_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution
+        dir_datacube = root_target / sinister / dataset_name / 'datacube'
+
         raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
         assert raster is not None
         raster = raster[0]
@@ -535,8 +537,10 @@ class GraphStructure():
 
         vb = vec_base[0]
         mode = vec_base[1]
-
-        data, GT = self._process_base_data(vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+        
+        dir_datacube_dept = dir_datacube / dept / resolution
+        
+        data, GT = self._process_base_data(vb, dept, dir_datacube_dept, dir_data, valid_mask, raster, train_date, path)
         if data is None:
             logger.info(f'Can t find {vb}')
             exit(1)
@@ -564,7 +568,8 @@ class GraphStructure():
         self._save_feature_image(path, dept, 'pred_risk', risk_image, raster)
 
         pred[~valid_mask] = -1
-        bin_data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
+        datacube = read_object(f'datacube.pkl', dir_datacube_dept)
+        bin_data = datacube['occurence'].values
         assert bin_data is not None
 
         if self.scale == -1:
@@ -751,12 +756,14 @@ class GraphStructure():
         self._post_process_result(pred, raster, mask, node_already_predicted, 'graph')
         self._save_feature_image(path, dept, 'pred_final', pred, raster)
 
-    def _process_base_data(self, vb, dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path):
+    def _process_base_data(self, vb, dept, dir_datacube_dept, dir_data, valid_mask, raster, train_date, path):
         
         GT = None
+        
+        datacube = read_object('datacube.pkl', dir_datacube_dept)
 
         if vb == 'risk':
-            data = read_object(f'{dept}Influence.pkl', dir_target)
+            data = datacube['influence'].values
             if data is None or dept not in self.train_departements:
                 if data is not None:
                     GT = np.copy(data)
@@ -770,7 +777,7 @@ class GraphStructure():
                 data = data[:, :, :allDates.index(train_date)]
                 data = np.nansum(data, axis=2)
         elif vb == 'nbsinister':
-            data = read_object(f'{dept}binScale0.pkl', dir_target_bin)
+            data = datacube['occurence'].values
             if data is None or dept not in self.train_departements:
                 data = read_object(f'{dept}Influence.pkl', path / 'predict_map')
                 if data is None:
@@ -822,8 +829,8 @@ class GraphStructure():
     
     def _raster2(self, path, resStr, sinister, dataset_name):
 
-        dir_raster = root_target / sinister / dataset_name / 'occurence' / 'raster' / resStr
-
+        dir_raster = root_target / sinister / dataset_name / 'raster' / resStr
+        
         dir_datacube = root_target / sinister / dataset_name / 'datacube'
 
         if len(self.drop_department) == self.departements.unique().shape[0]:
@@ -841,12 +848,15 @@ class GraphStructure():
 
             datacube = read_object('datacube.pkl', dir_datacube_dept)
             assert datacube is not None
+            
+            #print(self.departements.shape)
+            #print(dept)
 
-            maskDept = np.argwhere(self.departements == dept)
+            maskDept = np.argwhere(self.departements.values == dept)
             geo = gpd.GeoDataFrame(index=np.arange(maskDept.shape[0]), geometry=self.oriGeometry[maskDept[:,0]])
 
             outputName = f'{dept}rasterScale0.pkl'
-
+            
             raster = read_object(outputName, dir_raster)
             assert raster is not None
             raster = raster[0]

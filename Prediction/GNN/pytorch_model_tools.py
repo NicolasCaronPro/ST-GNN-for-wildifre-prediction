@@ -2110,14 +2110,14 @@ class Training():
         del self.graph
         
     def clean(self):
-        """try:
+        try:
             del self.df_train
         except:
             pass
         try:
             del self.df_val
         except:
-            pass"""
+            pass
         try:
             del self.df_test
         except:
@@ -2155,7 +2155,7 @@ class Training():
             pass
         
         # Delete dataframes
-        """try:
+        try:
             del self.df_train
         except:
             pass
@@ -2166,7 +2166,7 @@ class Training():
         try:
             del self.df_test
         except:
-            pass"""
+            pass
         
         # Delete graph
         try:
@@ -2899,8 +2899,11 @@ class Training():
             #    except:
             #        continue
 
-            optimizer.zero_grad()
-            loss.backward()
+            try:
+                optimizer.zero_grad()
+                loss.backward()
+            except Exception as e:
+                continue
             
             if 'res_loss' in locals():
                 res_loss += loss.item()
@@ -3546,40 +3549,46 @@ class Training():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                "gainsfloor": 4.81,
+                "gainsfloor": 2.6,
                 "wkdecay": "exp",
-                "wklambda": 0.94,
-                "gamma": 8.14,
-                "taugate": 0.26,
-                "gatetemp": 0.73,
-                "wfocal": 2.83,
-                "wmu0": 0.81,
-                "fgamma": 1.1,
-                "falpha": 0.73,
-                "massupdate": 0.88,
-                "mumomentum": 0.95,
-                "mulambdag": 0.74,
-                "mulambdac": 4.46,
-                "wmid": 0.08,
-                "wtrans": 3.4,
+                "wkpower": 3.86,
+                "wklambda": 1.15,
+                "gamma": 7.71,
+                "taugate": 0.34,
+                "gatetemp": 0.88,
+                "wfocal": 2.22,
+                "wmu0": 0.45,
+                "fgamma": 1.9,
+                "falpha": 0.63,
+                "massupdate": 0.41,
+                "mumomentum": 0.93,
+                "mulambdag": 2.64,
+                "mulambdac": 1.93,
+                "mulambdad": 4.22,
+                "wmid": 1.47,
+                "wtrans": 4.34,
                 })
                         
         elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for ressource-constrained regions')
         
             loss_params.update({
-                "gamma": 2.07,
-                "taugate": 0.36,
-                "gatetemp": 0.02,
+                "gainsfloor": 3.36,
                 "wkdecay": "None",
-                "wfocal": 1.23,
-                "wmu0": 1.85,
-                "fgamma": 3.19,
-                "falpha": 0.56,
-                "mumomentum": 0.82,
-                "mulambdag": 1.13,
-                "mulambdac": 0.83,
-                "num_classes": 5
+                "gamma": 8.59,
+                "taugate": 0.44,
+                "gatetemp": 0.94,
+                "wfocal": 0.6,
+                "wmu0": 0.57,
+                "fgamma": 1.48,
+                "falpha": 0.85,
+                "massupdate": 0.5,
+                "mumomentum": 0.52,
+                "mulambdag": 4.09,
+                "mulambdac": 0.4,
+                "mulambdad": 3.98,
+                "wmid": 2.68,
+                "wtrans": 3.28,
             })
             
         elif 'timeintervention' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
@@ -3604,8 +3613,21 @@ class Training():
             })
         
         elif 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
-            pass
-        
+            loss_params.update({
+                    "gamma": 1.59,
+                    "taugate": 0.18,
+                    "gatetemp": 0.13,
+                    "wkdecay": "power",
+                    "wkpower": 1.91,
+                    "wfocal": 1.49,
+                    "wmu0": 1.78,
+                    "fgamma": 2.95,
+                    "falpha": 0.75,
+                    "mumomentum": 0.84,
+                    "mulambdag": 1.12,
+                    "mulambdac": 0.56,
+                    })
+            
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
             loss_params.update({
@@ -3947,13 +3969,13 @@ class Training():
             self.plot_area_parameter(epochs_list, y[:, 0], sums[:, -1])
             save_object(self.area_parameters_log, 'area_parameters_log.pkl' ,self.dir_log)
 
-        if has_method(self.criterion, 'update_params'):
-            print(f'Update criterion params with {self.criterion_params[self.best_epoch]}')
-            self.criterion.update_params(self.criterion_params[self.best_epoch])
-
         if has_method(self.criterion, 'plot_params'):
             print(f'Launch criterion params plot')
             self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
+            
+        if has_method(self.criterion, 'update_params'):
+            print(f'Update criterion params with {self.criterion_params[self.best_epoch]}')
+            self.criterion.update_params(self.criterion_params[self.best_epoch])
 
         """# --- LOG LOSS COMPONENTS ---
         # "Je veux les valeurs brutes, sans les multiplications par les lambda"
@@ -5104,8 +5126,6 @@ class Training():
             self.criterion_params = all_criterion_params[best_run_idx]
             self.criterion = all_run_criteria.get(best_run_idx, self.criterion)
             
-            print(criterion.alpha)
-
             if has_method(self.criterion, 'plot_params'):
                 self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
 
@@ -5128,7 +5148,7 @@ class Training():
                 shutil.copy(last_model_path, original_dir_log / "last.pt")
         else:
             logger.info("============= ALL RUNS COMPLETED =============")
-        
+            
         # Plot variance
         try:
             self.plot_runs_variance(all_runs_scores, n_runs)
@@ -5473,8 +5493,11 @@ class Training():
 
     def get_loss(self, loss_name, loss_params):
         
-        if 'ccllt' in loss_name or "ranknet" in loss_name:
+        if 'ccllt' in loss_name or "ranknet" in loss_name or 'msetheta' in loss_name:
             loss_params['ndepartements'] = self.df_train['departement'].unique().shape[0]
+        
+        if 'ccltt' in loss_params and "bdiff" in self.dir_log.as_posix():
+            loss_params['clustersequaldept'] = True
             
         loss_params.update({'num_classes' : 5})
         return get_loss_function(loss_name, **loss_params)
@@ -6130,35 +6153,56 @@ class Training():
         # ─────────────────────────────────────────────────────────────────────
         if "ccllt" in name:
             # Parameters for ClusterCLMBinnedTransitionLoss aligned with test_ciol_convergnce_optuna.ipynb
-            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 0.0, 5.0)
+            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 0.0, 5.0, step=0.01)
             
             params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["None", "power", "exp"])
-            if params["wkdecay"] == "power":
-                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.0, 5.0)
-            elif params["wkdecay"] == "exp":
-                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.01, 2.0)
+            params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.0, 5.0, step=0.01)
+            params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.01, 2.0, step=0.01)
             
-            params["gamma"]    = trial.suggest_float("ccllt_gamma", 0.1, 10.0)
-            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5)
-            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.01, 1.0)
+            params["scaleagg"] = trial.suggest_categorical("ccllt_scaleagg", ["None", "department"])
             
-            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 5.0)
-            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 5.0)
-            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.1, 5.0)
-            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 1.0)
+            params["gamma"]    = trial.suggest_float("ccllt_gamma", 0.1, 10.0, step=0.01)
+            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5, step=0.01)
+            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.01, 1.0, step=0.01)
             
-            params["massupdate"] = trial.suggest_float("ccllt_massupdate", 0.01, 0.9)
-            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.5, 0.9999)
-            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.01, 5.0)
-            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.01, 5.0)
-            params["wmid"]       = trial.suggest_float("ccllt_wmid", 0.01, 5.0)
-            params["wtrans"]     = trial.suggest_float("ccllt_wtrans", 0.01, 5.0)
+            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 5.0, step=0.01)
+            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 5.0, step=0.01)
+            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.1, 5.0, step=0.01)
+            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 1.0, step=0.01)
+            
+            params["massupdate"] = trial.suggest_float("ccllt_massupdate", 0.01, 0.9, step=0.01)
+            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.5, 0.9999, step=0.0001)
+            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.01, 5.0, step=0.01)
+            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.01, 5.0, step=0.01)
+            params["mulambdad"]  = trial.suggest_float("ccllt_mulambdad", 0.01, 5.0, step=0.01)
+            params["wmid"]       = trial.suggest_float("ccllt_wmid", 0.01, 5.0, step=0.01)
+            params["wtrans"]     = trial.suggest_float("ccllt_wtrans", 0.01, 5.0, step=0.01)
 
             return params
         
         # ─────────────────────────────────────────────────────────────────────
         # Si on arrive ici: loss inconnue ou pas câblée explicitement
         # ─────────────────────────────────────────────────────────────────────
+        
+        if "ranknet" in name:
+            params["sigma"] = trial.suggest_float("ranknet_sigma", 0.1, 10.0, step=0.1)
+            params["num_pairs_per_group"] = trial.suggest_categorical("ranknet_num_pairs_per_group", [None, 512, 1024, 2048])
+            params["tie_epsilon"] = trial.suggest_float("ranknet_tie_epsilon", 0.0, 1.0, step=0.01)
+            params["use_soft_targets"] = trial.suggest_categorical("ranknet_use_soft_targets", [True, False])
+            
+            if params["use_soft_targets"]:
+                params["soft_target_temperature"] = trial.suggest_float("ranknet_soft_target_temperature", 0.1, 5.0, step=0.1)
+                
+            params["weight_by_delta"] = trial.suggest_categorical("ranknet_weight_by_delta", [True, False])
+            
+            if params["weight_by_delta"]:
+                params["delta_power"] = trial.suggest_float("ranknet_delta_power", 0.5, 3.0, step=0.1)
+                
+            params["wrank"] = trial.suggest_float("ranknet_wrank", 0.1, 5.0, step=0.1)
+            params["wmid"] = trial.suggest_float("ranknet_wmid", 0.0, 5.0, step=0.1)
+            
+            return params
+            
         return {}
         
     def train_optuna(
@@ -6171,7 +6215,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=500,
+        n_trials=75,
         warmup=5,
         enable_pruning=False,
     ):

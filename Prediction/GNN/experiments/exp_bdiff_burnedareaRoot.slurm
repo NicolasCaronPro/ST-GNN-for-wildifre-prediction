@@ -8,7 +8,7 @@
 #SBATCH -t 180:00:00
 #SBATCH --partition=bigmem
 #SBATCH -c 8  ## request 16 cores (MAX is 32)
-#SBATCH --mem=200G ## (MAX is 250G)
+#SBATCH --mem=75G ## (MAX is 250G)
 
 module purge
 module load miniconda3@4.10.3/gcc-12.1.0
@@ -16,16 +16,16 @@ module load miniconda3@4.10.3/gcc-12.1.0
 conda activate meso_test
 
 
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_bceloss.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cornfl.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cornloss.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_fl.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_flwk.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_flwki-id_departement.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_pdegpd.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_weightedcrossentropy.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_wkloss.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cll.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_bceloss.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cornfl.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cornloss.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_fl.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_flwk.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_flwki-id_departement.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_pdegpd.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_weightedcrossentropy.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_wkloss.json
+#python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cll.json
 #python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_lmol.json
 #python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_prls.json
-python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_cllt.json
+python3.9 train_model_from_config.py -c config/config_06_burnedareaRoot_ccllt.json

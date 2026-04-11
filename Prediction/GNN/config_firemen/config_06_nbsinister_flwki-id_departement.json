@@ -64,13 +64,17 @@
         2023
     ],
     "train_departments": [
-        "departement-06-alpes-maritimes"
+        "departement-01-ain",
+        "departement-06-alpes-maritimes",
+        "departement-25-doubs"
     ],
     "test_departments": [
-        "departement-06-alpes-maritimes"
+        "departement-01-ain",
+        "departement-06-alpes-maritimes",
+        "departement-25-doubs"
     ],
     "dataset": "firemen",
-    "name": "062023",
+    "name": "01_06_25_summer",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -100,7 +104,7 @@
     "days_in_futur": 0,
     "k_days": 0,
     "scaling": "z-score",
-    "graphConstruct": "zonemeteo",
+    "graphConstruct": "risk-size-zonemeteo-degree-a3-r5-t0.3",
     "sinisterEncoding": "occurence",
     "sinister": "firepoint",
     "graph_method": "node",
@@ -119,7 +123,7 @@
             "task": "classification",
             "loss": "flwki-id{departement}",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "horizon": 0,
             "use_log": false,
             "aggregation_method": "weighted",
@@ -140,6 +144,7 @@
         "global_epochs": 60,
         "patience_count_global": 10,
         "delta_lr": 0.2,
-        "PATIENCE_CNT_LR": 5
-    }
+        "PATIENCE_CNT_LR": 0
+    },
+    "use_log": false
 }

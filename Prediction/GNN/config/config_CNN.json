@@ -305,7 +305,7 @@
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
-            "n_run": 3,
+            "n_run": 1,
             "image_per_node": true,
             "params": {},
             "loss_param_search": false

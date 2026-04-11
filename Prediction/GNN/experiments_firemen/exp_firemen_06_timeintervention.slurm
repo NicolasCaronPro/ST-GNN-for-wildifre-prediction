@@ -8,7 +8,7 @@
 #SBATCH -t 180:00:00
 #SBATCH --partition=bigmem
 #SBATCH -c 8  ## request 16 cores (MAX is 32)
-#SBATCH --mem=100G ## (MAX is 250G)
+#SBATCH --mem=50G ## (MAX is 250G)
 
 module purge
 module load miniconda3@4.10.3/gcc-12.1.0
@@ -26,6 +26,8 @@ conda activate meso_test
 #python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_weightedcrossentropy.json
 #python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_wkloss.json
 #python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_cll.json
-python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_cllt.json
+#python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_cllt.json
+python3.9 train_model_from_config.py -c config_firemen/config_06_ressource_ranknet.json
+
 #python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_lmol.json
 #python3.9 train_model_from_config.py -c config_firemen/config_06_timeintervention_prls.json

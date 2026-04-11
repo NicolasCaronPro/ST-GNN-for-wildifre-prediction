@@ -72,10 +72,14 @@
         "departement-78-yvelines"
     ],
     "test_departments": [
-        "departement-06-alpes-maritimes"
+        "departement-01-ain",
+        "departement-06-alpes-maritimes",
+        "departement-25-doubs",
+        "departement-69-rhone",
+        "departement-78-yvelines"
     ],
     "dataset": "firemen",
-    "name": "default",
+    "name": "06_01_25_78",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -105,7 +109,7 @@
     "days_in_futur": 0,
     "k_days": 0,
     "scaling": "z-score",
-    "graphConstruct": "risk-size-zonemeteo-degree-t0.3",
+    "graphConstruct": "zonemeteo",
     "sinisterEncoding": "occurence",
     "sinister": "firepoint",
     "graph_method": "node",
@@ -124,7 +128,7 @@
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "horizon": 0,
             "use_log": false,
             "aggregation_method": "weighted",
@@ -147,7 +151,7 @@
             "task": "classification",
             "loss": "wkloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "horizon": 0,
             "use_log": false,
             "aggregation_method": "weighted",
@@ -168,6 +172,7 @@
         "global_epochs": 60,
         "patience_count_global": 10,
         "delta_lr": 2e-06,
-        "PATIENCE_CNT_LR": 5
-    }
+        "PATIENCE_CNT_LR": 0
+    },
+    "use_log": false
 }

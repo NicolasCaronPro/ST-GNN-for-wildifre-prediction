@@ -306,7 +306,7 @@
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -323,7 +323,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -340,7 +340,7 @@
             "task": "classification",
             "loss": "mcewk",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -357,7 +357,7 @@
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -374,7 +374,7 @@
             "task": "classification",
             "loss": "bceloss",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -391,7 +391,7 @@
             "task": "classification",
             "loss": "mcewk",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false
@@ -408,7 +408,7 @@
             "task": "binary",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": false,
             "params": {},
             "loss_param_search": false

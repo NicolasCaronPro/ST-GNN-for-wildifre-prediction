@@ -64,13 +64,21 @@
         2023
     ],
     "train_departments": [
-        "departement-06-alpes-maritimes"
+        "departement-01-ain",
+        "departement-06-alpes-maritimes",
+        "departement-25-doubs",
+        "departement-69-rhone",
+        "departement-78-yvelines"
     ],
     "test_departments": [
-        "departement-06-alpes-maritimes"
+        "departement-01-ain",
+        "departement-06-alpes-maritimes",
+        "departement-25-doubs",
+        "departement-69-rhone",
+        "departement-78-yvelines"
     ],
     "dataset": "firemen",
-    "name": "062023",
+    "name": "01_06_25",
     "likenormal": false,
     "featuresSelection": true,
     "NbFeatures": "all",
@@ -100,7 +108,7 @@
     "days_in_futur": 0,
     "k_days": 0,
     "scaling": "z-score",
-    "graphConstruct": "zonemeteo",
+    "graphConstruct": "risk-size-zonemeteo-degree-a3-r5-t0.3",
     "sinisterEncoding": "occurence",
     "sinister": "firepoint",
     "graph_method": "node",
@@ -108,17 +116,65 @@
     "train_script": "train_any_model.py",
     "models": [
         {
-            "type": "GRU",
+            "type": "itransformer",
             "use_temporal_as_edges": false,
             "mesh_file": null,
             "under_sampling": "search",
             "over_sampling": "full",
-            "kdays": 10,
+            "kdays": 30,
             "nbfeatures": "all",
             "target": "nbsinister",
             "task": "regression",
-            "loss": "cllt",
-            "out_channels" : 1,
+            "loss": "ccllt-id{node}-nclusters{30}",
+            "out_channels": 1,
+            "n_run": 1,
+            "horizon": 0,
+            "use_log": false,
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "params": {},
+            "loss_param_search": false
+        },
+
+        {
+            "type": "itransformer",
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "kdays": 30,
+            "nbfeatures": "all",
+            "target": "ressource",
+            "task": "regression",
+            "loss": "ccllt-id{node}-nclusters{30}",
+            "out_channels": 1,
+            "n_run": 1,
+            "horizon": 0,
+            "use_log": false,
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "params": {},
+            "loss_param_search": false
+        },
+
+        {
+            "type": "itransformer",
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "kdays": 30,
+            "nbfeatures": "all",
+            "target": "timeintervention",
+            "task": "regression",
+            "loss": "ccllt-id{node}-nclusters{30}",
+            "out_channels": 1,
             "n_run": 1,
             "horizon": 0,
             "use_log": false,
@@ -130,10 +186,9 @@
             "params": {},
             "loss_param_search": false
         }
-
     ],
     "hyperparameters": {
-        "epochs": 1000,
+        "epochs": 3000,
         "batch_size": 64,
         "lr": 0.0005,
         "PATIENCE_CNT": 25,
@@ -141,6 +196,7 @@
         "global_epochs": 60,
         "patience_count_global": 10,
         "delta_lr": 0.2,
-        "PATIENCE_CNT_LR": 2
-    }
+        "PATIENCE_CNT_LR": 0
+    },
+    "use_log": false
 }

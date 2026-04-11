@@ -1,0 +1,22 @@
+{
+    "gainsfloor": 2.6,
+    "wkdecay": "exp",
+    "wkpower": 3.86,
+    "wklambda": 1.15,
+    "gamma": 7.71,
+    "taugate": 0.34,
+    "gatetemp": 0.88,
+    "wfocal": 2.22,
+    "wmu0": 0.45,
+    "fgamma": 1.9,
+    "falpha": 0.63,
+    "massupdate": 0.41,
+    "mumomentum": 0.93,
+    "mulambdag": 2.64,
+    "mulambdac": 1.93,
+    "mulambdad": 4.22,
+    "wmid": 1.47,
+    "wtrans": 4.34,
+    "ndepartements": 3,
+    "num_classes": 5
+}

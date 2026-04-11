@@ -309,7 +309,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -327,7 +327,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -345,7 +345,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -363,7 +363,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -381,7 +381,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -399,7 +399,7 @@
             "loss": "degpd",
             "out_channels": 1,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         }

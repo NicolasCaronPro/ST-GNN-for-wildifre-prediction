@@ -1014,7 +1014,7 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     logger.info(f'WARNING : WE CONSIDER PRED[0] = PRED[1]')
 
     ############################################## Get daily metrics #######################################################
-    if name.find('classification') != -1 or name.find('corn') != -1 or name.find('cll') != -1:
+    if name.find('classification') != -1 or name.find('corn') != -1 or name.find('cll') != -1 or name.find('msetheta') != -1 or name.find('ranknet') != -1:
         mapping = {
             "nbsinister": "nbsinister-quantile-5-Class-Dept",
             "timeintervention": "timeintervention-quantile-5-Class-Dept",

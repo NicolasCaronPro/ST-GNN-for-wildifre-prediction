@@ -311,7 +311,7 @@
             "loss_class": "wkloss",
             "out_channels": 5,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -331,7 +331,7 @@
             "loss_class": "wkloss",
             "out_channels": 5,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -351,7 +351,7 @@
             "loss_class": "wkloss",
             "out_channels": 5,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         },
@@ -371,7 +371,7 @@
             "loss_class": "wkloss",
             "out_channels": 5,
             "use_log": false,
-            "n_run": 5,
+            "n_run": 1,
             "params": {},
             "loss_param_search": false
         }

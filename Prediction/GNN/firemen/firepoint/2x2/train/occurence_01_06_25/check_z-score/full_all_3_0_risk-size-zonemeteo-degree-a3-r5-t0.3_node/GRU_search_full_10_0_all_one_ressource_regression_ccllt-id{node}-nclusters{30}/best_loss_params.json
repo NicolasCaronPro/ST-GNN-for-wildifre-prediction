@@ -1,0 +1,19 @@
+{
+    "beta": 12.42,
+    "t": 0.0,
+    "wneg": 1.49,
+    "gamma": 2.07,
+    "taugate": 0.36,
+    "gatetemp": 0.02,
+    "wkdecay": "None",
+    "wkmin": 0.0,
+    "wfocal": 1.23,
+    "wmu0": 1.85,
+    "fgamma": 3.19,
+    "falpha": 0.56,
+    "mumomentum": 0.82,
+    "mulambdag": 1.13,
+    "mulambdac": 0.83,
+    "ndepartements": 3,
+    "num_classes": 5
+}

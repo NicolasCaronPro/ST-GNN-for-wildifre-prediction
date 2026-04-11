@@ -306,7 +306,7 @@
             "task": "classification",
             "loss": "mcewk-distillation",
             "out_channels": 5,
-            "n_run": 3,
+            "n_run": 1,
             "params": {
                 "return_hidden": true
             },

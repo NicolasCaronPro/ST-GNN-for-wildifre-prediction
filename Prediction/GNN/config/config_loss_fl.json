@@ -308,7 +308,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -332,7 +332,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -356,7 +356,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -380,7 +380,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -404,7 +404,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -428,7 +428,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -452,7 +452,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
@@ -476,7 +476,7 @@
             "task": "classification",
             "loss": "fl",
             "out_channels": 5,
-            "n_run": 5,
+            "n_run": 1,
             "use_log": true,
             "num_test": [
                 5,
