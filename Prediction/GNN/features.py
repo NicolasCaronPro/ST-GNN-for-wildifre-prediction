@@ -1789,7 +1789,7 @@ def get_sub_nodes_feature_with_geodataframe(
         if "sentinel" in features:
             for band, var in enumerate(sentinel_variables):
                 save_values(geo[var].values, var, index, maskNode)
-
+                
         if "landcover" in features:
             if "landcover_encoder" in landcover_variables:
                 save_value_with_encoding(
@@ -1876,6 +1876,250 @@ def get_sub_nodes_feature_with_geodataframe(
                 X[index, features_name.index("cluster_encoder_R")] = val
 
     return X, features_name
+
+def add_varying_time_features(X: np.ndarray, Y: np.ndarray, new_shape: int, features: list,
+                              feature_names: list, ks: int, scale: int, methods: list):
+    """
+    Adds varying time features to the dataset X based on past ks time steps.
+
+    Parameters:
+    - X: Input feature matrix (numpy array of shape (n_samples, n_features))
+    - Y: Output variable or additional data (numpy array)
+    - new_shape: New number of features after adding the varying time features
+    - features: List of feature names to process
+    - feature_names: List of all feature names in X
+    - ks: Number of past time steps to consider
+    - scale: Used in calculate_feature_range
+    - methods: List of aggregation methods to apply (e.g., ['mean', 'max'])
+
+    Returns:
+    - res: Feature matrix with added varying time features
+    """
+
+    # Initialize result matrix with NaNs
+    res = np.full((X.shape[0], new_shape), fill_value=np.nan)
+
+    # Copy original X into res
+    res[:, :X.shape[1]] = X
+
+    # Dictionary mapping method names to numpy functions
+    methods_dict = {
+        'mean': np.nanmean,
+        'max': np.nanmax,
+        'min': np.nanmin,
+        'std': np.nanstd,
+        'sum': np.nansum
+    }
+
+    # Unique nodes in Y[:, 0]
+    unique_nodes = np.unique(Y[:, 0])
+
+    for node in unique_nodes:
+        # Indices where Y[:, 0] == node
+        node_indices = np.argwhere(Y[:, 0] == node).flatten()
+
+        # Initialize the additional features to zero for this node
+        res[node_indices, X.shape[1]:] = 0
+
+        # List to store shifted copies of X for this node
+        X_node_copy = []
+
+        for k in range(ks + 1):
+            # Shift the node's data by k time steps
+            rolled_X = np.roll(res[node_indices], shift=k, axis=0)
+            # Set the first k elements to NaN since they don't have enough history
+            rolled_X[:k] = np.nan
+            X_node_copy.append(rolled_X)
+
+        # Stack shifted data along a new axis (shape: (ks + 1, num_samples_for_node, num_features))
+        X_node_copy = np.array(X_node_copy, dtype=float)
+
+        # Process each feature
+        for feat in features:
+            # Extract base feature name
+            name = feat.split('_')[0]
+
+            # Determine index and limit based on feature type
+            if 'Calendar' in feat:
+                _, limit, _, _ = calculate_feature_range('Calendar', scale, methods)
+                index_feat = feature_names.index(f'{calendar_variables[0]}')
+            elif 'air' in feat:
+                _, limit, _, _ = calculate_feature_range('air', scale, methods)
+                index_feat = feature_names.index(f'{air_variables[0]}')
+            elif 'Historical' in feat:
+                _, limit, _, _ = calculate_feature_range('Historical', scale, methods)
+                index_feat = feature_names.index(f'{historical_variables[0]}_mean')
+            else:
+                index_feat = feature_names.index(f'{name}_mean')
+                limit = 1  # Default limit for single features
+
+            for method in methods:
+                # Get the aggregation function
+                func = methods_dict.get(method)
+                if func is None:
+                    raise ValueError(f'Unknown method "{method}" for feature "{feat}"')
+
+                # Determine index for new feature in res
+                if 'Calendar' in feat:
+                    index_new_feat = feature_names.index(f'{calendar_variables[0]}_{method}_{ks}')
+                elif 'air' in feat:
+                    index_new_feat = feature_names.index(f'{air_variables[0]}_{method}_{ks}')
+                elif 'Historical' in feat:
+                    index_new_feat = feature_names.index(f'{historical_variables[0]}_{method}_{ks}')
+                else:
+                    index_new_feat = feature_names.index(feat)
+
+                # Check if all values are NaN; if so, skip computation
+                if np.isnan(X_node_copy[:, :, index_feat:index_feat + limit]).all():
+                    continue
+
+                # Compute the aggregation over ks time steps
+                aggregated_values = func(
+                    X_node_copy[:, :, index_feat:index_feat + limit],
+                    axis=0
+                )
+
+                # Assign the aggregated values to res
+                res[node_indices, index_new_feat:index_new_feat + limit] = aggregated_values
+                
+    return res
+
+def nan_gradient(arr, *args, **kwargs):
+    """
+    Calcule le gradient d'un tableau en gérant les NaN.
+    Les NaN sont interpolés linéairement avant le calcul du gradient.
+    """
+    if len(arr) == 1:
+        return np.asarray([0])
+    arr = np.asarray(arr, dtype=np.float64)
+    nan_mask = np.isnan(arr)
+
+    # Si le tableau ne contient pas de NaN, utiliser np.gradient directement
+    if not nan_mask.any():
+        return np.gradient(arr, *args, **kwargs)
+
+    # Interpolation des NaN
+    arr_filled = arr.copy()
+
+    # Obtenir les indices des valeurs non-NaN
+    not_nan_indices = np.nonzero(~nan_mask)[0]
+    not_nan_values = arr[not_nan_indices]
+
+    # Si toutes les valeurs sont NaN, retourner un tableau de NaN
+    if not_nan_indices.size == 0:
+        return np.full_like(arr, np.nan)
+
+    # Interpoler les NaN
+    interpolated_values = np.interp(
+        x=np.arange(arr.size),
+        xp=not_nan_indices,
+        fp=not_nan_values
+    )
+    arr_filled[nan_mask] = interpolated_values[nan_mask]
+
+    # Calculer le gradient sur le tableau rempli
+    grad = np.gradient(arr_filled, *args, **kwargs)
+
+    # Remettre les NaN aux positions où le gradient n'est pas défini
+    grad[nan_mask] = np.nan
+
+    return grad
+
+def add_time_columns(array, integer_param, dataframe, train_features, features_name):
+    """
+    For each integer between 1 and the integer parameter,
+    the function iterates through the array of column names and adds to the dataframe
+    the values of the method applied to each element of the array.
+    The elements are created as {column}_{method}.
+    The final column name is {column}_{method}_{integer}.
+
+    :param array: List of column names to process
+    :param integer_param: Integer specifying the range of integers to iterate over
+    :param dataframe: The pandas DataFrame to which new columns will be added
+    :return: The updated DataFrame with new columns added
+    """
+    dataframe = dataframe.copy()
+    unode = dataframe['id'].unique()
+
+    # Dictionary of available methods
+    methods_dict = {
+        'mean': lambda x: np.nanmean(x),
+        'sum': lambda x: np.nansum(x),
+        'max': lambda x: np.nanmax(x),
+        'min': lambda x: np.nanmin(x),
+        'std': lambda x: np.nanstd(x),
+        'grad': lambda x : nan_gradient(x)
+    }
+    new_fet = []
+    # List of methods you want to apply
+    for i in range(1, integer_param + 1):
+        for column in array:
+            vec = column.split('_')
+            if len(vec) == 2:
+                column_name, method_name = vec[0], vec[1]
+            else:
+                column_name, method_name = vec[0] + '_' + vec[1] + '_' + vec[1], vec[2]
+
+            if 'Calendar' in vec[0] and 'Calendar' in train_features:
+                columns = calendar_variables
+            elif 'air' in vec[0] and 'air' in train_features:
+                columns = air_variables
+            elif 'Historical' in column_name and 'Historical' in train_features:
+                columns = historical_variables
+            elif 'AutoRegressionBin' in vec[0] and 'AutoRegressionBin' in train_features:
+                columns = [f'AutoRegressionBin-{bin_fet}' for bin_fet in auto_regression_variable_bin]
+            elif 'AutoRegressionReg' in vec[0] and 'AutoRegressionReg' in train_features:
+                columns = [f'AutoRegressionReg-{reg_fet}' for reg_fet in auto_regression_variable_reg]
+            elif vec[0] in train_features:
+                columns = [column_name]
+            else:
+                continue
+
+            for col in columns:
+                for node in unode:
+                    index = dataframe[dataframe['id'] == node].index
+                    if method_name in methods_dict:
+                        if col in features_name:
+                            new_column_name = f"{col}_{method_name}_{i}"
+                            if new_column_name not in list(dataframe.columns):
+                                #logger.info(f'{new_column_name}')
+                                dataframe[new_column_name] = np.nan
+                            dataframe.loc[index, new_column_name] = dataframe.loc[index, col].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
+                            if new_column_name not in new_fet:
+                                new_fet.append(new_column_name)
+                        else:
+                            for spatial_method in METHODS_SPATIAL:
+                                if f'{col}_{spatial_method}' in features_name:
+                                    new_column_name = f"{col}_{spatial_method}_{method_name}_{i}"
+                                    if new_column_name not in list(dataframe.columns):
+                                        #logger.info(f'{new_column_name}')
+                                        dataframe[new_column_name] = np.nan
+                                    dataframe.loc[index, new_column_name] = dataframe.loc[index, f'{col}_{spatial_method}'].rolling(window=i+1).apply(methods_dict[method_name], raw=True)
+                                    if new_column_name not in new_fet:
+                                        new_fet.append(new_column_name)
+                    else:
+                        raise ValueError(f"Unknown method '{method_name}'")
+                
+                    if col in features_name:
+                        new_column_name_shift = f"{col}_-{i}"
+                        if new_column_name_shift not in list(dataframe.columns):
+                            #logger.info(f'{new_column_name_shift}')
+                            dataframe[new_column_name_shift] = np.nan
+                        dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, col].shift(i)
+                        if new_column_name not in new_fet:
+                            new_fet.append(new_column_name_shift)
+                    else:
+                        for spatial_method in METHODS_SPATIAL:
+                            if f'{col}_{spatial_method}' in features_name:
+                                new_column_name_shift = f"{col}_{spatial_method}_-{i}"
+                                if new_column_name_shift not in list(dataframe.columns):
+                                    dataframe[new_column_name_shift] = np.nan
+                                    #logger.info(f'{new_column_name_shift}')
+                                dataframe.loc[index, new_column_name_shift] = dataframe.loc[index, f'{col}_{spatial_method}'].shift(i)
+                                if new_column_name not in new_fet:
+                                    new_fet.append(new_column_name_shift)
+                    
+    return dataframe, new_fet
 
 def add_varying_time_features(X: np.ndarray, Y: np.ndarray, new_shape: int, features: list,
                               feature_names: list, ks: int, scale: int, methods: list):
