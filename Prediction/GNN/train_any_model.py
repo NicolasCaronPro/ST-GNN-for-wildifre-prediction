@@ -385,7 +385,7 @@ def main():
         )
         
         #features_name = remove_correlated_feature(train_dataset, cfg.scale, features_selected, name_exp, graphScale, dir_output, logger, METHODS_SPATIAL_TRAIN)
-
+        
         if m.get("type") != "fwi":
             info = (
                 f"{m['under_sampling']}_{m['over_sampling']}_{m['kdays']}_{m.get('horizon', 0)}"
@@ -396,6 +396,7 @@ def main():
                 voting_model = define_voting_dl_models(m['type'], m['kdays'], m['horizon'], m['out_channels'], m['n_run'], m['loss'])[0]
 
             model_name = f"{m['type']}_{info}"
+            
         is_tree = m["type"].lower() in TREE_MODELS
         post_process = get_post_process_model(train_dataset, 'quantile', m['target'], 'departement', dir_log=dir_output / 'clusterers', n_clusters=5) if m.get('apply_discretization', False) else None 
         global_params['post_process'] = post_process
@@ -686,6 +687,7 @@ def main():
                         "infos": info,
                         "min_epochs": m.get('min_epochs', 1),
                         "out_channels": m["out_channels"],
+                        "out_channels_num": m["out_channels_num"],
                         "n_run": m["n_run"],
                         "target_num": m.get("target_num"),
                         "custom_model_params": m.get("params"),

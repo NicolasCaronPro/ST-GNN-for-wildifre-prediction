@@ -178,11 +178,19 @@ class ModelGNN(SplitTraining):
             df_test=pd.concat([df_train, df_val, df_test], axis=0).reset_index(drop=True),
             nbsinister_col=_nbsin_col,
         )
-        # ───────────────────────────────────────────────────────────────────
-
-        #df_train = df_train[~df_train[self.target_name].isna()]
-        #df_val = df_val[~df_val[self.target_name].isna()]
-        #df_test = df_test[~df_test[self.target_name].isna()]
+        
+        if 'snow' in self.features_name: 
+            self.features_name.remove('snow')
+        
+        if 'sum_snow_last_7_days' in self.features_name:
+            self.features_name.remove('sum_snow_last_7_days')
+        
+        # ── Reference FWI model (computed before any sampling) ─────────────────
+        _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
+        
+        print(f'Train -> Unique values of raw targets: {df_train[_nbsin_col].unique()}')
+        print(f'Val -> Unique values of raw targets: {df_val[_nbsin_col].unique()}')
+        print(f'Test -> Unique values of raw targets: {df_test[_nbsin_col].unique()}')
         
         self.graph = graph
 
@@ -373,8 +381,6 @@ class ModelGNN(SplitTraining):
         #save_object_torch(self.train_loader, 'train_loader.pkl', self.dir_log)
         #save_object_torch(self.val_loader, 'val_loader.pkl', self.dir_log)
         #save_object_torch(self.test_loader, 'test_loader.pkl', self.dir_log)
-
-        
 
     def create_test_loader(self, graph, df):
         loader = create_test_loader(graph, df,

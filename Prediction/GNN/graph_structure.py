@@ -26,6 +26,13 @@ from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 import re
 
+def load_geo_zone_for_06(dir_data):
+    dir_data_dfe = dir_data / 'departement-06-alpes-maritimes' / 'data' / 'geo'
+    
+    geo = gpd.read_file(dir_data_dfe / 'Zones_meteo.geojson')
+    
+    return geo
+
 def load_dfe_for_06(dir_data):
     
     dir_data_dfe = dir_data / 'departement-06-alpes-maritimes' / 'firepoint'
@@ -124,26 +131,80 @@ def load_dfe_for_06(dir_data):
 
     return df
 
-def num_zone2_graph_id_dep6(df, graph_ids):
+from scipy.optimize import linear_sum_assignment
+
+def num_zone2_graph_id_dep6(df, graph_ids, geo_zone, dict_lat_long, base):
     """
     Inverse du mapping graph_id -> num_zone
     pour departement == 6, avec graph_ids fourni.
     """
 
-    num_zone = [65, 62, 64, 61, 66, 67, 63]
+    if "zonemeteo" in base:
 
-    if len(graph_ids) != len(num_zone):
-        graph_ids = graph_ids[1:]
+        num_zone = [65, 62, 64, 61, 66, 67, 63]
 
-    assert len(num_zone) == len(graph_ids), f'The size of {graph_ids} must match the size of {num_zone}'
+        if len(graph_ids) != len(num_zone):
+            graph_ids = graph_ids[1:]
 
-    # Mapping inversé : num_zone -> graph_id
-    inv_map = {nz: gi for gi, nz in zip(graph_ids, num_zone)}
+        assert len(num_zone) == len(graph_ids), (
+            f"The size of {graph_ids} must match the size of {num_zone}"
+        )
 
-    mask = df['departement'] == 6
-    df.loc[mask, 'graph_id'] = df.loc[mask, 'num_zone'].map(inv_map)
+        # Mapping inversé : num_zone -> graph_id
+        inv_map = {nz: gi for gi, nz in zip(graph_ids, num_zone)}
 
-    return df
+        mask = df["departement"] == 6
+        df.loc[mask, "graph_id"] = df.loc[mask, "num_zone"].map(inv_map)
+
+        return df
+
+    else:
+        geo_zone['num_zone'] = geo_zone['SECT_MET_1'].apply(lambda x : int(x.split(' ')[0]))
+        geo_zone = geo_zone.copy()
+
+        # Centroïdes des zones
+        geo_zone["centroid"] = geo_zone["geometry"].centroid
+
+        # Un seul centroid par num_zone
+        zone_centroids = (
+            geo_zone.groupby("num_zone")["centroid"]
+            .apply(lambda s: s.iloc[0])
+            .to_dict()
+        )
+        
+        # Coordonnées des zones
+        # shapely : x = longitude, y = latitude
+        zone_coords = {}
+        for nz, c in zone_centroids.items():
+            zone_coords[nz] = (c.y, c.x)  # (lat, lon)
+
+        # Pour chaque graph_id, trouver la num_zone la plus proche
+        graph_to_zone = {}
+        for gid in graph_ids:
+            if gid not in dict_lat_long:
+                continue
+
+            lat_gid, lon_gid = dict_lat_long[gid]
+
+            best_zone = None
+            best_dist = np.inf
+
+            for nz, (lat_zone, lon_zone) in zone_coords.items():
+                dist = np.sqrt((lat_gid - lat_zone) ** 2 + (lon_gid - lon_zone) ** 2)
+
+                if dist < best_dist:
+                    best_dist = dist
+                    best_zone = nz
+
+            graph_to_zone[gid] = best_zone
+
+        # Inversion : num_zone -> graph_id
+        inv_map = {nz: gid for gid, nz in graph_to_zone.items()}
+
+        mask = df["departement"] == 6
+        df.loc[mask, "graph_id"] = df.loc[mask, "num_zone"].map(inv_map)
+
+        return df
 
 # Create graph structure from corresponding geoDataframe
 class GraphStructure():
@@ -975,17 +1036,35 @@ class GraphStructure():
             datacube['area'] = xr.DataArray(mask, dims=('latitude', 'longitude'))
 
             datacube = datacube.expand_dims(dim={'departement': [dept]})
-            
-            if dept == 'departement-06-alpes-maritimes' and "zonemeteo" in self.base:
+
+            if dept == 'departement-06-alpes-maritimes':
                 dfe_df = load_dfe_for_06(rootDisk / 'csv')
+                geo_zone = load_geo_zone_for_06(rootDisk / 'csv')
             else:
                 dfe_df = None
-            
+                geo_zone = None
+                            
             if not dfe_df is None:
                 graph_ids = np.unique(mask)
-                graph_ids = graph_ids[(graph_ids >= np.sort(np.unique(mask))[1]) & ~(np.isnan(graph_ids))]
+                if "zonemeteo" in self.base:
+                    graph_ids = graph_ids[(graph_ids >= np.sort(np.unique(mask))[1]) & ~(np.isnan(graph_ids))]
+                else:
+                    graph_ids = graph_ids[~(np.isnan(graph_ids))]
                 graph_ids = np.sort(graph_ids)
-                dfe_df = num_zone2_graph_id_dep6(dfe_df, graph_ids)
+                
+                latitude = datacube.latitude.values      # shape (n_lat,)
+                longitude = datacube.longitude.values    # shape (n_lon,)
+
+                lat_mask, lon_mask = np.meshgrid(latitude, longitude, indexing="ij")
+
+                dict_lat_long = {}
+                for graph_id in graph_ids:
+                    lat = np.nanmean(lat_mask[mask == graph_id])
+                    long = np.nanmean(lon_mask[mask == graph_id])
+                    dict_lat_long[graph_id] = (lat, long)
+                    
+                dfe_df = num_zone2_graph_id_dep6(dfe_df, graph_ids, geo_zone, dict_lat_long, self.base)
+                print(dfe_df[['graph_id', 'num_zone']])
                 datacube = self.add_dfe_variable(datacube, dfe_df)
                 # --- Verify DFE 2024 data ---
                 print("Verifying DFE data for 2024...")

@@ -1888,9 +1888,11 @@ def test_dl_model(cfg,
 
         model_dir = dir_train / name_exp / f'check_{scaling}' / prefix_train / read_name
         model = read_object(f'{read_name}.pkl', model_dir)
+        
+        if 'timeintervention' in model.target_name:
+            test_dataset_dep_ = test_dataset_dep_[test_dataset_dep_["departement"] != 1]
 
-        print(model.df_train.departement.unique())
-        print(model.df_train[model.df_train['departement'] == 25].weight.unique())
+        print(test_dataset_dep_['departement'].unique())
         
         if model is None:
             logger.info(f'{model_dir}/{read_name}.pkl not found')
@@ -1914,6 +1916,7 @@ def test_dl_model(cfg,
                                 'class_value_3_predictions' : 15,
                                 'class_value_4_predictions' : 20
                                 }
+                
                 generalized_departement = test_dataset_dep_.groupby('departement')['nbsinisterDaily'].sum().reset_index()
                 generalized_departement = generalized_departement[generalized_departement['nbsinisterDaily'] < 100]
                 generalized_departement = generalized_departement.departement.unique()
@@ -3568,7 +3571,6 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     )
 
     batch_size = params['batch_size']
-    bin_name = 'GRU_search_full_10_all_one_nbsinister-kmeans-5-Class-Dept_binary_fl'
     if torch_structure == 'Model_Torch':
         occ_model = Model_Torch(
             model_name=model,
@@ -3581,11 +3583,11 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             out_channels=2,
             features_name=features_occ,
             ks=kdays,
-            dir_log = dir_output / f'check_{params["scaling"]}/{params["prefix"]}/{bin_name}',
-            name = bin_name,
+            dir_log=dir_log,
+            name=f'DualTraining-occ-{model}_{infos_occ}',
             task_type='binary',
             loss="fl",
-            device=torch.device('cpu'),
+            device=params['device'],
             under_sampling=under_sampling,
             over_sampling=over_sampling,
             n_run=1,
@@ -3602,14 +3604,14 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             delta_lr=params['delta_lr'],
             patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=params['target_num'],
-            out_channels=5,
+            out_channels=params['out_channels_num'],
             features_name=features_num,
             ks=kdays,
             dir_log=dir_log,
             name=f'DualTraining-num-{model}_{infos}',
             task_type=task_type_num,
             loss=loss,
-            device=torch.device('cpu'),
+            device=params['device'],
             under_sampling="full",
             over_sampling="full",
             n_run=1,
@@ -3667,7 +3669,7 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
             delta_lr=params['delta_lr'],
             patience_cnt_lr=params['PATIENCE_CNT_LR'],
             target_name=params['target_num'],
-            out_channels=5,
+            out_channels=params['out_channels_num'],
             features_name=features_num,
             ks=kdays,
             dir_log=dir_log,
@@ -3701,6 +3703,9 @@ def wrapped_train_deep_learning_1D_dualtraining(params):
     dual_model.create_train_val_test_loader(params['graph'], (train_dataset, train_pos), (val_dataset, val_pos), (test_dataset, test_pos),
                                             params['epochs'], params['PATIENCE_CNT'], params['CHECKPOINT'],
                                             custom_model_params=custom_model_params, features_importance=False, use_log=params.get('use_log', True))
+
+    dual_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'],
+                     min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
 
     save_object(dual_model, f'{dual_model.name}.pkl', dir_log)
     

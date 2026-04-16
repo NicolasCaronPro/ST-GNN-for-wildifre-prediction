@@ -1969,7 +1969,15 @@ class WrapperModel(torch.nn.Module):
         x_orig = x_flat.reshape(-1, self.F, self.T)
 
         logits, y = self.model._predict_tensor((x_orig, self.y_background, self.edges), prediction_type="RawFormulaVal", use_grad=True)
-        return logits
+
+        # Select the desired horizon
+        # logits shape is (B, Horizon+1, OutChannels)
+        res = logits[:, self.horizon, :]
+        
+        # If OutChannels is 1, squeeze to (B,) to help SHAP handle it as a scalar-per-sample
+        if res.shape[1] == 1:
+            res = res.squeeze(-1)
+        return res
 
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
@@ -3012,9 +3020,12 @@ class Training():
             for i, data in enumerate(loader, 0):
                 
                 loss, loss_res = self.launch_batch(data, criterion, 'val', do_update=True)
-                if torch.isnan(loss):
-                    continue
                 
+                try:
+                    if torch.isnan(loss):
+                        continue
+                except:
+                    continue
                 if loss is not None:
                     if torch.is_tensor(loss):
                         total_loss += loss.item()
@@ -3181,6 +3192,29 @@ class Training():
                 ))
             except Exception:
                 metrics['recall'] = 0.0
+        
+        if 'f1' not in metrics or metrics['f1'] is None:
+            try:
+                from sklearn.metrics import recall_score as _rec
+                metrics['f1'] = float(_rec(
+                    (np.asarray(y_true) > 0).astype(int),
+                    (np.asarray(y_pred) > 0).astype(int),
+                    zero_division=0
+                ))
+            except Exception:
+                metrics['f1'] = 0.0
+                
+        if 'prec' not in metrics or metrics['prec'] is None:
+            try:
+                from sklearn.metrics import recall_score as _rec
+                metrics['prec'] = float(_rec(
+                    (np.asarray(y_true) > 0).astype(int),
+                    (np.asarray(y_pred) > 0).astype(int),
+                    zero_division=0
+                ))
+            except Exception:
+                metrics['prec'] = 0.0
+                
         return metrics
 
     def _compute_geometric_agg(self, raw_dict):
@@ -3216,17 +3250,34 @@ class Training():
         """
         Compute raw scores + normalise by self.reference_scores.
 
-            u_k = clip((s_k - s_baseline) / (|s_k_ref - s_k_baseline| + ε), 0, 1)
-            agg = geometric_mean_k(u_k)
+        - task_type == 'binary'  : agg = f1 score (binary detection).
+        - other task types       : agg = geometric mean of normalised u_k scores.
 
-        Returns dict: {score_k1..k4, recall, agg, ...}.
+        Returns dict: {score_k1..k4, recall, f1, agg, ...}.
         """
         raw = self._compute_raw_scores(y_true, y_pred, dates, zones)
 
+        # ── Binary task: use F1 as the single optimisation target ──────────
+        if getattr(self, 'task_type', None) == 'binary':
+            result = {f'score_k{k}': raw.get(f'score_k{k}', 0.0) for k in [1, 2, 3, 4]}
+            result['recall'] = raw.get('recall', 0.0)
+            result['f1']     = raw.get('f1', 0.0)
+            result['score_min_class'] = raw.get('score_min_class', 0.0)
+            result['agg']    = result['f1']  # optimise on F1
+            for k in range(5):
+                if f'mu_{k}' in raw:
+                    result[f'mu_{k}'] = raw[f'mu_{k}']
+            for idx in range(50):
+                if f'mu_dense_{idx}' in raw:
+                    result[f'mu_dense_{idx}'] = raw[f'mu_dense_{idx}']
+            return result
+
+        # ── All other tasks: geometric aggregate ────────────────────────────
         agg, u_vals = self._compute_geometric_agg(raw)
 
         result = {f'score_k{k}': raw[f'score_k{k}'] for k in [1, 2, 3, 4]}
         result['recall'] = raw['recall']
+        result['f1']     = raw.get('f1', 0.0)
         result['score_min_class'] = raw['score_min_class']
         result['agg'] = agg
 
@@ -3272,7 +3323,15 @@ class Training():
         """
         EPS = 1e-6
         df_eval = df_test if df_test is not None else df_train
-
+        
+        if 'DualTraining-num' in self.name:
+            df_eval = df_eval[df_eval[self.target_name] > 0].copy()
+            df_train = df_train[df_train[self.target_name] > 0].copy()
+            n_classes = 4
+        else:
+            df_eval = df_eval.copy()
+            n_classes = 5
+            
         _DEFAULTS = ['fwi', 'fwi_mean', 'isi', 'bui', 'dc', 'ffmc', 'dmc', 'dailySeverityRating']
         if fwi_candidates is None:
             fwi_candidates = [c for c in _DEFAULTS if c in df_train.columns]
@@ -3294,13 +3353,10 @@ class Training():
         for col in [date_col, zone_col]:
             if col not in df_train.columns:
                 raise ValueError(f"Column '{col}' not found in evaluation dataframe.")
-        if nbsinister_col not in df_train.columns or nbsinister_col not in df_train.columns:
+        if nbsinister_col not in df_train.columns or nbsinister_col not in df_eval.columns:
             raise ValueError(f"'{nbsinister_col}' not found in dataframe(s).")
 
-        # y_true: valeurs brutes de nbsinister (pas de quantile)
-        y_true = df_train[nbsinister_col].fillna(0).values
-        dates  = df_train[date_col].values
-        zones  = df_train[zone_col].values
+        y_true = df_eval[nbsinister_col].fillna(0).values
 
         if verbose:
             import collections
@@ -3311,8 +3367,12 @@ class Training():
             return np.searchsorted(qs, s_eval.fillna(s_eval.median()).values
                                    ).clip(0, n_classes - 1).astype(int)
 
-        def _scores_for(pred, reference=False):
+        def _scores_for(pred, df, reference=False):
             """Raw scores keyed by int k + 'recall' + 'score_min_class'."""
+            # y_true: valeurs brutes de nbsinister (pas de quantile)
+            y_true = df[nbsinister_col].fillna(0).values
+            dates  = df[date_col].values
+            zones  = df[zone_col].values
             raw = self.scoring.evaluate_metrics(y_true, pred, dates=dates, zones=zones, reference=reference)
             for k in [1, 2, 3, 4]:
                 v = raw.get(f'score_k{k}')
@@ -3331,31 +3391,54 @@ class Training():
         self.scoring.set_sigma(self.sigma)
 
         # Baseline: trivial predictor (all class 0)
-        s_baseline = _scores_for(np.zeros(len(y_true), dtype=int), reference=False)
+        s_baseline = _scores_for(np.zeros(len(y_true), dtype=int), df=df_eval, reference=False)
         if verbose:
             print(f"[ref_model] baseline: {s_baseline}")
 
-        _QUANTILE_GRID = [
-            ("fwi_quantiles", [0.0, 0.50, 0.75, 0.95, 0.99, 1.0]),
-            ("uniform",       np.linspace(0.0, 1.0, n_classes + 1).tolist()),
-            ("heavy_low",     [0.0, 0.50, 0.70, 0.83, 0.92, 1.0]),
-            ("heavy_high",    [0.0, 0.08, 0.20, 0.40, 0.65, 1.0]),
-            ("low_emphasis",  [0.0, 0.30, 0.55, 0.72, 0.87, 1.0]),
-            ("high_emphasis", [0.0, 0.13, 0.28, 0.45, 0.70, 1.0]),
-            ("balanced_low",  [0.0, 0.40, 0.60, 0.75, 0.88, 1.0]),
-            ("extreme_tail",  [0.0, 0.60, 0.75, 0.85, 0.93, 1.0]),
-            ("mild_tail",     [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]),
-        ]
+        if n_classes == 5:
+            _QUANTILE_GRID = [
+                ("fwi_quantiles", [0.0, 0.50, 0.75, 0.95, 0.99, 1.0]),
+                ("uniform",       np.linspace(0.0, 1.0, 6).tolist()),
+                ("heavy_low",     [0.0, 0.50, 0.70, 0.83, 0.92, 1.0]),
+                ("heavy_high",    [0.0, 0.08, 0.20, 0.40, 0.65, 1.0]),
+                ("low_emphasis",  [0.0, 0.30, 0.55, 0.72, 0.87, 1.0]),
+                ("high_emphasis", [0.0, 0.13, 0.28, 0.45, 0.70, 1.0]),
+                ("balanced_low",  [0.0, 0.40, 0.60, 0.75, 0.88, 1.0]),
+                ("extreme_tail",  [0.0, 0.60, 0.75, 0.85, 0.93, 1.0]),
+                ("mild_tail",     [0.0, 0.20, 0.40, 0.60, 0.80, 1.0]),
+            ]
+        elif n_classes == 4:
+            _QUANTILE_GRID = [
+                ("fwi_quantiles", [0.0, 0.50, 0.90, 0.98, 1.0]),
+                ("uniform",       np.linspace(0.0, 1.0, 5).tolist()),
+                ("heavy_low",     [0.0, 0.40, 0.70, 0.90, 1.0]),
+                ("heavy_high",    [0.0, 0.15, 0.40, 0.75, 1.0]),
+                ("low_emphasis",  [0.0, 0.35, 0.65, 0.85, 1.0]),
+                ("high_emphasis", [0.0, 0.25, 0.55, 0.80, 1.0]),
+                ("balanced_low",  [0.0, 0.50, 0.75, 0.90, 1.0]),
+                ("extreme_tail",  [0.0, 0.75, 0.90, 0.96, 1.0]),
+                ("mild_tail",     [0.0, 0.33, 0.66, 0.90, 1.0]),
+            ]
+        else:
+            _QUANTILE_GRID = [("uniform", np.linspace(0.0, 1.0, n_classes + 1).tolist())]
 
         # ── Référence : colonne précalculée {target}-quantile-5-Class-Dept ──────
         # → y_ref_pred est la discrétisation ordinale officielle de la target (0..4)
         # C'est ce prédicteur qui définit pair_mean_deltas (étalon de normalisation).
         _ref_col = f"{self.target_name}-quantile-5-Class-Dept"
         if _ref_col in df_train.columns:
-            y_ref_pred = df_train[_ref_col].fillna(0).clip(0, n_classes - 1).astype(int).values
+            y_ref_pred = df_train[_ref_col].fillna(0).astype(int).values
+            if n_classes == 4:
+                # If target > 0, the original 5-class labels are [1, 2, 3, 4], map them to [0, 1, 2, 3]
+                y_ref_pred = np.clip(y_ref_pred - 1, 0, n_classes - 1)
+            else:
+                y_ref_pred = np.clip(y_ref_pred, 0, n_classes - 1)
         else:
             # Fallback : quantilisation manuelle sur df_train si la colonne est absente
-            _qs = np.quantile(df_train[nbsinister_col].fillna(0).values, [0.50, 0.75, 0.95, 0.99])
+            if n_classes == 4:
+                _qs = np.quantile(df_train[nbsinister_col].fillna(0).values, [0.50, 0.90, 0.98])
+            else:
+                _qs = np.quantile(df_train[nbsinister_col].fillna(0).values, [0.50, 0.75, 0.95, 0.99])
             y_ref_pred = np.searchsorted(
                 _qs, df_train[nbsinister_col].fillna(0).values
             ).clip(0, n_classes - 1).astype(int)
@@ -3367,7 +3450,7 @@ class Training():
 
         # Appel reference=True → peuple self.scoring.pair_mean_deltas uniquement
         # Le return value (scores de la TARGET) n'est pas utile → ignoré
-        _scores_for(y_ref_pred, reference=True)
+        _scores_for(y_ref_pred, df_train, reference=True)
         if verbose:
             print(f"[ref_model] pair_mean_deltas (target): {self.scoring.pair_mean_deltas}")
 
@@ -3377,8 +3460,8 @@ class Training():
         _init_col    = fwi_candidates[0]
         _, _init_q   = _QUANTILE_GRID[0]   # fwi_quantiles
         if _init_col in df_train.columns:
-            _init_pred   = _discretize(df_train[_init_col], df_train[_init_col], _init_q)
-            _init_scores = _scores_for(_init_pred, reference=False)
+            _init_pred   = _discretize(df_train[_init_col], df_eval[_init_col], _init_q)
+            _init_scores = _scores_for(_init_pred, df_eval, reference=False)
         else:
             _init_scores = {f'score_k{k}': 0.0 for k in [1,2,3,4]}
             _init_scores.update({'recall': 0.0, 'score_min_class': 0.0})
@@ -3398,7 +3481,7 @@ class Training():
                 continue
             for qname, qbounds in _QUANTILE_GRID:
                 pred   = _discretize(df_train[fwi_col], df_eval[fwi_col], qbounds)
-                scores = _scores_for(pred, reference=False)
+                scores = _scores_for(pred, df_eval, reference=False)
                 agg, _ = self._compute_geometric_agg(scores)
                 cfg = {'fwi_col': fwi_col, 'quantile_name': qname,
                        'quantiles': qbounds, 'scores': scores, 'mean_u': float(agg)}
@@ -3592,27 +3675,53 @@ class Training():
             })
             
         elif 'timeintervention' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
-             loss_params.update({
-                    "gainsfloor": 3.18,
-                    "wkdecay": "power",
-                    "wkpower": 2.56,
-                    "gamma": 8.28,
-                    "taugate": 0.3,
-                    "gatetemp": 0.85,
-                    "wfocal": 2.5,
-                    "wmu0": 0.8,
-                    "fgamma": 0.63,
-                    "falpha": 0.36,
-                    "massupdate": 0.38,
-                    "mumomentum": 0.94,
-                    "mulambdag": 2.69,
-                    "mulambdac": 2.64,
-                    "wmid": 4.86,
-                    "wtrans": 1.6,
-                    "num_classes": 5
+            print('Using optimal parameters for timeintervention-constrained regions')
+            
+            loss_params.update({
+                "gainsfloor": 3.26,
+                "wkdecay": "None",
+                "wkpower": 3.75,
+                "wklambda": 0.21,
+                "gamma": 0.1,
+                "taugate": 0.21,
+                "gatetemp": 0.44,
+                "wfocal": 4.02,
+                "wmu0": 0.77,
+                "fgamma": 2.16,
+                "falpha": 0.66,
+                "massupdate": 0.1,
+                "mumomentum": 0.57,
+                "mulambdag": 0.17,
+                "mulambdac": 1.54,
+                "mulambdad": 3.49,
+                "wmid": 1.76,
+                "wtrans": 3.65,
             })
+            
+            """loss_params.update({
+                    "gainsfloor": 2.6,
+                "wkdecay": "exp",
+                "wkpower": 3.86,
+                "wklambda": 1.15,
+                "gamma": 7.71,
+                "taugate": 0.34,
+                "gatetemp": 0.88,
+                "wfocal": 2.22,
+                "wmu0": 0.45,
+                "fgamma": 1.9,
+                "falpha": 0.63,
+                "massupdate": 0.41,
+                "mumomentum": 0.93,
+                "mulambdag": 2.64,
+                "mulambdac": 1.93,
+                "mulambdad": 4.22,
+                "wmid": 1.47,
+                "wtrans": 4.34,
+            })"""
         
         elif 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
+            print('Using optimal parameters for nbsinister-constrained regions')
+            
             loss_params.update({
                     "gamma": 1.59,
                     "taugate": 0.18,
@@ -3625,25 +3734,33 @@ class Training():
                     "falpha": 0.75,
                     "mumomentum": 0.84,
                     "mulambdag": 1.12,
-                    "mulambdac": 0.56,
+                    "mulambdad": 0.56,
+                    "mulambdac": 0.0,
+                    "wmid": 0.72,
+                    "wtrans": 0.93,
                     })
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
             loss_params.update({
-                    "gamma": 1.76,
-                    "taugate": 0.35,
-                    "gatetemp": 0.44,
+                     "gainsfloor": 0.65,
                     "wkdecay": "power",
-                    "wkpower": 2.42,
-                    "wfocal": 0.84,
-                    "wmu0": 0.22,
-                    "fgamma": 3.69,
-                    "falpha": 0.22,
-                    "mumomentum": 0.92,
-                    "mulambdag": 1.19,
-                    "mulambdac": 1.47,
-                    "num_classes": 5
+                    "wkpower": 1.75,
+                    "wklambda": 0.72,
+                    "gamma": 9.41,
+                    "taugate": 0.28,
+                    "gatetemp": 0.96,
+                    "wfocal": 4.12,
+                    "wmu0": 0.71,
+                    "fgamma": 3.61,
+                    "falpha": 0.15,
+                    "massupdate": 0.43,
+                    "mumomentum": 0.65,
+                    "mulambdag": 0.59,
+                    "mulambdac": 0.0,
+                    "mulambdad": 2.12,
+                    "wmid": 0.72,
+                    "wtrans": 0.93,
                     })
     
         self.criterion = self.get_loss(self.loss, loss_params)
@@ -4420,7 +4537,7 @@ class Training():
         check_and_create_path(self.dir_log)
 
         if not is_unknowed_risk:
-                test_percentage = np.round(np.arange(0.1, 1.05, 0.1), 2)
+            test_percentage = np.round(np.arange(0.1, 1.05, 0.1), 2)
         else:
             test_percentage = np.arange(0.0, 1.05, 0.05)
 
@@ -4454,7 +4571,7 @@ class Training():
             # We output `agg` (the true geometric mean of U converted back dynamically, or the direct index, depending on how agg works).
             agg, _ = self._compute_geometric_agg(mapped_dict)
             return float(agg)
- 
+        
         try:
             tracemalloc.start()
             self.log_memory("Start search_samples_proportion")
@@ -4546,7 +4663,7 @@ class Training():
     
                         # Mettre à jour df_train pour l'entraînement
                         #df_train_copy["weight"] = df_combined["weight"].reindex(df_train_copy.index, fill_value=0)
-                        
+                                                    
                         df_train_copy['weight'] = 0
                         #weight = egpd_trunc_discrete_weights(df_combined[self.target_name].values, df_combined['graph_id'].values)
                         df_train_copy.loc[df_combined.index, 'weight'] = 1
@@ -4703,8 +4820,12 @@ class Training():
                     mu_val  = _mean_u_agg(self.metrics[tp], '_val')
                     mu_test = _mean_u_agg(self.metrics[tp], '_test')
 
-                    self.metrics[tp]['mean_u_val'] = mu_val
-                    self.metrics[tp]['mean_u_test'] = mu_test
+                    if self.task_type != 'binary':
+                        self.metrics[tp]['mean_u_val'] = mu_val
+                        self.metrics[tp]['mean_u_test'] = mu_test
+                    else:
+                        self.metrics[tp]['mean_f1_val'] = self.metrics[tp]['f1_val']
+                        self.metrics[tp]['mean_f1_test'] = self.metrics[tp]['f1_test']
 
                     def _fmt_score(m_dict, key):
                         vals = np.atleast_1d(m_dict.get(key, [float('nan')]))
@@ -4753,31 +4874,35 @@ class Training():
                 if not isinstance(tp, float):
                     continue
                 
-                # Build a mapped dict matching raw output
-                mapped_dict = {}
-                for k in [1, 2, 3, 4]:
-                    key = f'score_k{k}_val'
-                    vals = np.atleast_1d(metric_dict.get(key, [0.0]))
-                    sk = float(np.nanmean(vals)) if len(vals) else 0.0
-                    mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
+                if self.task_type != 'binary':
+                    # Build a mapped dict matching raw output
+                    mapped_dict = {}
+                    for k in [1, 2, 3, 4]:
+                        key = f'score_k{k}_val'
+                        vals = np.atleast_1d(metric_dict.get(key, [0.0]))
+                        sk = float(np.nanmean(vals)) if len(vals) else 0.0
+                        mapped_dict[f'score_k{k}'] = sk if not np.isnan(sk) else 0.0
 
-                recall_vals = np.atleast_1d(metric_dict.get('recall_val', [0.0]))
-                sk_recall = float(np.nanmean(recall_vals)) if len(recall_vals) else 0.0
-                mapped_dict['recall'] = sk_recall if not np.isnan(sk_recall) else 0.0
+                    recall_vals = np.atleast_1d(metric_dict.get('recall_val', [0.0]))
+                    sk_recall = float(np.nanmean(recall_vals)) if len(recall_vals) else 0.0
+                    mapped_dict['recall'] = sk_recall if not np.isnan(sk_recall) else 0.0
 
-                smc_vals = np.atleast_1d(metric_dict.get('score_min_class_val', [0.0]))
-                sk_smc = float(np.nanmean(smc_vals)) if len(smc_vals) else 0.0
-                mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
+                    smc_vals = np.atleast_1d(metric_dict.get('score_min_class_val', [0.0]))
+                    sk_smc = float(np.nanmean(smc_vals)) if len(smc_vals) else 0.0
+                    mapped_dict['score_min_class'] = sk_smc if not np.isnan(sk_smc) else 0.0
 
-                #if getattr(self, 'loss', '') == 'bceloss':
-                #    iou_vals = np.atleast_1d(metric_dict.get('iou_val', [0.0]))
-                #    mean_u_per_tp[tp] = float(np.nanmean(iou_vals)) if len(iou_vals) else 0.0
-                #else:
-                agg, u_vals = self._compute_geometric_agg(mapped_dict)
-                # Consistent with early stopping behavior for the selection criterion:
-                mean_u_per_tp[tp] = float(agg)
-                
-                tp_candidates.append(tp)
+                    #if getattr(self, 'loss', '') == 'bceloss':
+                    #    iou_vals = np.atleast_1d(metric_dict.get('iou_val', [0.0]))
+                    #    mean_u_per_tp[tp] = float(np.nanmean(iou_vals)) if len(iou_vals) else 0.0
+                    #else:
+                    agg, u_vals = self._compute_geometric_agg(mapped_dict)
+                    # Consistent with early stopping behavior for the selection criterion:
+                    mean_u_per_tp[tp] = float(agg)
+                    
+                    tp_candidates.append(tp)
+                else:
+                    mean_u_per_tp[tp] = float(np.nanmean(self.metrics[tp]['mean_f1_val']))
+                    tp_candidates.append(tp)
 
             if not tp_candidates:
                 logger.warning("No valid k-scores found for Reference Selection. Falling back to score_val maximization.")
@@ -4794,7 +4919,7 @@ class Training():
                 # Logging
                 logger.info("--- Reference-Normalised Selection Results ---")
                 for tp in sorted(tp_candidates):
-                    logger.info(f"tp={tp}: mean_u={mean_u_per_tp[tp]:.4f}")
+                    logger.info(f"tp={tp}: mean_u={float(mean_u_per_tp[tp]):.4f}")
 
             logger.info(f'Best tp {best_tp} (Rank-Based)')
             self.metrics['iou_score'] = iou_scores # Keep legacy key name or update? Let's keep data but variable name is misleading. It's actually score history list but variable iou_scores was empty anyway here
@@ -4901,7 +5026,7 @@ class Training():
                 
             inputs, orilabels_, _ = X
 
-            orilabels_ = orilabels_.to(device)
+            orilabels_ = orilabels_.to(self.device)
             pred_horizon = []
             labels_horizon = []
 
@@ -5017,7 +5142,7 @@ class Training():
                     pred_argmax = probs.argmax(dim=1).detach().cpu()
                     
                     output = criterion.score_to_class(output, clusters_ids, departement_ids)
-
+                        
                     diff_mask = (output.detach().cpu() != pred_argmax)
                     diff_mean = diff_mask.float().mean().item()
                     self.diff_bin_argmax = diff_mean
@@ -5033,7 +5158,9 @@ class Training():
                             self.ccllt_diff_params['date'].append(orilabels[idx_item, date_index].item())
                             self.ccllt_diff_params['pred_bin'].append(output[idx_item].item())
                             self.ccllt_diff_params['pred_argmax'].append(pred_argmax[idx_item].item())
-                                            
+                    
+                    #output = pred_argmax
+                    
                 if prediction_type == 'Class':
                     
                     if self.task_type == 'classification' or self.task_type == 'binary' or self.task_type == 'corn':
@@ -5083,6 +5210,17 @@ class Training():
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
     def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
+
+        logger.info(
+            f"\n{'='*60}\n"
+            f"  Training model : {self.name}\n"
+            f"  task_type      : {getattr(self, 'task_type', 'N/A')}\n"
+            f"  target         : {getattr(self, 'target_name', 'N/A')}\n"
+            f"  epochs         : {epochs}  |  n_runs : {n_runs}\n"
+            f"  train loader   : {len(self.train_loader)} batches\n"
+            f"  val loader     : {len(self.val_loader)} batches\n"
+            f"{'='*60}"
+        )
 
         if self.loss_param_search:
             self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
@@ -5490,16 +5628,22 @@ class Training():
     
     def update_model(self, model):
         self.model = deepcopy(model)
-
+        
     def get_loss(self, loss_name, loss_params):
         
         if 'ccllt' in loss_name or "ranknet" in loss_name or 'msetheta' in loss_name:
             loss_params['ndepartements'] = self.df_train['departement'].unique().shape[0]
         
-        if 'ccltt' in loss_params and "bdiff" in self.dir_log.as_posix():
+        if 'ccllt' in loss_name and "bdiff" in self.dir_log.as_posix():
             loss_params['clustersequaldept'] = True
             
-        loss_params.update({'num_classes' : 5})
+        if 'ccllt' in loss_name:
+            loss_params['wfocal'] = 0.0
+            
+        if 'DualTraining-num' in self.name:
+            loss_params.update({'num_classes' : 4})
+        else:
+            loss_params.update({'num_classes' : 5})
         return get_loss_function(loss_name, **loss_params)
 
     def get_learnable_parameters(self, criterion):
@@ -5607,7 +5751,7 @@ class Training():
             # Mettre à jour df_train pour l'entraînement
             self.df_train.loc[df_combined.index, 'weight'] = 1
             
-        background_data_train = self.df_train
+        background_data_train = self.df_train.sample(100)
                         
         background_data_train, y_background, e = get_numpy_data(self.graph, background_data_train, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         background_data_train = torch.Tensor(background_data_train).to(self.device)
@@ -5619,14 +5763,18 @@ class Training():
 
         # SHAP DeepExplainer avec wrapper du modèle
         self.model.eval()
-        if not hasattr(self, 'explainer') or self.explainer is None:
-            self.explainer = shap.DeepExplainer(wm, background_data_train)
+        if not hasattr(self, 'explainer') or self.explainer is None or not isinstance(self.explainer, dict):
+            self.explainer = {}
+            
+        if horizon_shap not in self.explainer:
+            print(f"Initializing DeepExplainer for horizon {horizon_shap} with background data shape: {background_data_train.shape}")
+            self.explainer[horizon_shap] = shap.DeepExplainer(wm, background_data_train)
         else:
-            print('Explainer already exists')
+            print(f'Explainer for horizon {horizon_shap} already exists')
             
         self.model.eval()
         wm.y_background = y_test
-        shap_values = self.explainer.shap_values(Xst_flat, check_additivity=False)
+        shap_values = self.explainer[horizon_shap].shap_values(Xst_flat, check_additivity=False)
         
         n_classes = self.out_channels
 
@@ -5702,7 +5850,7 @@ class Training():
                 for i, sample in enumerate(samples):
                     plt.figure(figsize=figsize)
                     shap.force_plot(
-                        self.explainer.expected_value[class_idx],
+                        self.explainer[horizon_shap].expected_value[class_idx],
                         shap_values[sample, :, class_idx],
                         features=df.iloc[sample].values,
                         feature_names=self.features_name,
@@ -5722,7 +5870,7 @@ class Training():
         # Sauvegarder les valeurs SHAP ET l'explainer pour réutilisation ultérieure
         shap_data = {
             'shap_values': shap_values,  # Shape: (B, F, n_classes)
-            'expected_values': self.explainer.expected_value,
+            'expected_values': self.explainer[horizon_shap].expected_value,
             'feature_names': self.features_name,
             'n_classes': n_classes,
             'B': B,
@@ -5736,7 +5884,7 @@ class Training():
         
         # Sauvegarder l'explainer séparément (peut être volumineux)
         explainer_data = {
-            'explainer': self.explainer,
+            'explainer': self.explainer[horizon_shap],
             'wrapper_model': WrapperModel(self, F, T, e, y_background, horizon_shap),
             'F': F,
             'T': T,
@@ -5745,7 +5893,7 @@ class Training():
             'horizon_shap': horizon_shap
         }
         #save_object(explainer_data, f'{outname}_shap_explainer.pkl', dir_output)
-        save_object(self.explainer, f'{outname}_shap_explainer.pkl', dir_output)
+        save_object(self.explainer[horizon_shap], f'{outname}_shap_explainer.pkl', dir_output)
         print(f"SHAP values sauvegardées dans: {dir_output / f'{outname}_shap_values.pkl'}")
         print(f"SHAP explainer sauvegardé dans: {dir_output / f'{outname}_shap_explainer.pkl'}")
 
@@ -5770,8 +5918,8 @@ class Training():
         import pandas as pd
         
         # Priorité 1: Vérifier si self.explainer existe (explainer en mémoire)
-        if hasattr(self, 'explainer') and self.explainer is not None:
-            print(f"Utilisation de self.explainer (en mémoire)")
+        if hasattr(self, 'explainer') and self.explainer is not None and isinstance(self.explainer, dict) and horizon in self.explainer:
+            print(f"Utilisation de self.explainer[{horizon}] (en mémoire)")
             
             # Préparer les données pour cet échantillon
             if hasattr(self, 'use_temporal_as_edges'):
@@ -5787,7 +5935,7 @@ class Training():
             # Calculer les SHAP values pour cet échantillon
             
             # Activer le mode logits si le modèle est un WrapperModel
-            sample_shap_values_raw = explainer.shap_values(Xst_sample_flat, check_additivity=False)
+            sample_shap_values_raw = self.explainer[horizon].shap_values(Xst_sample_flat, check_additivity=False)
             
             n_classes = self.out_channels
             
@@ -5808,7 +5956,7 @@ class Training():
             # Extraire pour cet échantillon
             sample_shap_values = sample_shap_values_raw[0, :, :]  # Shape: (F, n_classes)
             sample_features = Xst_sample[:, :,  -1 - (self.horizon - horizon)].cpu().numpy()
-            expected_values = self.explainer.expected_value
+            expected_values = self.explainer[horizon].expected_value
             feature_names = self.features_name
         else:
             print(f"Aucune SHAP value ni explainer pré-calculé trouvé.")
@@ -6215,7 +6363,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=75,
+        n_trials=200,
         warmup=5,
         enable_pruning=False,
     ):
@@ -7368,166 +7516,152 @@ class DualTraining:
 
     The class orchestrates two sub-models: ``occ_model`` operates on the
     binarised dataset while ``num_model`` is restricted to samples with a
-    positive label. Losses and parameters of both sub-models are combined so
-    that a single optimisation step updates them simultaneously."""
+    positive label. Both sub-models are trained sequentially within the
+    standard train() / create_train_val_test_loader() interface."""
 
-    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str, n_run : int = 1, horizon=0):
+    def __init__(self, target_name, occ_model: Training, num_model: Training, name, task_type: str,
+                 n_run: int = 1, horizon=0, loss_param_search=False):
         self.occ_model = occ_model
         self.num_model = num_model
         self.name = name
         self.task_type = task_type
         self.n_run = n_run
         self.target_name = target_name
-        self.horizon = 0
-
-    def train(
-        self,
-        graph,
-        PATIENCE_CNT,
-        CHECKPOINT,
-        epochs,
-        verbose: bool = True,
-        custom_model_params=None,
-        new_model: bool = True,
-    ):
-        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
-        #self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model)
+        self.horizon = horizon
+        self.loss_param_search = loss_param_search
+        self.metrics = {}
+        self.scoring = Scoring()
 
     # ------------------------------------------------------------------
-    # Inference utilities
+    # Loader creation  (does NOT train anything)
     # ------------------------------------------------------------------
-    def create_test_loader(self, graph, df):
-        """Create test loaders for both sub-models.
-
-        The occurence model consumes the full dataframe while the numeric
-        model will later be applied only on samples predicted positive. We
-        therefore keep a reference to ``graph`` and ``df`` so that the
-        numeric loader can be rebuilt after filtering.
-        """
-
-        # store for later use in ``_predict_test_loader``
-        self._test_graph = graph
-        self._test_df = df.reset_index(drop=True)
-
-        # loader for the occurence model (covers all samples)
-        self.test_loader = self.occ_model.create_test_loader(graph, df)
-        self.occ_model.test_loader = self.test_loader
-        return self.test_loader
-    
-    def create_train_val_test_loader(self, graph, dfs_train, dfs_val, dfs_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params, features_importance, use_log):
+    def create_train_val_test_loader(self, graph, dfs_train, dfs_val, dfs_test, epochs, PATIENCE_CNT, CHECKPOINT,
+                                     custom_model_params=None, features_importance=False, use_log=True):
         train_dataset, train_pos = dfs_train
         val_dataset, val_pos = dfs_val
         test_dataset, test_pos = dfs_test
-        
+
         self.num_model.create_train_val_test_loader(
-                graph,
-                train_pos,
-                val_pos,
-                test_pos,
-                epochs,
-                PATIENCE_CNT,
-                CHECKPOINT,
-                custom_model_params=custom_model_params,
-                features_importance=False,
-                use_log=use_log,
-            )
-        
-        self.metrics = {}
+            graph, train_pos, val_pos, test_pos,
+            epochs, PATIENCE_CNT, CHECKPOINT,
+            custom_model_params=custom_model_params,
+            features_importance=False,
+            use_log=use_log,
+        )
+
+        self.occ_model.create_train_val_test_loader(
+            graph, train_dataset, val_dataset, test_dataset,
+            epochs, PATIENCE_CNT, CHECKPOINT,
+            custom_model_params=custom_model_params,
+            features_importance=False,
+            use_log=use_log,
+        )
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs,
+              verbose: bool = True, custom_model_params=None,
+              new_model: bool = True, min_epochs: int = 1):
+        """Train num_model first (positive-only), then occ_model over n_run seeds."""
+
+        # ── 1. Train the numeric model (strictly on positive samples) ────────
+        logger.info("============= DualTraining: training num_model =============")
+        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs,
+                             verbose, custom_model_params, new_model, min_epochs)
+
+        # ── 2. Train occ_model with n_run seeds, evaluate, track scores ──────
+        all_runs_scores = {}
         tp = 'occ-based'
-        self.num_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, True, custom_model_params=custom_model_params, new_model=True)
 
         for run in range(self.n_run):
-            seed = int(random.random())
-            self.occ_model.seed = seed
+            logger.info(f"============= DualTraining: occ_model RUN {run + 1}/{self.n_run} =============")
+            self.occ_model.seed = int(random.random())
             self.occ_model.n_run = 1
-            self.occ_model.create_train_val_test_loader(
-                graph,
-                train_dataset,
-                val_dataset,
-                test_dataset,
-                epochs,
-                PATIENCE_CNT,
-                CHECKPOINT,
-                custom_model_params=custom_model_params,
-                features_importance=False,
-                use_log=use_log,
+
+            scores_evolution, _ = self.occ_model.train_run(
+                graph, PATIENCE_CNT, CHECKPOINT, epochs,
+                verbose, custom_model_params, new_model, min_epochs, run_idx=run
             )
-            self.occ_model.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, False, custom_model_params=custom_model_params, new_model=True)
+            all_runs_scores[run] = scores_evolution
 
-            ############################# On set test ##############################
-            test_output, y = self._predict_test_loader((self.occ_model.test_loader, self.num_model.test_loader))
-            prediction = test_output.detach().cpu().numpy()
-            y = y.detach().cpu().numpy()
-            prediction = prediction[:, 0]
-            y = y[:, :, 0]
-        
-            dff = pd.DataFrame(index=np.arange(0, y.shape[0]))
-            dff['departement'] = y[:, departement_index]
-            dff['date'] = y[:, date_index]
-            dff['graph_id'] = y[:, graph_id_index]
-            dff[self.target_name] = y[:, -1]
-            y = y[:, -1]
+            # ── Evaluate combined prediction on test set ────────────────────
+            test_output, y = self._predict_test_loader(
+                (self.occ_model.test_loader, self.num_model.test_loader)
+            )
+            prediction = test_output.detach().cpu().numpy()[:, 0]
+            y_np = y.detach().cpu().numpy()[:, :, 0]
 
-            metrics_run = self.scoring.evaluate_metrics(dff[self.target_name], prediction, zones=dff['graph_id'], dates=dff['date'])
+            dff = pd.DataFrame(index=np.arange(y_np.shape[0]))
+            dff['departement'] = y_np[:, departement_index]
+            dff['date'] = y_np[:, date_index]
+            dff['graph_id'] = y_np[:, graph_id_index]
+            dff[self.target_name] = y_np[:, -1]
+
+            metrics_run = self.scoring.evaluate_metrics(
+                dff[self.target_name], prediction,
+                zones=dff['graph_id'], dates=dff['date']
+            )
             metrics_run = round_floats(metrics_run)
             update_metrics_as_arrays(self, tp, metrics_run, 'test')
 
         self.metrics[tp] = add_ic95_to_dict(self.metrics[tp], None, "_ic95")
         self.metrics['best_tp'] = tp
 
+        # ── 3. Variance plots (mirrors Training.plot_runs_variance) ──────────
+        try:
+            self.occ_model.plot_runs_variance(all_runs_scores, self.n_run)
+        except Exception as e:
+            logger.warning(f"Failed to plot runs variance: {e}")
+
+    # ------------------------------------------------------------------
+    # Inference utilities
+    # ------------------------------------------------------------------
     def _predict_test_loader(self, loader=None, prediction_type='Class', output_pdf=None, calibrate=False):
         occ_loader, num_loader = loader
         pred_occ, y_occ = self.occ_model._predict_test_loader(occ_loader, prediction_type, output_pdf, calibrate=calibrate)
         pred_num, y_num = self.num_model._predict_test_loader(num_loader, prediction_type, output_pdf, calibrate=calibrate)
-        
+
         print('Size check ->', y_occ.shape, y_num.shape)
-        
+
         pred_occ = torch.as_tensor(pred_occ, dtype=torch.float32)
         pred_num = torch.as_tensor(pred_num, dtype=torch.float32)
         for H in range(self.horizon + 1):
-            
             pred_occ_horizon = pred_occ[:, H]
             pred_num_horizon = pred_num[:, H]
-            
+
             occ_mask = pred_occ_horizon.reshape(-1) > 0
-            
-            y_occ_positve_samples = y_occ[occ_mask, :, H]
-            
-            selected_idx_num : List[torch.Tensor] = []
-            selected_idx_occ : List[torch.Tensor] = []
-            for i in range(y_occ_positve_samples.shape[0]):
-                samples = y_occ_positve_samples[i]
-                date = samples[date_index]
-                graph_id = samples[graph_id_index]
-                
+            y_occ_positive_samples = y_occ[occ_mask, :, H]
+
+            selected_idx_num: List[torch.Tensor] = []
+            selected_idx_occ: List[torch.Tensor] = []
+            for i in range(y_occ_positive_samples.shape[0]):
+                sample = y_occ_positive_samples[i]
+                date = sample[date_index]
+                graph_id = sample[graph_id_index]
+
                 idx = torch.argwhere((y_num[:, date_index, H] == date) & (y_num[:, graph_id_index, H] == graph_id))
                 if len(idx) > 0:
                     selected_idx_num += idx
-                    
+
                 idx = torch.argwhere((y_occ[:, date_index, H] == date) & (y_occ[:, graph_id_index, H] == graph_id))
                 if len(idx) > 0:
                     selected_idx_occ += idx
-            
+
             print('Size idx check ->', len(selected_idx_num), len(selected_idx_occ))
-            pred_occ[selected_idx_occ] = pred_num_horizon[selected_idx_num][..., None]
-            
+            pred_occ[selected_idx_occ] = pred_num_horizon[selected_idx_num][..., None] + 1
+
         return pred_occ, y_num
-    
+
     def create_test_loader(self, graph, df):
         loader_occ = self.occ_model.create_test_loader(graph, df)
-        
         loader_num = self.num_model.create_test_loader(graph, df)
-
         return (loader_occ, loader_num)
-    
+
     def search_samples_proportion(self, *args, **kwargs):
-        """Delegate proportion search to the occurence model.
-
-        This wrapper keeps the signature of :func:`Training.search_samples_proportion`
-        for compatibility while relying on the occurence model implementation.
-        """
-
+        """Delegate proportion search to the occurence model."""
         return self.occ_model.search_samples_proportion(*args, **kwargs)
+
     
 class Distribution2Class:
     def __init__(self, target_name, distrib_model: Training, class_model: Training, name, task_type: str, n_run : int = 1, horizon=0):

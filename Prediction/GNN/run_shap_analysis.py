@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 import torch
 import numpy as np
+import argparse
 
 def check_and_create_path(path: Path):
     """
@@ -31,7 +32,7 @@ def graph_id2_num_zone(df, scale, graph_construct):
 
     # ====== PARTIE DEPARTEMENT 6 ======
     mask_dep6 = df['departement'] == 6
-    if True in np.unique(mask_dep6):
+    if np.any(mask_dep6):
 
         df_dep6 = df[mask_dep6]
 
@@ -78,10 +79,33 @@ if str(prediction_path) not in sys.path:
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
-model_name = 'GRU_search_full_10_0_all_one_nbsinister_regression_ccllt-id{node}-nclusters{30}'
+# Argument parsing
+parser = argparse.ArgumentParser(description='Run SHAP analysis for wildfire prediction models')
+parser.add_argument('--dataset', type=str, default='firemen', help='Dataset name')
+parser.add_argument('--name', type=str, default='occurence_01_06_25', help='Run name')
+parser.add_argument('--graph_construct', type=str, default='risk-size-zonemeteo-degree-a3-r5-t0.3', help='Graph construction string')
+parser.add_argument('--target', type=str, default='nbsinister-quantile-5-Class-Dept', help='Target name')
+parser.add_argument('--loss', type=str, default='flwk', help='Loss function name')
+parser.add_argument('--model_type', type=str, default='GRU', help='Model type (e.g., GRU)')
+parser.add_argument('--task_type', type=str, default='classification', help='Task type (classification/regression)')
+parser.add_argument('--scale', type=int, default=3, help='Spatial scale')
+
+args = parser.parse_args()
+
+dataset = args.dataset
+name = args.name
+graph_construct = args.graph_construct
+target = args.target
+loss = args.loss
+model_type = args.model_type
+task_type = args.task_type
+scale = args.scale
+
+model_name = f'{model_type}_search_full_10_0_all_one_{target}_{task_type}_{loss}'
 
 # Chemins des fichiers
-root_path = f"/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/firemen/firepoint/2x2/train/occurence_06_01_25_78/check_z-score/full_all_3_0_risk-size-zonemeteo-degree-a3-r5-t0.3_node/{model_name}"
+root_path = f"/Work/Users/ncaron/GNN/{dataset}/firepoint/2x2/train/{name}/check_z-score/full_all_{scale}_0_{graph_construct}_node/{model_name}"
+#root_path = f"/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/{dataset}/firepoint/2x2/train/{name}/check_z-score/full_all_{scale}_0_{graph_construct}_node/{model_name}"
 model_path = f"{root_path}/{model_name}.pkl"
 
 print(f"Chargement du modèle: {model_path}")
@@ -103,71 +127,72 @@ os.makedirs(output_dir, exist_ok=True)
 #sample_size = min(2000, len(df_test))
 #df_sample = df_test.sample(sample_size, random_state=42)
 
-horizon = 0
-target = "nbsinister"
-df_test = graph_id2_num_zone(df_test, scale=3, graph_construct='risk-size-zonemeteo-degree-a3-r5-t0.3')
+horizon = model.horizon
+target = model.target_name
+df_test = graph_id2_num_zone(df_test, scale=scale, graph_construct=graph_construct)
 nz = df_test['num_zone'].unique()
-print(nz)
 depts = df_test['departement'].unique()
 
-for num_zone in nz:
+for H in range(horizon + 1):
+    
+    for num_zone in nz:
 
-    outname = f'{target}_h{horizon}_zone{num_zone}' 
+        outname = f'{target}_h{H}_zone{num_zone}' 
 
-    df_sample = df_test[df_test['num_zone'] == num_zone]
-    dept = df_sample['departement'].unique()[0]
-    sample_size = len(df_sample)
+        df_sample = df_test[df_test['num_zone'] == num_zone]
+        dept = df_sample['departement'].unique()[0]
+        sample_size = len(df_sample)
 
-    print(f"Lancement de shapley_additive_explanation sur {sample_size} num_zone {num_zone} échantillons...")
-    try:
-        # On s'assure que le modèle utilise le bon device (CPU par défaut pour SHAP si GPU non dispo)
-        #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        device = 'cpu'
-        model.device = device
-        if hasattr(model, 'model') and model.model is not None:
-            model.model.to(device)
+        print(f"Lancement de shapley_additive_explanation sur {num_zone} num_zone {sample_size} échantillons...")
+        try:
+            # On s'assure que le modèle utilise le bon device (CPU par défaut pour SHAP si GPU non dispo)
+            #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            device = 'cpu'
+            model.device = device
+            if hasattr(model, 'model') and model.model is not None:
+                model.model.to(device)
 
-        model.shapley_additive_explanation(
-            df=df_sample,
-            outname=outname,
-            dir_output=output_dir / str(dept),
-            mode='beeswarm',
-            figsize=(15, 25),
-            plot=True
-        )
-        print(f"Analyse terminée avec succès. Résultats dans: {output_dir}")
-    except Exception as e:
-        print(f"Erreur lors de l'exécution de SHAP: {e}")
-        import traceback
-        traceback.print_exc()
+            model.shapley_additive_explanation(
+                df=df_sample,
+                outname=outname,
+                dir_output=output_dir / str(dept),
+                mode='beeswarm',
+                figsize=(15, 25),
+                plot=True
+            )
+            print(f"Analyse terminée avec succès. Résultats dans: {output_dir}")
+        except Exception as e:
+            print(f"Erreur lors de l'exécution de SHAP: {e}")
+            import traceback
+            traceback.print_exc()
 
-for dept in depts:
-    outname = f'{target}_h{horizon}'
+    for dept in depts:
+        outname = f'{target}_h{H}_{dept}'
 
-    df_sample = df_test[df_test['departement'] == dept]
-    sample_size = len(df_sample)
+        df_sample = df_test[df_test['departement'] == dept]
+        sample_size = len(df_sample)
 
-    print(f"Lancement de shapley_additive_explanation sur {sample_size} dept {dept} échantillons...")
-    try:
-        # On s'assure que le modèle utilise le bon device (CPU par défaut pour SHAP si GPU non dispo)
-        #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        device = 'cpu'
-        model.device = device
-        if hasattr(model, 'model') and model.model is not None:
-            model.model.to(device)
+        print(f"Lancement de shapley_additive_explanation sur {sample_size} dept {dept} échantillons...")
+        try:
+            # On s'assure que le modèle utilise le bon device (CPU par défaut pour SHAP si GPU non dispo)
+            #device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+            device = 'cpu'
+            model.device = device
+            if hasattr(model, 'model') and model.model is not None:
+                model.model.to(device)
 
-        model.shapley_additive_explanation(
-            df=df_sample,
-            outname=outname,
-            dir_output=output_dir / str(dept),
-            mode='beeswarm',
-            figsize=(15, 25),
-            plot=True
-        )
-        print(f"Analyse terminée avec succès. Résultats dans: {output_dir}")
-    except Exception as e:
-        print(f"Erreur lors de l'exécution de SHAP: {e}")
-        import traceback
-        traceback.print_exc()
+            model.shapley_additive_explanation(
+                df=df_sample,
+                outname=outname,
+                dir_output=output_dir / str(dept),
+                mode='beeswarm',
+                figsize=(15, 25),
+                plot=True
+            )
+            print(f"Analyse terminée avec succès. Résultats dans: {output_dir}")
+        except Exception as e:
+            print(f"Erreur lors de l'exécution de SHAP: {e}")
+            import traceback
+            traceback.print_exc()
 
-save_object(model, f'{model_name}.pkl', Path(root_path))
+    save_object(model, f'{model_name}.pkl', Path(root_path))
