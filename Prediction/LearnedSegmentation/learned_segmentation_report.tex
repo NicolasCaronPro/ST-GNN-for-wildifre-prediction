@@ -1,0 +1,91 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{amsmath, amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\geometry{margin=2.5cm}
+
+\title{\textbf{Segmentation Spatiale Apprise pour la Prédiction Multi-Modale des Incendies de Forêt}}
+\author{\textit{Équipe de Recherche Wildfire Prediction}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Ce rapport présente une étude approfondie du module \texttt{LearnedSegmentation}, conçu pour automatiser la délimitation de zones de risque d'incendie optimales à travers le territoire français. Contrairement aux approches basées sur des maillages réguliers, notre méthode utilise un algorithme de ligne de partage des eaux (\textit{Watershed}) guidé par des cartes de susceptibilité apprises. Nous détaillons ici le pipeline de traitement de données (64 canaux), l'architecture des modèles convolutifs (\textbf{UNet}, \textbf{SwinUNet}) et les stratégies d'optimisation d'hyperparamètres. Les résultats démontrent une capacité de généralisation inter-départementale avec un IoU moyen de 0,50 sur des zones de test.
+\end{abstract}
+
+\section{Introduction}
+La gestion opérationnelle des incendies de forêt nécessite une discrétisation spatiale pertinente du territoire. Les découpages administratifs (départements) sont souvent trop vastes et hétérogènes, tandis que les grilles régulières ignorent les barrières naturelles et les gradients de risque. Le module \texttt{LearnedSegmentation} vise à générer des segments "appris" qui maximisent la cohérence interne du risque d'incendie tout en respectant des contraintes de taille et de topologie.
+
+\section{Collecte et Ingénierie des Données}
+Le système traite des \textit{datacubes} complexes extraits de diverses sources satellitaires et météorologiques. Les données sont agrégées sur une résolution de 2x2 km.
+
+\subsection{Espace de Caractéristiques (Features)}
+L'entrée du modèle se compose de \textbf{64 canaux} thématiques :
+\begin{itemize}
+    \item \textbf{Variables Météorologiques (Air/CEMS)} : Température, point de rosée (\textit{dwpt}), humidité relative (\textit{rhum}), précipitations (\textit{prcp}), pression et vitesse du vent (\textit{wspd}).
+    \item \textbf{Indices de Combustible (Sentinel-2)} : Indices de végétation et d'humidité du sol.
+    \item \textbf{Occupation du Sol (CLC/Forest)} : Encodage catégoriel (via \textit{Target Encoding} et \textit{CatBoostEncoder}) des types de forêts et de landcover.
+    \item \textbf{Topographie} : Altitude et pente.
+    \item \textbf{Facteurs Anthropiques} : Densité de population et réseau routier (\textit{BD-Route}).
+\end{itemize}
+
+\subsection{Prétraitement et Normalisation}
+Les données subissent une normalisation standard (\textit{Z-score}) via \texttt{StandardScaler}, fitée uniquement sur les données d'entraînement (70 départements). Pour l'entraînement des réseaux convolutifs, les images sont redimensionnées à une résolution fixe de \textbf{64x64 pixels}.
+
+\section{Méthodologie de Segmentation}
+
+\subsection{Pipeline de Segmentation Watershed}
+L'algorithme de segmentation implémenté dans \texttt{segmentation.py} suit un processus en plusieurs étapes :
+\begin{enumerate}
+    \item \textbf{Quantisation du Risque} : La carte de susceptibilité initiale est simplifiée par un régresseur `Predictor` avec $a$ clusters (\texttt{reduce}), réduisant le bruit topologique.
+    \item \textbf{Détection de Contours} : Un filtre de \textbf{Sobel} est appliqué pour identifier les gradients de risque abrupts.
+    \item \textbf{Transformée de Distance} : Une transformation de distance euclidienne (EDT) est effectuée sur les contours pour localiser les "germes" (\textit{seeds}) au centre des zones homogènes.
+    \item \textbf{Inondation (\textit{Flooding})} : L'algorithme de ligne de partage des eaux est exécuté sur l'inverse de la carte de risque pour délimiter les bassins versants (\textit{catchment basins}).
+\end{enumerate}
+
+\subsection{Optimisation d'Hyperparamètres (a, r)}
+Une recherche sur grille (\textit{Grid Search}) est effectuée pour optimiser deux paramètres critiques :
+\begin{itemize}
+    \item \textbf{$a$ (\textit{reduce})} : Nombre de niveaux de quantisation pour la détection des germes d'inondation.
+    \item \textbf{$r$ (\textit{attempt})} : Nombre de cycles de fusion des petits segments adjacents.
+\end{itemize}
+L'objectif est de maximiser l'indice \textbf{IoU (Intersection over Union)} binaire entre les segments générés et les occurrences réelles de feux (\textit{nbsinister}).
+
+\section{Modélisation Apprise}
+
+\subsection{Architectures Convolutionnelles}
+Trois types de modèles sont supportés :
+\begin{itemize}
+    \item \textbf{UNet} : Architecture \textit{encoder-decoder} classique avec connexions résiduelles.
+    \item \textbf{SwinUNet} : Modèle basé sur des \textit{Hierarchical Vision Transformers} pour capturer des relations à longue portée.
+    \item \textbf{TBConvResNetNet} : Extension convolutive pour le traitement des séries temporelles spatialisées.
+\end{itemize}
+
+\subsection{Entraînement et Régularisation}
+L'entraînement utilise la \textbf{Weighted Cross Entropy Loss} pour compenser le déséquilibre des classes (les incendies étant des événements rares). L'optimisation est réalisée via l'\textbf{Adam Optimizer} avec un taux d'apprentissage de $0,001$.
+L'augmentation de données est activée avec des rotations aléatoires de $\pm 15^\circ$ pour améliorer l'invariance spatiale du modèle.
+
+Une attention particulière est portée à la cohérence géométrique lors de l'augmentation : pour les cibles de type \textit{Frontier} (frontières de zones), le pipeline applique une interpolation bilinéaire sur la carte de distance et une interpolation au plus proche voisin sur le masque binaire.
+
+\section{Résultats Expérimentaux}
+Les résultats sont archivés dans le répertoire \texttt{Experiments/}. Sur un ensemble de test comprenant des départements méditerranéens (Var, Alpes-Maritimes), le modèle \textbf{UNet} démontre :
+\begin{itemize}
+    \item Une décroissance stable de la \textit{Loss} de 0,66 à 0,18.
+    \item Un \textbf{Mean IoU de 0,50}, indiquant une forte corrélation entre les segments appris et la réalité terrain.
+    \item Une dispersion contrôlée des segments (mesurée par l'écart-type des distances aux centroïdes), assurant des zones compactes et opérationnelles.
+\end{itemize}
+
+\section{Conclusion}
+Le module \texttt{LearnedSegmentation} prouve qu'une segmentation adaptative est supérieure aux méthodes statiques pour la prédiction des risques d'incendie. L'intégration de caractéristiques multi-modales et l'optimisation systématique du watershed permettent d'obtenir des unités spatiales à la fois scientifiquement précises et utilisables par les services de secours.
+
+\end{document}

@@ -101,6 +101,7 @@ class Segmentation:
         dir_data = rootDisk / 'csv' / dept / 'raster' / resolution
         
         dir_target_bin = root_target / sinister / dataset_name / sinister_encoding / 'bin' / resolution
+        dir_target = root_target / sinister / dataset_name / sinister_encoding / 'log' / resolution
         dir_raster = root_target / sinister / dataset_name / sinister_encoding / 'raster' / resolution
         raster = read_object(f'{dept}rasterScale0.pkl', dir_raster)
         
@@ -115,9 +116,14 @@ class Segmentation:
         mode = vec_base[1]
 
         # Load data_bin (nbsinister)
-        data_bin = self.process_input_data('nbsinister', dept, None, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+        data_bin = self.process_input_data('nbsinister', dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
 
-        data = resize(data, raster.shape, anti_aliasing=False, preserve_range=True, order=0)
+        if not isinstance(data, str):
+            data = resize(data, raster.shape, anti_aliasing=False, preserve_range=True, order=0)
+        else:
+            data, _ = self.process_input_data('risk', dept, dir_target, dir_target_bin, dir_data, valid_mask, raster, train_date, path)
+            if data.ndim == 3:
+                data = np.nansum(data, axis=2)
 
         data[valid_mask & (np.isnan(data))] = 0
 
@@ -230,7 +236,7 @@ class Segmentation:
         assert bin_data is not None
 
         # 2) create_cluster
-        _, pred = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred', attempt=final_attempt)
+        _, pred, pred_fz = self.create_cluster(pred, dept, path, self.scale, mode, bin_data, raster, valid_mask, 'pred', attempt=final_attempt)
 
         try:
             # Analyse dispersion of fire regions
@@ -252,7 +258,7 @@ class Segmentation:
             logger.warning(f"Post-processing failed: {e}")
             return pred
         
-        return pred
+        return pred, pred_fz
 
         #logger.info(f'Cluster dispersion {self.dispersions}')
 
@@ -287,6 +293,8 @@ class Segmentation:
             pred = merge_adjacent_clusters(pred, min_cluster_size=min_cluster_size, max_cluster_size=max_cluster_size,
             features=None, mode=mode, exclude_label=0, background=-1,
             nb_attempt=attempt)
+
+            pred_fz = np.copy(pred)
 
             valid_cluster = find_clusters(pred, min_cluster_size, 0, -1)
             self._save_feature_image(path, dept, 'pred_merge', pred, raster)
@@ -369,7 +377,7 @@ class Segmentation:
         if print:
             logger.info(f'Mean fr {sum_fr}')
 
-        return sum_fr, pred
+        return sum_fr, pred, pred_fz
 
     def my_watershed(self, dept, data, valid_mask, raster, path, vb, image_type, reduce=None):
         

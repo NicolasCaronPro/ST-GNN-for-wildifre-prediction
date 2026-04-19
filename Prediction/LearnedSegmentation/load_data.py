@@ -756,6 +756,9 @@ class DataLoader:
                     y_tensor = np.expand_dims(y_tensor, axis=0) # (1, 1, H, W)
             else:
                 y_tensor = None
+
+            if self.config.get_target_type() == "binary":
+                y_tensor = np.where(y_tensor > 0, 1, 0)
             
             return X_tensor, y_tensor, weights, loaded_features
 

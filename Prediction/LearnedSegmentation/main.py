@@ -165,7 +165,7 @@ def main():
         print("Loading test data...")
         test_depts = config.get_test_departements()
 
-        # 3.1 Test on Training Set
+        """# 3.1 Test on Training Set
         print("\n--- Testing on Training Set ---")
         train_depts = config.get_train_departements()
         train_output_dir = current_run_dir / 'train'
@@ -179,9 +179,9 @@ def main():
                 if 'tester' not in locals():
                      tester = Tester(config, model_save_path, model_params)
                 
-                tester.test(X_train_test, y_train_test, weights=weights_train_test, dept_name=dept, compute_metrics=True, output_dir=train_output_dir)
+                tester.test(X_train_test, y_train_test, weights=weights_train_test, dept_name=dept, compute_metrics=True, output_dir=train_output_dir, testset='train')
             else:
-                print(f"WARNING: No training data found or loaded for {dept} during testing phase.")
+                print(f"WARNING: No training data found or loaded for {dept} during testing phase.")"""
 
         # 3.2 Test on Test Set
         print("\n--- Testing on Test Set ---")
@@ -199,7 +199,7 @@ def main():
                 if 'tester' not in locals():
                      tester = Tester(config, model_save_path, model_params)
                 
-                predictions = tester.test(X_test, y_test, weights=weights_test, dept_name=dept, compute_metrics=True, output_dir=test_output_dir)
+                predictions = tester.test(X_test, y_test, weights=weights_test, dept_name=dept, compute_metrics=True, output_dir=test_output_dir, testset='test')
                 
             else:
                 print(f"WARNING: No test data found or loaded for {dept}.")
@@ -222,7 +222,7 @@ def main():
                     if 'tester' not in locals():
                         tester = Tester(config, model_save_path, model_params)
                     
-                    predictions_new = tester.test(X_new, y_new, weights=weights_new, dept_name=dept, compute_metrics=False, output_dir=new_test_output_dir)
+                    predictions_new = tester.test(X_new, y_new, weights=weights_new, dept_name=dept, compute_metrics=False, output_dir=new_test_output_dir, testset='new_test')
                     
                 else:
                     print(f"WARNING: No new test data found or loaded for {dept}.")

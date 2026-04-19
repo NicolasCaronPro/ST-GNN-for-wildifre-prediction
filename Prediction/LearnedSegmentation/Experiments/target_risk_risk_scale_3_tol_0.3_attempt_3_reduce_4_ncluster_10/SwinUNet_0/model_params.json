@@ -1,0 +1,16 @@
+{
+    "type": "SwinUNet",
+    "params": {
+        "out_channels": 1,
+        "augmentation": true,
+        "rotation_range": 15,
+        "bilinear": false,
+        "task_type": "regression",
+        "n_channels": 64
+    },
+    "epochs": 1000,
+    "batch_size": 8,
+    "learning_rate": 0.0001,
+    "loss": "mse",
+    "early_stopping": 100
+}

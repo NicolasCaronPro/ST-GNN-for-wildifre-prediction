@@ -59,7 +59,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 from GNN.forecasting_models.sklearn.models import MyXGBRegressor, MyXGBClassifier
-from GNN.forecasting_models.pytorch.models_2D import UNet
+from GNN.forecasting_models.pytorch.models_2D import UNet, SwinUnet, TBConvResNetNet
 from GNN.train import get_loss_function
 from GNN.forecasting_models.pytorch.classification_loss import WeightedCrossEntropyLoss
 from data_augmentation import DataAugmentor
@@ -76,6 +76,7 @@ class Trainer:
         self.batch_size = model_params.get('batch_size', 8)
         self.learning_rate = model_params.get('learning_rate', 0.001)
         self.loss_name = model_params.get('loss', 'bceloss')
+        self.early_stopping = model_params.get('early_stopping', 15)
         #self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.device = torch.device('cpu')
         
@@ -94,6 +95,49 @@ class Trainer:
             )
             model = model.to(self.device)
             return model
+        elif self.model_type == 'SwinUNet':
+            model = SwinUnet(
+                img_size=self.params.get('img_size', 64),
+                patch_size=self.params.get('patch_size', 4),
+                in_channels=self.params.get('n_channels', 3),
+                embed_dim=self.params.get('embed_dim', 96),
+                depths=self.params.get('depths', [3, 3, 3]),
+                num_heads=self.params.get('num_heads', [3, 6, 12]),
+                depths_decoder=self.params.get('depths_decoder', [1, 2, 2]),
+                window_size=self.params.get('window_size', 4),
+                mlp_ratio=self.params.get('mlp_ratio', 4.0),
+                attn_drop_rate=self.params.get('attn_drop_rate', 0.0),
+                drop_rate=self.params.get('drop_rate', 0.0),
+                qkv_bias=self.params.get('qkv_bias', True),
+                qk_scale=self.params.get('qk_scale', None),
+                num_classes=self.params.get('out_channels', 1),
+                zero_head=self.params.get('zero_head', False),
+                vis=self.params.get('vis', True),
+                task_type=self.params.get('task_type', 'classification')
+            )
+            model = model.to(self.device)
+            return model
+        elif self.model_type == 'tbconvnet':
+            model = TBConvResNetNet(
+                in_chans=self.params.get('n_channels', 3),
+                num_classes=self.params.get('out_channels', 1),
+                base_ch=self.params.get('base_ch', 32),
+                img_size=self.params.get('img_size', 64),
+                window_size=self.params.get('window_size', 8),
+                heads=self.params.get('heads', (2, 4, 8)),
+                task_type=self.params.get('task_type', 'classification'),
+                mlp_ratio=self.params.get('mlp_ratio', 4.0),
+                qkv_bias=self.params.get('qkv_bias', True),
+                qk_scale=self.params.get('qk_scale', None),
+                drop_rate=self.params.get('drop_rate', 0.0),
+                attn_drop=self.params.get('attn_drop', 0.0),
+                drop_rate_path=self.params.get('drop_rate_path', 0.0),
+                act_layer=self.params.get('act_layer', "GELU"),
+                norm_layer=self.
+                params.get('norm_layer', nn.LayerNorm)
+            )
+            model = model.to(self.device)
+            return model
         elif self.model_type == 'XGBRegressor':
             return MyXGBRegressor(**self.params)
         elif self.model_type == 'XGBClassifier':
@@ -104,7 +148,7 @@ class Trainer:
     def train(self, X, y, weights=None):
         logger.info(f"Training {self.model_type} model...")
         
-        if self.model_type == 'UNet':
+        if self.model_type == 'UNet' or self.model_type == 'SwinUNet' or self.model_type == 'tbconvnet':
             self._train_unet(X, y, weights)
         else:
             # Scikit-learn style models
@@ -135,6 +179,7 @@ class Trainer:
         else:
             dataset = TensorDataset(X, y)
             
+        # X -> (B, C, H, W)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         
         # Loss and Optimizer
@@ -157,6 +202,10 @@ class Trainer:
             augmentor = DataAugmentor(rotation_range=rotation_range)
         
         self.model.train()
+        
+        best_loss = float('inf')
+        patience_counter = 0
+        
         for epoch in range(self.epochs):
             running_loss = 0.0
             for i, data in enumerate(dataloader, 0):
@@ -182,10 +231,13 @@ class Trainer:
                 outputs, logits, hidden = self.model(inputs)
 
                 B, H, W, O = logits.shape
-                #import matplotlib.pyplot as plt
-                #plt.imshow(outputs[0].detach().cpu().numpy())
+                import matplotlib.pyplot as plt
+                #plt.imshow(outputs[0, :, :, 1].detach().cpu().numpy(), cmap='jet')
                 #plt.show()
 
+                #plt.imshow(labels[0, 0])
+                #plt.show()
+                
                 if O == 1:
                     logits = logits.reshape((H * W * B)) 
                 else:
@@ -196,7 +248,7 @@ class Trainer:
                     labels = labels.reshape((H * W * B, 2))
                 else:
                     labels = labels.reshape((H * W * B))
-                
+                    
                 sample_weights = sample_weights.reshape((H * W * B))
                 loss = criterion(logits, labels, sample_weights)
                 
@@ -208,6 +260,19 @@ class Trainer:
             epoch_loss = running_loss / len(dataloader)
             self.loss_history.append(epoch_loss)
             logger.info(f"Epoch {epoch+1}/{self.epochs}, Loss: {epoch_loss}")
+            
+            if self.early_stopping is not None:
+                if epoch_loss < best_loss:
+                    best_loss = epoch_loss
+                    patience_counter = 0
+                    # Optionally save best model here if desired, but we save at the end currently.
+                    # To be safe, we could save a checkpoint.
+                else:
+                    patience_counter += 1
+                    logger.info(f"Early stopping counter: {patience_counter}/{self.early_stopping}")
+                    if patience_counter >= self.early_stopping:
+                        logger.info("Early stopping triggered.")
+                        break
 
     def save_model(self, path):
         path = Path(path)
