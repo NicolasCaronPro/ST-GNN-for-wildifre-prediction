@@ -258,14 +258,11 @@ def main():
             "features_importance.pkl",
             dir_output
             / "features_importance"
-            / f"{cfg.nbpoint}_{getattr(cfg, 'k_days', 0)}_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{graphScale.base}_{graphScale.graph_method}",
+            / f"{cfg.nbpoint}_0_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{graphScale.base}_{graphScale.graph_method}",
         )
         print(features_selected_str)
-        if features_selected_str is not None:
-            features_selected_str = list(np.asarray(features_selected_str)[:, 0])
-        else:
-            features_name, _ = get_features_name_list(graphScale.scale, cfg.features, METHODS_SPATIAL_TRAIN)
-            features_selected_str = list(features_name)
+        assert features_selected_str is not None
+        features_selected_str = list(np.asarray(features_selected_str)[:, 0])
 
         """if "Past_risk" in cfg.features:
             features_selected_str.append("Past_risk")

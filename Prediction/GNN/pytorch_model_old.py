@@ -15,6 +15,8 @@ import torchvision.transforms.functional as TF
 
 from copy import deepcopy
 import itertools
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from GNN.discretization import *
 from GNN.tools import (
@@ -2909,7 +2911,7 @@ class Training():
                         logger.info(f'Loss has not increased for {patience_cnt} epochs. Last best val loss {BEST_VAL_LOSS}, current val loss {val_loss}')
                         save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
                         save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-                        plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+                        self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
                         if MLFLOW:
                             mlflow.end_run()
                         break
@@ -2923,7 +2925,7 @@ class Training():
             logger.info(f'Last val loss {val_loss}')
             save_object_torch(self.model.state_dict(), 'last.pt', self.dir_log)
             save_object_torch(BEST_MODEL_PARAMS, 'best.pt', self.dir_log)
-            plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
+            self.plot_train_val_loss(epochs_list, train_loss_list, val_loss_list, self.dir_log)
         
         if self.best_epoch == 0:
             print(val_loss)
@@ -3834,37 +3836,75 @@ class Training():
         return pred
     
     def plot_train_val_loss(self, epochs, train_loss_list, val_loss_list, dir_log):
-        # Création de la figure et des axes
-        plt.figure(figsize=(10, 6))
+        logger.info(f"Generating loss plots in {dir_log}...")
+        if not train_loss_list or not val_loss_list:
+            return
 
-        # Tracé de la courbe de val_loss
-        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
+        if isinstance(train_loss_list[0], dict):
+            keys = list(train_loss_list[0].keys())
+            
+            # We ignore non-loss keys like 'id' if they exist, and 'total_loss' for the combined components plot
+            # We also ignore 'l' (legacy scalar loss) to avoid redundancy in the breakdown plot
+            ignore_keys = ['id', 'C', 'l']
+            component_keys = [k for k in keys if k not in ignore_keys and k != 'total_loss' and 'mean_' not in k]
+            
+            # 1) Overall Combined components plot (Training)
+            if component_keys:
+                plt.figure(figsize=(12, 7))
+                for key in component_keys:
+                    train_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in train_loss_list]
+                    plt.plot(epochs, train_values, label=key)
+                plt.xlabel('Epochs')
+                plt.ylabel('Loss')
+                plt.title('Training Loss Components (Breakdown)')
+                plt.legend()
+                plt.grid(True, linestyle='--', alpha=0.6)
+                plt.savefig(dir_log / 'Training_Loss_Components_Combined.png')
+                plt.close()
 
-        # Ajout de la légende
-        plt.legend()
+                # Overall Combined components plot (Validation)
+                plt.figure(figsize=(12, 7))
+                for key in component_keys:
+                    val_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in val_loss_list]
+                    plt.plot(epochs, val_values, label=key)
+                plt.xlabel('Epochs')
+                plt.ylabel('Loss')
+                plt.title('Validation Loss Components (Breakdown)')
+                plt.legend()
+                plt.grid(True, linestyle='--', alpha=0.6)
+                plt.savefig(dir_log / 'Validation_Loss_Components_Combined.png')
+                plt.close()
 
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
+            # 2) Individual plots for EVERY key in the dictionary (including total_loss and metrics)
+            for key in keys:
+                if key == 'id': continue
+                
+                train_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in train_loss_list]
+                val_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in val_loss_list]
 
-        # Ajout d'un titre
-        plt.title('Validation Loss over Epochs')
-        plt.savefig(dir_log / 'Validation.png')
-        plt.close('all')
+                plt.figure(figsize=(10, 6))
+                plt.plot(epochs, train_values, label='Training', color='red', alpha=0.8)
+                plt.plot(epochs, val_values, label='Validation', color='blue', alpha=0.8)
+                plt.xlabel('Epochs')
+                plt.ylabel(key)
+                plt.title(f'{key} over Epochs')
+                plt.legend()
+                plt.grid(True, linestyle='--', alpha=0.6)
+                plt.savefig(dir_log / f'loss_{key}_detailed.png')
+                plt.close()
 
-        # Tracé de la courbe de train_loss
-        plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Training Loss over Epochs')
-        plt.savefig(dir_log / 'Training.png')
+        else:
+            # Standard logic for scalar loss lists
+            plt.figure(figsize=(10, 6))
+            plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
+            plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.title('Loss over Epochs')
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.savefig(dir_log / 'Loss_Trajectory.png')
+            plt.close()
         plt.close('all')
 
     def _load_model_from_path(self, path : Path, model) -> None:

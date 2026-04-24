@@ -1,5 +1,7 @@
 from copy import deepcopy
-from matplotlib.pyplot import grid
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from torch import Value
 from GNN.visualize import *
 from sklearn.linear_model import LinearRegression, LogisticRegression
@@ -7,7 +9,7 @@ from pygam import s, te, f, intercept, l
 from torch.nn import KLDivLoss
 from torch.nn import KLDivLoss
 from GNN.forecasting_models.pytorch.ordinal_loss import CumulativeLinkLoss, LargeMarginOrdinalLoss, PairwiseMarginRankingLoss, ClusterDepartmentRankNetLoss, CLMBinnedTransitionLoss, ClusterCLMBinnedTransitionLoss, ClusterDepartmentRankNetLoss
-from GNN.forecasting_models.pytorch.ordinal_loss_2 import OrdinalUncertaintyFocalWKLoss
+from GNN.forecasting_models.pytorch.ordinal_loss_2 import OrdinalUncertaintyFocalWKLoss, ContextualOrdinalUncertaintyFocalWKLoss
 
 ############################################## Some tools ###############################################
 
@@ -1926,74 +1928,81 @@ def train_break_point(df: pd.DataFrame, features: list, dir_output: Path, n_clus
 
 ################################ DEEP LEARNING #########################################
 
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+
 def plot_train_val_loss(epochs, train_loss_list, val_loss_list, dir_output):
+    logger.info(f"Generating loss plots in {dir_output}...")
+    if not train_loss_list or not val_loss_list:
+        return
 
     if isinstance(train_loss_list[0], dict):
+        keys = list(train_loss_list[0].keys())
         
-        keys = train_loss_list[0].keys()
+        # We ignore non-loss keys like 'id' if they exist, and 'total_loss' for the combined components plot
+        # We also ignore 'l' (legacy scalar loss) to avoid redundancy in the breakdown plot
+        ignore_keys = ['id', 'C', 'l']
+        component_keys = [k for k in keys if k not in ignore_keys and k != 'total_loss' and 'mean_' not in k]
         
+        # 1) Overall Combined components plot (Training)
+        if component_keys:
+            plt.figure(figsize=(12, 7))
+            for key in component_keys:
+                train_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in train_loss_list]
+                plt.plot(epochs, train_values, label=key)
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.title('Training Loss Components (Breakdown)')
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.savefig(dir_output / 'Training_Loss_Components_Combined.png')
+            plt.close()
+
+            # Overall Combined components plot (Validation)
+            plt.figure(figsize=(12, 7))
+            for key in component_keys:
+                val_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in val_loss_list]
+                plt.plot(epochs, val_values, label=key)
+            plt.xlabel('Epochs')
+            plt.ylabel('Loss')
+            plt.title('Validation Loss Components (Breakdown)')
+            plt.legend()
+            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.savefig(dir_output / 'Validation_Loss_Components_Combined.png')
+            plt.close()
+
+        # 2) Individual plots for EVERY key in the dictionary (including total_loss and metrics)
         for key in keys:
+            if key == 'id': continue
+            
+            train_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in train_loss_list]
+            val_values = [float(epoch_dict.get(key, 0.0)) for epoch_dict in val_loss_list]
 
-            # Extraction des valeurs pour chaque epoch
-            train_values = [float(epoch_dict[key]) for epoch_dict in train_loss_list]
-            val_values = [float(epoch_dict[key]) for epoch_dict in val_loss_list]
-
-            # ======================
-            # Validation Loss
-            # ======================
             plt.figure(figsize=(10, 6))
-            plt.plot(epochs, val_values, label='Validation Loss', color='blue')
+            plt.plot(epochs, train_values, label='Training', color='red', alpha=0.8)
+            plt.plot(epochs, val_values, label='Validation', color='blue', alpha=0.8)
             plt.xlabel('Epochs')
-            plt.ylabel('Loss')
-            plt.title(f'Validation Loss ({key}) over Epochs')
+            plt.ylabel(key)
+            plt.title(f'{key} over Epochs')
             plt.legend()
-            plt.savefig(dir_output / f'{key}_Validation.png')
+            plt.grid(True, linestyle='--', alpha=0.6)
+            plt.savefig(dir_output / f'loss_{key}_detailed.png')
             plt.close()
 
-            # ======================
-            # Training Loss
-            # ======================
-            plt.figure(figsize=(10, 6))
-            plt.plot(epochs, train_values, label='Training Loss', color='red')
-            plt.xlabel('Epochs')
-            plt.ylabel('Loss')
-            plt.title(f'Training Loss ({key}) over Epochs')
-            plt.legend()
-            plt.savefig(dir_output / f'{key}_Training.png')
-            plt.close()
     else:
-        # Création de la figure et des axes
+        # Standard logic for scalar loss lists
         plt.figure(figsize=(10, 6))
-
-        # Tracé de la courbe de val_loss
-        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
-        plt.xlabel('Epochs')
-        plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Validation Loss over Epochs')
-        plt.savefig(dir_output / 'Validation.png')
-        plt.close('all')
-
-        # Tracé de la courbe de train_loss
         plt.plot(epochs, train_loss_list, label='Training Loss', color='red')
-
-        # Ajout de la légende
-        plt.legend()
-
-        # Ajout des labels des axes
+        plt.plot(epochs, val_loss_list, label='Validation Loss', color='blue')
         plt.xlabel('Epochs')
         plt.ylabel('Loss')
-
-        # Ajout d'un titre
-        plt.title('Training Loss over Epochs')
-        plt.savefig(dir_output / 'Training.png')
-        plt.close('all')
+        plt.title('Loss over Epochs')
+        plt.legend()
+        plt.grid(True, linestyle='--', alpha=0.6)
+        plt.savefig(dir_output / 'Loss_Trajectory.png')
+        plt.close()
+    plt.close('all')
     
 # Fonction pour sélectionner la fonction de perte via son nom
 def get_loss_function(loss_name, **loss_params):
@@ -2052,7 +2061,7 @@ def get_loss_function(loss_name, **loss_params):
             if key == 'id':
                 if val == 'departement':
                     loss_params[key] = departement_index
-                elif val == 'cluster':
+                elif val == 'cluster' or val == 'cluster-encoder':
                     loss_params[key] = cluster_encoder_index
                 elif val == 'node':
                     loss_params[key] = graph_id_index
@@ -2079,7 +2088,8 @@ def get_loss_function(loss_name, **loss_params):
             "rmsle":                       lambda: RMSLELoss(),
             "rmse":                        lambda: RMSELoss(),
             "mse":                         lambda: MSELoss(),
-            "ordinaluncertaintyfocalwkloss": lambda: OrdinalUncertaintyFocalWKLoss(**loss_params),
+            "ouflwk":                      lambda: OrdinalUncertaintyFocalWKLoss(**loss_params),
+            "couflwk":                     lambda: ContextualOrdinalUncertaintyFocalWKLoss(**loss_params),
             "huber":                       lambda: HuberLoss(),
             "logcosh":                     lambda: LogCoshLoss(),
             "tukeybiweight":               lambda: TukeyBiweightLoss(),
@@ -2128,7 +2138,6 @@ def get_loss_function(loss_name, **loss_params):
             "prls" :                       lambda: PairwiseMarginRankingLoss(**loss_params),
             "cllt" :                       lambda: CLMBinnedTransitionLoss(**loss_params),
             "ccllt" :                       lambda: ClusterCLMBinnedTransitionLoss(**loss_params),
-            "ccllt2" :                       lambda: ClusterCLMBinnedTransitionLoss2(**loss_params),
             "ranknet" :                      lambda: ClusterDepartmentRankNetLoss(**loss_params),
             "msetheta" :                     lambda: MSEThetaLoss(**loss_params),
         }

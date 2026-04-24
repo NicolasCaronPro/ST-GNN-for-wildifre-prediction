@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 from matplotlib import axis, markers
 from GNN.encoding import *
 import matplotlib.cm as cm
