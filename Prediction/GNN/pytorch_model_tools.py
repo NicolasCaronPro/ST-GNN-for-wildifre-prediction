@@ -1974,10 +1974,35 @@ class WrapperModel(torch.nn.Module):
         # logits shape is (B, Horizon+1, OutChannels)
         res = logits[:, self.horizon, :]
         
-        # If OutChannels is 1, squeeze to (B,) to help SHAP handle it as a scalar-per-sample
-        if res.shape[1] == 1:
-            res = res.squeeze(-1)
-        return res
+        loss_lower = self.model.loss.lower() if hasattr(self.model, 'loss') else ""
+        task_type = self.model.task_type if hasattr(self.model, 'task_type') else ""
+        out_channels = self.model.out_channels if hasattr(self.model, 'out_channels') else res.shape[-1]
+        
+        if "pdegpd" in loss_lower:
+            pmf = self.model.criterion.pmf_all(res, from_logits=True)
+            y_vals = torch.arange(pmf.size(-1), device=pmf.device, dtype=pmf.dtype)
+            score = (pmf * y_vals).sum(dim=-1, keepdim=True)
+            
+        elif task_type == "classification":
+            if out_channels == 1:
+                score = torch.sigmoid(res)
+            else:
+                probs = torch.softmax(res, dim=-1)
+                y_vals = torch.arange(probs.size(-1), device=probs.device, dtype=probs.dtype)
+                score = (probs * y_vals).sum(dim=-1, keepdim=True)
+            
+        elif task_type == "regression" and out_channels == 1:
+            score = res
+        else:
+            raise ValueError(f"SHAP explanation not defined for task_type={task_type}, out_channels={out_channels}, loss={loss_lower}")
+
+        # Ensure output is strictly 2D (B, 1) for SHAP deep_pytorch compatibility
+        if score.ndim == 1:
+            score = score.unsqueeze(-1)
+        elif score.ndim > 2:
+            score = score.view(score.shape[0], -1)
+            
+        return score
 
 class Training():
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
@@ -3101,7 +3126,7 @@ class Training():
             val_loss_dict = train_loss_dict
 
         return val_loss, train_loss, val_loss_dict, train_loss_dict
-
+    
     def get_class_freq(self, df_train):
         uclass = np.sort(df_train[self.target_name].unique())
         res = np.zeros_like(uclass)
@@ -3425,7 +3450,7 @@ class Training():
         # ── Référence : colonne précalculée {target}-quantile-5-Class-Dept ──────
         # → y_ref_pred est la discrétisation ordinale officielle de la target (0..4)
         # C'est ce prédicteur qui définit pair_mean_deltas (étalon de normalisation).
-        _ref_col = f"{self.target_name}-quantile-5-Class-Dept"
+        _ref_col = f"{self.target_name}-kmeans-5-Class-Dept"
         if _ref_col in df_train.columns:
             y_ref_pred = df_train[_ref_col].fillna(0).astype(int).values
             if n_classes == 4:
@@ -3645,18 +3670,19 @@ class Training():
                 "falpha": 0.63,
                 "massupdate": 0.41,
                 "mumomentum": 0.93,
-                "mulambdag": 2.64,
-                "mulambdac": 1.93,
-                "mulambdad": 4.22,
+                "mulambdag": 1.0,
+                "mulambdac": 0.0,
+                "mulambdad": 0.0,
                 "wmid": 1.47,
                 "wtrans": 4.34,
                 })
                         
         elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for ressource-constrained regions')
-        
-            loss_params.update({
-                "gainsfloor": 3.36,
+            
+            
+            """
+            "gainsfloor": 3.36,
                 "wkdecay": "None",
                 "gamma": 8.59,
                 "taugate": 0.44,
@@ -3672,34 +3698,32 @@ class Training():
                 "mulambdad": 3.98,
                 "wmid": 2.68,
                 "wtrans": 3.28,
+            """
+        
+            loss_params.update({
+                "gainsfloor": 3.0,
+                "wkdecay": "None",
+                "gamma": 9.0,
+                "taugate": 0.2,
+                "gatetemp": 1.0,
+                "wfocal": 0.6,
+                "wmu0": 0.57,
+                "fgamma": 1.5,
+                "falpha": 0.9,
+                "massupdate": 0.5,
+                "mumomentum": 0.99,
+                "mulambdag": 1.0,
+                "mulambdac": 0.0,
+                "mulambdad": 0.0,
+                "wmid": 2.68,
+                "wtrans": 3.0,
             })
             
         elif 'timeintervention' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for timeintervention-constrained regions')
             
-            loss_params.update({
-                "gainsfloor": 3.26,
-                "wkdecay": "None",
-                "wkpower": 3.75,
-                "wklambda": 0.21,
-                "gamma": 0.1,
-                "taugate": 0.21,
-                "gatetemp": 0.44,
-                "wfocal": 4.02,
-                "wmu0": 0.77,
-                "fgamma": 2.16,
-                "falpha": 0.66,
-                "massupdate": 0.1,
-                "mumomentum": 0.57,
-                "mulambdag": 0.17,
-                "mulambdac": 1.54,
-                "mulambdad": 3.49,
-                "wmid": 1.76,
-                "wtrans": 3.65,
-            })
-            
             """loss_params.update({
-                    "gainsfloor": 2.6,
+                     "gainsfloor": 2.6,
                 "wkdecay": "exp",
                 "wkpower": 3.86,
                 "wklambda": 1.15,
@@ -3718,26 +3742,50 @@ class Training():
                 "wmid": 1.47,
                 "wtrans": 4.34,
             })"""
+            
+            loss_params.update({
+                    "gainsfloor": 2.6,
+                "wkdecay": "exp",
+                "wkpower": 3.86,
+                "wklambda": 1.15,
+                "gamma": 7.71,
+                "taugate": 0.34,
+                "gatetemp": 0.88,
+                "wfocal": 0.6,
+                "wmu0": 0.57,
+                "fgamma": 1.9,
+                "falpha": 0.63,
+                "massupdate": 0.41,
+                "mumomentum": 0.93,
+                "mulambdag": 1.0,
+                "mulambdac": 0.0,
+                "mulambdad": 0.0,
+                "wmid": 2.68,
+                "wtrans": 3.0,
+            })
         
         elif 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                    "gamma": 1.59,
-                    "taugate": 0.18,
-                    "gatetemp": 0.13,
-                    "wkdecay": "power",
-                    "wkpower": 1.91,
-                    "wfocal": 1.49,
-                    "wmu0": 1.78,
-                    "fgamma": 2.95,
-                    "falpha": 0.75,
-                    "mumomentum": 0.84,
-                    "mulambdag": 1.12,
-                    "mulambdad": 0.56,
-                    "mulambdac": 0.0,
-                    "wmid": 0.72,
-                    "wtrans": 0.93,
+                "gainsfloor": 15.0,
+                "wkdecay": "exp",
+                "wkpower": 3.86,
+                "wklambda": 0.75,
+                "gamma": 7.7,
+                "taugate": 0.34,
+                "gatetemp": 0.88,
+                "wfocal": 1.0,
+                "wmu0": 0.45,
+                "fgamma": 1.9,
+                "falpha": 0.63, 
+                "massupdate": 0.40,
+                "mumomentum": 0.93,
+                "mulambdag": 1.0,
+                "mulambdac": 0.0,
+                "mulambdad": 1.0,
+                "wmid": 1.47,
+                "wtrans": 4.34,
                     })
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
@@ -3750,17 +3798,17 @@ class Training():
                     "gamma": 9.41,
                     "taugate": 0.28,
                     "gatetemp": 0.96,
-                    "wfocal": 4.12,
-                    "wmu0": 0.71,
+                    "wfocal": 0.6,
+                    "wmu0": 0.57,
                     "fgamma": 3.61,
                     "falpha": 0.15,
                     "massupdate": 0.43,
                     "mumomentum": 0.65,
-                    "mulambdag": 0.59,
+                    "mulambdag": 1.0,
                     "mulambdac": 0.0,
-                    "mulambdad": 2.12,
-                    "wmid": 0.72,
-                    "wtrans": 0.93,
+                    "mulambdad": 0.0,
+                     "wmid": 2.68,
+                    "wtrans": 3.0,
                     })
     
         self.criterion = self.get_loss(self.loss, loss_params)
@@ -3770,6 +3818,24 @@ class Training():
                 self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
             elif 'id{node}' in self.loss:
                 self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+
+        if has_method(self.criterion, 'calculate_class_coverage'):
+            try:
+                from GNN.config import cluster_encoder_index
+            except ImportError:
+                cluster_encoder_index = None
+
+            cid = getattr(self.criterion, 'id', None)
+            cluster_col = 'departement'
+            if cid == departement_index:
+                cluster_col = 'departement'
+            elif cid == graph_id_index:
+                cluster_col = 'graph_id'
+            elif cluster_encoder_index is not None and cid == cluster_encoder_index:
+                cluster_col = 'cluster-encoder'
+            
+            if cluster_col in self.df_train.columns:
+                self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
 
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
         
@@ -4967,11 +5033,14 @@ class Training():
     def _predict_test_loader(self, X: DataLoader, prediction_type='Class', output_pdf="test", calibrate=False) -> torch.tensor:
             assert self.model is not None
             self.model.eval()
-            if self.criterion is None:
+            """if self.criterion is None:
                 print(f'Model cannot predict')
-                return None
+                return None"""
             
-            criterion = self.criterion
+            if hasattr(self, 'criterion'):
+                criterion = self.criterion
+            else:
+                criterion = None
             
             with torch.no_grad():
                 pred = []
@@ -5012,11 +5081,14 @@ class Training():
         assert self.model is not None
         self.model.eval()
 
-        if self.criterion is None:
+        """if self.criterion is None:
             print(f'Model cannot predict')
-            return None
-            
-        criterion = self.criterion
+            return None"""
+        
+        if hasattr(self, 'criterion'):
+            criterion = self.criterion
+        else:
+            criterion = None
                 
         if use_grad:
             func = torch.enable_grad
@@ -5165,6 +5237,9 @@ class Training():
                     
                     if self.task_type == 'classification' or self.task_type == 'binary' or self.task_type == 'corn':
                         output = torch.argmax(output, dim=1)
+                        
+                    elif self.task_type == 'uclassification':
+                        output = torch.argmax(output[:, :-1], dim=1)
                         
                     elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
                         output = torch.argmax(output, dim=1)
@@ -5632,7 +5707,7 @@ class Training():
     def get_loss(self, loss_name, loss_params):
         
         if 'ccllt' in loss_name or "ranknet" in loss_name or 'msetheta' in loss_name:
-            loss_params['ndepartements'] = self.df_train['departement'].unique().shape[0]
+            loss_params['ndepartements'] = np.unique(self.udepts).shape[0]
         
         if 'ccllt' in loss_name and "bdiff" in self.dir_log.as_posix():
             loss_params['clustersequaldept'] = True
@@ -5741,17 +5816,17 @@ class Training():
         Xst_horizon_flat = Xst_horizon[:, :, -1]
         
         df_features = []
-
-        if self.under_sampling == 'search':
+        
+        """if self.under_sampling == 'search':
             y = self.df_train[self.target_name].values
             nb = int(self.metrics['best_tp'] * len(y[y == 0]))
             df_combined = self.split_dataset(self.df_train, nb, reset=False)
             self.df_train['weight'] = 0
 
             # Mettre à jour df_train pour l'entraînement
-            self.df_train.loc[df_combined.index, 'weight'] = 1
+            self.df_train.loc[df_combined.index, 'weight'] = 1"""
             
-        background_data_train = self.df_train.sample(100)
+        background_data_train = self.df_train
                         
         background_data_train, y_background, e = get_numpy_data(self.graph, background_data_train, self.features_name, use_temporal_as_edges, self.ks, self.horizon)
         background_data_train = torch.Tensor(background_data_train).to(self.device)
@@ -5766,6 +5841,16 @@ class Training():
         if not hasattr(self, 'explainer') or self.explainer is None or not isinstance(self.explainer, dict):
             self.explainer = {}
             
+        # Vérifier si l'explainer a été instancié avec l'ancien code multi-classe (num_outputs > 1) 
+        # car on force désormais une sortie scalaire.
+        if horizon_shap in self.explainer:
+            if hasattr(self.explainer[horizon_shap], 'expected_value'):
+                ev = self.explainer[horizon_shap].expected_value
+                is_multi = isinstance(ev, list) or (isinstance(ev, np.ndarray) and ev.size > 1)
+                if is_multi:
+                    print(f"L'explainer en cache pour horizon {horizon_shap} est multi-classes. On le recrée pour ignorer le cache obsolète.")
+                    del self.explainer[horizon_shap]
+            
         if horizon_shap not in self.explainer:
             print(f"Initializing DeepExplainer for horizon {horizon_shap} with background data shape: {background_data_train.shape}")
             self.explainer[horizon_shap] = shap.DeepExplainer(wm, background_data_train)
@@ -5776,82 +5861,82 @@ class Training():
         wm.y_background = y_test
         shap_values = self.explainer[horizon_shap].shap_values(Xst_flat, check_additivity=False)
         
-        n_classes = self.out_channels
+        n_classes = 1
 
-        # Vérifier la forme des valeurs SHAP pour débogage
-        print(f"SHAP values type: {type(shap_values)}")
-        print(f"SHAP values shape (before processing): {np.asarray(shap_values).shape if isinstance(shap_values, (list, np.ndarray)) else 'N/A'}")
-        
-        # Vérifier si la sortie SHAP est multi-classes
-        if n_classes == 1:
-            shap_values = shap_values[:, :, np.newaxis]
+        # Reformater proprement shap_values (n_classes, B, F*T) s'il s'agit d'une liste
+        if isinstance(shap_values, list):
+            shap_values = np.asarray(shap_values)
+        else:
+            shap_values = np.asarray(shap_values)
+            if shap_values.ndim == 2:
+                shap_values = shap_values[np.newaxis, :, :]
 
-        shap_values = np.moveaxis(shap_values, 0, 2)
-        
-        shap_values = np.asarray(shap_values)
+        # On passe de (n_classes, B, F*T) à (B, F*T, n_classes)
+        shap_values = np.moveaxis(shap_values, 0, -1)
 
-        # Vérification de dimensions pour éviter les erreurs de reshape
-        expected_shape = (B, F, T, n_classes)
+        expected_shape = (B, F, n_classes)
         try:
             shap_values = np.reshape(shap_values, expected_shape)
         except ValueError as e:
-            print(f"Erreur de reshape: forme actuelle {shap_values.shape}, forme attendue {expected_shape}")
-            raise e
+            # Fallback si T > 1 : on somme sur la dimension temporelle
+            print(f"Fallback : la forme attendue était {expected_shape} mais on a T={T}.")
+            shap_values = np.reshape(shap_values, (B, F, T, n_classes))
+            shap_values = np.sum(shap_values, axis=2)
         
-        shap_values = shap_values[:, :,  -1 - (self.horizon - horizon_shap), :]
+        # Retirer la dimension de classe car il n'y en a plus qu'une (score scalaire)
+        shap_values = shap_values[:, :, 0]
+
+        # Calcul des valeurs SHAP moyennes et écarts-types globalement
+        shap_mean_abs = np.mean(np.abs(shap_values), axis=0)
+        shap_std_abs = np.std(np.abs(shap_values), axis=0)
+        shap_mean = np.mean(shap_values, axis=0)
         
-        # Pour chaque classe, calculer et sauvegarder les résultats SHAP
-        for class_idx in range(n_classes):
-            # Calcul des valeurs SHAP moyennes et écarts-types
-            shap_mean_abs = np.mean(np.abs(shap_values[:, :, class_idx]), axis=0)
-            shap_std_abs = np.std(np.abs(shap_values[:, :, class_idx]), axis=0)
+        df_shap = pd.DataFrame({
+            "mean_abs_shap": shap_mean_abs,
+            "stdev_abs_shap": shap_std_abs,
+            "mean_shap": shap_mean,
+            "name": self.features_name
+        }).sort_values("mean_abs_shap", ascending=False)
         
-            df_shap = pd.DataFrame({
-                "mean_abs_shap": shap_mean_abs,
-                "stdev_abs_shap": shap_std_abs,
-                "name": self.features_name
-            }).sort_values("mean_abs_shap", ascending=False)
-            
-            print(df_shap.sort_values("mean_abs_shap").head())
+        df_features.append(df_shap)
 
-            df_shap['class'] = class_idx
-            df_features.append(df_shap)
+        if plot:
+            check_and_create_path(dir_output)
+            # Visualisation globale (summary_plot)
+            plt.figure(figsize=figsize)
+            if mode == 'bar':
+                shap.summary_plot(
+                    shap_values,
+                    features=Xst_horizon_flat,
+                    feature_names=self.features_name,
+                    plot_type='bar',
+                    show=False
+                )
+            elif mode == 'beeswarm':
+                shap.summary_plot(
+                    shap_values,
+                    features=Xst_horizon_flat,
+                    feature_names=self.features_name,
+                    show=False,
+                    plot_type="dot"
+                )
 
-            if plot:
-                check_and_create_path(dir_output)
-                # Visualisation globale (summary_plot) pour chaque classe
-                plt.figure(figsize=figsize)
-                if mode == 'bar':
-                    shap.summary_plot(
-                        shap_values[:, :, class_idx],
-                        features=Xst_horizon_flat,
-                        feature_names=self.features_name,
-                        plot_type='bar',
-                        show=False
-                    )
-                elif mode == 'beeswarm':
-                    # Générer le graphique SHAP pour une classe spécifique (class_idx)
-                    shap.summary_plot(
-                        shap_values[:, :, class_idx],
-                        features=Xst_horizon_flat,
-                        feature_names=self.features_name,
-                        show=False,
-                        plot_type="dot"
-                    )
-
-            print(f"Sauvegarde: {dir_output / f'{outname}_class_{class_idx}_shapley.png'}")
-            if plot:
-                plt.savefig(dir_output / f"{outname}_class_{class_idx}_shapley.png", bbox_inches='tight', dpi=100)
-                plt.close('all')
+            print(f"Sauvegarde: {dir_output / f'{outname}_shapley.png'}")
+            plt.savefig(dir_output / f"{outname}_shapley.png", bbox_inches='tight', dpi=100)
+            plt.close('all')
 
             # Visualisations spécifiques aux échantillons (force_plot)
-            if samples is not None and samples_name is not None and plot:
-
+            if samples is not None and samples_name is not None:
                 for i, sample in enumerate(samples):
                     plt.figure(figsize=figsize)
+                    
+                    expected_value = self.explainer[horizon_shap].expected_value
+                    if isinstance(expected_value, (list, np.ndarray)):
+                        expected_value = expected_value[0]
+                        
                     shap.force_plot(
-                        self.explainer[horizon_shap].expected_value[class_idx],
-                        shap_values[sample, :, class_idx],
+                        expected_value,
+                        shap_values[sample, :],
                         features=df.iloc[sample].values,
                         feature_names=self.features_name,
                         matplotlib=True,
@@ -5859,7 +5944,7 @@ class Training():
                     )
 
                     plt.savefig(
-                        dir_output / f"{outname}_class_{class_idx}_{samples_name[i]}_shapley.png",
+                        dir_output / f"{outname}_{samples_name[i]}_shapley.png",
                         bbox_inches='tight'
                     )
                     plt.close('all')
@@ -5869,26 +5954,26 @@ class Training():
         
         # Sauvegarder les valeurs SHAP ET l'explainer pour réutilisation ultérieure
         shap_data = {
-            'shap_values': shap_values,  # Shape: (B, F, n_classes)
+            'shap_values': shap_values,  # Shape: (B, F)
             'expected_values': self.explainer[horizon_shap].expected_value,
             'feature_names': self.features_name,
-            'n_classes': n_classes,
+            'n_classes': 1,
             'B': B,
             'F': F,
             'T': T,
             'Xst_flat': Xst_flat.cpu().numpy() if torch.is_tensor(Xst_flat) else Xst_flat,
             'horizon_shap': horizon_shap,
-            'e': e  # Edges pour reconstruire le WrapperModel si nécessaire
+            'e': None  # Edges pour reconstruire le WrapperModel si nécessaire
         }
         save_object(shap_data, f'{outname}_shap_values.pkl', dir_output)
         
         # Sauvegarder l'explainer séparément (peut être volumineux)
         explainer_data = {
             'explainer': self.explainer[horizon_shap],
-            'wrapper_model': WrapperModel(self, F, T, e, y_background, horizon_shap),
+            'wrapper_model': WrapperModel(self, F, T, None, y_background, horizon_shap),
             'F': F,
             'T': T,
-            'e': e,
+            'e': None,
             'y' : y_background,
             'horizon_shap': horizon_shap
         }
@@ -5919,6 +6004,13 @@ class Training():
         
         # Priorité 1: Vérifier si self.explainer existe (explainer en mémoire)
         if hasattr(self, 'explainer') and self.explainer is not None and isinstance(self.explainer, dict) and horizon in self.explainer:
+            if hasattr(self.explainer[horizon], 'expected_value'):
+                ev = self.explainer[horizon].expected_value
+                is_multi = isinstance(ev, list) or (isinstance(ev, np.ndarray) and ev.size > 1)
+                if is_multi:
+                    print(f"L'explainer en cache pour horizon {horizon} est multi-classes. Impossible d'utiliser le cache avec le nouveau WrapperModel. Veuillez recréer l'explainer.")
+                    raise ValueError("Cache d'explainer SHAP incompatible (multi-classes) avec le nouveau modèle. Relancez d'abord shapley_additive_explanation global.")
+                    
             print(f"Utilisation de self.explainer[{horizon}] (en mémoire)")
             
             # Préparer les données pour cet échantillon
@@ -5937,26 +6029,33 @@ class Training():
             # Activer le mode logits si le modèle est un WrapperModel
             sample_shap_values_raw = self.explainer[horizon].shap_values(Xst_sample_flat, check_additivity=False)
             
-            n_classes = self.out_channels
+            n_classes = 1
             
-            # Reformater les SHAP values
-            if n_classes == 1:
-                sample_shap_values_raw = sample_shap_values_raw[:, :, np.newaxis]
+            # Reformater proprement
+            if isinstance(sample_shap_values_raw, list):
+                sample_shap_values_raw = np.asarray(sample_shap_values_raw)
+            else:
+                sample_shap_values_raw = np.asarray(sample_shap_values_raw)
+                if sample_shap_values_raw.ndim == 2:
+                    sample_shap_values_raw = sample_shap_values_raw[np.newaxis, :, :]
             
-            sample_shap_values_raw = np.asarray(sample_shap_values_raw)
+            # shape est (n_classes, 1, F*T)
+            sample_shap_values_raw = np.moveaxis(sample_shap_values_raw, 0, -1) # -> (1, F*T, n_classes)
             
-            # Reshape selon le format attendu
-            expected_shape = (n_classes, B, F, T)
-            sample_shap_values_raw = np.reshape(sample_shap_values_raw, expected_shape)
-            
-            # Extraire le dernier pas de temps (utiliser horizon 0 par défaut si non spécifié)
-            sample_shap_values_raw = sample_shap_values_raw[:, :, :, -1 - (self.horizon - horizon)]
-            sample_shap_values_raw = np.moveaxis(sample_shap_values_raw, 0, 2)
+            expected_shape = (1, F, n_classes)
+            try:
+                sample_shap_values_raw = np.reshape(sample_shap_values_raw, expected_shape)
+            except ValueError as e:
+                # Fallback proportionnel
+                sample_shap_values_raw = np.reshape(sample_shap_values_raw, (1, F, T, n_classes))
+                sample_shap_values_raw = np.sum(sample_shap_values_raw, axis=2)
             
             # Extraire pour cet échantillon
-            sample_shap_values = sample_shap_values_raw[0, :, :]  # Shape: (F, n_classes)
+            sample_shap_values = sample_shap_values_raw[0, :, 0]  # Shape: (F,)
             sample_features = Xst_sample[:, :,  -1 - (self.horizon - horizon)].cpu().numpy()
             expected_values = self.explainer[horizon].expected_value
+            if isinstance(expected_values, (list, np.ndarray)):
+                expected_values = expected_values[0]
             feature_names = self.features_name
         else:
             print(f"Aucune SHAP value ni explainer pré-calculé trouvé.")
@@ -5965,7 +6064,7 @@ class Training():
                 f"Veuillez d'abord exécuter shapley_additive_explanation() pour calculer et sauvegarder les valeurs SHAP."
             )
         
-        # Générer les visualisations pour chaque classe
+        # Générer les visualisations
         results = {
             'shap_values': sample_shap_values,
             'features': sample_features,
@@ -5974,83 +6073,83 @@ class Training():
         }
         
         if plot:
-            for class_idx in range(n_classes):
-                # 1. Bar plot des valeurs SHAP pour cet échantillon
+            # 1. Bar plot des valeurs SHAP pour cet échantillon
+            plt.figure(figsize=figsize)
+            
+            # Créer un DataFrame pour faciliter la visualisation
+            # Flatten sample_features to 1D if needed (it may have shape (1, F) or (F,))
+            sample_features_flat = sample_features.flatten() if sample_features.ndim > 1 else sample_features
+            
+            shap_df = pd.DataFrame({
+                'feature': feature_names,
+                'shap_value': sample_shap_values,
+                'feature_value': sample_features_flat[:len(feature_names)]
+            })
+            shap_df = shap_df.reindex(shap_df['shap_value'].abs().sort_values(ascending=False).index)
+            
+            # Limiter aux 10 features les plus importantes pour le bar plot
+            shap_df_top10 = shap_df.head(10)
+            
+            # Bar plot
+            colors = ['red' if x < 0 else 'blue' for x in shap_df_top10['shap_value']]
+            plt.barh(range(len(shap_df_top10)), shap_df_top10['shap_value'], color=colors)
+            plt.yticks(range(len(shap_df_top10)), shap_df_top10['feature'])
+            plt.xlabel('SHAP value (Ordinal Impact)')
+            plt.title(f'SHAP Values (Top 10) - {sample_name}')
+            plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+            plt.tight_layout()
+            
+            bar_plot_path = dir_output / f"{outname}_{sample_name}_shap_bar.png"
+            plt.savefig(bar_plot_path, bbox_inches='tight', dpi=100)
+            plt.close('all')
+            results['plots_generated'].append(str(bar_plot_path))
+            print(f"Sauvegardé: {bar_plot_path}")
+            
+            # 2. Waterfall plot (si SHAP le supporte)
+            try:
                 plt.figure(figsize=figsize)
-                
-                # Créer un DataFrame pour faciliter la visualisation
-                # Flatten sample_features to 1D if needed (it may have shape (1, F) or (F,))
-                sample_features_flat = sample_features.flatten() if sample_features.ndim > 1 else sample_features
-                
-                shap_df = pd.DataFrame({
-                    'feature': feature_names,
-                    'shap_value': sample_shap_values[:, class_idx],
-                    'feature_value': sample_features_flat[:len(feature_names)]
-                })
-                shap_df = shap_df.reindex(shap_df['shap_value'].abs().sort_values(ascending=False).index)
-                
-                # Limiter aux 10 features les plus importantes pour le bar plot
-                shap_df_top10 = shap_df.head(10)
-                
-                # Bar plot
-                colors = ['red' if x < 0 else 'blue' for x in shap_df_top10['shap_value']]
-                plt.barh(range(len(shap_df_top10)), shap_df_top10['shap_value'], color=colors)
-                plt.yticks(range(len(shap_df_top10)), shap_df_top10['feature'])
-                plt.xlabel('SHAP value')
-                plt.title(f'SHAP Values (Top 10) - {sample_name} - Class {class_idx}')
-                plt.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
-                plt.tight_layout()
-                
-                bar_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_bar.png"
-                plt.savefig(bar_plot_path, bbox_inches='tight', dpi=100)
+                shap.plots._waterfall.waterfall_legacy(
+                    expected_values,
+                    sample_shap_values,
+                    feature_names=feature_names,
+                    max_display=20,
+                    show=False
+                )
+                waterfall_path = dir_output / f"{outname}_{sample_name}_shap_waterfall.png"
+                plt.savefig(waterfall_path, bbox_inches='tight', dpi=100)
                 plt.close('all')
-                results['plots_generated'].append(str(bar_plot_path))
-                print(f"Sauvegardé: {bar_plot_path}")
-                # 2. Waterfall plot (si SHAP le supporte)
+                results['plots_generated'].append(str(waterfall_path))
+                print(f"Sauvegardé: {waterfall_path}")
+            except Exception as e:
+                print(f"Impossible de générer le waterfall plot: {e}")
+            
+            # 3. Force plot (optionnel)
+            if generate_force_plot:
                 try:
                     plt.figure(figsize=figsize)
-                    shap.plots._waterfall.waterfall_legacy(
-                        expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
-                        sample_shap_values[:, class_idx],
+                    # Arrondir les valeurs SHAP à 3 décimales pour meilleure visibilité
+                    sample_shap_values_rounded = np.round(sample_shap_values, 5)
+                    expected_values_rounded = np.round(expected_values, 3)
+                    shap.force_plot(
+                        expected_values_rounded,
+                        sample_shap_values_rounded,
+                        features=sample_features_flat[:len(feature_names)],
                         feature_names=feature_names,
-                        max_display=20,
+                        matplotlib=True,
                         show=False
                     )
-                    waterfall_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_waterfall.png"
-                    plt.savefig(waterfall_path, bbox_inches='tight', dpi=100)
+                    force_plot_path = dir_output / f"{outname}_{sample_name}_shap_force.png"
+                    plt.savefig(force_plot_path, bbox_inches='tight', dpi=100)
                     plt.close('all')
-                    results['plots_generated'].append(str(waterfall_path))
-                    print(f"Sauvegardé: {waterfall_path}")
+                    results['plots_generated'].append(str(force_plot_path))
+                    print(f"Sauvegardé: {force_plot_path}")
                 except Exception as e:
-                    print(f"Impossible de générer le waterfall plot: {e}")
-                
-                # 3. Force plot (optionnel)
-                if generate_force_plot:
-                    try:
-                        plt.figure(figsize=figsize)
-                        # Arrondir les valeurs SHAP à 3 décimales pour meilleure visibilité
-                        sample_shap_values_rounded = np.round(sample_shap_values[:, class_idx], 5)
-                        expected_values = np.round(expected_values, 3)
-                        shap.force_plot(
-                            expected_values[class_idx] if isinstance(expected_values, (list, np.ndarray)) else expected_values,
-                            sample_shap_values_rounded,
-                            features=sample_features_flat[:len(feature_names)],
-                            feature_names=feature_names,
-                            matplotlib=True,
-                            show=False
-                        )
-                        force_plot_path = dir_output / f"{outname}_{sample_name}_class_{class_idx}_shap_force.png"
-                        plt.savefig(force_plot_path, bbox_inches='tight', dpi=100)
-                        plt.close('all')
-                        results['plots_generated'].append(str(force_plot_path))
-                        print(f"Sauvegardé: {force_plot_path}")
-                    except Exception as e:
-                        print(f"Impossible de générer le force plot: {e}")
+                    print(f"Impossible de générer le force plot: {e}")
             
-            # Sauvegarder les résultats pour cet échantillon
-            save_object(results, f'{outname}_{sample_name}_shap_results.pkl', dir_output)
-            print(f"\nRésultats sauvegardés: {dir_output / f'{outname}_{sample_name}_shap_results.pkl'}")
-            print(f"Nombre de visualisations générées: {len(results['plots_generated'])}")
+        # Sauvegarder les résultats pour cet échantillon
+        save_object(results, f'{outname}_{sample_name}_shap_results.pkl', dir_output)
+        print(f"\nRésultats sauvegardés: {dir_output / f'{outname}_{sample_name}_shap_results.pkl'}")
+        print(f"Nombre de visualisations générées: {len(results['plots_generated'])}")
         
         return results
 
@@ -6301,7 +6400,7 @@ class Training():
         # ─────────────────────────────────────────────────────────────────────
         if "ccllt" in name:
             # Parameters for ClusterCLMBinnedTransitionLoss aligned with test_ciol_convergnce_optuna.ipynb
-            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 0.0, 5.0, step=0.01)
+            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 3.0, 15.0, step=1.0)
             
             params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["None", "power", "exp"])
             params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.0, 5.0, step=0.01)
@@ -6438,6 +6537,24 @@ class Training():
                         criterion._preprocess(y_train)
                 except Exception as e:
                     logger.warning(f"_preprocess failed for {loss_name} (id={cid}): {e}")
+
+            if has_method(criterion, 'calculate_class_coverage'):
+                try:
+                    from GNN.config import cluster_encoder_index
+                except ImportError:
+                    cluster_encoder_index = None
+
+                cid = getattr(criterion, "id", None) or loss_params.get("id", None)
+                cluster_col = 'departement'
+                if cid == departement_index:
+                    cluster_col = 'departement'
+                elif cid == graph_id_index:
+                    cluster_col = 'graph_id'
+                elif cluster_encoder_index is not None and cid == cluster_encoder_index:
+                    cluster_col = 'cluster-encoder'
+                
+                if cluster_col in self.df_train.columns:
+                    criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
 
             # Create model and optimizer
 
@@ -7306,7 +7423,10 @@ class SplitTraining(Training):
 
             output = self.model(activations)
             if output.shape[1] > 1 and not proba:
-                output = torch.argmax(output, dim=1)
+                if getattr(self, 'task_type', None) == 'uclassification':
+                    output = torch.argmax(output[:, :-1], dim=1)
+                else:
+                    output = torch.argmax(output, dim=1)
 
                 preds.append(output.squeeze(0))
 

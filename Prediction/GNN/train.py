@@ -7,6 +7,7 @@ from pygam import s, te, f, intercept, l
 from torch.nn import KLDivLoss
 from torch.nn import KLDivLoss
 from GNN.forecasting_models.pytorch.ordinal_loss import CumulativeLinkLoss, LargeMarginOrdinalLoss, PairwiseMarginRankingLoss, ClusterDepartmentRankNetLoss, CLMBinnedTransitionLoss, ClusterCLMBinnedTransitionLoss, ClusterDepartmentRankNetLoss
+from GNN.forecasting_models.pytorch.ordinal_loss_2 import OrdinalUncertaintyFocalWKLoss
 
 ############################################## Some tools ###############################################
 
@@ -2078,6 +2079,7 @@ def get_loss_function(loss_name, **loss_params):
             "rmsle":                       lambda: RMSLELoss(),
             "rmse":                        lambda: RMSELoss(),
             "mse":                         lambda: MSELoss(),
+            "ordinaluncertaintyfocalwkloss": lambda: OrdinalUncertaintyFocalWKLoss(**loss_params),
             "huber":                       lambda: HuberLoss(),
             "logcosh":                     lambda: LogCoshLoss(),
             "tukeybiweight":               lambda: TukeyBiweightLoss(),

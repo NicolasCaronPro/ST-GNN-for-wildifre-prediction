@@ -467,42 +467,14 @@ def preprocess(df: pd.DataFrame, scaling: str, train_departements: list, test_de
 
     return df_train, df_val, df_test, train_dataset_unscale, val_dataset_unscale, test_dataset_unscale
 
-def preprocess_test(df_X: pd.DataFrame, df_Y: pd.DataFrame, x_train: pd.DataFrame, scaling: str):
-    df_XY = df_X.join(df_Y)
-
-    df_XY_clean = remove_nan_nodes(df_XY)
-    
-    logger.info(f'DataFrame shape before removal of NaNs: {df_X.shape}, after removal: {df_XY_clean.shape}')
-    assert df_XY_clean.shape[0] > 0
-
-    # Define the scaler
-    if scaling == 'MinMax':
-        scaler = min_max_scaler
-    elif scaling == 'z-score':
-        scaler = standard_scaler
-    elif scaling == "robust":
-        scaler = robust_scaler
-    else:
-        raise ValueError('Unknown scaling method. Scaling is obligatory.')
-
-    # Scaling Features
-    for feature in df_X.columns[6:]:
-        df_XY_clean[feature] = scaler(df_XY_clean[feature], x_train[feature], concat=False)
-
-    logger.info(f'Check {scaling} standardisation test: max {df_XY_clean.iloc[:, 6:].max().max()}, min {df_XY_clean.iloc[:, 6:].min().min()}')
-
-    return df_XY_clean
-
-def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str, features_name : list, fire_feature : list, apply_break_point : bool, 
+def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str, features_name : list, apply_break_point : bool,
                          scale, kmeans_features, dir_break_point, thresh, shift):
-    
-    df_X_clean = remove_nan_nodes(df_X, fire_feature)
+
+    df_X_clean = remove_nan_nodes(df_X, features_name)
 
     logger.info(f'DataFrame shape before removal of NaNs: {df_X.shape}, after removal: {df_X_clean.shape}')
 
     logger.info(f'Nan columns : {df_X.columns[df_X.isna().any()].tolist()}')
-
-    df_X_clean[fire_feature] = np.nan
 
     if apply_break_point:
         logger.info('Apply Kmeans to remove useless node')
@@ -521,7 +493,7 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
         scaler = robust_scaler
     else:
         raise ValueError('Unknown scaling method.')
-    
+
     df_X_copy = df_X_clean.copy(deep=True)
 
     # Scaling Features
@@ -530,10 +502,10 @@ def preprocess_inference(df_X: pd.DataFrame, x_train: pd.DataFrame, scaling: str
 
     logger.info(f'Check {scaling} standardisation inference: max {df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].max().max(), df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].max().idxmax()}')
     logger.info(f'Check {scaling} standardisation inference: min  {df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].min().min(), df_X_clean[df_X_clean["date"] == df_X_clean.date.max()][features_name].min().idxmin()}')
-    
+
     logger.info(f'Check before {scaling} standardisation inference: max {df_X_copy[df_X_copy["date"] == df_X_copy.date.max()][features_name].max().max(), df_X_copy[df_X_copy["date"] == df_X_copy.date.max()][features_name].max().idxmax()}')
     logger.info(f'Check before {scaling} standardisation inference: min  {df_X_copy[df_X_copy["date"] == df_X_copy.date.max()][features_name].min().min(), df_X_copy[df_X_copy["date"] == df_X_copy.date.max()][features_name].min().idxmin()}')
-    
+
     logger.info(f'Check before xtrain: max {x_train[features_name].max().max(), x_train[features_name].max().idxmax()}')
     logger.info(f'Check before xtrain: min  {x_train[features_name].min().min(), x_train[features_name].min().idxmin()}')
 

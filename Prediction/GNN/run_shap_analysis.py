@@ -135,6 +135,20 @@ depts = df_test['departement'].unique()
 
 for H in range(horizon + 1):
     
+    device = 'cpu'
+    model.device = device
+    if hasattr(model, 'model') and model.model is not None:
+        model.model.to(device)
+    
+    model.shapley_additive_explanation(
+                df=df_test,
+                outname=f'all_dept',
+                dir_output=output_dir / f'all',
+                mode='beeswarm',
+                figsize=(15, 25),
+                plot=True
+            )
+    
     for num_zone in nz:
 
         outname = f'{target}_h{H}_zone{num_zone}' 
@@ -155,7 +169,7 @@ for H in range(horizon + 1):
             model.shapley_additive_explanation(
                 df=df_sample,
                 outname=outname,
-                dir_output=output_dir / str(dept),
+                dir_output=output_dir / f'{str(dept)}',
                 mode='beeswarm',
                 figsize=(15, 25),
                 plot=True

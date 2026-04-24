@@ -193,7 +193,7 @@ class ModelGNN(SplitTraining):
         print(f'Test -> Unique values of raw targets: {df_test[_nbsin_col].unique()}')
         
         self.graph = graph
-
+        
         depts = np.union1d(df_train['departement'].unique(), df_val['departement'].unique())
         depts = np.union1d(depts, df_test['departement'].unique())
         self.udepts = np.unique(depts)

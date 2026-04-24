@@ -26,6 +26,29 @@ from skimage.segmentation import watershed
 from skimage.feature import peak_local_max
 import re
 
+def to_binary_mask(S):
+    """
+    Converts an array to a binary mask where values > 0 become 1 and others become 0.
+    """
+    if S is None:
+        return None
+    return (np.asarray(S) > 0).astype(int)
+
+def iou_binary(maskA, maskB):
+    """
+    Calculates the Intersection over Union (IoU) between two binary masks.
+    """
+    maskA = np.asarray(maskA) > 0
+    maskB = np.asarray(maskB) > 0
+    
+    intersection = np.logical_and(maskA, maskB).sum()
+    union = np.logical_or(maskA, maskB).sum()
+    
+    if union == 0:
+        return 0.0
+    return intersection / union
+
+
 def load_geo_zone_for_06(dir_data):
     dir_data_dfe = dir_data / 'departement-06-alpes-maritimes' / 'data' / 'geo'
     

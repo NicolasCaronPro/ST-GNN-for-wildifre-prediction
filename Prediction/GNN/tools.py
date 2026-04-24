@@ -2856,6 +2856,9 @@ def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
     Returns:
         tuple: (n_rows, n_cols, total_pixels)
     """
+    
+    print('kjehfkjzefknef')
+    
     # Longueur d’un degré de latitude (quasi constant)
     km_per_deg_lat = 111.32
 
@@ -2867,6 +2870,8 @@ def count_pixels_in_france_deg_square(res_km=2, deg_size=0.25, lat_deg=46.5):
     height_km = deg_size * km_per_deg_lat
     width_km = deg_size * km_per_deg_lon
 
+    print(deg_size)
+    
     # Nombre de pixels
     n_rows = int(height_km // res_km)
     n_cols = int(width_km // res_km)
