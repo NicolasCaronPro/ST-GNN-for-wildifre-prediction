@@ -2275,7 +2275,7 @@ class Training():
             
         return inputs_horizon
     
-    def compute_single_loss(self, out, tar, wei, clusters_ids=None, tolong=False, areas=None, criterion=None, departement_ids=None):
+    def compute_single_loss(self, out, tar, wei, hidden, clusters_ids=None, tolong=False, areas=None, criterion=None, departement_ids=None):
         if self.task_type == 'regression':
             tar = tar.view(out.shape[0])
             wei = wei.view(out.shape[0])
@@ -2307,6 +2307,9 @@ class Training():
 
         if departement_ids is not None:
             additionnal_params['departement_ids'] = departement_ids
+            
+        if required_params(criterion.forward, 'hidden'):
+            additionnal_params['hidden'] = hidden
         
         try:
             additionnal_params['sample_weight'] = wei
@@ -2316,7 +2319,7 @@ class Training():
             print(e)
             return criterion(out, tar)
 
-    def calculate_loss(self, criterion, output, target, weights, label, tolong=True):
+    def calculate_loss(self, criterion, output, target, weights, hidden, label, tolong=True):
         
         departement_ids = None
         
@@ -2342,7 +2345,7 @@ class Training():
         else:
             areas = None
             
-        base_loss = self.compute_single_loss(output, target, weights, clusters_ids, tolong, areas, criterion, departement_ids=departement_ids)
+        base_loss = self.compute_single_loss(output, target, weights, hidden, clusters_ids, tolong, areas, criterion, departement_ids=departement_ids)
         
         if 'area' in self.loss and False: # Calculate area loss (specify loss-area)
             area_mask = label[:, graph_id_index, -1]
@@ -2792,7 +2795,7 @@ class Training():
             hidden_past.append(hidden)
             output_past.append(output)
             
-            loss_res = self.calculate_loss(criterion, logits, target, weights, labels)
+            loss_res = self.calculate_loss(criterion, logits, target, weights, hidden, labels)
             
             #if torch.isnan(loss_res):
             #    print('####################################')
