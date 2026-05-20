@@ -988,11 +988,11 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
     ############################################## Get daily metrics #######################################################
     if name.find('classification') != -1 or name.find('corn') != -1 or name.find('cll') != -1 or name.find('msetheta') != -1 or name.find('ranknet') != -1:
         mapping = {
-            "nbsinister": "nbsinister-quantile-5-Class-Dept",
-            "timeintervention": "timeintervention-quantile-5-Class-Dept",
-            "ressource": "ressource-quantile-5-Class-Dept",
-            "burnedareaRoot": "burnedareaRoot-quantile-5-Class-Dept",
-            "burnedarea": "burnedarea-quantile-5-Class-Dept",
+            "nbsinister": "nbsinister-kmeans-5-Class-Dept",
+            "timeintervention": "timeintervention-kmeans-5-Class-Dept",
+            "ressource": "ressource-kmeans-5-Class-Dept",
+            "burnedareaRoot": "burnedareaRoot-kmeans-5-Class-Dept",
+            "burnedarea": "burnedarea-kmeans-5-Class-Dept",
         }
 
         if target_name in mapping.keys():
@@ -1016,7 +1016,9 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         col_class = 'nbsinister-kmeans-5-Class-Dept'
         col_class_1 = 'nbsinister-kmeans-5-Class-Dept'
         col_class_2 = 'nbsinister-kmeans-5-Class-Dept-cubic-Specialized'
-    
+
+    print('###################################')
+    print(target_name, col_class, col_nbsinister)
     metrics = {}
 
     logger.info(f'###################### Analysis {target_name} #########################')
@@ -1130,6 +1132,8 @@ def evaluate_pipeline(dir_train, prefix, df_test, pred, predProba, y, graph, tes
         except Exception as e:
             print(f'Can t load confusion matrix -> {e}')
             pass
+        
+        print(np.unique(y_pred))
         
         accuracy = round(accuracy_score(y_true, y_pred), 2)
         metrics[f'accuracy'] = accuracy
@@ -1861,6 +1865,12 @@ def test_dl_model(cfg,
         model_dir = dir_train / name_exp / f'check_{scaling}' / prefix_train / read_name
         model = read_object(f'{read_name}.pkl', model_dir)
         
+        if model is not None and hasattr(model, 'model') and model.model is not None:
+             total_params = sum(p.numel() for p in model.model.parameters())
+             trainable_params = sum(p.numel() for p in model.model.parameters() if p.requires_grad)
+             logger.info(f'Total parameters: {total_params:,}')
+             logger.info(f'Trainable parameters: {trainable_params:,}')
+
         if 'timeintervention' in model.target_name:
             test_dataset_dep_ = test_dataset_dep_[test_dataset_dep_["departement"] != 1]
 
@@ -2038,10 +2048,27 @@ def test_dl_model(cfg,
                 
                 ious_per_horizon.append(metrics[run].get('iou_class_hard', np.nan))
 
+                mapped_target_name = target_name
+                if name.find('classification') != -1 or name.find('corn') != -1 or name.find('cll') != -1 or name.find('msetheta') != -1 or name.find('ranknet') != -1:
+                    mapping = {
+                        "nbsinister": "nbsinister-kmeans-5-Class-Dept",
+                        "timeintervention": "timeintervention-kmeans-5-Class-Dept",
+                        "ressource": "ressource-kmeans-5-Class-Dept",
+                        "burnedareaRoot": "burnedareaRoot-kmeans-5-Class-Dept",
+                        "burnedarea": "burnedarea-kmeans-5-Class-Dept",
+                    }
+                    if target_name in mapping.keys():
+                        mapped_target_name = mapping[target_name]
+
                 if res_horizon is None:
                     res_horizon = res
                 else:
-                    res_horizon[f'prediction_{model.target_name}_{H}'] = res[f'prediction_{model.target_name}_{H}']
+                    res_horizon[f'prediction_{mapped_target_name}_{H}'] = res[f'prediction_{mapped_target_name}_{H}']
+                    if predTensorProba is not None:
+                        for c in range(predTensorProba.shape[-1]):
+                            col_c = f'prediction_{mapped_target_name}_{H}_C{c}'
+                            if col_c in res.columns:
+                                res_horizon[col_c] = res[col_c]
 
                 if not isinstance(model, ModelVotingPytorchAndSklearn) and not isinstance(model, ModelKnowledgeDistillation) \
                     and "best_tp" in model.metrics.keys():

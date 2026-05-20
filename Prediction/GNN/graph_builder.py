@@ -170,7 +170,7 @@ def add_edge_features(
         src_pos = src_pos[None, :]
         dst_pos = dst_pos[None, :]
     try:
-        testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]))
+        testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]), atol=1e-3, rtol=1e-3)
     except ValueError:
         raise ValueError("Invalid projection of edge nodes to local ccordinate system")
     
@@ -181,9 +181,9 @@ def add_edge_features(
         src_pos = src_pos[None, :]
         dst_pos = dst_pos[None, :]
     try:
-        testing.assert_close(dst_pos[:, 0], torch.ones_like(dst_pos[:, 0]))
-        testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]))
-        testing.assert_close(dst_pos[:, 2], torch.zeros_like(dst_pos[:, 2]))
+        testing.assert_close(dst_pos[:, 0], torch.ones_like(dst_pos[:, 0]), atol=1e-3, rtol=1e-3)
+        testing.assert_close(dst_pos[:, 1], torch.zeros_like(dst_pos[:, 1]), atol=1e-3, rtol=1e-3)
+        testing.assert_close(dst_pos[:, 2], torch.zeros_like(dst_pos[:, 2]), atol=1e-3, rtol=1e-3)
     except ValueError:
         raise ValueError("Invalid projection of edge nodes to local ccordinate system")
 

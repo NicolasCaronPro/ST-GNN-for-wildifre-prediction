@@ -1,4 +1,5 @@
 from GNN.pytorch_model_tools import *
+from GNN.config import graph_id_index, departement_index, date_index, area_index, logger
 
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
@@ -481,7 +482,7 @@ class ModelGNN(SplitTraining):
             hidden_past.append(hidden)
             output_past.append(output)
 
-            loss_res = self.calculate_loss(criterion, logits, target, weights, labels)
+            loss_res = self.calculate_loss(criterion, logits, target, weights, hidden, labels)
             
             if isinstance(loss_res, dict):
                 loss = loss_res['total_loss']
@@ -501,7 +502,7 @@ class ModelGNN(SplitTraining):
                 target_teacher = torch.Tensor(pred_teacher, device=inputs.device).to(torch.float32)
                 target_teacher = target_teacher / self.temperature_value
                 
-                loss2 = self.calculate_loss(criterion_teacher, output, target_teacher, weights, labels, tolong=False)
+                loss2 = self.calculate_loss(criterion_teacher, output, target_teacher, weights, hidden, labels, tolong=False)
 
                 loss = self.alpha_value * loss2 + (1 - self.alpha_value) * loss
 
@@ -536,86 +537,110 @@ class ModelGNN(SplitTraining):
         - features: Numpy array of feature indices to use.
         - device: Torch device to use for computations.
         - target_name: Name of the target variable.
-        - autoRegression: Boolean indicating whether to use autoregression.
-        - features_name: List mapping feature names to indices.
-        - dataset: Pandas DataFrame containing 'node_id', 'date_id', and 'nbsinister' columns.
+        """
+        return self._predict(X, prediction_type, output_pdf, calibrate)
 
-        Returns:
-        - pred: Tensor containing the model's predictions.
-        - y: Tensor containing the true labels.
+    def _predict(self, X: DataLoader, prediction_type='Class', output_pdf='test', calibrate=False) -> torch.tensor:
+        """
+        Generic prediction logic using a DataLoader.
+        Iterates over the DataLoader, computes predictions and true labels,
+        and returns concatenated results.
         """
         assert self.model is not None
         self.model.eval()
-        criterion = self.get_loss(self.loss, {})
-        if len(self.criterion_params) > 0:
-            if has_method(criterion, 'update_params'):
-                idx = getattr(self, 'best_epoch', -1)
-                if idx >= len(self.criterion_params):
-                    idx = -1
-                criterion.update_params(self.criterion_params[idx])
-                criterion.eval()
+            
+        if hasattr(self, 'criterion'):
+            criterion = self.criterion
+        else:
+            criterion = None
 
         with torch.no_grad():
             pred = []
             y = []
 
             for i, data in enumerate(X, 0):
+                pred_horizon, labels_horizon = self._predict_tensor(data, prediction_type=prediction_type, output_pdf=output_pdf, calibrate=calibrate)
+                pred.append(pred_horizon)
+                y.append(labels_horizon)
+
+            y = torch.cat(y, 0)
+            pred = torch.cat(pred, 0)
+            
+            if prediction_type == 'Class' and pred.dtype != torch.long:
+                pred = torch.round(pred, decimals=1)
+
+            return pred, y
+
+    def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False, use_grad=False) -> torch.tensor:
+        assert self.model is not None
+        self.model.eval()
+            
+        if hasattr(self, 'criterion'):
+            criterion = self.criterion
+        else:
+            criterion = None
+
+        if use_grad:
+            func = torch.enable_grad
+        else:
+            func = torch.no_grad
+        with func():
+            if not self.mesh:
+                inputs, orilabels_, graphs, graphs_id = X
+            else:
+                inputs, orilabels_, DGLgraphs, graphs_id = X
+                
+            orilabels_ = orilabels_.to(device)
+
+            pred_horizon = []
+            labels_horizon = []
+
+            hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
+            output_past: List[torch.Tensor] = []
+            for H in range(self.horizon + 1):
+
+                horizon_index = -1 - (self.horizon - H)
+                orilabels = orilabels_[:, :, horizon_index]
+
+                inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
+                if H == 0:
+                    z_prev = None
+                else:
+                    if self.ks > 0:
+                        # on prend les ks derniers états cachés déjà vus
+                        history = hidden_past[-(self.ks + 1):]
+                        # empilement (B, D, L) avec L = len(history)
+                        z_prev = torch.stack(history, dim=2)  # (B, D, L)
+
+                        # padding à gauche si L < ks
+                        L = z_prev.size(2)
+                        if L < (self.ks + 1):
+                            B, D = z_prev.size(0), z_prev.size(1)
+                            pad = torch.zeros(
+                                (B, D, self.ks + 1 - L),
+                                device=z_prev.device,
+                                dtype=z_prev.dtype
+                            )
+                            z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
+                    else:
+                        z_prev = hidden_past[-1]
+                if H > 0:
+                    if self.id_past_risk is not None:
+                        inputs_horizon[:, self.id_past_risk, -H:] = 0
+                    if self.id_past_ba is not None:
+                        inputs_horizon[:, self.id_past_ba, -H:] = 0
+                    if self.prev_idx is not None:
+                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
 
                 if not self.mesh:
-                    inputs, orilabels_, graphs, graphs_id = data
-                    model_args = (graphs,)
+                    output, logits, hidden = self.model(inputs_horizon, graphs, z_prev=z_prev)
                 else:
-                    inputs, orilabels_, DGLgraphs, graphs_id = data
-                    
-                orilabels_ = orilabels_.to(device)
-
-                pred_horizon = []
-                labels_horizon = []
-
-                prev_output = None
-
-                hidden_past: List[torch.Tensor] = []  # contiendra des tenseurs (B, D)
-                output_past: List[torch.Tensor] = []
-                for H in range(self.horizon + 1):
-
-                    horizon_index = -1 - (self.horizon - H)
-                    orilabels = orilabels_[:, :, horizon_index]
-
-                    inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
-                    if H == 0:
-                        z_prev = None
-                    else:
-                        if self.ks > 0:
-                            # on prend les ks derniers états cachés déjà vus
-                            history = hidden_past[-(self.ks + 1):]
-                            # empilement (B, D, L) avec L = len(history)
-                            z_prev = torch.stack(history, dim=2)  # (B, D, L)
-
-                            # padding à gauche si L < ks
-                            L = z_prev.size(2)
-                            if L < (self.ks + 1):
-                                B, D = z_prev.size(0), z_prev.size(1)
-                                pad = torch.zeros(
-                                    (B, D, self.ks + 1 - L),
-                                    device=z_prev.device,
-                                    dtype=z_prev.dtype
-                                )
-                                z_prev = torch.cat([pad, z_prev], dim=2)  # (B, D, ks)
-                        else:
-                            z_prev = hidden_past[-1]
-                    if H > 0:
-                        if self.id_past_risk is not None:
-                            inputs_horizon[:, self.id_past_risk, -H:] = 0
-                        if self.id_past_ba is not None:
-                            inputs_horizon[:, self.id_past_ba, -H:] = 0
-                        if self.prev_idx is not None and prev_output is not None:
-                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
-
                     output, logits, hidden = self.model(inputs_horizon, DGLgraphs[0], DGLgraphs[1], DGLgraphs[2], z_prev=z_prev)
 
-                    hidden_past.append(hidden)
-                    output_past.append(output)
-                    
+                hidden_past.append(hidden)
+                output_past.append(output)
+                
+                if prediction_type != 'RawFormulaVal':
                     if 'criterion' in locals() and hasattr(criterion, 'calibrate') and calibrate:
                             if 'clusters_ids' in required_params(criterion.transform):
                                 clusters_ids = orilabels[:, criterion.id].long()
@@ -651,30 +676,58 @@ class ModelGNN(SplitTraining):
 
                         output = criterion.transform(**params)
 
-                    if prediction_type == 'Class':
+                if hasattr(criterion, 'score_to_class') and prediction_type == 'Class':
+                    
+                    self.ccllt_diff_params = {'graph_id': [], 'date': [], 'pred_bin': [], 'pred_argmax': []}
+                    
+                    clusters_ids = orilabels[:, criterion.id].long()
+                    departement_ids = orilabels[:, departement_index].long()
+                    
+                    probs = output.detach().clone()
+                    
+                    pred_bin = criterion.score_to_class(
+                        output,
+                        clusters_ids=clusters_ids,
+                        departement_ids=departement_ids
+                    ).detach().cpu()
 
-                        if self.task_type in ['classification', 'binary', 'corn']:
-                            output = torch.argmax(output, dim=1)
-
-                        elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
-                            output = torch.argmax(output, dim=1)
-
-                    elif prediction_type == 'RawFormulaVal':
-                        output = logits
+                    pred_argmax = probs.argmax(dim=1).detach().cpu()
+                    
+                    output = criterion.score_to_class(output, clusters_ids, departement_ids)
                         
-                    pred_horizon.append(output[:, None])
-                    labels_horizon.append(orilabels[:, :, None])
+                    diff_mask = (output.detach().cpu() != pred_argmax)
+                    diff_mean = diff_mask.float().mean().item()
+                    self.diff_bin_argmax = diff_mean
+                    if self.metrics is None:
+                        self.metrics = {}
+                    self.metrics['diff_bin_argmax'] = self.diff_bin_argmax
+                    
+                    if diff_mask.any():
+                        indices = torch.where(diff_mask)[0]
+                        for idx in indices:
+                            idx_item = idx.item()
+                            self.ccllt_diff_params['graph_id'].append(orilabels[idx_item, graph_id_index].item())
+                            self.ccllt_diff_params['date'].append(orilabels[idx_item, date_index].item())
+                            self.ccllt_diff_params['pred_bin'].append(output[idx_item].item())
+                            self.ccllt_diff_params['pred_argmax'].append(pred_argmax[idx_item].item())
 
-                pred_horizon = torch.cat(pred_horizon, dim=1)
-                labels_horizon = torch.cat(labels_horizon, dim=2)
-                pred.append(pred_horizon)
-                y.append(labels_horizon)
+                if prediction_type == 'Class':
 
-            y = torch.cat(y, 0)
-            pred = torch.cat(pred, 0)
-            
-            if prediction_type == 'Class' and pred.dtype != torch.long:
-                pred = torch.round(pred, decimals=1)
+                    if self.task_type in ['classification', 'binary', 'corn']:
+                        if output.ndim > 1:
+                            output = torch.argmax(output, dim=1)
+
+                    elif self.task_type == 'regression' and output.ndim > 1 and output.shape[1] > 1:
+                        output = torch.argmax(output, dim=1)
+
+                elif prediction_type == 'RawFormulaVal':
+                    output = logits
+                    
+                pred_horizon.append(output[:, None])
+                labels_horizon.append(orilabels[:, :, None])
+
+            pred = torch.cat(pred_horizon, dim=1)
+            y = torch.cat(labels_horizon, dim=2)
 
             return pred, y
 

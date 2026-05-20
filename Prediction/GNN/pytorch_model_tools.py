@@ -2277,13 +2277,25 @@ class Training():
             
         return inputs_horizon
     
-    def compute_single_loss(self, out, tar, wei, hidden, clusters_ids=None, tolong=False, areas=None, criterion=None, departement_ids=None):
+    def compute_single_loss(self, out, tar, wei, hidden, clusters_ids=None, tolong=False, areas=None, criterion=None, departement_ids=None, graph_ids=None, dates=None):
         if self.task_type == 'regression':
             tar = tar.view(out.shape[0])
             wei = wei.view(out.shape[0])
 
             tar = torch.masked_select(tar, wei.gt(0))
             out = out[wei.gt(0)]
+            if hidden is not None:
+                hidden = hidden[wei.gt(0)]
+            if graph_ids is not None:
+                graph_ids = graph_ids[wei.gt(0)]
+            if dates is not None:
+                dates = dates[wei.gt(0)]
+            if clusters_ids is not None:
+                clusters_ids = clusters_ids[wei.gt(0)]
+            if departement_ids is not None:
+                departement_ids = departement_ids[wei.gt(0)]
+            if areas is not None:
+                areas = areas[wei.gt(0)]
             wei = torch.masked_select(wei, wei.gt(0))
         else:
             wei = wei.long()
@@ -2293,6 +2305,19 @@ class Training():
 
             if clusters_ids is not None:
                 clusters_ids = clusters_ids[wei.gt(0)]
+            if departement_ids is not None:
+                departement_ids = departement_ids[wei.gt(0)]
+            if areas is not None:
+                areas = areas[wei.gt(0)]
+            
+            if hidden is not None:
+                hidden = hidden[wei.gt(0)]
+            
+            if graph_ids is not None:
+                graph_ids = graph_ids[wei.gt(0)]
+            
+            if dates is not None:
+                dates = dates[wei.gt(0)]
 
             wei = torch.masked_select(wei, wei.gt(0))
 
@@ -2310,9 +2335,17 @@ class Training():
         if departement_ids is not None:
             additionnal_params['departement_ids'] = departement_ids
             
-        if 'hidden' in required_params(criterion.forward):
+        req_params = required_params(criterion.forward)
+        
+        if 'hidden' in req_params:
             additionnal_params['hidden'] = hidden
         
+        if 'graph_ids' in req_params:
+            additionnal_params['graph_ids'] = graph_ids
+        
+        if 'dates' in req_params:
+            additionnal_params['dates'] = dates
+            
         try:
             additionnal_params['sample_weight'] = wei
         
@@ -2346,8 +2379,18 @@ class Training():
 
         else:
             areas = None
+
+        if 'graph_ids' in required_params(criterion.forward):
+            graph_ids = label[:, graph_id_index, -1]
+        else:
+            graph_ids = None
             
-        base_loss = self.compute_single_loss(output, target, weights, hidden, clusters_ids, tolong, areas, criterion, departement_ids=departement_ids)
+        if 'dates' in required_params(criterion.forward):
+            dates = label[:, date_index, -1]
+        else:
+            dates = None
+            
+        base_loss = self.compute_single_loss(output, target, weights, hidden, clusters_ids, tolong, areas, criterion, departement_ids=departement_ids, graph_ids=graph_ids, dates=dates)
         
         if 'area' in self.loss and False: # Calculate area loss (specify loss-area)
             area_mask = label[:, graph_id_index, -1]
@@ -2714,6 +2757,49 @@ class Training():
         inputs, labels, _ = data
         graphs = None
         
+        # --- Verification of timeseries consistency on LABELS ---
+        if labels.dim() == 3: # (B, C, T)
+            B_l, C_l, T_l = labels.shape
+            for b in range(B_l):
+                # 1. Check graph_id consistency in labels
+                gids_l = labels[b, graph_id_index, :]
+                if not torch.all(gids_l == gids_l[0]):
+                    raise ValueError(f"CRITICAL: graph_id inconsistency in labels for batch {b}. GIDs: {gids_l.cpu().numpy()}")
+                
+                # 2. Check date sequentiality in labels (step of 1)
+                dates_l = labels[b, date_index, :]
+                if not (dates_l[-1] == torch.max(dates_l)):
+                    raise ValueError(f"CRITICAL: last date is not the maximum in labels for batch {b}. Dates: {dates_l.cpu().numpy()}")
+                
+                if T_l > 1:
+                    diffs_l = torch.diff(dates_l)
+                    if not torch.all(diffs_l == 1):
+                        raise ValueError(f"CRITICAL: date sequence inconsistency in labels for batch {b}. Dates: {dates_l.cpu().numpy()}")
+                
+                # 3. Check weights: only the target window should have weight > 0
+                weights_l = labels[b, weight_index, :]
+                past_len = T_l - (self.horizon + 1)
+                if past_len > 0:
+                    if not torch.all(weights_l[:past_len] == 0):
+                        raise ValueError(f"CRITICAL: weights non-zero in historical window for batch {b}. Weights: {weights_l.cpu().numpy()}")
+
+        # --- Verification of dynamic variables variation in INPUTS ---
+        from GNN.tools import get_static_temporal_idx
+        _, dynamic_idx = get_static_temporal_idx(self.features_name)
+        if len(dynamic_idx) > 0 and inputs.dim() == 3:
+            B, C, T = inputs.shape
+            if T > 1:
+                for b in range(B):
+                    # Check if all dynamic variables are constant (suspicious)
+                    all_constant = True
+                    for idx in dynamic_idx:
+                        feat_values = inputs[b, idx, :]
+                        if not torch.all(feat_values == feat_values[0]):
+                            all_constant = False
+                            break
+                    if all_constant:
+                         raise ValueError(f"CRITICAL: All temporal variables are constant in inputs for batch {b}. The timeseries might be incorrectly constructed (repeated days).")
+
         if torch.isnan(inputs).any():
             print(f">>> [DEBUG launch_batch] inputs contains NaN! Shape: {inputs.shape}")
         
@@ -3658,162 +3744,120 @@ class Training():
         elif 'fl' in self.loss: # Use focal loss
             loss_params = {'alpha' : self.get_class_freq(self.df_train)}
             
+        sigma = self.df_train[self.target_name].std()
+        
+        if 'ranknet' in loss_params:
+            loss_params.update({
+                "sigma" : sigma,
+                "wmid": 0.1
+            })
+            
         if 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for nbsinister-constrained regions')
-            
+
             loss_params.update({
-                "gainsfloor": 2.6,
-                "wkdecay": "exp",
-                "wkpower": 3.86,
-                "wklambda": 1.15,
-                "gamma": 7.71,
-                "taugate": 0.34,
-                "gatetemp": 0.88,
-                "wfocal": 2.22,
-                "wmu0": 0.45,
-                "fgamma": 1.9,
-                "falpha": 0.63,
-                "massupdate": 0.41,
-                "mumomentum": 0.93,
-                "mulambdag": 1.0,
-                "mulambdac": 0.0,
-                "mulambdad": 0.0,
-                "wmid": 1.47,
-                "wtrans": 4.34,
-                })
+                  "sigma": sigma,
+                "wmu0": 0.29,
+                "wmid": 0.11,
+                "wtrans": 1.5,
+                "wcoverage": 2.76,
+                "gainsfloor": 3.03,
+                "wkdecay": "None",
+                "taugate": 0.35,
+                "gatetemp": 1.39,
+                "massupdate": 0.12,
+                "mumomentum": 0.55,
+                "mulambdag": 3.0,
+                "mulambdac": 0.49,
+                "mulambdad": 0.83,
+                "shift": 0.64,
+                            })
                         
         elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for ressource-constrained regions')
-            
-            
-            """
-            "gainsfloor": 3.36,
-                "wkdecay": "None",
-                "gamma": 8.59,
-                "taugate": 0.44,
-                "gatetemp": 0.94,
-                "wfocal": 0.6,
-                "wmu0": 0.57,
-                "fgamma": 1.48,
-                "falpha": 0.85,
-                "massupdate": 0.5,
-                "mumomentum": 0.52,
-                "mulambdag": 4.09,
-                "mulambdac": 0.4,
-                "mulambdad": 3.98,
-                "wmid": 2.68,
-                "wtrans": 3.28,
-            """
         
             loss_params.update({
-                "gainsfloor": 3.0,
-                "wkdecay": "None",
-                "gamma": 9.0,
-                "taugate": 0.2,
-                "gatetemp": 1.0,
-                "wfocal": 0.6,
-                "wmu0": 0.57,
-                "fgamma": 1.5,
-                "falpha": 0.9,
-                "massupdate": 0.5,
-                "mumomentum": 0.99,
-                "mulambdag": 1.0,
-                "mulambdac": 0.0,
-                "mulambdad": 0.0,
-                "wmid": 2.68,
-                "wtrans": 3.0,
+              "wmu0": 0.73,
+            "wmid": 0.09,
+            "wtrans": 1.81,
+            "wcoverage": 4.05,
+            "gainsfloor": 3.84,
+            "wkdecay": "power",
+            "wkpower": 3.45,
+            "taugate": 0.11,
+            "gatetemp": 1.87,
+            "massupdate": 0.35,
+            "mumomentum": 0.02,
+            "mulambdag": 2.17,
+            "mulambdac": 0.33,
+            "mulambdad": 1.73,
+            "shift": 1.0,
+                "sigma": sigma,
             })
             
         elif 'timeintervention' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for timeintervention-constrained regions')
             
-            """loss_params.update({
-                     "gainsfloor": 2.6,
-                "wkdecay": "exp",
-                "wkpower": 3.86,
-                "wklambda": 1.15,
-                "gamma": 7.71,
-                "taugate": 0.34,
-                "gatetemp": 0.88,
-                "wfocal": 2.22,
-                "wmu0": 0.45,
-                "fgamma": 1.9,
-                "falpha": 0.63,
-                "massupdate": 0.41,
-                "mumomentum": 0.93,
-                "mulambdag": 2.64,
-                "mulambdac": 1.93,
-                "mulambdad": 4.22,
-                "wmid": 1.47,
-                "wtrans": 4.34,
-            })"""
-            
             loss_params.update({
-                    "gainsfloor": 2.6,
-                "wkdecay": "exp",
-                "wkpower": 3.86,
-                "wklambda": 1.15,
-                "gamma": 7.71,
-                "taugate": 0.34,
-                "gatetemp": 0.88,
-                "wfocal": 0.6,
-                "wmu0": 0.57,
-                "fgamma": 1.9,
-                "falpha": 0.63,
-                "massupdate": 0.41,
-                "mumomentum": 0.93,
-                "mulambdag": 1.0,
-                "mulambdac": 0.0,
-                "mulambdad": 0.0,
-                "wmid": 2.68,
-                "wtrans": 3.0,
+              "wmu0": 1.17,
+                "wmid": 2.05,
+                "wtrans": 3.37,
+                "wcoverage": 2.85,
+                "gainsfloor": 3.72,
+                "wkdecay": "power",
+                "wkpower": 5.52,
+                "taugate": 0.54,
+                "gatetemp": 0.37,
+                "massupdate": 0.1,
+                "mumomentum": 0.47,
+                "mulambdag": 0.91,
+                "mulambdac": 0.76,
+                "mulambdad": 1.43,
+                "shift": 0.95,
+                "sigma": sigma,
             })
         
         elif 'nbsinister' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                "gainsfloor": 15.0,
-                "wkdecay": "exp",
+                  "gainsfloor": 3.0,
+                "wkdecay": "None",
                 "wkpower": 3.86,
-                "wklambda": 0.75,
-                "gamma": 7.7,
+                "wklambda": 1.15,
                 "taugate": 0.34,
                 "gatetemp": 0.88,
-                "wfocal": 1.0,
-                "wmu0": 0.45,
-                "fgamma": 1.9,
-                "falpha": 0.63, 
-                "massupdate": 0.40,
+                "wmu0": 1.0,
+                "massupdate": 0.41,
                 "mumomentum": 0.93,
                 "mulambdag": 1.0,
                 "mulambdac": 0.0,
                 "mulambdad": 1.0,
-                "wmid": 1.47,
-                "wtrans": 4.34,
+                "wmid": 1.0,
+                "wtrans": 2.0,
+                "wcoverage": 3.0,
+                "sigma": sigma,
                     })
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
             loss_params.update({
-                     "gainsfloor": 0.65,
-                    "wkdecay": "power",
-                    "wkpower": 1.75,
-                    "wklambda": 0.72,
-                    "gamma": 9.41,
-                    "taugate": 0.28,
-                    "gatetemp": 0.96,
-                    "wfocal": 0.6,
-                    "wmu0": 0.57,
-                    "fgamma": 3.61,
-                    "falpha": 0.15,
-                    "massupdate": 0.43,
-                    "mumomentum": 0.65,
+                    "gainsfloor": 3.0,
+                    "wkdecay": "None",
+                    "wkpower": 3.86,
+                    "wklambda": 1.15,
+                    "taugate": 0.34,
+                    "gatetemp": 0.88,
+                    "wmu0": 1.0,
+                    "massupdate": 0.41,
+                    "mumomentum": 0.93,
                     "mulambdag": 1.0,
                     "mulambdac": 0.0,
-                    "mulambdad": 0.0,
-                     "wmid": 2.68,
-                    "wtrans": 3.0,
+                    "mulambdad": 1.0,
+                    "wmid": 1.0,
+                    "wtrans": 2.0,
+                    "wcoverage": 3.0,
+                    "sigma": sigma,
                     })
     
         self.criterion = self.get_loss(self.loss, loss_params)
@@ -3840,8 +3884,11 @@ class Training():
                 cluster_col = 'cluster-encoder'
             
             if cluster_col in self.df_train.columns:
-                self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
-
+                if self.target_name in ['nbsinister', 'ressource', 'timeintervention']:
+                    self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=f'{self.target_name}-kmeans-5-Class-Dept', dir_output=self.dir_log)
+                else:    
+                    self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
+                
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
         
         new_params = {'static_idx': static_idx, 'temporal_idx' : temporal_idx}
@@ -5753,9 +5800,6 @@ class Training():
         if 'ccllt' in loss_name and "bdiff" in self.dir_log.as_posix():
             loss_params['clustersequaldept'] = True
             
-        if 'ccllt' in loss_name:
-            loss_params['wfocal'] = 0.0
-            
         if 'DualTraining-num' in self.name:
             loss_params.update({'num_classes' : 4})
         else:
@@ -6440,31 +6484,28 @@ class Training():
         #     scaleagg, weighttype, alphatype, mumomentum, mulambdag, mulambdac
         # ─────────────────────────────────────────────────────────────────────
         if "ccllt" in name:
-            # Parameters for ClusterCLMBinnedTransitionLoss aligned with test_ciol_convergnce_optuna.ipynb
-            params["gainsfloor"] = trial.suggest_float("ccllt_gainsfloor", 3.0, 15.0, step=1.0)
-            
-            params["wkdecay"] = trial.suggest_categorical("ccllt_wkdecay", ["None", "power", "exp"])
-            params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.0, 5.0, step=0.01)
-            params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.01, 2.0, step=0.01)
-            
-            params["scaleagg"] = trial.suggest_categorical("ccllt_scaleagg", ["None", "department"])
-            
-            params["gamma"]    = trial.suggest_float("ccllt_gamma", 0.1, 10.0, step=0.01)
-            params["taugate"]  = trial.suggest_float("ccllt_taugate", 0.01, 0.5, step=0.01)
-            params["gatetemp"] = trial.suggest_float("ccllt_gatetemp", 0.01, 1.0, step=0.01)
-            
-            params["wfocal"] = trial.suggest_float("ccllt_wfocal", 0.0, 5.0, step=0.01)
-            params["wmu0"]   = trial.suggest_float("ccllt_wmu0", 0.0, 5.0, step=0.01)
-            params["fgamma"] = trial.suggest_float("ccllt_fgamma", 0.1, 5.0, step=0.01)
-            params["falpha"] = trial.suggest_float("ccllt_falpha", 0.1, 1.0, step=0.01)
-            
-            params["massupdate"] = trial.suggest_float("ccllt_massupdate", 0.01, 0.9, step=0.01)
-            params["mumomentum"] = trial.suggest_float("ccllt_mumomentum", 0.5, 0.9999, step=0.0001)
-            params["mulambdag"]  = trial.suggest_float("ccllt_mulambdag", 0.01, 5.0, step=0.01)
-            params["mulambdac"]  = trial.suggest_float("ccllt_mulambdac", 0.01, 5.0, step=0.01)
-            params["mulambdad"]  = trial.suggest_float("ccllt_mulambdad", 0.01, 5.0, step=0.01)
-            params["wmid"]       = trial.suggest_float("ccllt_wmid", 0.01, 5.0, step=0.01)
-            params["wtrans"]     = trial.suggest_float("ccllt_wtrans", 0.01, 5.0, step=0.01)
+            params["sigma"]       = self.df_train[self.target_name].std()
+            #params["ndepartements"] = 3
+            #params["num_classes"]   = 5
+
+            params["wmu0"]        = trial.suggest_float("ccllt_wmu0", 0.0, 3.0, step=0.01)
+            params["wmid"]        = trial.suggest_float("ccllt_wmid", 0.0, 5.0, step=0.01)
+            params["wtrans"]      = trial.suggest_float("ccllt_wtrans", 0.0, 5.0, step=0.01)
+            params["wcoverage"]   = trial.suggest_float("ccllt_wcoverage", 0.0, 5.0, step=0.01)
+            params["gainsfloor"]  = trial.suggest_float("ccllt_gainsfloor", 0.5, 5.0, step=0.01)
+            params["wkdecay"]     = trial.suggest_categorical("ccllt_wkdecay", ["power", "exp", "None"])
+            if params["wkdecay"] == "power":
+                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.5, 6.0, step=0.01)
+            elif params["wkdecay"] == "exp":
+                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.05, 3.0, log=True)
+            params["taugate"]     = trial.suggest_float("ccllt_taugate", 0.01, 0.9, step=0.01)
+            params["gatetemp"]    = trial.suggest_float("ccllt_gatetemp", 0.1, 2.0, step=0.01)
+            params["massupdate"]  = trial.suggest_float("ccllt_massupdate", 0.0, 1.0, step=0.01)
+            params["mumomentum"]  = trial.suggest_float("ccllt_mumomentum", 0.0, 1.0, step=0.01)
+            params["mulambdag"]   = trial.suggest_float("ccllt_mulambdag", 0.0, 3.0, step=0.01)
+            params["mulambdac"]   = trial.suggest_float("ccllt_mulambdac", 0.0, 3.0, step=0.01)
+            params["mulambdad"]   = trial.suggest_float("ccllt_mulambdad", 0.0, 3.0, step=0.01)
+            params["shift"]       = trial.suggest_float("ccllt_shift", 0.1, 1.0, step=0.01)
 
             return params
         
@@ -6503,7 +6544,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=200,
+        n_trials=500,
         warmup=5,
         enable_pruning=False,
     ):
