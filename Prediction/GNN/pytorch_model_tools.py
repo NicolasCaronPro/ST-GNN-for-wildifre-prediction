@@ -3756,42 +3756,47 @@ class Training():
             print('Using optimal parameters for nbsinister-constrained regions')
 
             loss_params.update({
-                  "sigma": sigma,
-                "wmu0": 0.29,
-                "wmid": 0.11,
-                "wtrans": 1.5,
-                "wcoverage": 2.76,
-                "gainsfloor": 3.03,
-                "wkdecay": "None",
-                "taugate": 0.35,
-                "gatetemp": 1.39,
-                "massupdate": 0.12,
-                "mumomentum": 0.55,
-                "mulambdag": 3.0,
-                "mulambdac": 0.49,
-                "mulambdad": 0.83,
-                "shift": 0.64,
+                "sigma": sigma,
+               "wmu0": 2.19,
+                "wmid": 4.18,
+                "wtrans": 3.4,
+                "wcoverage": 1.01,
+                "gainsfloor": 2.93,
+                "wkdecay": "power",
+                "wkpower": 2.12,
+                "taugate": 0.79,
+                "gatetemp": 0.18,
+                "massupdate": 0.82,
+                "mumomentum": 0.02,
+                "mulambdag": 1.78,
+                "mulambdac": 1.08,
+                "mulambdad": 1.9,
+                "shift": 0.46,
+
+
                             })
                         
         elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for ressource-constrained regions')
         
             loss_params.update({
-              "wmu0": 0.73,
-            "wmid": 0.09,
-            "wtrans": 1.81,
-            "wcoverage": 4.05,
-            "gainsfloor": 3.84,
-            "wkdecay": "power",
-            "wkpower": 3.45,
-            "taugate": 0.11,
-            "gatetemp": 1.87,
-            "massupdate": 0.35,
-            "mumomentum": 0.02,
-            "mulambdag": 2.17,
-            "mulambdac": 0.33,
-            "mulambdad": 1.73,
-            "shift": 1.0,
+        
+                "wmu0": 0.26,
+                "wmid": 1.96,
+                "wtrans": 3.38,
+                "wcoverage": 4.42,
+                "gainsfloor": 2.8,
+                "wkdecay": "exp",
+                "wklambda": 0.13,
+                "taugate": 0.71,
+                "gatetemp": 0.18,
+                "massupdate": 0.17,
+                "mumomentum": 0.83,
+                "mulambdag": 2.25,
+                "mulambdac": 0.25,
+                "mulambdad": 1.37,
+                "shift": 0.84,
+
                 "sigma": sigma,
             })
             
@@ -3799,21 +3804,22 @@ class Training():
             print('Using optimal parameters for timeintervention-constrained regions')
             
             loss_params.update({
-              "wmu0": 1.17,
-                "wmid": 2.05,
-                "wtrans": 3.37,
-                "wcoverage": 2.85,
-                "gainsfloor": 3.72,
-                "wkdecay": "power",
-                "wkpower": 5.52,
-                "taugate": 0.54,
-                "gatetemp": 0.37,
-                "massupdate": 0.1,
-                "mumomentum": 0.47,
-                "mulambdag": 0.91,
-                "mulambdac": 0.76,
-                "mulambdad": 1.43,
-                "shift": 0.95,
+              "wmu0": 1.12,
+            "wmid": 3.58,
+            "wtrans": 2.03,
+            "wcoverage": 0.08,
+            "gainsfloor": 4.88,
+            "wkdecay": "power",
+            "wkpower": 2.88,
+            "taugate": 0.66,
+            "gatetemp": 0.1,
+            "massupdate": 0.33,
+            "mumomentum": 0.77,
+            "mulambdag": 1.91,
+            "mulambdac": 0.57,
+            "mulambdad": 1.67,
+            "shift": 0.38,
+
                 "sigma": sigma,
             })
         
@@ -3821,21 +3827,21 @@ class Training():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                  "gainsfloor": 3.0,
-                "wkdecay": "None",
-                "wkpower": 3.86,
-                "wklambda": 1.15,
-                "taugate": 0.34,
-                "gatetemp": 0.88,
-                "wmu0": 1.0,
-                "massupdate": 0.41,
-                "mumomentum": 0.93,
-                "mulambdag": 1.0,
-                "mulambdac": 0.0,
-                "mulambdad": 1.0,
-                "wmid": 1.0,
-                "wtrans": 2.0,
-                "wcoverage": 3.0,
+                 "wmu0": 0.26,
+                "wmid": 1.96,
+                "wtrans": 3.38,
+                "wcoverage": 4.42,
+                "gainsfloor": 2.8,
+                "wkdecay": "exp",
+                "wklambda": 0.13,
+                "taugate": 0.71,
+                "gatetemp": 0.18,
+                "massupdate": 0.17,
+                "mumomentum": 0.83,
+                "mulambdag": 2.25,
+                "mulambdac": 0.25,
+                "mulambdad": 1.37,
+                "shift": 0.84,
                 "sigma": sigma,
                     })
             
@@ -3843,20 +3849,21 @@ class Training():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
             loss_params.update({
                     "gainsfloor": 3.0,
-                    "wkdecay": "None",
-                    "wkpower": 3.86,
-                    "wklambda": 1.15,
-                    "taugate": 0.34,
-                    "gatetemp": 0.88,
-                    "wmu0": 1.0,
-                    "massupdate": 0.41,
-                    "mumomentum": 0.93,
-                    "mulambdag": 1.0,
-                    "mulambdac": 0.0,
-                    "mulambdad": 1.0,
-                    "wmid": 1.0,
-                    "wtrans": 2.0,
-                    "wcoverage": 3.0,
+                     "wmu0": 1.12,
+                "wmid": 3.58,
+                "wtrans": 2.03,
+                "wcoverage": 0.08,
+                "gainsfloor": 4.88,
+                "wkdecay": "power",
+                "wkpower": 2.88,
+                "taugate": 0.66,
+                "gatetemp": 0.1,
+                "massupdate": 0.33,
+                "mumomentum": 0.77,
+                "mulambdag": 1.91,
+                "mulambdac": 0.57,
+                "mulambdad": 1.67,
+                "shift": 0.38,
                     "sigma": sigma,
                     })
     
@@ -5199,6 +5206,7 @@ class Training():
                     if H == 0:
                         output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                     else:
+                        inputs_horizon = inputs_horizon.clone()
                         if self.id_past_risk is not None:
                             inputs_horizon[:, self.id_past_risk, -H:] = 0
                         if self.id_past_ba is not None:
