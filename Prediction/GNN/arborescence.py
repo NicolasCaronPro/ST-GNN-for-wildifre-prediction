@@ -22,7 +22,9 @@ if not is_pc:
     root = rootDisk
     root_graph = root / 'GNN'
     root_target = root / 'Target'
+
 else:
+
     rootDisk = Path('/media/caron/X9 Pro/travaille/Thèse/')
     root = rootDisk 
     root_graph = root / 'Model/HexagonalScale/ST-GNN-for-wildifre-prediction/Prediction/GNN'

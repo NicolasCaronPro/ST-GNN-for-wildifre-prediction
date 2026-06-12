@@ -2011,7 +2011,7 @@ class Training():
                  features_name, ks, out_channels, dir_log,
                  loss='mse', name='Training', device='cpu',
                  under_sampling='full', over_sampling='full', n_run=1,
-                 horizon=0, post_process=None, loss_param_search=False):
+                 horizon=0, post_process=None, loss_param_search=False, use_feature_horizon=False):
         
         self.model_name = model_name
         self.name = name
@@ -2057,6 +2057,7 @@ class Training():
         self._current_epoch = None
         self.seed = None
         self.horizon = horizon
+        self.use_feature_horizon = use_feature_horizon
         self.apply_discretization = post_process is not None
         self.post_process = post_process
         self.loss_param_search = loss_param_search
@@ -2346,6 +2347,9 @@ class Training():
         if 'dates' in req_params:
             additionnal_params['dates'] = dates
             
+        if 'current_epoch' in req_params and hasattr(self, '_current_epoch'):
+            additionnal_params['current_epoch'] = self._current_epoch
+            
         try:
             additionnal_params['sample_weight'] = wei
         
@@ -2372,7 +2376,17 @@ class Training():
             clusters_ids = None
 
         if 'departement_ids' in required_params(criterion.forward):
-            departement_ids = label[:, departement_index, -1]
+            if hasattr(criterion, 'idept') and criterion.idept is not None:
+                if criterion.idept == -1 :
+                    departement_ids = torch.ones(target.shape[0], device=target.device)
+                else:
+                    departement_ids = label[:, criterion.idept, -1]
+                    self.departement_id_index = criterion.idept
+            else:
+                departement_ids = label[:, departement_index, -1]
+                self.departement_id_index = departement_index
+        else:
+            departement_ids = None
 
         if 'areas' in required_params(criterion.forward):
             areas = label[:, area_index, -1]
@@ -2849,8 +2863,12 @@ class Training():
                         if has_method(criterion, 'update_after_batch'):
                             criterion.update_after_batch(logits, target)
                 else:
-                    # Use persistence (features from H=0)
-                    inputs_horizon = inputs_horizon_persistent.clone()
+                    if getattr(self, 'use_feature_horizon', False):
+                        inputs_horizon = self.compute_inputs(inputs, -1 - (self.horizon - H), "futur")
+                    else:
+                        # Use persistence (features from H=0)
+                        inputs_horizon = inputs_horizon_persistent.clone()
+                        
                     if self.ks > 0:
                         # on prend les ks derniers états cachés déjà vus (detached to prevent BPTT from H>0 to H=0)
                         history = [h.detach() for h in hidden_past[-(self.ks + 1):]]
@@ -2870,13 +2888,14 @@ class Training():
                     else:
                         z_prev = hidden_past[-1]
 
-                    if self.id_past_risk is not None:
-                        inputs_horizon[:, self.id_past_risk, -H:] = 0
-                    if self.id_past_ba is not None:
-                        inputs_horizon[:, self.id_past_ba, -H:] = 0
-                    if self.prev_idx is not None:
-                        # Remplacer les valeurs de la feature par les prédictions passées (detached to prevent BPTT)
-                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack([o.detach() for o in output_past], dim=2)
+                    if not getattr(self, 'use_feature_horizon', False):
+                        if self.id_past_risk is not None:
+                            inputs_horizon[:, self.id_past_risk, -H:] = 0
+                        if self.id_past_ba is not None:
+                            inputs_horizon[:, self.id_past_ba, -H:] = 0
+                        if self.prev_idx is not None:
+                            # Remplacer les valeurs de la feature par les prédictions passées (detached to prevent BPTT)
+                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack([o.detach() for o in output_past], dim=2)
     
                     output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
             
@@ -3383,7 +3402,7 @@ class Training():
             for k in range(5):
                 if f'mu_{k}' in raw:
                     result[f'mu_{k}'] = raw[f'mu_{k}']
-            for idx in range(50):
+            for idx in range(101):
                 if f'mu_dense_{idx}' in raw:
                     result[f'mu_dense_{idx}'] = raw[f'mu_dense_{idx}']
             return result
@@ -3403,10 +3422,10 @@ class Training():
                 result[f'mu_{k}'] = raw[f'mu_{k}']
                 
         # Include dense mu values from splines
-        for idx in range(50):
+        for idx in range(101):
             if f'mu_dense_{idx}' in raw:
                 result[f'mu_dense_{idx}'] = raw[f'mu_dense_{idx}']
-
+                
         # Individual normalised scores mapped to (0,1)
         for i, k in enumerate([1, 2, 3, 4]):
             result[f'u_k{k}'] = float(u_vals[i])
@@ -3757,46 +3776,61 @@ class Training():
 
             loss_params.update({
                 "sigma": sigma,
-               "wmu0": 2.19,
-                "wmid": 4.18,
-                "wtrans": 3.4,
-                "wcoverage": 1.01,
-                "gainsfloor": 2.93,
-                "wkdecay": "power",
-                "wkpower": 2.12,
-                "taugate": 0.79,
-                "gatetemp": 0.18,
-                "massupdate": 0.82,
-                "mumomentum": 0.02,
-                "mulambdag": 1.78,
-                "mulambdac": 1.08,
-                "mulambdad": 1.9,
-                "shift": 0.46,
+                "wmu0": 1.27,
+                "wmid": 0.05,
+                "wtrans": 3.34,
+                "wcoverage": 4.69,
+                "gainsfloor": 0.79,
+                "wkdecay": "None",
+                "coveragedistance": "cdf_l2",
+                "taugate": 0.1,
+                "gatetemp": 1.69,
+                "massupdate": 0.13,
+                "mumomentum": 0.07,
+                "mulambdag": 1.06,
+                "mulambdac": 1.71,
+                "mulambdad": 2.78,
+                "shift": 0.74,
 
-
-                            })
+            })
                         
         elif 'ressource' in self.target_name and 'ccllt' in self.loss and 'firemen' in self.dir_log.as_posix():
             print('Using optimal parameters for ressource-constrained regions')
         
             loss_params.update({
         
-                "wmu0": 0.26,
-                "wmid": 1.96,
-                "wtrans": 3.38,
-                "wcoverage": 4.42,
-                "gainsfloor": 2.8,
-                "wkdecay": "exp",
-                "wklambda": 0.13,
-                "taugate": 0.71,
-                "gatetemp": 0.18,
-                "massupdate": 0.17,
-                "mumomentum": 0.83,
-                "mulambdag": 2.25,
-                "mulambdac": 0.25,
-                "mulambdad": 1.37,
-                "shift": 0.84,
-
+                #"wmu0": 0.26,
+                #"wmid": 1.96,
+                #"wtrans": 3.38,
+                #"wcoverage": 4.42,
+                #"gainsfloor": 2.8,
+                #"wkdecay": "exp",
+                #"wklambda": 0.13,
+                #"taugate": 0.71,
+                #"gatetemp": 0.18,
+                #"massupdate": 0.17,
+                #"mumomentum": 0.83,
+                #"mulambdag": 2.25,
+                #"mulambdac": 0.25,
+                #"mulambdad": 1.37,
+                #"shift": 0.84,
+                
+                "wmu0": 2.54,
+                "wmid": 0.04,
+                "wtrans": 0.67,
+                "wcoverage": 0.47,
+                "gainsfloor": 2.87,
+                "wkdecay": "None",
+                "coveragedistance": "cdf_l2",
+                "taugate": 0.1,
+                "gatetemp": 0.13,
+                "massupdate": 0.15,
+                "mumomentum": 0.98,
+                "mulambdag": 2.39,
+                "mulambdac": 0.33,
+                "mulambdad": 2.16,
+                "shift": 0.66,
+                
                 "sigma": sigma,
             })
             
@@ -3804,21 +3838,21 @@ class Training():
             print('Using optimal parameters for timeintervention-constrained regions')
             
             loss_params.update({
-              "wmu0": 1.12,
-            "wmid": 3.58,
-            "wtrans": 2.03,
-            "wcoverage": 0.08,
-            "gainsfloor": 4.88,
-            "wkdecay": "power",
-            "wkpower": 2.88,
-            "taugate": 0.66,
-            "gatetemp": 0.1,
-            "massupdate": 0.33,
-            "mumomentum": 0.77,
-            "mulambdag": 1.91,
-            "mulambdac": 0.57,
-            "mulambdad": 1.67,
-            "shift": 0.38,
+            "wmu0": 1.6,
+            "wmid": 0.02,
+            "wtrans": 2.39,
+            "wcoverage": 1.26,
+            "gainsfloor": 5.0,
+            "wkdecay": "None",
+            "coveragedistance": "cdf_l2",
+            "taugate": 0.1,
+            "gatetemp": 1.79,
+            "massupdate": 0.05,
+            "mumomentum": 0.87,
+            "mulambdag": 0.0,
+            "mulambdac": 1.44,
+            "mulambdad": 2.62,
+            "shift": 0.75,
 
                 "sigma": sigma,
             })
@@ -3827,53 +3861,58 @@ class Training():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                 "wmu0": 0.26,
-                "wmid": 1.96,
-                "wtrans": 3.38,
-                "wcoverage": 4.42,
-                "gainsfloor": 2.8,
-                "wkdecay": "exp",
-                "wklambda": 0.13,
-                "taugate": 0.71,
-                "gatetemp": 0.18,
-                "massupdate": 0.17,
-                "mumomentum": 0.83,
-                "mulambdag": 2.25,
-                "mulambdac": 0.25,
-                "mulambdad": 1.37,
-                "shift": 0.84,
+                "wmu0": 1.6,
+                "wmid": 0.02,
+                "wtrans": 2.39,
+                "wcoverage": 1.26,
+                "gainsfloor": 5.0,
+                "wkdecay": "None",
+                "coveragedistance": "cdf_l2",
+                "taugate": 0.1,
+                "gatetemp": 1.79,
+                "massupdate": 0.05,
+                "mumomentum": 0.87,
+                "mulambdag": 0.0,
+                "mulambdac": 1.44,
+                "mulambdad": 2.62,
+                "shift": 0.75,
+
                 "sigma": sigma,
                     })
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
             loss_params.update({
-                    "gainsfloor": 3.0,
-                     "wmu0": 1.12,
-                "wmid": 3.58,
-                "wtrans": 2.03,
-                "wcoverage": 0.08,
-                "gainsfloor": 4.88,
-                "wkdecay": "power",
-                "wkpower": 2.88,
-                "taugate": 0.66,
-                "gatetemp": 0.1,
-                "massupdate": 0.33,
-                "mumomentum": 0.77,
-                "mulambdag": 1.91,
-                "mulambdac": 0.57,
-                "mulambdad": 1.67,
-                "shift": 0.38,
+                  "wmu0": 1.6,
+                "wmid": 0.02,
+                "wtrans": 2.39,
+                "wcoverage": 1.26,
+                "gainsfloor": 5.0,
+                "wkdecay": "None",
+                "coveragedistance": "cdf_l2",
+                "taugate": 0.1,
+                "gatetemp": 1.79,
+                "massupdate": 0.05,
+                "mumomentum": 0.87,
+                "mulambdag": 1.44,
+                "mulambdac": 0.02,
+                "mulambdad": 2.62,
+                "shift": 0.75,
+
                     "sigma": sigma,
                     })
     
         self.criterion = self.get_loss(self.loss, loss_params)
 
         if has_method(self.criterion, '_preprocess'):
-            if 'id{departement}' in self.loss:
-                self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
-            elif 'id{node}' in self.loss:
-                self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+            y_train = self.df_train[self.target_name].values
+            cid = getattr(self.criterion, "id", None)
+            if cid == departement_index and "departement" in self.df_train.columns and "cluster-encoder" in self.df_train.columns:
+                self.criterion._preprocess(y_train, self.df_train['departement'].values, self.df_train['cluster-encoder'].values)
+            elif cid == graph_id_index and "graph_id" in self.df_train.columns and "cluster-encoder" in self.df_train.columns:
+                self.criterion._preprocess(y_train, self.df_train['graph_id'].values, self.df_train['cluster-encoder'].values)
+            else:
+                self.criterion._preprocess(y_train)
 
         if has_method(self.criterion, 'calculate_class_coverage'):
             try:
@@ -3889,12 +3928,20 @@ class Training():
                 cluster_col = 'graph_id'
             elif cluster_encoder_index is not None and cid == cluster_encoder_index:
                 cluster_col = 'cluster-encoder'
+                
+            cid = getattr(self.criterion, 'idept', None)
+            department_col = 'departement'
+            if cid == departement_index:
+                department_col = 'departement'
+            elif cid == graph_id_index:
+                department_col = 'graph_id'
+            elif cluster_encoder_index is not None and cid == cluster_encoder_index:
+                department_col = 'cluster-encoder'
             
-            if cluster_col in self.df_train.columns:
-                if self.target_name in ['nbsinister', 'ressource', 'timeintervention']:
-                    self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=f'{self.target_name}-kmeans-5-Class-Dept', dir_output=self.dir_log)
-                else:    
-                    self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
+            if self.target_name in ['nbsinister', 'ressource', 'timeintervention']:
+                self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=f'{self.target_name}-kmeans-5-Class-Dept', dir_output=self.dir_log)
+            else:    
+                self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=self.target_name, dir_output=self.dir_log)
                 
         static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
         
@@ -3908,8 +3955,9 @@ class Training():
         else:
             custom_model_params.update(new_params)
 
-        # Fixer la seed pour reproduire (différente pour chaque run)
-        trial_seed = 42 + run_idx
+        # Seed aléatoire
+        import random
+        trial_seed = run_idx
         import torch
         torch.manual_seed(trial_seed)
         np.random.seed(trial_seed)
@@ -4214,8 +4262,9 @@ class Training():
             self.criterion.plot_params(self.criterion_params, self.dir_log, best_epoch=self.best_epoch)
             
         if has_method(self.criterion, 'update_params'):
-            print(f'Update criterion params with {self.criterion_params[self.best_epoch]}')
-            self.criterion.update_params(self.criterion_params[self.best_epoch])
+            _best_cp = next((p for p in self.criterion_params if p.get('epoch') == self.best_epoch), self.criterion_params[-1] if self.criterion_params else {})
+            print(f'Update criterion params with {_best_cp}')
+            self.criterion.update_params(_best_cp)
 
         """# --- LOG LOSS COMPONENTS ---
         # "Je veux les valeurs brutes, sans les multiplications par les lambda"
@@ -4322,6 +4371,10 @@ class Training():
                 logger.info(f"Distillation log/plot skipped: {_e}")
 
         self.params = BEST_MODEL_PARAMS
+        
+        if hasattr(self, 'criterion') and hasattr(self.criterion, 'alpha'):
+            logger.info(f"Alpha Parameter containing:\n{self.criterion.alpha}")
+            
         return self.score_per_epochs, self.criterion_params
 
     def _save_distill_logs_and_plot(self):
@@ -5133,22 +5186,82 @@ class Training():
                     pred = torch.round(pred, decimals=1)
                     
             return pred, y
+    @torch.no_grad()
+    def score_to_class(self, scores: torch.Tensor, clusters_ids: torch.Tensor = None, departement_ids: torch.Tensor = None) -> torch.Tensor:
+        if getattr(self, 'ordinal_thresholds', None) is not None:
+            thr = self.ordinal_thresholds
+            sigma = getattr(self, 'ordinal_sigma', 1.0)
+            alphatype = getattr(self, 'ordinal_alphatype', None)
+            cluster_raw_to_slot = getattr(self, 'ordinal_cluster_raw_to_slot', None)
+            departement_raw_to_slot = getattr(self, 'ordinal_departement_raw_to_slot', None)
+        elif hasattr(self, 'criterion') and hasattr(self.criterion, '_compute_thresholds'):
+            thr = self.criterion._compute_thresholds().detach().cpu()
+            sigma = getattr(self.criterion, 'sigma', 1.0)
+            alphatype = getattr(self.criterion, 'alphatype', None)
             
+            cluster_raw_to_slot = None
+            departement_raw_to_slot = None
+            if hasattr(self.criterion, 'cluster_slot_to_raw'):
+                cluster_raw_to_slot = {
+                    int(raw): slot for slot, raw in enumerate(self.criterion.cluster_slot_to_raw.cpu().tolist()) if raw != -1
+                }
+            if hasattr(self.criterion, 'departement_slot_to_raw'):
+                departement_raw_to_slot = {
+                    int(raw): slot for slot, raw in enumerate(self.criterion.departement_slot_to_raw.cpu().tolist()) if raw != -1
+                }
+        else:
+            raise ValueError("Ordinal thresholds not initialized and criterion lacks _compute_thresholds")
+            
+        s = scores.detach().flatten().unsqueeze(1)
+        s = s / sigma
+        device = s.device
+
+        thr = thr.to(device=device)
+
+        if thr.dim() == 1:
+            return torch.bucketize(scores.flatten(), thr, right=True)
+            
+        if alphatype == "cluster":
+            chosen_ids = clusters_ids
+        elif alphatype == "department":
+            chosen_ids = departement_ids
+        else:
+            chosen_ids = (clusters_ids if clusters_ids is not None else departement_ids)
+
+        if chosen_ids is None:
+            raise ValueError("IDs are required when thresholds are cluster/department-specific.")
+            
+        chosen_ids = chosen_ids.view(-1).long().to(device)
+        
+        local_ids = torch.zeros_like(chosen_ids, dtype=torch.long, device=device)
+        if alphatype == "cluster":
+            raw_to_slot = cluster_raw_to_slot
+        elif alphatype == "department":
+            raw_to_slot = departement_raw_to_slot
+        else:
+            raise ValueError(f"Unknown alphatype: {alphatype}")
+            
+        if raw_to_slot is not None:
+            for i in range(chosen_ids.numel()):
+                rid = int(chosen_ids[i].item())
+                if rid in raw_to_slot:
+                    local_ids[i] = raw_to_slot[rid]
+                else:
+                    local_ids[i] = 0
+
+        thr_s = thr.index_select(0, local_ids)
+        return (s > thr_s).sum(dim=1)
+
     def _predict_tensor(self, X, prediction_type='Class', output_pdf="test", calibrate=False, use_grad=False) -> torch.tensor:
         assert self.model is not None
-        self.model.eval()
-
-        """if self.criterion is None:
-            print(f'Model cannot predict')
-            return None"""
         
         if hasattr(self, 'criterion'):
             criterion = self.criterion
         else:
             criterion = None
-                
+            
         if use_grad:
-            func = torch.enable_grad
+            func = lambda: contextlib.nullcontext()
         else:
             func = torch.no_grad
         with func():
@@ -5207,12 +5320,13 @@ class Training():
                         output, logits, hidden = self.model(inputs_horizon, z_prev=None)
                     else:
                         inputs_horizon = inputs_horizon.clone()
-                        if self.id_past_risk is not None:
-                            inputs_horizon[:, self.id_past_risk, -H:] = 0
-                        if self.id_past_ba is not None:
-                            inputs_horizon[:, self.id_past_ba, -H:] = 0
-                        if self.prev_idx is not None:
-                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                        if not getattr(self, 'use_feature_horizon', False):
+                            if self.id_past_risk is not None:
+                                inputs_horizon[:, self.id_past_risk, -H:] = 0
+                            if self.id_past_ba is not None:
+                                inputs_horizon[:, self.id_past_ba, -H:] = 0
+                            if self.prev_idx is not None:
+                                inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
                         
                         output, logits, hidden = self.model(inputs_horizon, z_prev=z_prev)
                 
@@ -5254,16 +5368,17 @@ class Training():
                         params['prediction_type'] = prediction_type
                         output = criterion.transform(**params)
                         
-                if hasattr(criterion, 'score_to_class') and prediction_type == 'Class':
+                if hasattr(self, 'score_to_class') and (hasattr(self, 'ordinal_thresholds') or (hasattr(self, 'criterion') and hasattr(self.criterion, '_compute_thresholds'))) and prediction_type == 'Class':
                     
                     self.ccllt_diff_params = {'graph_id': [], 'date': [], 'pred_bin': [], 'pred_argmax': []}
                     
-                    clusters_ids = orilabels[:, criterion.id].long()
+                    cluster_id_index = getattr(self, 'ordinal_cluster_id', graph_id_index)
+                    clusters_ids = orilabels[:, cluster_id_index].long()
                     departement_ids = orilabels[:, departement_index].long()
                     
                     probs = output.detach().clone()
                     
-                    pred_bin = criterion.score_to_class(
+                    pred_bin = self.score_to_class(
                         output,
                         clusters_ids=clusters_ids,
                         departement_ids=departement_ids
@@ -5271,7 +5386,7 @@ class Training():
 
                     pred_argmax = probs.argmax(dim=1).detach().cpu()
                     
-                    output = criterion.score_to_class(output, clusters_ids, departement_ids)
+                    output = self.score_to_class(output, clusters_ids, departement_ids)
                         
                     diff_mask = (output.detach().cpu() != pred_argmax)
                     diff_mean = diff_mask.float().mean().item()
@@ -5342,7 +5457,7 @@ class Training():
         self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=5):
 
         logger.info(
             f"\n{'='*60}\n"
@@ -5410,6 +5525,35 @@ class Training():
                     if name in loaded_state_dict:
                         assert torch.allclose(param.data.cpu(), loaded_state_dict[name].cpu(), atol=1e-5), f"Model loading failed: weights do not match for {name}"
                 
+                if hasattr(self.criterion, 'score_to_class'):
+                    best_params = next((p for p in self.criterion_params if p.get('epoch') == self.best_epoch), self.criterion_params[-1] if self.criterion_params else {})
+                    if 'alpha' in best_params and 'thresholds' in best_params:
+                        self.ordinal_alpha = torch.tensor(best_params['alpha']).to(self.device)
+                        self.ordinal_thresholds = torch.tensor(best_params['thresholds']).to(self.device)
+                        self.ordinal_sigma = getattr(self.criterion, 'sigma', 1.0)
+                        self.ordinal_alphatype = getattr(self.criterion, 'alphatype', None)
+                        self.ordinal_nclusters = getattr(self.criterion, 'nclusters', None)
+                        self.ordinal_ndepartements = getattr(self.criterion, 'ndepartements', None)
+                        self.ordinal_cluster_id = getattr(self.criterion, 'id', graph_id_index)
+                        
+                        if 'cluster_slot_to_raw' in best_params:
+                            self.ordinal_cluster_slot_to_raw = torch.tensor(best_params['cluster_slot_to_raw']).to(self.device)
+                            self.ordinal_cluster_raw_to_slot = {
+                                int(raw): slot for slot, raw in enumerate(self.ordinal_cluster_slot_to_raw.tolist()) if raw != -1
+                            }
+                        else:
+                            self.ordinal_cluster_slot_to_raw = None
+                            self.ordinal_cluster_raw_to_slot = None
+                            
+                        if 'departement_slot_to_raw' in best_params:
+                            self.ordinal_departement_slot_to_raw = torch.tensor(best_params['departement_slot_to_raw']).to(self.device)
+                            self.ordinal_departement_raw_to_slot = {
+                                int(raw): slot for slot, raw in enumerate(self.ordinal_departement_slot_to_raw.tolist()) if raw != -1
+                            }
+                        else:
+                            self.ordinal_departement_slot_to_raw = None
+                            self.ordinal_departement_raw_to_slot = None
+
                 shutil.copy(best_model_path, original_dir_log / "best.pt")
                 logger.info(f"Loaded and saved best model from run {best_run_idx}.")
             last_model_path = original_dir_log / f"run_{best_run_idx}" / "last.pt"
@@ -5420,6 +5564,18 @@ class Training():
         else:
             logger.info("============= ALL RUNS COMPLETED =============")
             
+        # Save all runs scores to JSON for reproducibility
+        try:
+            import json
+            scores_path = original_dir_log / "all_runs_scores.json"
+            # Ensure keys are easily serializable (convert integer dict keys to strings if necessary)
+            serializable_scores = {str(r): {str(ep): metrics for ep, metrics in run_data.items()} for r, run_data in all_runs_scores.items()}
+            with open(scores_path, "w") as f:
+                json.dump(serializable_scores, f, indent=4)
+            logger.info(f"Saved all_runs_scores to {scores_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save all_runs_scores.json: {e}")
+
         # Plot variance
         try:
             self.plot_runs_variance(all_runs_scores, n_runs)
@@ -5458,7 +5614,7 @@ class Training():
                     mu_data.append(mu_row)
                     
                     mu_dense_row = {'run': r}
-                    for idx in range(50):
+                    for idx in range(101):
                         mu_dense_row[idx] = best_scores.get(f'mu_dense_{idx}', np.nan)
                     mu_dense_data.append(mu_dense_row)
                 
@@ -5512,16 +5668,16 @@ class Training():
         df_mu_dense = pd.DataFrame(mu_dense_data)
         
         # Plot individual runs continuously
-        x_vals_dense = np.linspace(0, 4, 50)
+        x_vals_dense = np.linspace(0, 4, 101)
         for idx, row in df_mu_dense.iterrows():
-            y_vals_dense = [row[k] for k in range(50)]
+            y_vals_dense = [row[k] for k in range(101)]
             ax_spline.plot(x_vals_dense, y_vals_dense, color='gray', alpha=0.4, linewidth=1)
             
         # Plot median and variance area continuously
         if not df_mu_dense.empty:
-            mu_median_dense = df_mu_dense[list(range(50))].median()
-            mu_min_dense = df_mu_dense[list(range(50))].min()
-            mu_max_dense = df_mu_dense[list(range(50))].max()
+            mu_median_dense = df_mu_dense[list(range(101))].median()
+            mu_min_dense = df_mu_dense[list(range(101))].min()
+            mu_max_dense = df_mu_dense[list(range(101))].max()
             
             ax_spline.plot(x_vals_dense, mu_median_dense, color='blue', linewidth=2, label='Médiane')
             ax_spline.fill_between(x_vals_dense, mu_min_dense, mu_max_dense, color='blue', alpha=0.15, label='Min/Max Variabilité')
@@ -5802,12 +5958,9 @@ class Training():
         
     def get_loss(self, loss_name, loss_params):
         
-        if 'ccllt' in loss_name or "ranknet" in loss_name or 'msetheta' in loss_name:
+        if 'ccllt' in loss_name or "ranknet" in loss_name or 'msetheta' in loss_name and 'iddept' not in loss_name:
             loss_params['ndepartements'] = np.unique(self.udepts).shape[0]
         
-        if 'ccllt' in loss_name and "bdiff" in self.dir_log.as_posix():
-            loss_params['clustersequaldept'] = True
-            
         if 'DualTraining-num' in self.name:
             loss_params.update({'num_classes' : 4})
         else:
@@ -5832,7 +5985,7 @@ class Training():
                 if isinstance(p, torch.nn.Parameter):
                     loss_params.append(p)
                 else:
-                    # Convertir un tensor en Parameter si besoin
+                    # Convertir un tensor en Parameter si besion
                     loss_params.append(torch.nn.Parameter(p, requires_grad=True))
             params.extend(loss_params)
 
@@ -6501,19 +6654,21 @@ class Training():
             params["wtrans"]      = trial.suggest_float("ccllt_wtrans", 0.0, 5.0, step=0.01)
             params["wcoverage"]   = trial.suggest_float("ccllt_wcoverage", 0.0, 5.0, step=0.01)
             params["gainsfloor"]  = trial.suggest_float("ccllt_gainsfloor", 0.5, 5.0, step=0.01)
-            params["wkdecay"]     = trial.suggest_categorical("ccllt_wkdecay", ["power", "exp", "None"])
-            if params["wkdecay"] == "power":
-                params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.5, 6.0, step=0.01)
-            elif params["wkdecay"] == "exp":
-                params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.05, 3.0, log=True)
-            params["taugate"]     = trial.suggest_float("ccllt_taugate", 0.01, 0.9, step=0.01)
+            params['wkdecay'] = "None"
+            params['coveragedistance'] = "cdf_l2"
+            #params["wkdecay"]     = trial.suggest_categorical("ccllt_wkdecay", ["power", "exp", "None"])
+            #if params["wkdecay"] == "power":
+            #    params["wkpower"] = trial.suggest_float("ccllt_wkpower", 0.5, 6.0, step=0.01)
+            #elif params["wkdecay"] == "exp":
+            #    params["wklambda"] = trial.suggest_float("ccllt_wklambda", 0.05, 3.0, log=True)
+            params["taugate"]     = 0.1
             params["gatetemp"]    = trial.suggest_float("ccllt_gatetemp", 0.1, 2.0, step=0.01)
             params["massupdate"]  = trial.suggest_float("ccllt_massupdate", 0.0, 1.0, step=0.01)
             params["mumomentum"]  = trial.suggest_float("ccllt_mumomentum", 0.0, 1.0, step=0.01)
             params["mulambdag"]   = trial.suggest_float("ccllt_mulambdag", 0.0, 3.0, step=0.01)
             params["mulambdac"]   = trial.suggest_float("ccllt_mulambdac", 0.0, 3.0, step=0.01)
             params["mulambdad"]   = trial.suggest_float("ccllt_mulambdad", 0.0, 3.0, step=0.01)
-            params["shift"]       = trial.suggest_float("ccllt_shift", 0.1, 1.0, step=0.01)
+            params["shift"]       = trial.suggest_float("ccllt_shift", 0.0, 1.0, step=0.01)
 
             return params
         
@@ -6552,7 +6707,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=500,
+        n_trials=200,
         warmup=5,
         enable_pruning=False,
     ):
@@ -6615,7 +6770,9 @@ class Training():
 
             # Preprocess if needed
             if hasattr(criterion, "_preprocess"):
-                cid = getattr(criterion, "id", None) or loss_params.get("id", None)
+                cid = getattr(criterion, "id", None)
+                if cid is None:
+                    cid = loss_params.get("id", None)
 
                 try:
                     if cid == departement_index and departement_ids is not None and similar_ids is not None:
@@ -6634,7 +6791,9 @@ class Training():
                 except ImportError:
                     cluster_encoder_index = None
 
-                cid = getattr(criterion, "id", None) or loss_params.get("id", None)
+                cid = getattr(criterion, "id", None)
+                if cid is None:
+                    cid = loss_params.get("id", None)
                 cluster_col = 'departement'
                 if cid == departement_index:
                     cluster_col = 'departement'
@@ -6642,9 +6801,23 @@ class Training():
                     cluster_col = 'graph_id'
                 elif cluster_encoder_index is not None and cid == cluster_encoder_index:
                     cluster_col = 'cluster-encoder'
+
+                cid_dept = getattr(criterion, "idept", None)
+                if cid_dept is None:
+                    cid_dept = loss_params.get("idept", None)
+                department_col = 'departement'
+                if cid_dept == departement_index:
+                    department_col = 'departement'
+                elif cid_dept == graph_id_index:
+                    department_col = 'graph_id'
+                elif cluster_encoder_index is not None and cid_dept == cluster_encoder_index:
+                    department_col = 'cluster-encoder'
                 
                 if cluster_col in self.df_train.columns:
-                    criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, target_col=self.target_name, dir_output=self.dir_log)
+                    if self.target_name in ['nbsinister', 'ressource', 'timeintervention']:
+                        criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=f'{self.target_name}-kmeans-5-Class-Dept', dir_output=self.dir_log)
+                    else:    
+                        criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=self.target_name, dir_output=self.dir_log)
 
             # Create model and optimizer
 
@@ -6666,8 +6839,8 @@ class Training():
             for optuna_run in range(n_optuna_runs):
                 logger.info(f"Trial {trial.number}, Run {optuna_run+1}/{n_optuna_runs}")
 
-                # Seed for reproducibility within run
-                run_seed = 42 + (trial.number * 10) + optuna_run
+                # Seed for reproducibility within run (same seed set across all trials)
+                run_seed = 42 + optuna_run
                 torch.manual_seed(run_seed)
                 np.random.seed(run_seed)
                 random.seed(run_seed)
@@ -6888,6 +7061,9 @@ class Training():
             avg_agg, _ = self._compute_geometric_agg(mapped_dict)
             avg_agg = float(avg_agg)
             
+            if mapped_dict['recall'] < 0.70:
+                avg_agg = -1.0
+            
             # Store full scores for post-hoc plots
             best_models_best_scores[trial.number] = mapped_dict
             best_models_best_scores[trial.number]['agg'] = avg_agg
@@ -7106,6 +7282,42 @@ class Training():
                 
             real_loss_params = best_models_loss_params.get(best_trial.number, best_params)
             self.criterion = self.get_loss(loss_name, real_loss_params)
+
+            if has_method(self.criterion, '_preprocess'):
+                if 'id{departement}' in self.loss:
+                    self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['departement'].values, self.df_train.get('cluster-encoder', pd.Series()).values if 'cluster-encoder' in self.df_train else None)
+                elif 'id{node}' in self.loss:
+                    self.criterion._preprocess(self.df_train[self.target_name].values, self.df_train['graph_id'].values, self.df_train.get('cluster-encoder', pd.Series()).values if 'cluster-encoder' in self.df_train else None)
+
+            if has_method(self.criterion, 'calculate_class_coverage'):
+                try:
+                    from GNN.config import cluster_encoder_index
+                except ImportError:
+                    cluster_encoder_index = None
+
+                cid = getattr(self.criterion, 'id', None) or real_loss_params.get('id', None)
+                cluster_col = 'departement'
+                if cid == departement_index:
+                    cluster_col = 'departement'
+                elif cid == graph_id_index:
+                    cluster_col = 'graph_id'
+                elif cluster_encoder_index is not None and cid == cluster_encoder_index:
+                    cluster_col = 'cluster-encoder'
+                    
+                cid_dept = getattr(self.criterion, 'idept', None) or real_loss_params.get('idept', None)
+                department_col = 'departement'
+                if cid_dept == departement_index:
+                    department_col = 'departement'
+                elif cid_dept == graph_id_index:
+                    department_col = 'graph_id'
+                elif cluster_encoder_index is not None and cid_dept == cluster_encoder_index:
+                    department_col = 'cluster-encoder'
+                
+                if cluster_col in self.df_train.columns:
+                    if self.target_name in ['nbsinister', 'ressource', 'timeintervention']:
+                        self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=f'{self.target_name}-kmeans-5-Class-Dept', dir_output=self.dir_log)
+                    else:    
+                        self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=self.target_name, dir_output=self.dir_log)
             
             # Load best weights
             if best_trial.number in best_models_states:
@@ -7819,6 +8031,17 @@ class DualTraining:
         self.metrics['best_tp'] = tp
 
         # ── 3. Variance plots (mirrors Training.plot_runs_variance) ──────────
+        # Save all runs scores to JSON for reproducibility
+        try:
+            import json
+            scores_path = self.occ_model.dir_log / "all_runs_scores.json"
+            serializable_scores = {str(r): {str(ep): metrics for ep, metrics in run_data.items()} for r, run_data in all_runs_scores.items()}
+            with open(scores_path, "w") as f:
+                json.dump(serializable_scores, f, indent=4)
+            logger.info(f"Saved all_runs_scores to {scores_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save all_runs_scores.json: {e}")
+
         try:
             self.occ_model.plot_runs_variance(all_runs_scores, self.n_run)
         except Exception as e:

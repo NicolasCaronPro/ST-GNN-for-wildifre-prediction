@@ -44,8 +44,11 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
 
         fore = datacube_feature['forest_landcover'].values
         if fore is not None:
+            if len(fore.shape) == 3:
+                fore = fore[:, :, 0]
             fore = resize_no_dim(fore, tar.shape[0], tar.shape[1])
-            foret += list(fore[~np.isnan(tar[:,:,0])])
+            masked_fore = fore[~np.isnan(tar[:,:,0])]
+            foret += list(masked_fore)
 
         """os = datacube_feature['osmnx_landcover'].values[:, :, 0]
         if os is not None:
@@ -81,6 +84,8 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
         
         corine_image = datacube_feature['corine_landcover'].values
         if corine_image is not None:
+            if len(corine_image.shape) == 3:
+                corine_image = corine_image[:, :, 0]
             corine_image = resize_no_dim(corine_image, tar.shape[0], tar.shape[1])
             #plt.figure(figsize=(15,5))
             #plt.imshow(corine_image)
@@ -89,6 +94,8 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
         
         route_image = datacube_feature['route_landcover'].values
         if route_image is not None:
+            if len(route_image.shape) == 3:
+                route_image = route_image[:, :, 0]
             route_image = resize_no_dim(route_image, tar.shape[0], tar.shape[1])
             route += list(route_image[~np.isnan(tar[:, :, 0])])
         
@@ -182,6 +189,21 @@ def encode_from_xarray(target, trainDates, expe, train_departements, dir_output,
         ):
             encoder = CatBoostEncoder(cols=cols)
             encoder.fit(X, y)
+        if 'foret' in filename:
+            print("=== FORET ENCODER DEBUG ===")
+            print(f"Target filename: {filename}")
+            print(f"Input X shape: {X.shape if hasattr(X, 'shape') else 'N/A'}")
+            print(f"Input y shape: {y.shape if hasattr(y, 'shape') else 'N/A'}")
+            if encoder is not None:
+                print(f"Encoder object: {encoder}")
+                if hasattr(encoder, 'mapping'):
+                    print(f"Encoder mapping:\n{encoder.mapping}")
+                else:
+                    print("Encoder has no 'mapping' attribute.")
+            else:
+                print("Encoder is None (not fitted).")
+            print("===========================")
+
         save_object(encoder, filename, dir_output)
 
     _fit_and_save_encoder(calendar_array, temporalValues, np.arange(0, stop_calendar),

@@ -4,13 +4,13 @@ from GNN.config import graph_id_index, departement_index, date_index, area_index
 class ModelCNN(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels, dir_log, features_name, features, features_1D,
                  ks, loss, name, device, under_sampling, over_sampling, path, image_per_node, n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                post_process=None, loss_param_search=False,
+                post_process=None, loss_param_search=False, use_feature_horizon=False,
                  **kwargs):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, post_process=post_process, loss_param_search=loss_param_search, **kwargs)
+                         over_sampling=over_sampling, n_run=n_run, post_process=post_process, loss_param_search=loss_param_search, use_feature_horizon=use_feature_horizon, **kwargs)
 
         self.training_mode = training_mode
         self.path = path
@@ -156,11 +156,11 @@ class ModelGNN(SplitTraining):
     def __init__(self, graph_method, mesh, mesh_file, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
                  out_channels, dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling,
                  n_run, training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=0, post_process=None, loss_param_search=False):
+                 horizon=0, post_process=None, loss_param_search=False, use_feature_horizon=False):
 
         super().__init__(federated_cluster=federated_cluster, cut_layer_name=cut_layer_name, input_server_model=input_server_model, model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr, target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search, use_feature_horizon=use_feature_horizon)
         self.training_mode = training_mode
         self.mesh = mesh
         self.mesh_file = mesh_file
@@ -440,11 +440,15 @@ class ModelGNN(SplitTraining):
             if self.loss not in ['kldivloss']:
                 target = target.long()
 
-            inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
-
             if H == 0:
+                inputs_horizon = self.compute_inputs(inputs, horizon_index, "current")
+                inputs_horizon_persistent = inputs_horizon.clone()
                 z_prev = None
             else:
+                if getattr(self, 'use_feature_horizon', False):
+                    inputs_horizon = self.compute_inputs(inputs, horizon_index, "futur")
+                else:
+                    inputs_horizon = inputs_horizon_persistent.clone()
                 if self.ks > 0:
                     # on prend les ks derniers états cachés déjà vus
                     history = hidden_past[-(self.ks + 1):]
@@ -465,12 +469,13 @@ class ModelGNN(SplitTraining):
                     z_prev = hidden_past[-1]
                     
             if H > 0:
-                if self.id_past_risk is not None:
-                    inputs_horizon[:, self.id_past_risk, -H:] = 0
-                if self.id_past_ba is not None:
-                    inputs_horizon[:, self.id_past_ba, -H:] = 0
-                if self.prev_idx is not None:
-                    inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                if not getattr(self, 'use_feature_horizon', False):
+                    if self.id_past_risk is not None:
+                        inputs_horizon[:, self.id_past_risk, -H:] = 0
+                    if self.id_past_ba is not None:
+                        inputs_horizon[:, self.id_past_ba, -H:] = 0
+                    if self.prev_idx is not None:
+                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
             else: 
                 z_prev = None
 
@@ -602,10 +607,15 @@ class ModelGNN(SplitTraining):
                 horizon_index = -1 - (self.horizon - H)
                 orilabels = orilabels_[:, :, horizon_index]
 
-                inputs_horizon = self.compute_inputs(inputs, horizon_index, "current" if H == 0 else "futur")
                 if H == 0:
+                    inputs_horizon = self.compute_inputs(inputs, horizon_index, "current")
+                    inputs_horizon_persistent = inputs_horizon.clone()
                     z_prev = None
                 else:
+                    if getattr(self, 'use_feature_horizon', False):
+                        inputs_horizon = self.compute_inputs(inputs, horizon_index, "futur")
+                    else:
+                        inputs_horizon = inputs_horizon_persistent.clone()
                     if self.ks > 0:
                         # on prend les ks derniers états cachés déjà vus
                         history = hidden_past[-(self.ks + 1):]
@@ -625,12 +635,13 @@ class ModelGNN(SplitTraining):
                     else:
                         z_prev = hidden_past[-1]
                 if H > 0:
-                    if self.id_past_risk is not None:
-                        inputs_horizon[:, self.id_past_risk, -H:] = 0
-                    if self.id_past_ba is not None:
-                        inputs_horizon[:, self.id_past_ba, -H:] = 0
-                    if self.prev_idx is not None:
-                        inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
+                    if not getattr(self, 'use_feature_horizon', False):
+                        if self.id_past_risk is not None:
+                            inputs_horizon[:, self.id_past_risk, -H:] = 0
+                        if self.id_past_ba is not None:
+                            inputs_horizon[:, self.id_past_ba, -H:] = 0
+                        if self.prev_idx is not None:
+                            inputs_horizon[:, self.prev_idx, -H:] = torch.stack(output_past, dim=2)
 
                 if not self.mesh:
                     output, logits, hidden = self.model(inputs_horizon, graphs, z_prev=z_prev)
@@ -735,7 +746,7 @@ class Model_Torch(SplitTraining):
     def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
                  training_mode='normal', federated_cluster='', cut_layer_name='', input_server_model=0,
-                 horizon=0, post_process=None, loss_param_search=False):
+                 horizon=0, post_process=None, loss_param_search=False, use_feature_horizon=False):
 
         #federated_cluster, model_name, nbfeatures, batch_size, lr, target_name, task_type, out_channels,
         #         dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run
@@ -744,7 +755,7 @@ class Model_Torch(SplitTraining):
                          model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr, delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr,
                          target_name=target_name, task_type=task_type, features_name=features_name, ks=ks,
                          out_channels=out_channels, dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search, use_feature_horizon=use_feature_horizon)
 
         self.training_mode = training_mode
 

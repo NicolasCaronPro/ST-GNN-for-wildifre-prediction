@@ -9,8 +9,29 @@ Groups:
 
 import pickle
 import sys
+import argparse
+
+# Ajout de la gestion d'argument --expert
+SHOW_EXPERT = True
+if any(a.startswith('--expert') for a in sys.argv):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--expert', action='store_true', help="Afficher le modèle expert dans l'operationnal_plot.")
+    args, _ = parser.parse_known_args()
+    SHOW_EXPERT = args.expert
 import numpy as np
 import pandas as pd
+
+import sys
+if not hasattr(pd.core.indexes, 'numeric'):
+    from pandas.core.indexes.api import Index
+    import pandas.core.indexes as pci
+    class NumericIndexCompat:
+        Int64Index = Index
+        Float64Index = Index
+        UInt64Index = Index
+    pci.numeric = NumericIndexCompat()
+    sys.modules['pandas.core.indexes.numeric'] = pci.numeric
+
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -18,6 +39,7 @@ from matplotlib.patches import Rectangle
 from matplotlib.colors import TwoSlopeNorm, Normalize
 import matplotlib.dates as mdates
 import datetime as dt
+import math
 
 from pathlib import Path
 import sys
@@ -63,7 +85,7 @@ def iou_score(y_true, y_pred):
 
 allDates = find_dates_between('2017-06-12', '2025-12-31')
 
-dataset = 'bdiff'
+dataset = 'firemen'
 
 if dataset == "firemen":
     expe = "occurence_01_06_25"
@@ -74,11 +96,14 @@ else:
 
 # ── constants ─────────────────────────────────────────────────────────────────
 BASE = Path(f'/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/{dataset}/firepoint/2x2/test/{expe}/all/{graph_construct}')
-BASE_OUT  = Path('/home/caron/Bureau/bdiff_2024')
+BASE_OUT  = Path('/home/caron/Bureau/bdiff_ordinal_loss_2')
 BASE_OUT.mkdir(parents=True, exist_ok=True)
 
 N_CLASSES   = 5
-YEAR_FILTER = 2023
+if '2024' in expe:
+    YEAR_FILTER = 2024
+else:
+    YEAR_FILTER = 2023
 
 def make_cols(base_target, model_name):
     """Return (TARGET, SIGNAL_COL, PRED_COL, PROBA_COLS) for a given base target and model name."""
@@ -95,19 +120,25 @@ def make_cols(base_target, model_name):
     if model_name == 'expert':
         return target, signal_col, None, None
         
-    if 'cll' in model_name and 'ccllt' not in model_name:
-        pred_col   = f'prediction_{base_target}-quantile-5-Class-Dept_0'
-        proba_cols = [f'prediction_{target}_0_C{c}' for c in range(N_CLASSES)]
-    else:
-        pred_col   = f'prediction_{target}_0'
-        proba_cols = [f'prediction_{target}_0_C{c}' for c in range(N_CLASSES)]
+    #if 'cll' in model_name:
+    #    pred_col   = f'prediction_{base_target}-quantile-5-Class-Dept_0'
+    #    proba_cols = [f'prediction_{target}_0_C{c}' for c in range(N_CLASSES)]
+    #else:
+    pred_col   = f'prediction_{target}_0'
+    proba_cols = [f'prediction_{target}_0_C{c}' for c in range(N_CLASSES)]
     return target, signal_col, pred_col, proba_cols
 
 # ── model groups ──────────────────────────────────────────────────────────────
-models_prefixes = {
+"""models_prefixes = {
     'GRU': 'GRU_search_full_10_0_all_one_',
     'DilatedCNN': 'DilatedCNN_search_full_10_0_all_one_',
     'LSTM': 'LSTM_search_full_10_0_all_one_',
+    'NetMLP': 'NetMLP_search_full_0_0_all_one_',
+    #'GraphCastGRU': 'GraphCastTime_search_full_10_0_all_one_'
+}"""
+
+models_prefixes = {
+    'GRU': 'GRU_search_full_10_0_all_one_',
     'NetMLP': 'NetMLP_search_full_0_0_all_one_',
     #'GraphCastGRU': 'GraphCastTime_search_full_10_0_all_one_'
 }
@@ -123,19 +154,25 @@ losses_suffixes = {
     'bceloss': 'classification_bceloss',
 }
 
-"""losses_suffixes = {
-    'ranknet': 'regression_ranknet-id{node}-nclusters{30}',
-    'cll': 'classification_cll',
+losses_suffixes = {
+   #'ranknet_2': 'regression_ranknet-id{cluster}-nclusters{4}-alphatype{cluster}',
+   'ranknet': 'regression_ranknet-id{node}-nclusters{30}',
+    #'cll': 'classification_cll',
     'flwki': 'classification_flwki-id{departement}',
-    #'ccllt': 'regression_ccllt-id{node}-nclusters{30}',
-}"""
+    'ccllt': 'regression_ccllt-id{node}-nclusters{30}',
+    #'ccllt_warm5': 'regression_ccllt-id{node}-nclusters{30}-warmupes{5}',
+    'ccllt_nomu': 'regression_ccllt-id{node}-nclusters{30}-warmupes{3000}',
+    'ccllt_nocov': 'regression_ccllt-id{node}-nclusters{30}-wcoverage{0.0}',
+    'ccllt_nomid': 'regression_ccllt-id{node}-nclusters{30}-wmid{0.0}',
+    'ccllt_noanchor': 'regression_ccllt-id{node}-nclusters{30}-wmu0{0.0}',
+}
 
 if dataset == 'firemen':
-    targets_list = ['nbsinister', 'timeintervention', 'ressource']
-    #targets_list = ['timeintervention']
+    #targets_list = ['nbsinister', 'timeintervention', 'ressource']
+    targets_list = ['nbsinister']
 else:
-    #targets_list = ['nbsinister']
-    targets_list = ['burnedareaRoot']
+    targets_list = ['nbsinister']
+    #targets_list = ['burnedareaRoot']
     pass
     
 GROUPS = {}
@@ -216,6 +253,7 @@ def plot_operational_heatmap(
     figsize=(22, 13),
     save_path=None,
     dpi=300,
+    show_expert=None,
 ):
     """
     df attendu au format long :
@@ -228,14 +266,22 @@ def plot_operational_heatmap(
     losses = list(df[loss_col].drop_duplicates())
 
     # Modèles par loss, dans l'ordre d'apparition
+    if show_expert is None:
+        show_expert = SHOW_EXPERT
     rows = []
     for loss in losses:
         models = list(df.loc[df[loss_col] == loss, model_col].drop_duplicates())
+        # Filtrer expert selon show_expert
+        if not show_expert:
+            models = [m for m in models if m != 'expert']
         for model in models:
             rows.append((loss, model))
 
-    # Force expert to be first
-    rows.sort(key=lambda x: 0 if x[1] == 'expert' else 1)
+    # Force expert to be first si demandé
+    if show_expert:
+        rows.sort(key=lambda x: 0 if x[1] == 'expert' else 1)
+    else:
+        rows.sort(key=lambda x: 1 if x[1] == 'expert' else 0)
 
     n_rows = len(rows)
     n_clusters = len(clusters)
@@ -367,7 +413,11 @@ def plot_operational_heatmap(
                         color = cmap_iou(iou_norm(val))
                     else:
                         color = cmap_k(k_norm(val))
-                    text = f"{val:.2f}"
+                        
+                    val_round = round(val, 2)
+                    if val_round == 0.0 and val != 0.0:
+                        val_round = 0.01 if val > 0 else -0.01
+                    text = f"{val_round:.2f}"
 
                 ax.add_patch(
                     Rectangle(
@@ -965,6 +1015,10 @@ for group_name, _group_dict in GROUPS.items():
                         'k2': float(adj.get(2, np.nan)),
                         'k3': float(adj.get(3, np.nan)),
                         'k4': float(adj.get(4, np.nan)),
+                        'cov_k1': cov.get(1, 0),
+                        'cov_k2': cov.get(2, 0),
+                        'cov_k3': cov.get(3, 0),
+                        'cov_k4': cov.get(4, 0),
                         'recall': rec,
                         'iou': iou_val,
                         'run_type': run_type,
@@ -1195,13 +1249,279 @@ for group_name, _group_dict in GROUPS.items():
                     loss_col="loss",
                     model_col="model",
                     cluster_col="cluster",
-                    save_path=out_cov_heat
+                    save_path=out_cov_heat,
+                    show_expert=SHOW_EXPERT
                 )
                 print(f"  Saved heatmap: {out_cov_heat.name}")
             except Exception as e:
                 print(f"  [ERROR] Plotting coverage heatmap: {e}")
 
 print('\nDone. All figures saved under', BASE_OUT)
+
+
+
+def plot_coverage_heatmap(
+    df: pd.DataFrame,
+    title: str = "Coverage opérationnel en fonction du schéma",
+    k_cols=("cov_k1", "cov_k2", "cov_k3", "cov_k4"),
+    model_col="model",
+    loss_col="loss",
+    cluster_col="cluster",
+    cluster_backgrounds=None,
+    figsize=(22, 13),
+    save_path=None,
+    dpi=300,
+    show_expert=None,
+):
+    """
+    df attendu au format long :
+    columns = [loss, model, cluster, cov_k1, cov_k2, cov_k3, cov_k4]
+    """
+    cluster_backgrounds = cluster_backgrounds or CLUSTER_BACKGROUNDS
+
+    df = df.copy()
+    clusters = list(df[cluster_col].drop_duplicates())
+    losses = list(df[loss_col].drop_duplicates())
+
+    if show_expert is None:
+        show_expert = SHOW_EXPERT
+    rows = []
+    for loss in losses:
+        models = list(df.loc[df[loss_col] == loss, model_col].drop_duplicates())
+        if not show_expert:
+            models = [m for m in models if m != 'expert']
+        for model in models:
+            rows.append((loss, model))
+
+    if show_expert:
+        rows.sort(key=lambda x: 0 if x[1] == 'expert' else 1)
+    else:
+        rows.sort(key=lambda x: 1 if x[1] == 'expert' else 0)
+
+    n_rows = len(rows)
+    n_clusters = len(clusters)
+    n_metrics = len(k_cols)
+
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.set_xlim(0, 2 + n_clusters * n_metrics)
+    ax.set_ylim(0, n_rows + 3)
+    ax.axis("off")
+
+    k_values = df[list(k_cols)].to_numpy().ravel()
+    k_min = 0
+    k_max = np.nanmax(k_values) if not np.isnan(np.nanmax(k_values)) else 1
+
+    k_norm = Normalize(vmin=k_min, vmax=k_max)
+    cmap_k = plt.cm.Greens
+
+    left_w = 2.0
+    cell_w = 1.0
+    cell_h = 0.75
+    header_h = 1.25
+    top_y = n_rows + 1.2
+
+    ax.text(
+        left_w + n_clusters * n_metrics / 2,
+        n_rows + 2.5,
+        title,
+        ha="center",
+        va="center",
+        fontsize=18,
+        fontweight="bold",
+    )
+
+    ax.text(0.55, top_y - 0.6, "Schéma", ha="center", va="center", fontsize=10, fontweight="bold")
+    ax.text(1.55, top_y - 0.6, "Modèle", ha="center", va="center", fontsize=10, fontweight="bold")
+
+    for c_idx, cluster in enumerate(clusters):
+        x0 = left_w + c_idx * n_metrics
+        bg = cluster_backgrounds.get(cluster, "#F7F7F7")
+
+        ax.add_patch(
+            Rectangle(
+                (x0, 0.4),
+                n_metrics,
+                n_rows + header_h,
+                facecolor=bg,
+                edgecolor="0.65",
+                linewidth=1.2,
+                zorder=0,
+            )
+        )
+
+        ax.text(
+            x0 + n_metrics / 2,
+            top_y,
+            cluster,
+            ha="center",
+            va="center",
+            fontsize=11,
+            fontweight="bold",
+        )
+
+        for j, col in enumerate(k_cols):
+            ax.text(
+                x0 + j + 0.5,
+                top_y - 0.8,
+                col.replace('cov_', ''),
+                ha="center",
+                va="center",
+                fontsize=9,
+                fontstyle="italic",
+            )
+
+    previous_loss = None
+    for row_idx, (loss, model) in enumerate(rows):
+        y_pos = n_rows - row_idx
+        if loss != previous_loss:
+            ax.text(0.55, y_pos, loss, ha="center", va="center", fontsize=10, fontweight="bold")
+            ax.axhline(y_pos + 0.5, xmin=0, xmax=1.5, color="black", linewidth=1.5)
+            previous_loss = loss
+
+        ax.text(1.55, y_pos, model, ha="center", va="center", fontsize=10, fontweight="bold")
+
+        for c_idx, cluster in enumerate(clusters):
+            x0 = left_w + c_idx * n_metrics
+
+            sub = df[
+                (df[loss_col] == loss)
+                & (df[model_col] == model)
+                & (df[cluster_col] == cluster)
+            ]
+
+            if sub.empty:
+                values = [np.nan] * n_metrics
+            else:
+                values = sub.iloc[0][list(k_cols)].to_list()
+
+            for j, val in enumerate(values):
+                if pd.isna(val):
+                    color = "#FFFFFF"
+                    text = "--"
+                else:
+                    color = cmap_k(k_norm(val))
+                    text = f"{val:.0f}"
+
+                ax.add_patch(
+                    Rectangle(
+                        (x0 + j, y_pos - cell_h / 2),
+                        cell_w,
+                        cell_h,
+                        facecolor=color,
+                        edgecolor="white",
+                        linewidth=1.0,
+                    )
+                )
+
+                ax.text(
+                    x0 + j + 0.5,
+                    y_pos,
+                    text,
+                    ha="center",
+                    va="center",
+                    fontsize=8.5,
+                    fontweight="bold",
+                    color="white" if not pd.isna(val) and val > (k_max * 0.6) else "black",
+                )
+
+    sm_k = plt.cm.ScalarMappable(norm=k_norm, cmap=cmap_k)
+    cax1 = fig.add_axes([0.4, 0.055, 0.2, 0.018])
+    cbar1 = fig.colorbar(sm_k, cax=cax1, orientation="horizontal")
+    cbar1.set_label("Coverage (nombre de paires utilisées)", fontsize=10)
+
+    plt.tight_layout(rect=[0, 0.08, 1, 1])
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
+
+    return fig, ax
+
+def save_operational_latex(
+    df: pd.DataFrame,
+    out_path,
+    k_cols=("k1", "k2", "k3", "k4"),
+    recall_col="recall",
+    iou_col="iou",
+    loss_col="loss",
+    model_col="model",
+    cluster_col="cluster",
+    caption: str = "Performance opérationnelle",
+    label: str = "tab:operational",
+):
+    """
+    Sauvegarde le DataFrame de scoring opérationnel en tableau LaTeX.
+
+    Le tableau est structuré comme la heatmap :
+      Schéma | Modèle | Cluster | k1 | k2 | k3 | k4 | Recall | IoU
+    """
+    df = df.copy()
+    metric_cols = list(k_cols) + [recall_col, iou_col]
+
+    # Colonnes disponibles (recall/iou peuvent être NaN)
+    available_metrics = [c for c in metric_cols if c in df.columns]
+
+    # Trier : expert en premier, puis par loss/model
+    df["_sort"] = df[model_col].apply(lambda m: 0 if m == "expert" else 1)
+    df = df.sort_values(["_sort", loss_col, model_col, cluster_col]).drop(columns="_sort")
+
+    rows_latex = []
+    prev_loss = None
+    for _, row in df.iterrows():
+        loss_val = row[loss_col]
+        if loss_val != prev_loss:
+            if prev_loss is not None:
+                rows_latex.append(r"\midrule")
+            prev_loss = loss_val
+
+        vals = []
+        for m in available_metrics:
+            v = row.get(m, float("nan"))
+            if pd.isna(v):
+                vals.append("--")
+            else:
+                v_round = round(v, 2)
+                if v_round == 0.0 and v != 0.0:
+                    v_round = 0.01 if v > 0 else -0.01
+                vals.append(f"{v_round:.2f}")
+
+        rows_latex.append(
+            " & ".join([
+                str(row[loss_col]),
+                str(row[model_col]),
+                str(row[cluster_col]),
+            ] + vals) + r" \\"
+        )
+
+    col_headers = (
+        ["Schéma", "Modèle", "Cluster"]
+        + [("Recall" if c == recall_col else ("IoU" if c == iou_col else c)) for c in available_metrics]
+    )
+    n_cols = len(col_headers)
+    col_spec = "ll l" + " r" * (n_cols - 3)
+
+    lines = [
+        r"\begin{table}[ht]",
+        r"\centering",
+        r"\footnotesize",
+        r"\setlength{\tabcolsep}{4pt}",
+        rf"\caption{{{caption}}}",
+        rf"\label{{{label}}}",
+        rf"\begin{{tabular}}{{{col_spec}}}",
+        r"\toprule",
+        " & ".join(col_headers) + r" \\",
+        r"\midrule",
+    ]
+    lines += rows_latex
+    lines += [
+        r"\bottomrule",
+        r"\end{tabular}",
+        r"\end{table}",
+    ]
+
+    out_path = Path(out_path)
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+    print(f"  Saved LaTeX table: {out_path}")
+
 
 if all_scoring_rows:
     df_all = pd.DataFrame(all_scoring_rows)
@@ -1211,6 +1531,8 @@ if all_scoring_rows:
             if not sub_df.empty:
                 out_dir = BASE_OUT / dataset / tgt / rt
                 out_dir.mkdir(parents=True, exist_ok=True)
+
+                # ── PNG heatmap ────────────────────────────────────────────
                 out_heat = out_dir / f'operational_heatmap_{tgt}_{rt}.png'
                 try:
                     plot_operational_heatmap(
@@ -1219,8 +1541,39 @@ if all_scoring_rows:
                         loss_col="loss",
                         model_col="model",
                         cluster_col="cluster",
-                        save_path=out_heat
+                        save_path=out_heat,
+                        show_expert=SHOW_EXPERT
                     )
                     print(f"  Saved heatmap: {out_heat}")
                 except Exception as e:
                     print(f"  [ERROR] Plotting heatmap for {tgt} ({rt}): {e}")
+
+                # ── Coverage heatmap ─────────────────────────────────────────
+                out_cov = out_dir / f'coverage_heatmap_{tgt}_{rt}.png'
+                try:
+                    plot_coverage_heatmap(
+                        sub_df,
+                        title=f"Coverage opérationnel ({tgt}) - {rt.capitalize()}",
+                        loss_col="loss",
+                        model_col="model",
+                        cluster_col="cluster",
+                        save_path=out_cov,
+                        show_expert=SHOW_EXPERT
+                    )
+                    print(f"  Saved coverage heatmap: {out_cov}")
+                except Exception as e:
+                    print(f"  [ERROR] Plotting coverage heatmap for {tgt} ({rt}): {e}")
+
+                # ── LaTeX table ────────────────────────────────────────────
+                out_tex = out_dir / f'operational_heatmap_{tgt}_{rt}.tex'
+                try:
+                    save_operational_latex(
+                        sub_df,
+                        out_path=out_tex,
+                        caption=f"Performance opérationnelle ({tgt}) — {rt.capitalize()}",
+                        label=f"tab:operational_{tgt}_{rt}",
+                    )
+                except Exception as e:
+                    print(f"  [ERROR] Saving LaTeX table for {tgt} ({rt}): {e}")
+
+

@@ -89,7 +89,8 @@ parser.add_argument('--loss', type=str, default='flwk', help='Loss function name
 parser.add_argument('--model_type', type=str, default='GRU', help='Model type (e.g., GRU)')
 parser.add_argument('--task_type', type=str, default='classification', help='Task type (classification/regression)')
 parser.add_argument('--scale', type=int, default=3, help='Spatial scale')
-
+parser.add_argument('--horizon', type=int, default=0, help='Prediction horizon')
+parser.add_argument('--kdays', type=int, default=10, help='Number of days')
 args = parser.parse_args()
 
 dataset = args.dataset
@@ -100,8 +101,10 @@ loss = args.loss
 model_type = args.model_type
 task_type = args.task_type
 scale = args.scale
+horizon = args.horizon
+kdays = args.kdays
 
-model_name = f'{model_type}_search_full_10_0_all_one_{target}_{task_type}_{loss}'
+model_name = f'{model_type}_search_full_{kdays}_{horizon}_all_one_{target}_{task_type}_{loss}'
 
 # Chemins des fichiers
 root_path = f"/Work/Users/ncaron/GNN/{dataset}/firepoint/2x2/train/{name}/check_z-score/full_all_{scale}_0_{graph_construct}_node/{model_name}"
@@ -133,7 +136,7 @@ df_test = graph_id2_num_zone(df_test, scale=scale, graph_construct=graph_constru
 nz = df_test['num_zone'].unique()
 depts = df_test['departement'].unique()
 
-for H in range(horizon + 1):
+for H in range(1):
     
     device = 'cpu'
     model.device = device
@@ -194,7 +197,7 @@ for H in range(horizon + 1):
             model.device = device
             if hasattr(model, 'model') and model.model is not None:
                 model.model.to(device)
-
+                
             model.shapley_additive_explanation(
                 df=df_sample,
                 outname=outname,
@@ -209,4 +212,4 @@ for H in range(horizon + 1):
             import traceback
             traceback.print_exc()
 
-    save_object(model, f'{model_name}.pkl', Path(root_path))
+    #save_object(model, f'{model_name}.pkl', Path(root_path))

@@ -190,15 +190,15 @@ def main():
         if 'DFE' not in train_dataset.columns:
             train_dataset['DFE'] = 0.0
             val_dataset['DFE'] = 0.0
-            test_dataset['DFE'] = 0.0
+            if test_dataset is not None: test_dataset['DFE'] = 0.0
         
         train_dataset['burnedarea'] = train_dataset['burned_area'].values
         val_dataset['burnedarea'] = val_dataset['burned_area'].values
-        test_dataset['burnedarea'] = test_dataset['burned_area'].values
+        if test_dataset is not None: test_dataset['burnedarea'] = test_dataset['burned_area'].values
         
         train_dataset['burnedareaRoot'] = train_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         val_dataset['burnedareaRoot'] = val_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
-        test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
+        if test_dataset is not None: test_dataset['burnedareaRoot'] = test_dataset['burnedarea'].apply(lambda x : np.sqrt(x))
         
         #if 'area' not in train_dataset.columns:
         if True:
@@ -211,28 +211,28 @@ def main():
             for departement in train_dataset.departement.unique():
                 train_dataset.loc[train_dataset[train_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
                 val_dataset.loc[val_dataset[val_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
-                test_dataset.loc[test_dataset[test_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
+                if test_dataset is not None: test_dataset.loc[test_dataset[test_dataset['departement'] == departement].index, 'area'] = areas[int2name[departement]] 
 
         train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
         val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
-        test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
+        if test_dataset is not None: test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
 
         train_dataset['saison-mediterranean'] = train_dataset['saison'] + '-' + train_dataset['mediterranean'].astype(str)
         val_dataset['saison-mediterranean'] = val_dataset['saison'] + '-' + val_dataset['mediterranean'].astype(str)
-        test_dataset['saison-mediterranean'] = test_dataset['saison'] + '-' + test_dataset['mediterranean'].astype(str)
+        if test_dataset is not None: test_dataset['saison-mediterranean'] = test_dataset['saison'] + '-' + test_dataset['mediterranean'].astype(str)
 
         train_dataset['saison-cluster-encoder'] = train_dataset['saison'] + '-' + train_dataset['cluster-encoder'].astype(str)
         val_dataset['saison-cluster-encoder'] = val_dataset['saison'] + '-' + val_dataset['cluster-encoder'].astype(str)
-        test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
+        if test_dataset is not None: test_dataset['saison-cluster-encoder'] = test_dataset['saison'] + '-' + test_dataset['cluster-encoder'].astype(str)
         
         train_dataset['timeintervention'] = train_dataset['time_intervention']
         val_dataset['timeintervention'] = val_dataset['time_intervention']
-        test_dataset['timeintervention'] = test_dataset['time_intervention']
+        if test_dataset is not None: test_dataset['timeintervention'] = test_dataset['time_intervention']
 
         if 'ressource' not in train_dataset.columns:
             train_dataset['ressource'] = 0
             val_dataset['ressource'] = 0
-            test_dataset['ressource'] = 0
+            if test_dataset is not None: test_dataset['ressource'] = 0
 
         if 'nbsinister-quantile-5-Class-Dept' not in train_dataset.columns:
         #if False:
@@ -244,11 +244,11 @@ def main():
 
         train_dataset['timeintervention-quantile-5-Class-Dept'] = train_dataset['time_intervention-quantile-5-Class-Dept']
         val_dataset['timeintervention-quantile-5-Class-Dept'] = val_dataset['time_intervention-quantile-5-Class-Dept']
-        test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-quantile-5-Class-Dept']
+        if test_dataset is not None: test_dataset['timeintervention-quantile-5-Class-Dept'] = test_dataset['time_intervention-quantile-5-Class-Dept']
 
         train_dataset['burnedarea-kmeans-5-Class-Dept'] = train_dataset['burned_area-kmeans-5-Class-Dept']
         val_dataset['burnedarea-kmeans-5-Class-Dept'] = val_dataset['burned_area-kmeans-5-Class-Dept']
-        test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
+        if test_dataset is not None: test_dataset['burnedarea-kmeans-5-Class-Dept'] = test_dataset['burned_area-kmeans-5-Class-Dept']
 
         train_dataset_unscale = read_object(f"df_unscaled_train_{prefix}.pkl", dir_output)
         val_dataset_unscale = read_object(f"df_unscaled_val_{prefix}.pkl", dir_output)
@@ -273,7 +273,7 @@ def main():
 
         train_dataset['saison-encoding'] = train_dataset['date'].apply(get_saison_encoding)
         val_dataset['saison-encoding'] = val_dataset['date'].apply(get_saison_encoding)
-        test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
+        if test_dataset is not None: test_dataset['saison-encoding'] = test_dataset['date'].apply(get_saison_encoding)
 
         train_dataset = add_past_risk(
             train_dataset,
@@ -281,11 +281,12 @@ def main():
             "risk",
         )
         
-        test_dataset = add_past_risk(
-            test_dataset,
-            "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
-            "risk",
-        )
+        if test_dataset is not None:
+            test_dataset = add_past_risk(
+                test_dataset,
+                "nbsinisterDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+                "risk",
+            )
 
         val_dataset = add_past_risk(
             val_dataset,
@@ -299,11 +300,12 @@ def main():
             "burnedarea",
         )
 
-        test_dataset = add_past_risk(
-            test_dataset,
-            "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
-            "burnedarea",
-        )
+        if test_dataset is not None:
+            test_dataset = add_past_risk(
+                test_dataset,
+                "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
+                "burnedarea",
+            )
         val_dataset = add_past_risk(
             val_dataset,
             "burnedareaDaily-kmeans-5-Class-Dept-cubic-Specialized-Past",
@@ -312,11 +314,11 @@ def main():
 
         save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
         save_object(val_dataset, f"df_val_{prefix}.pkl", dir_output)
-        save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
+        if test_dataset is not None: save_object(test_dataset, f"df_test_{prefix}.pkl", dir_output)
     
     train_dataset['nbsinister-binary'] = (train_dataset['nbsinister'] > 0).astype(int)
     val_dataset['nbsinister-binary'] = (val_dataset['nbsinister'] > 0).astype(int)
-    test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
+    if test_dataset is not None: test_dataset['nbsinister-binary'] = (test_dataset['nbsinister'] > 0).astype(int)
     
     prefix = f"full_all_{cfg.scale}_{getattr(cfg, 'days_in_futur', 0)}_{cfg.graphConstruct}_{cfg.graph_method}"
 
@@ -496,6 +498,7 @@ def main():
                     params["torch_structure"] = "Model_Torch"
                     
                 params["use_log"] = m.get('use_log', True)
+                params["use_feature_horizon"] = m.get("use_feature_horizon", False)
 
                 if cfg.training_mode == "federated":
                     params.update(

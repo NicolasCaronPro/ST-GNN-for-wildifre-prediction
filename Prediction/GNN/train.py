@@ -2077,9 +2077,29 @@ def get_loss_function(loss_name, **loss_params):
                     loss_params[key] = -1
                 else:
                     raise ValueError(f'Unknown value of id {val}')
+                
+            elif key == 'iddept':
+                if val == 'departement':
+                    loss_params[key] = departement_index
+                elif val == 'cluster' or val == 'cluster-encoder':
+                    loss_params[key] = cluster_encoder_index
+                elif val == 'node':
+                    loss_params[key] = graph_id_index
+                elif val == 'scale':
+                    loss_params[key] = scale_index
+                elif val == 'saison':
+                    loss_params[key] = saison_index
+                elif val == 'med':
+                    loss_params[key] = med_index
+                elif val == 'area':
+                    loss_params[key] = area_index
+                elif val == 'all':
+                    loss_params[key] = -1
+                else:
+                    raise ValueError(f'Unknown value of id {val}')
             else:
                 loss_params[key] = val
-
+                
         loss_name = base_name
 
     #logger.info(f'Loss_params : {loss_params}')
