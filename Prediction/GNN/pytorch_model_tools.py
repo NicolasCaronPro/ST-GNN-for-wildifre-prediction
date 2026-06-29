@@ -3882,8 +3882,6 @@ class Training():
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
-            print(sigma)
-            exit(1)
             loss_params.update({
                     "wmu0": 2.86,
                     "wmid": 0.1,
