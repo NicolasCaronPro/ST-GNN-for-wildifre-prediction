@@ -12,7 +12,7 @@ import sys
 import argparse
 
 # Ajout de la gestion d'argument --expert
-SHOW_EXPERT = True
+SHOW_EXPERT = False
 if any(a.startswith('--expert') for a in sys.argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('--expert', action='store_true', help="Afficher le modèle expert dans l'operationnal_plot.")
@@ -85,18 +85,18 @@ def iou_score(y_true, y_pred):
 
 allDates = find_dates_between('2017-06-12', '2025-12-31')
 
-dataset = 'firemen'
+dataset = 'bdiff'
 
 if dataset == "firemen":
     expe = "occurence_01_06_25"
     graph_construct = "full_all_3_0_risk-size-zonemeteo-degree-a3-r5-t0.3_node"
 else:
-    expe = "occurence_default_2024"
+    expe = "occurence_default"
     graph_construct = "full_all_departement_0_None_node"
 
 # ── constants ─────────────────────────────────────────────────────────────────
 BASE = Path(f'/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/{dataset}/firepoint/2x2/test/{expe}/all/{graph_construct}')
-BASE_OUT  = Path('/home/caron/Bureau/bdiff_ordinal_loss_2')
+BASE_OUT  = Path('/home/caron/Bureau/bdiff_ordinal_loss_2_operationel_horizon')
 BASE_OUT.mkdir(parents=True, exist_ok=True)
 
 N_CLASSES   = 5
@@ -139,13 +139,15 @@ def make_cols(base_target, model_name):
 
 models_prefixes = {
     'GRU': 'GRU_search_full_10_0_all_one_',
+    'LSTM': 'LSTM_search_full_10_0_all_one_',
+    'DilatedCNN': 'DilatedCNN_search_full_10_0_all_one_',
     'NetMLP': 'NetMLP_search_full_0_0_all_one_',
     #'GraphCastGRU': 'GraphCastTime_search_full_10_0_all_one_'
 }
 
 losses_suffixes = {
     'pdegpd': 'regression_pdegpd',
-    'flwki': 'classification_flwki-id{departement}',
+    #'flwki': 'classification_flwki-id{departement}',
     'flwk': 'classification_flwk',
     'cornloss': 'corn_cornloss',
     'fl': 'classification_fl',
@@ -156,20 +158,21 @@ losses_suffixes = {
 
 losses_suffixes = {
    #'ranknet_2': 'regression_ranknet-id{cluster}-nclusters{4}-alphatype{cluster}',
-   'ranknet': 'regression_ranknet-id{node}-nclusters{30}',
+   'ranknet': 'regression_ranknet-id{node}-nclusters{95}',
     #'cll': 'classification_cll',
     'flwki': 'classification_flwki-id{departement}',
-    'ccllt': 'regression_ccllt-id{node}-nclusters{30}',
+    'ccllt': 'regression_ccllt-id{node}-nclusters{95}',
+    'ccllt-2': 'regression_ccllt-id{cluster}-iddept{cluster}-nclusters{4}-alphatype{cluster}',
     #'ccllt_warm5': 'regression_ccllt-id{node}-nclusters{30}-warmupes{5}',
-    'ccllt_nomu': 'regression_ccllt-id{node}-nclusters{30}-warmupes{3000}',
-    'ccllt_nocov': 'regression_ccllt-id{node}-nclusters{30}-wcoverage{0.0}',
-    'ccllt_nomid': 'regression_ccllt-id{node}-nclusters{30}-wmid{0.0}',
-    'ccllt_noanchor': 'regression_ccllt-id{node}-nclusters{30}-wmu0{0.0}',
+    #'ccllt_nomu': 'regression_ccllt-id{node}-nclusters{30}-warmupes{3000}',
+    #'ccllt_nocov': 'regression_ccllt-id{node}-nclusters{30}-wcoverage{0.0}',
+    #'ccllt_nomid': 'regression_ccllt-id{node}-nclusters{30}-wmid{0.0}',
+    #'ccllt_noanchor': 'regression_ccllt-id{node}-nclusters{30}-wmu0{0.0}',
 }
 
 if dataset == 'firemen':
-    #targets_list = ['nbsinister', 'timeintervention', 'ressource']
-    targets_list = ['nbsinister']
+    targets_list = ['nbsinister', 'ressource', "timeintervention"]
+    #targets_list = ['ressource']
 else:
     targets_list = ['nbsinister']
     #targets_list = ['burnedareaRoot']
@@ -178,20 +181,17 @@ else:
 GROUPS = {}
 
 for target in targets_list:
+    group_name = f"{target}_all_models"
+    GROUPS[group_name] = {'_target': target}
     for m_name, m_prefix in models_prefixes.items():
         for l_name, l_suffix in losses_suffixes.items():
-            group_name = f"{target}_{m_name}_{l_name}"
-            
             if 'ranknet' in l_suffix or 'cll' in l_suffix or 'ccllt' in l_suffix:
                 # ccllt doesn't use the clustered target name
                 folder_name = f"{m_prefix}{target}_{l_suffix}"
             else:
                 folder_name = f"{m_prefix}{target}-kmeans-5-Class-Dept_{l_suffix}"
                 
-            GROUPS[group_name] = {
-                '_target': target,
-                f"{m_name}_{l_name}": folder_name
-            }
+            GROUPS[group_name][f"{m_name}_{l_name}"] = folder_name
 
 """GROUPS['filter'] = {
     '_target':       'nbsinister',
@@ -464,6 +464,129 @@ def plot_operational_heatmap(
         plt.savefig(save_path, dpi=dpi, bbox_inches="tight")
 
     return fig, ax
+
+def plot_horizons_score_recall_heatmap(
+    df: pd.DataFrame,
+    title: str = "Heatmaps Score / Recall vs Horizon",
+    k_cols=("score_k1", "score_k2", "score_k3", "score_k4"),
+    recall_col="recall",
+    save_path=None,
+    dpi=300,
+    show_expert=None,
+):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import TwoSlopeNorm, Normalize
+    
+    df = df.copy()
+    
+    if show_expert is None:
+        show_expert = SHOW_EXPERT
+        
+    losses = list(df['loss'].drop_duplicates())
+    rows = []
+    for loss in losses:
+        models_for_loss = list(df.loc[df['loss'] == loss, 'model'].drop_duplicates())
+        if not show_expert:
+            models_for_loss = [m for m in models_for_loss if m != 'expert']
+        for model in models_for_loss:
+            rows.append((loss, model))
+            
+    if show_expert:
+        rows.sort(key=lambda x: 0 if x[1] == 'expert' else 1)
+    else:
+        rows.sort(key=lambda x: 1 if x[1] == 'expert' else 0)
+        
+    def format_label(lbl):
+        if '_' in lbl:
+            parts = lbl.split('_', 1)
+            m_type = parts[0]
+            l_type = parts[1]
+            if l_type.lower() == 'ccllt':
+                l_type = 'CCLLT'
+            elif l_type.lower() == 'ranknet':
+                l_type = 'RankNet'
+            else:
+                l_type = l_type.capitalize()
+            return f"{m_type}-{l_type}"
+        return lbl
+
+    horizons = sorted(df['horizon'].unique())
+    n_horizons = len(horizons)
+    n_rows = len(rows)
+    if n_rows == 0 or n_horizons == 0:
+        return
+        
+    metrics = list(k_cols) + [recall_col]
+    metric_titles = ["k1", "k2", "k3", "k4", "Recall"]
+    n_metrics = len(metrics)
+    
+    k_values = df[list(k_cols)].values
+    k_min = np.nanmin(k_values)
+    k_max = np.nanmax(k_values)
+    
+    k_norm = TwoSlopeNorm(
+        vmin=min(k_min, -1e-9),
+        vcenter=0,
+        vmax=max(k_max, 1e-9),
+    )
+    recall_norm = Normalize(vmin=0, vmax=1)
+    
+    cmap_k = plt.cm.RdYlGn
+    cmap_recall = plt.cm.Blues
+    
+    fig, axes = plt.subplots(1, n_metrics, figsize=(22, max(4, n_rows * 0.8 + 2)))
+    if n_metrics == 1: axes = [axes]
+    
+    for idx, (metric, m_title) in enumerate(zip(metrics, metric_titles)):
+        ax = axes[idx]
+        is_recall = (metric == recall_col)
+        
+        mat = np.full((n_rows, n_horizons), np.nan)
+        for i, (loss, m) in enumerate(rows):
+            for j, h in enumerate(horizons):
+                sub = df[(df['model'] == m) & (df['horizon'] == h)]
+                if not sub.empty:
+                    mat[i, j] = sub.iloc[0][metric]
+                    
+        norm = recall_norm if is_recall else k_norm
+        cmap = cmap_recall if is_recall else cmap_k
+            
+        im = ax.imshow(mat, cmap=cmap, norm=norm, aspect='auto')
+        
+        for i in range(n_rows):
+            for j in range(n_horizons):
+                val = mat[i, j]
+                if not np.isnan(val):
+                    text_color = "white" if is_recall and val > 0.65 else "black"
+                    val_round = round(val, 2)
+                    if val_round == 0.0 and val != 0.0:
+                        val_round = 0.01 if val > 0 else -0.01
+                    ax.text(j, i, f"{val_round:.2f}", ha="center", va="center", color=text_color, fontsize=8, fontweight='bold')
+                    
+        ax.set_title(m_title, fontsize=12)
+        ax.set_xticks(np.arange(n_horizons))
+        ax.set_xticklabels([f"H{int(h)}" for h in horizons])
+        
+        prev_loss = None
+        for i, (loss, m) in enumerate(rows):
+            if prev_loss is not None and loss != prev_loss:
+                ax.axhline(i - 0.5, color='black', linewidth=1.5)
+            prev_loss = loss
+        
+        if idx == 0:
+            ax.set_yticks(np.arange(n_rows))
+            ax.set_yticklabels([format_label(m) for l, m in rows])
+        else:
+            ax.set_yticks([])
+            
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        
+    fig.suptitle(title, fontsize=16)
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path, dpi=dpi, bbox_inches='tight')
+    plt.close(fig)
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def load_pkl(model_name, h="H0"):
@@ -1146,14 +1269,41 @@ for group_name, _group_dict in GROUPS.items():
                         y_pred_float, y_true_raw, dates_h, zones_fe,
                         df_spline=5, min_n=1, reference=False
                     )
-                    h_row = {'model': label, 'loss': label.split('_', 1)[1] if '_' in label else group_name, 'horizon': h}
+                    
+                    y_true_cls = np.clip(y_true_raw, 0, 4).astype(int)
+                    y_pred_int = np.clip(np.round(y_pred_float), 0, 4).astype(int)
+                    rec = recall_score(y_true_cls > 0, y_pred_int > 0, zero_division=0)
+                    
+                    h_row = {'model': label, 'loss': label.split('_', 1)[1] if '_' in label else group_name, 'horizon': h, 'zone': 'Global', 'recall': float(rec)}
                     for k in [1, 2, 3, 4]:
                         h_row[f'score_k{k}'] = float(adj.get(k, np.nan))
                         h_row[f'cov_k{k}'] = float(cov.get(k, np.nan))
                     horizon_rows.append(h_row)
                     model_horizons_data.append((h, mu, mu_dense, y_pred_float))
                 except Exception as e:
-                    print(f"  [ERROR Horizon {h}] for {label}: {e}")
+                    print(f"  [ERROR Horizon {h} Global] for {label}: {e}")
+                
+                # Per department eval
+                for z in np.unique(zones_fe):
+                    mask = zones_fe == z
+                    if mask.sum() < 2: continue
+                    try:
+                        _, _, cov_z, adj_z, _, _, _ = sc.evaluation_scoring(
+                            y_pred_float[mask], y_true_raw[mask], dates_h[mask], zones_fe[mask],
+                            df_spline=5, min_n=1, reference=False
+                        )
+                        
+                        y_true_cls_z = np.clip(y_true_raw[mask], 0, 4).astype(int)
+                        y_pred_int_z = np.clip(np.round(y_pred_float[mask]), 0, 4).astype(int)
+                        rec_z = recall_score(y_true_cls_z > 0, y_pred_int_z > 0, zero_division=0)
+                        
+                        h_row_z = {'model': label, 'loss': label.split('_', 1)[1] if '_' in label else group_name, 'horizon': h, 'zone': z, 'recall': float(rec_z)}
+                        for k in [1, 2, 3, 4]:
+                            h_row_z[f'score_k{k}'] = float(adj_z.get(k, np.nan))
+                            h_row_z[f'cov_k{k}'] = float(cov_z.get(k, np.nan))
+                        horizon_rows.append(h_row_z)
+                    except Exception as e:
+                        pass
                     
             if len(model_horizons_data) > 0:
                 n_h = len(model_horizons_data)
@@ -1195,66 +1345,166 @@ for group_name, _group_dict in GROUPS.items():
                 
         if len(horizon_rows) > 0:
             import math
+            import matplotlib.pyplot as plt
+            import matplotlib.lines as mlines
+            
             df_horizons = pd.DataFrame(horizon_rows)
             
-            fig_sk, axes_sk = plt.subplots(2, 2, figsize=(14, 10))
-            for k in [1, 2, 3, 4]:
-                ax = axes_sk.flatten()[k-1]
-                for label in df_horizons['model'].unique():
-                    sub_h = df_horizons[df_horizons['model'] == label].sort_values('horizon')
-                    ax.plot(sub_h['horizon'], sub_h[f'score_k{k}'], marker='o', label=label)
-                ax.set_title(f"Score k={k} vs Horizon")
-                ax.set_xlabel("Horizon (jours)")
-                ax.set_ylabel(f"Score k{k}")
-                ax.grid(True, linestyle='--', alpha=0.6)
-                ax.legend()
-            plt.tight_layout()
-            out_sk = OUT / f'{group_name}_11_horizons_score_k.png'
-            fig_sk.savefig(out_sk, dpi=120, bbox_inches='tight')
-            plt.close(fig_sk)
-            print(f"  Saved: {out_sk.name}")
+            # Calculate and add Average across departments
+            df_depts = df_horizons[df_horizons['zone'] != 'Global']
+            if not df_depts.empty:
+                numeric_cols = [c for c in df_depts.columns if c.startswith('score_') or c.startswith('cov_') or c == 'recall']
+                df_avg = df_depts.groupby(['model', 'loss', 'horizon'])[numeric_cols].mean().reset_index()
+                df_avg['zone'] = 'Average'
+                df_horizons = pd.concat([df_horizons, df_avg], ignore_index=True)
             
-            fig_cov, axes_cov = plt.subplots(2, 2, figsize=(14, 10))
-            for k in [1, 2, 3, 4]:
-                ax = axes_cov.flatten()[k-1]
-                for label in df_horizons['model'].unique():
-                    sub_h = df_horizons[df_horizons['model'] == label].sort_values('horizon')
-                    ax.plot(sub_h['horizon'], sub_h[f'cov_k{k}'], marker='s', label=label)
-                ax.set_title(f"Coverage k={k} vs Horizon")
-                ax.set_xlabel("Horizon (jours)")
-                ax.set_ylabel(f"Coverage k{k}")
-                ax.grid(True, linestyle='--', alpha=0.6)
-                ax.legend()
-            plt.tight_layout()
-            out_cov = OUT / f'{group_name}_11_horizons_coverage_curve.png'
-            fig_cov.savefig(out_cov, dpi=120, bbox_inches='tight')
-            plt.close(fig_cov)
-            print(f"  Saved: {out_cov.name}")
+            models_types = df_horizons['model'].apply(lambda x: x.split('_')[0] if '_' in x else x).unique()
+            losses = df_horizons['loss'].unique()
             
-            df_cov_heat = df_horizons[df_horizons['horizon'] == 0].copy()
-            df_cov_heat['cluster'] = "Global"
-            df_cov_heat['k1'] = df_cov_heat['cov_k1']
-            df_cov_heat['k2'] = df_cov_heat['cov_k2']
-            df_cov_heat['k3'] = df_cov_heat['cov_k3']
-            df_cov_heat['k4'] = df_cov_heat['cov_k4']
-            df_cov_heat['recall'] = np.nan
-            df_cov_heat['iou'] = np.nan
+            colors = plt.cm.tab10(np.linspace(0, 1, max(1, len(models_types))))
+            model_color_map = {m: c for m, c in zip(models_types, colors)}
             
-            try:
-                out_cov_heat = OUT / f'{group_name}_11_horizons_coverage_heatmap.png'
-                plot_operational_heatmap(
-                    df_cov_heat,
-                    title=f"Coverage des transitions par Horizon ({run_type})",
-                    k_cols=("k1", "k2", "k3", "k4"),
-                    loss_col="loss",
-                    model_col="model",
-                    cluster_col="cluster",
-                    save_path=out_cov_heat,
-                    show_expert=SHOW_EXPERT
-                )
-                print(f"  Saved heatmap: {out_cov_heat.name}")
-            except Exception as e:
-                print(f"  [ERROR] Plotting coverage heatmap: {e}")
+            markers = ['o', 's', '^', 'D', 'v', '<', '>', 'p', '*', '+', 'x']
+            linestyles = ['-', '--', '-.', ':']
+            loss_style_map = {}
+            for i, l in enumerate(losses):
+                loss_style_map[l] = (markers[i % len(markers)], linestyles[i % len(linestyles)])
+                
+            def get_model_type(lbl):
+                return lbl.split('_')[0] if '_' in lbl else lbl
+            
+            for z in df_horizons['zone'].unique():
+                sub_df = df_horizons[df_horizons['zone'] == z]
+                if z == "Global":
+                    z_name = "Global"
+                elif z == "Average":
+                    z_name = "Average"
+                else:
+                    z_name = f"dept_{int(float(z))}"
+                
+                # --- Plot Score k and Recall ---
+                fig_sk, axes_sk = plt.subplots(2, 3, figsize=(22, 12))
+                for k in [1, 2, 3, 4]:
+                    ax = axes_sk.flatten()[k-1]
+                    for label in sub_df['model'].unique():
+                        sub_h = sub_df[sub_df['model'] == label].sort_values('horizon')
+                        m_type = get_model_type(label)
+                        loss_type = sub_h['loss'].iloc[0]
+                        ax.plot(
+                            sub_h['horizon'], sub_h[f'score_k{k}'], 
+                            marker=loss_style_map[loss_type][0],
+                            linestyle=loss_style_map[loss_type][1],
+                            color=model_color_map[m_type],
+                            label=f"{m_type} ({loss_type})"
+                        )
+                    ax.set_title(f"Score k={k} vs Horizon - {z_name}")
+                    ax.set_xlabel("Horizon (jours)")
+                    ax.set_ylabel(f"Score k{k}")
+                    ax.set_ylim(-0.5, 1.0)
+                    ax.grid(True, linestyle='--', alpha=0.6)
+                    # Deduplicate legend
+                    handles, labels_leg = ax.get_legend_handles_labels()
+                    by_label = dict(zip(labels_leg, handles))
+                    ax.legend(by_label.values(), by_label.keys(), fontsize='small', bbox_to_anchor=(1.05, 1), loc='upper left')
+                
+                # Add Recall Plot
+                ax_rec = axes_sk.flatten()[4]
+                for label in sub_df['model'].unique():
+                    sub_h = sub_df[sub_df['model'] == label].sort_values('horizon')
+                    m_type = get_model_type(label)
+                    loss_type = sub_h['loss'].iloc[0]
+                    ax_rec.plot(
+                        sub_h['horizon'], sub_h['recall'], 
+                        marker=loss_style_map[loss_type][0],
+                        linestyle=loss_style_map[loss_type][1],
+                        color=model_color_map[m_type],
+                        label=f"{m_type} ({loss_type})"
+                    )
+                ax_rec.set_title(f"Recall vs Horizon - {z_name}")
+                ax_rec.set_xlabel("Horizon (jours)")
+                ax_rec.set_ylabel("Recall")
+                ax_rec.set_ylim(0, 1.0)
+                ax_rec.grid(True, linestyle='--', alpha=0.6)
+                handles, labels_leg = ax_rec.get_legend_handles_labels()
+                by_label = dict(zip(labels_leg, handles))
+                ax_rec.legend(by_label.values(), by_label.keys(), fontsize='small', bbox_to_anchor=(1.05, 1), loc='upper left')
+                
+                # Hide 6th axis
+                axes_sk.flatten()[5].set_visible(False)
+
+                plt.tight_layout()
+                out_sk = OUT / f'{group_name}_11_horizons_{z_name}_score_k_and_recall.png'
+                fig_sk.savefig(out_sk, dpi=120, bbox_inches='tight')
+                plt.close(fig_sk)
+                print(f"  Saved: {out_sk.name}")
+                
+                # --- Plot Score k and Recall Heatmap ---
+                out_hm = OUT / f'{group_name}_11_horizons_{z_name}_score_recall_heatmap.png'
+                try:
+                    plot_horizons_score_recall_heatmap(
+                        sub_df,
+                        title=f"Heatmaps Score / Recall vs Horizon — {z_name}",
+                        save_path=out_hm,
+                        show_expert=SHOW_EXPERT
+                    )
+                    print(f"  Saved heatmap: {out_hm.name}")
+                except Exception as e:
+                    print(f"  [ERROR] Plotting horizon heatmap for {z_name}: {e}")
+                
+                # --- Plot Coverage k ---
+                fig_cov, axes_cov = plt.subplots(2, 2, figsize=(16, 12))
+                for k in [1, 2, 3, 4]:
+                    ax = axes_cov.flatten()[k-1]
+                    for label in sub_df['model'].unique():
+                        sub_h = sub_df[sub_df['model'] == label].sort_values('horizon')
+                        m_type = get_model_type(label)
+                        loss_type = sub_h['loss'].iloc[0]
+                        ax.plot(
+                            sub_h['horizon'], sub_h[f'cov_k{k}'], 
+                            marker=loss_style_map[loss_type][0],
+                            linestyle=loss_style_map[loss_type][1],
+                            color=model_color_map[m_type],
+                            label=f"{m_type} ({loss_type})"
+                        )
+                    ax.set_title(f"Coverage k={k} vs Horizon - {z_name}")
+                    ax.set_xlabel("Horizon (jours)")
+                    ax.set_ylabel(f"Coverage k{k}")
+                    ax.grid(True, linestyle='--', alpha=0.6)
+                    handles, labels_leg = ax.get_legend_handles_labels()
+                    by_label = dict(zip(labels_leg, handles))
+                    ax.legend(by_label.values(), by_label.keys(), fontsize='small', bbox_to_anchor=(1.05, 1), loc='upper left')
+                plt.tight_layout()
+                out_cov = OUT / f'{group_name}_11_horizons_{z_name}_coverage_curve.png'
+                fig_cov.savefig(out_cov, dpi=120, bbox_inches='tight')
+                plt.close(fig_cov)
+                print(f"  Saved: {out_cov.name}")
+            
+            # Heatmap global
+            df_cov_heat = df_horizons[(df_horizons['horizon'] == 0) & (df_horizons['zone'] == 'Global')].copy()
+            if not df_cov_heat.empty:
+                df_cov_heat['cluster'] = "Global"
+                df_cov_heat['k1'] = df_cov_heat['cov_k1']
+                df_cov_heat['k2'] = df_cov_heat['cov_k2']
+                df_cov_heat['k3'] = df_cov_heat['cov_k3']
+                df_cov_heat['k4'] = df_cov_heat['cov_k4']
+                df_cov_heat['recall'] = np.nan
+                df_cov_heat['iou'] = np.nan
+                
+                try:
+                    out_cov_heat = OUT / f'{group_name}_11_horizons_coverage_heatmap.png'
+                    plot_operational_heatmap(
+                        df_cov_heat,
+                        title=f"Coverage des transitions par Horizon ({run_type})",
+                        k_cols=("k1", "k2", "k3", "k4"),
+                        loss_col="loss",
+                        model_col="model",
+                        cluster_col="cluster",
+                        save_path=out_cov_heat,
+                        show_expert=SHOW_EXPERT
+                    )
+                    print(f"  Saved heatmap: {out_cov_heat.name}")
+                except Exception as e:
+                    print(f"  [ERROR] Plotting coverage heatmap: {e}")
 
 print('\nDone. All figures saved under', BASE_OUT)
 

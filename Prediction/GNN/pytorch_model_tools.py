@@ -3786,7 +3786,7 @@ class Training():
                 "taugate": 0.1,
                 "gatetemp": 1.69,
                 "massupdate": 0.13,
-                "mumomentum": 0.07,
+                "mumomentum": 0.97,
                 "mulambdag": 1.06,
                 "mulambdac": 1.71,
                 "mulambdad": 2.78,
@@ -3849,7 +3849,7 @@ class Training():
             "gatetemp": 1.79,
             "massupdate": 0.05,
             "mumomentum": 0.87,
-            "mulambdag": 0.0,
+            "mulambdag": 0.02,
             "mulambdac": 1.44,
             "mulambdad": 2.62,
             "shift": 0.75,
@@ -3861,49 +3861,49 @@ class Training():
             print('Using optimal parameters for nbsinister-constrained regions')
             
             loss_params.update({
-                "wmu0": 1.6,
-                "wmid": 0.02,
-                "wtrans": 2.39,
-                "wcoverage": 1.26,
-                "gainsfloor": 5.0,
+                "wmu0": 1.95,
+                "wmid": 1.54,
+                "wtrans": 4.62,
+                "wcoverage": 4.07,
+                "gainsfloor": 1.47,
                 "wkdecay": "None",
                 "coveragedistance": "cdf_l2",
                 "taugate": 0.1,
-                "gatetemp": 1.79,
+                "gatetemp": 0.28,
                 "massupdate": 0.05,
-                "mumomentum": 0.87,
-                "mulambdag": 0.0,
-                "mulambdac": 1.44,
-                "mulambdad": 2.62,
-                "shift": 0.75,
+                "mumomentum": 0.78,
+                "mulambdag": 1.92,
+                "mulambdac": 0.0,
+                "mulambdad": 2.03,
+                "shift": 0.42,
 
                 "sigma": sigma,
-                    })
+                })
             
         elif 'burnedareaRoot' in self.target_name and 'ccllt' in self.loss and 'bdiff' in self.dir_log.as_posix():
             print('Using optimal parameters for burnedareaRoot-constrained regions')
+            print(sigma)
+            exit(1)
             loss_params.update({
-                  "wmu0": 1.6,
-                "wmid": 0.02,
-                "wtrans": 2.39,
-                "wcoverage": 1.26,
-                "gainsfloor": 5.0,
-                "wkdecay": "None",
-                "coveragedistance": "cdf_l2",
-                "taugate": 0.1,
-                "gatetemp": 1.79,
-                "massupdate": 0.05,
-                "mumomentum": 0.87,
-                "mulambdag": 1.44,
-                "mulambdac": 0.02,
-                "mulambdad": 2.62,
-                "shift": 0.75,
-
-                    "sigma": sigma,
+                    "wmu0": 2.86,
+                    "wmid": 0.1,
+                    "wtrans": 0.18,
+                    "wcoverage": 0.39,
+                    "gainsfloor": 5.0,
+                    "wkdecay": "None",
+                    "coveragedistance": "cdf_l2",
+                    "taugate": 0.1,
+                    "gatetemp": 0.21,
+                    "massupdate": 0.13,
+                    "mumomentum": 0.42,
+                    "mulambdag": 0.79,
+                    "mulambdac": 0.0,
+                    "mulambdad": 2.85,
+                    "shift": 0.26,
+                    "sigma": sigma
                     })
     
         self.criterion = self.get_loss(self.loss, loss_params)
-
         if has_method(self.criterion, '_preprocess'):
             y_train = self.df_train[self.target_name].values
             cid = getattr(self.criterion, "id", None)
@@ -5260,11 +5260,7 @@ class Training():
         else:
             criterion = None
             
-        if use_grad:
-            func = lambda: contextlib.nullcontext()
-        else:
-            func = torch.no_grad
-        with func():
+        with torch.set_grad_enabled(use_grad):
                 
             inputs, orilabels_, _ = X
 
@@ -6694,7 +6690,7 @@ class Training():
             params["wmid"] = trial.suggest_float("ranknet_wmid", 0.0, 5.0, step=0.1)
             
             return params
-            
+        
         return {}
         
     def train_optuna(
@@ -7416,11 +7412,11 @@ class SplitTraining(Training):
     def __init__(self, federated_cluster, cut_layer_name, input_server_model, model_name,
                  nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, out_channels,
                  dir_log, features_name, ks, loss, name, device, under_sampling, over_sampling, n_run,
-                 horizon=0, post_process=None, loss_param_search=False):
+                 horizon=0, post_process=None, loss_param_search=False, use_feature_horizon=False):
 
         super().__init__(model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type, features_name, ks,
                          out_channels, dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
-                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search)
+                         over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process, loss_param_search=loss_param_search, use_feature_horizon=use_feature_horizon)
 
         self.federated_cluster = federated_cluster
         self.cut_layer_name = cut_layer_name
