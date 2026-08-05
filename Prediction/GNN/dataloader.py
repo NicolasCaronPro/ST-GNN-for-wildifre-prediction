@@ -2,6 +2,9 @@ import torch_geometric
 import gc
 from zmq import device
 from GNN.pytorch_model import *
+from GNN.pytorch_model_pc_graph import (PCGraphTraining, PCGraphGenTraining,
+                                        PCGraphCornTraining, PCGraphGenCornTraining,
+                                        PCGraphClmTraining, PCGraphGenClmTraining)
 from sklearn.metrics import confusion_matrix
 import statsmodels.formula.api as smf
 import seaborn as sns
@@ -2409,6 +2412,138 @@ def wrapped_train_deep_learning_1D(params):
 
     if torch_structure == 'Model_Torch':
         wrapped_model = Model_Torch(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraph':
+        wrapped_model = PCGraphTraining(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraphGen':
+        wrapped_model = PCGraphGenTraining(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraphCorn':
+        wrapped_model = PCGraphCornTraining(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraphGenCorn':
+        wrapped_model = PCGraphGenCornTraining(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraphClm':
+        wrapped_model = PCGraphClmTraining(model_name=model,
+                                    batch_size=params['batch_size'],
+                                    nbfeatures=nbfeatures,
+                                    lr=params['lr'],
+                                    delta_lr=params['delta_lr'],
+                                    patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                    target_name=target_name,
+                                    out_channels=params['out_channels'],
+                                    features_name=features,
+                                    ks=kdays,
+                                    dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/{model}_{infos}'),
+                                    name=f'{model}_{infos}',
+                                    task_type=task_type,
+                                    loss=loss,
+                                    device=params['device'],
+                                    under_sampling=under_sampling,
+                                    over_sampling=over_sampling,
+                                    n_run=n_run,
+                                    horizon=int(horizon),
+                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    )
+    elif torch_structure == 'Model_PCGraphGenClm':
+        wrapped_model = PCGraphGenClmTraining(model_name=model,
                                     batch_size=params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=params['lr'],

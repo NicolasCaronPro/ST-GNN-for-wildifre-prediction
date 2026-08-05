@@ -4210,21 +4210,35 @@ class Training():
         test_output_, y_ = self._predict_test_loader(self.test_loader, output_pdf='test')
         test_output_ = test_output_.detach().cpu().numpy()
         y_ = y_.detach().cpu().numpy()
-        
+
+        final_scores_by_horizon = {}
+
         for H in range(self.horizon + 1):
 
             y = y_[:, :, -1 - (self.horizon - H)]
             test_output = test_output_[:, -1 - (self.horizon - H)]
-            
+
             under_prediction_score_value = under_prediction_score(y[:, -1], test_output)
             over_prediction_score_value = over_prediction_score(y[:, -1], test_output)
-            
+
             iou = iou_score(y[:, -1], test_output)
             f1 = f1_score((test_output > 0).astype(int), (y[:, -1] > 0).astype(int), zero_division=0)
             iou_area, f1_area = self.compute_area_score(test_output, y[:, -1], y[:, graph_id_index])
 
             _agg_test = BEST_SCORES.get('agg', float('nan')) if BEST_SCORES else float('nan')
             print(f'Horizon {H} -> Test {y.shape} -> Under achieved : {under_prediction_score_value}, Over achived {over_prediction_score_value}, IoU {iou} f1 {f1}, IoU_area {iou_area}, f1_area {f1_area}, agg {_agg_test}')
+
+            # Final test scores for this horizon, at the best epoch.
+            # Excludes mu_*/mu_dense_* (calibration curve, only useful for plotting).
+            try:
+                run_scores_h = self._compute_run_scores(y[:, -1], test_output, y[:, date_index], y[:, graph_id_index])
+                final_scores_by_horizon[H] = {k: v for k, v in run_scores_h.items() if not k.startswith('mu_')}
+                final_scores_by_horizon[H].update({
+                    'iou': iou, 'f1_bin': f1, 'under': under_prediction_score_value,
+                    'over': over_prediction_score_value, 'iou_area': iou_area, 'f1_area': f1_area,
+                })
+            except Exception as e:
+                logger.warning(f"Failed to compute final test scores for horizon {H}: {e}")
 
             # Test plots per graph_id (Mediterranean only)
             med_deps = [4, 5, 6, 7, 11, 13, 26, 30, 34, 48, 66, 83, 84]
@@ -4373,7 +4387,7 @@ class Training():
         if hasattr(self, 'criterion') and hasattr(self.criterion, 'alpha'):
             logger.info(f"Alpha Parameter containing:\n{self.criterion.alpha}")
             
-        return self.score_per_epochs, self.criterion_params
+        return self.score_per_epochs, self.criterion_params, final_scores_by_horizon
 
     def _save_distill_logs_and_plot(self):
         """Persist best/worst per-epoch logs and save a 3D scatter plot.
@@ -5451,7 +5465,7 @@ class Training():
         self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
         self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
         
-    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=5):
+    def train(self, graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose=True, custom_model_params=None, new_model=True, min_epochs=1, n_runs=1):
 
         logger.info(
             f"\n{'='*60}\n"
@@ -5472,18 +5486,20 @@ class Training():
         all_runs_scores = {}
         all_criterion_params = {}
         all_run_criteria = {}
+        all_final_scores_by_horizon = {}
 
         for r in range(n_runs):
             self.criterion_params = []
             logger.info(f"============= Starting RUN {r+1}/{n_runs} =============")
             self.dir_log = original_dir_log / f"run_{r}"
             check_and_create_path(self.dir_log)
-            
-            # For each run we must start from scratch 
-            scores_evolution, criterion_params = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
+
+            # For each run we must start from scratch
+            scores_evolution, criterion_params, final_scores_by_horizon = self.train_run(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, True, min_epochs, run_idx=r)
             all_runs_scores[r] = scores_evolution
             all_criterion_params[r] = criterion_params
             all_run_criteria[r] = deepcopy(self.criterion)
+            all_final_scores_by_horizon[r] = final_scores_by_horizon
 
         self.dir_log = original_dir_log
         
@@ -5570,12 +5586,26 @@ class Training():
         except Exception as e:
             logger.warning(f"Failed to save all_runs_scores.json: {e}")
 
+        # Save final test scores per horizon (best epoch only, scores only - no mu/mu_dense)
+        try:
+            import json
+            final_scores_path = original_dir_log / "final_scores_by_horizon.json"
+            serializable_final_scores = {
+                str(r): {str(h): metrics for h, metrics in horizon_data.items()}
+                for r, horizon_data in all_final_scores_by_horizon.items()
+            }
+            with open(final_scores_path, "w") as f:
+                json.dump(serializable_final_scores, f, indent=4)
+            logger.info(f"Saved final_scores_by_horizon to {final_scores_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save final_scores_by_horizon.json: {e}")
+
         # Plot variance
         try:
             self.plot_runs_variance(all_runs_scores, n_runs)
         except Exception as e:
             logger.warning(f"Failed to plot runs variance: {e}")
-            
+
     def plot_runs_variance(self, all_runs_scores, n_runs):
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -6701,7 +6731,7 @@ class Training():
         custom_model_params=None,
         new_model=True,
         min_epochs=1,
-        n_trials=200,
+        n_trials=300,
         warmup=5,
         enable_pruning=False,
     ):
@@ -7988,6 +8018,7 @@ class DualTraining:
 
         # ── 2. Train occ_model with n_run seeds, evaluate, track scores ──────
         all_runs_scores = {}
+        all_final_scores_by_horizon = {}
         tp = 'occ-based'
 
         for run in range(self.n_run):
@@ -7995,11 +8026,12 @@ class DualTraining:
             self.occ_model.seed = int(random.random())
             self.occ_model.n_run = 1
 
-            scores_evolution, _ = self.occ_model.train_run(
+            scores_evolution, _, final_scores_by_horizon = self.occ_model.train_run(
                 graph, PATIENCE_CNT, CHECKPOINT, epochs,
                 verbose, custom_model_params, new_model, min_epochs, run_idx=run
             )
             all_runs_scores[run] = scores_evolution
+            all_final_scores_by_horizon[run] = final_scores_by_horizon
 
             # ── Evaluate combined prediction on test set ────────────────────
             test_output, y = self._predict_test_loader(
@@ -8035,6 +8067,19 @@ class DualTraining:
             logger.info(f"Saved all_runs_scores to {scores_path}")
         except Exception as e:
             logger.warning(f"Failed to save all_runs_scores.json: {e}")
+
+        try:
+            import json
+            final_scores_path = self.occ_model.dir_log / "final_scores_by_horizon.json"
+            serializable_final_scores = {
+                str(r): {str(h): metrics for h, metrics in horizon_data.items()}
+                for r, horizon_data in all_final_scores_by_horizon.items()
+            }
+            with open(final_scores_path, "w") as f:
+                json.dump(serializable_final_scores, f, indent=4)
+            logger.info(f"Saved final_scores_by_horizon to {final_scores_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save final_scores_by_horizon.json: {e}")
 
         try:
             self.occ_model.plot_runs_variance(all_runs_scores, self.n_run)

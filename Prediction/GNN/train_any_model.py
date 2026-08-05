@@ -491,11 +491,11 @@ def main():
                 if m.get("mesh_file"):
                     params["mesh_file"] = m.get("mesh_file")
                     params["use_temporal_as_edges"] = m.get("use_temporal_as_edges")
-                    params["torch_structure"] = "Model_gnn"
+                    params["torch_structure"] = m.get("torch_structure", "Model_gnn")
                 else:
                     params["mesh_file"] = None
                     params["use_temporal_as_edges"] = None
-                    params["torch_structure"] = "Model_Torch"
+                    params["torch_structure"] = m.get("torch_structure", "Model_Torch")
                     
                 params["use_log"] = m.get('use_log', True)
                 params["use_feature_horizon"] = m.get("use_feature_horizon", False)
