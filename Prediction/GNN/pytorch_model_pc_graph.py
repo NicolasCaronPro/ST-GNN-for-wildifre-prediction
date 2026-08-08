@@ -96,10 +96,54 @@ class PCGraphTraining(Model_Torch):
 
         model = PCGraphModel(**params).to(self.device)
 
-        if self.model_params is None:
-            self.model_params = params
+        # Toujours reaffecte, jamais seulement au premier appel : la signature de
+        # `PCGraphModel` se termine par `**_ignored`, donc `lambda_ordinality`,
+        # `lambda_coverage`, `coverage_risk_shift`, `label_clamp_prob` et
+        # `weight_decay_theta` sont AVALES par le constructeur -- leur seule voie
+        # d'usage reelle est `self.model_params`, relu a chaque batch. Avec une
+        # garde `is None`, tous les essais Optuna s'entrainaient avec les valeurs
+        # du tout premier essai (verifie : un facteur 1100 sur `lambda_coverage`
+        # ne deplacait le score que de 0.04, i.e. du bruit).
+        self.model_params = params
 
         return model, params
+
+    def restore_optuna_trial(self, trial_number, graph, custom_model_params):
+        """Reconstruit `self.model` avec l'ARCHITECTURE de l'essai `trial_number`.
+
+        Appele par `train_optuna` juste avant de charger les poids du meilleur
+        essai. Sans cela ces poids atterrissent dans le modele du dernier essai :
+        `n_internal` etant fixe, le `state_dict` a la bonne forme et le
+        chargement reussit en silence, mais les attributs Python
+        `internal_spatial_slice` / `internal_temporal_slice` -- qui ne sont PAS
+        des buffers -- restent ceux du dernier essai et se retrouvent decales par
+        rapport au masque charge, faussant toute analyse spatial/temporel.
+
+        Retourne None si l'essai est inconnu (recherche sans `suggest_loss_params`
+        PC-graph), auquel cas `train_optuna` garde le modele courant."""
+        saved = getattr(self, '_optuna_trial_params', {}).get(trial_number)
+        if saved is None:
+            logger.warning(f'[PCGraph][optuna] params de l\'essai {trial_number} introuvables : '
+                           'modele non reconstruit, les slices peuvent etre desaccordees du masque.')
+            return None
+
+        from GNN.tools import get_static_temporal_idx
+        self._optuna_model_params = dict(saved)
+        self._clm_thr_cache = None   # les seuils dependent des poids de cet essai
+
+        params = dict(custom_model_params) if custom_model_params else {}
+        static_idx, temporal_idx = get_static_temporal_idx(self.features_name)
+        params.update({'static_idx': static_idx, 'temporal_idx': temporal_idx})
+        # Fusion explicite : seule `PCGraphClmTraining.make_model` relit
+        # `_optuna_model_params`, or ce hook doit valoir pour toute la hierarchie.
+        params.update(saved)
+
+        model, _ = self.make_model(graph, params)
+        logger.info(f'[PCGraph][optuna] modele reconstruit sur l\'architecture de '
+                    f'l\'essai {trial_number} : ' +
+                    ', '.join(f'{k}={v:.4g}' if isinstance(v, float) else f'{k}={v}'
+                              for k, v in saved.items()))
+        return model
 
     def _spatial_feature_indices(self):
         """Indices des features STATIQUES (constantes a l'interieur d'un
@@ -385,7 +429,12 @@ class PCGraphTraining(Model_Torch):
             theta = model.core.theta_masked().abs().cpu().numpy()
 
         F, T = model.in_dim, model.seq_len
-        n_internal, n_label = model.n_internal, model.out_channels
+        # NOMBRE DE NOEUDS de label, pas nombre de CLASSES : en `label_mode='clm'`
+        # un seul noeud (le score scalaire `s`) porte les 5 classes, que les
+        # seuils decoupent ensuite. `getattr` pour rester compatible avec les
+        # pickles anterieurs a l'introduction de `n_label`.
+        n_internal = model.n_internal
+        n_label = getattr(model, 'n_label', model.out_channels)
         feat_names = list(self.features_name)[:F]
 
         n_agg = F + n_internal + n_label
@@ -399,7 +448,13 @@ class PCGraphTraining(Model_Torch):
                 cols = np.where(idx_map == j_agg)[0]
                 agg[i_agg, j_agg] = theta[np.ix_(rows, cols)].sum()
 
-        labels = feat_names + [f'internal_{i}' for i in range(n_internal)] + [f'label_{i}' for i in range(n_label)]
+        # En mode CLM le noeud unique porte le score de risque, pas une classe :
+        # l'appeler `label_0` induirait en erreur sur les graphes.
+        if getattr(model, 'label_mode', 'onehot') == 'clm':
+            label_names = ['s (risque)']
+        else:
+            label_names = [f'label_{i}' for i in range(n_label)]
+        labels = feat_names + [f'internal_{i}' for i in range(n_internal)] + label_names
         groups = (['sensory'] * F) + (['internal'] * n_internal) + (['label'] * n_label)
         return agg, labels, groups
 
@@ -621,6 +676,63 @@ class PCGraphTraining(Model_Torch):
         logger.info(f'[PCGraph] internal topology plot saved to {dir_output / f"{outname}.png"}')
         return G, df_reach
 
+    def plot_internal_node_ego(self, node, outname=None, dir_output=None, top_k=20):
+        """Voisinage signe d'UN noeud interne : les `top_k` features qui
+        l'alimentent le plus fort, et son arete sortante vers le label.
+
+        Complete `plot_internal_topology`, qui montre la connectivite globale
+        mais pas le SIGNE ni le detail d'un noeud. Or c'est le signe qui donne
+        le sens : un noeud interne encode typiquement un AXE (deux familles de
+        features de signes opposes), et c'est le signe de son arete sortante
+        qui decide de la direction finale. Un decompte non signe le masquerait.
+
+        La colonne "effet net" est le produit des deux poids : la contribution
+        de cette feature au label EN PASSANT PAR ce noeud."""
+        import matplotlib
+        from matplotlib import pyplot as plt
+        import pandas as pd
+
+        model = self.model
+        F, T = model.in_dim, model.seq_len
+        feat_names = list(self.features_name)[:F]
+        with torch.no_grad():
+            theta = model.core.theta_masked().cpu()
+
+        node_idx = model.internal_slice.start + int(node)
+        w_out = float(theta[node_idx, model.label_slice.start])
+        incoming = theta[model.sensory_slice, node_idx].numpy()
+
+        order = np.argsort(-np.abs(incoming))[:top_k]
+        rows = [{'feature': feat_names[i // T] if T > 1 else feat_names[i],
+                 'poids_entrant': float(incoming[i]),
+                 'effet_net': float(incoming[i] * w_out)} for i in order]
+        df = pd.DataFrame(rows)
+
+        end_label = 's (risque)' if getattr(model, 'label_mode', 'onehot') == 'clm' else 'label'
+        dir_output = self._analysis_dir(dir_output)
+        outname = outname or f'internal_{node}_ego'
+
+        top = df.iloc[::-1]
+        colors = ['#2a78d6' if v > 0 else '#e34948' for v in top['poids_entrant']]
+        fig, ax = plt.subplots(figsize=(9, max(4, 0.36 * len(top))))
+        ax.barh(top['feature'], top['poids_entrant'], color=colors)
+        ax.axvline(0, color='black', lw=0.8)
+        ax.set_xlabel(f'poids feature -> internal_{node}   '
+                      f'(bleu = positif, rouge = negatif)')
+        sens = 'diminue' if w_out < 0 else 'augmente'
+        ax.set_title(f'internal_{node} : arete sortante vers {end_label} = {w_out:+.4f}\n'
+                     f'-> une feature a poids positif {sens} le risque', fontsize=10)
+        fig.tight_layout()
+        fig.savefig(dir_output / f'{outname}.png', dpi=150)
+        plt.close(fig)
+
+        notable = incoming[np.abs(incoming) > 0.05]
+        logger.info(
+            f'[PCGraph] internal_{node} -> {end_label} = {w_out:+.4f} | '
+            f'aretes notables : {int((notable > 0).sum())} positives, '
+            f'{int((notable < 0).sum())} negatives | figure : {dir_output / f"{outname}.png"}')
+        return df
+
     def feature_causal_ranking(self, n_hops=3, top_k=20, outname='causal_ranking', dir_output=None,
                                 prune_top_k=None):
         """Classement des features par force d'influence cumulee (jusqu'a
@@ -701,7 +813,7 @@ class PCGraphTraining(Model_Torch):
         return df
 
     def _reconstruct_chain(self, model, theta, feat_idx, t_idx, mids, label_idx):
-        """Facteur commun a `plot_strongest_paths`/`plot_top_explicative_features` :
+        """Utilise par `plot_top_explicative_features` :
         reconstruit la chaine lisible (noms) et les poids signes de CHAQUE
         saut a partir des indices bruts (`mids` en indices locaux a
         `internal_slice`, ou None/liste vide pour un chemin direct).
@@ -710,7 +822,13 @@ class PCGraphTraining(Model_Torch):
         feat_names = list(self.features_name)[:F]
         feat_label = feat_names[feat_idx] if T == 1 else f'{feat_names[feat_idx]}_t{t_idx}'
         mids = mids or []
-        chain_labels = [feat_label] + [f'internal_{m}' for m in mids] + [f'label_{label_idx}']
+        # En mode CLM il n'y a qu'UN noeud de label : le score de risque `s`,
+        # pas une classe. L'etiqueter `label_0` inverserait la lecture -- un
+        # poids negatif vers `s` DIMINUE le risque, alors qu'un poids negatif
+        # vers "la classe 0" signifierait qu'il l'augmente.
+        end_label = 's (risque)' if getattr(model, 'label_mode', 'onehot') == 'clm' \
+            else f'label_{label_idx}'
+        chain_labels = [feat_label] + [f'internal_{m}' for m in mids] + [end_label]
 
         global_idx = [model.sensory_slice.start + feat_idx * T + t_idx]
         global_idx += [model.internal_slice.start + m for m in mids]
@@ -718,100 +836,91 @@ class PCGraphTraining(Model_Torch):
         hop_values = [theta[global_idx[k], global_idx[k + 1]].item() for k in range(len(global_idx) - 1)]
         return feat_label, chain_labels, hop_values
 
-    def plot_strongest_paths(self, outname='strongest_paths', dir_output=None, max_hops=3):
-        """Pour CHAQUE label separement, LE chemin individuel le plus fort
-        (feature -> [noeud(s) interne(s)] -> label) parmi tous les points de
-        depart possibles (n'importe quelle feature sensorielle) et toutes
-        les longueurs de 1 a `max_hops` sauts -- avec le SIGNE reel de
-        chaque saut, pour lire le "sens" de la combinaison (est-ce que cette
-        feature, via ce chemin, pousse le label vers le haut ou vers le
-        bas ?).
+    def plot_structuring_nodes(self, outname='structuring_nodes', dir_output=None,
+                               top_nodes=3, top_features=8):
+        """Les `top_nodes` noeuds internes les plus STRUCTURANTS pour chaque
+        label, chacun affiche par ses `top_features` features les plus fortes.
 
-        Different de `feature_causal_ranking`, qui SOMME en valeur absolue
-        sur TOUS les chemins possibles (le signe est perdu, et mille chemins
-        faibles peuvent peser autant qu'un seul chemin fort) : ici on
-        cherche le meilleur chemin UNIQUE (`PCGraphCore.strongest_paths`),
-        seule une explication lisible et son sens reel nous interessent.
+        "Structurant" = flux causal total transitant par le noeud :
 
-        Dessine, par label, la chaine complete avec le poids signe de
-        CHAQUE saut individuel (vert = positif, rouge = negatif) -- pas
-        seulement le signe du produit final -- pour voir si un signe
-        negatif quelque part dans la chaine s'annule ou se cumule. Sauve un
-        CSV recapitulatif (une ligne par label). Retourne le DataFrame."""
+            flux(n) = ( somme_f |theta[f, n]| ) * |theta[n, label]|
+
+        soit "combien ce noeud agrege" multiplie par "combien il pese sur la
+        sortie". Un noeud tres connecte mais dont l'arete sortante est nulle ne
+        structure rien ; un noeud fortement branche sur le label mais qui
+        n'agrege aucune feature non plus.
+
+        Remplace l'ancien affichage en chaine (feature -> interne -> label),
+        qui ne montrait qu'UN chemin et donnait une impression trompeuse : le
+        noeud traverse agrege des dizaines de features, pas la seule du chemin.
+        Le chemin le plus fort passait d'ailleurs par un noeud globalement
+        faible (poids max 0.18) plutot que par le noeud le mieux structure
+        (0.54) -- `strongest_paths` maximise le PRODUIT le long du chemin, pas
+        la structuration du noeud traverse. Les deux questions sont distinctes,
+        celle-ci est la plus lisible.
+
+        Les barres sont signees (bleu positif, rouge negatif) : les noeuds
+        internes encodent typiquement un AXE -- deux familles de features de
+        signes opposes -- et c'est le signe de l'arete sortante qui decide de
+        la direction finale."""
         from matplotlib import pyplot as plt
         import pandas as pd
         import numpy as np
 
         model = self.model
-        out_channels = model.out_channels
+        n_label = getattr(model, 'n_label', model.out_channels)
+        F, T = model.in_dim, model.seq_len
+        feat_names = list(self.features_name)[:F]
 
-        results = model.core.strongest_paths(
-            model.sensory_slice, model.internal_slice, model.label_slice, max_hops=max_hops
-        )
         with torch.no_grad():
-            theta = model.core.theta_masked()  # signe reel, indices GLOBAUX
+            theta = model.core.theta_masked().cpu()
+        inc_all = theta[model.sensory_slice, model.internal_slice].numpy()   # (F*T, M)
 
         rows = []
         dir_output = self._analysis_dir(dir_output)
-        fig, axes = plt.subplots(out_channels, 1, figsize=(9, 2.3 * out_channels))
-        axes = np.atleast_1d(axes)
+        fig, axes = plt.subplots(n_label, top_nodes,
+                                 figsize=(4.6 * top_nodes, 3.4 * n_label), squeeze=False)
 
-        for label_idx in range(out_channels):
-            best_value, best_hops, best_start, best_mids = None, None, None, None
-            for hops, (value, mids) in enumerate(results, start=1):
-                col = value[:, label_idx]
-                start_local = torch.argmax(col.abs()).item()
-                v = col[start_local].item()
-                if best_value is None or abs(v) > abs(best_value):
-                    best_value = v
-                    best_hops = hops
-                    best_start = start_local
-                    best_mids = None if mids is None else mids[start_local, label_idx].tolist()
+        for label_idx in range(n_label):
+            out_w = theta[model.internal_slice, model.label_slice.start + label_idx].numpy()
+            flow = np.abs(inc_all).sum(axis=0) * np.abs(out_w)
+            best = np.argsort(-flow)[:top_nodes]
+            end_label = ('s (risque)' if getattr(model, 'label_mode', 'onehot') == 'clm'
+                         else f'label_{label_idx}')
 
-            feat_idx, t_idx = divmod(best_start, model.seq_len)
-            feat_label, chain_labels, hop_values = self._reconstruct_chain(
-                model, theta, feat_idx, t_idx, best_mids, label_idx
-            )
+            for rank, node in enumerate(best):
+                inc = inc_all[:, node]
+                order = np.argsort(-np.abs(inc))[:top_features][::-1]
+                names = [feat_names[i // T] if T > 1 else feat_names[i] for i in order]
+                vals = inc[order]
+                notable = inc[np.abs(inc) > 0.05]
 
-            rows.append({
-                'label': f'label_{label_idx}',
-                'feature': feat_label,
-                'hops': best_hops,
-                'chain': ' -> '.join(chain_labels),
-                'hop_weights': [round(v, 4) for v in hop_values],
-                'net_product': best_value,
-                'sens': 'positif (augmente le risque)' if best_value > 0 else 'negatif (diminue le risque)',
-            })
+                ax = axes[label_idx][rank]
+                ax.barh(names, vals, color=['#2a78d6' if v > 0 else '#e34948' for v in vals])
+                ax.axvline(0, color='black', lw=0.8)
+                ax.tick_params(labelsize=8)
+                ax.set_title(f'#{rank + 1}  internal_{node}  -> {end_label} = {out_w[node]:+.3f}\n'
+                             f'flux {flow[node]:.3f} | {int((notable > 0).sum())} aretes +, '
+                             f'{int((notable < 0).sum())} -', fontsize=9)
+                if rank == 0:
+                    ax.set_xlabel('poids feature -> noeud (bleu +, rouge -)', fontsize=8)
 
-            ax = axes[label_idx]
-            n_nodes = len(chain_labels)
-            xs = np.linspace(0.08, 0.92, n_nodes)
-            node_colors = ['#0072B2'] + ['#999999'] * (n_nodes - 2) + ['#E69F00']
-            ax.scatter(xs, [0] * n_nodes, s=350, color=node_colors, zorder=3)
-            for k in range(n_nodes):
-                ax.text(xs[k], 0.14, chain_labels[k], ha='center', fontsize=8)
-            for k in range(n_nodes - 1):
-                color = '#009E73' if hop_values[k] > 0 else '#D55E00'
-                ax.annotate('', xy=(xs[k + 1], 0), xytext=(xs[k], 0),
-                            arrowprops=dict(arrowstyle='->', color=color, lw=2, alpha=0.85))
-                ax.text((xs[k] + xs[k + 1]) / 2, -0.13, f'{hop_values[k]:+.3f}',
-                        ha='center', fontsize=8, color=color)
-            net_color = '#009E73' if best_value > 0 else '#D55E00'
-            ax.text(1.0, 0, f'net={best_value:+.4f}\n({best_hops} saut{"s" if best_hops > 1 else ""})',
-                    ha='left', va='center', fontsize=8, color=net_color, transform=ax.transData)
-            ax.set_xlim(-0.02, 1.25)
-            ax.set_ylim(-0.35, 0.35)
-            ax.set_title(f'label_{label_idx}', fontsize=10, loc='left')
-            ax.axis('off')
+                rows.append({
+                    'label': end_label, 'rang': rank + 1, 'noeud': int(node),
+                    'flux': float(flow[node]), 'poids_sortant': float(out_w[node]),
+                    'aretes_positives': int((notable > 0).sum()),
+                    'aretes_negatives': int((notable < 0).sum()),
+                    'top_features': ', '.join(reversed(names)),
+                })
 
-        fig.suptitle(f'Chemin causal individuel le plus fort par label -- {self.name}')
+        fig.suptitle(f'Noeuds internes les plus structurants -- {self.name}')
         fig.tight_layout()
         fig.savefig(dir_output / f'{outname}.png', dpi=150)
         plt.close(fig)
 
         df = pd.DataFrame(rows)
         df.to_csv(dir_output / f'{outname}.csv', index=False)
-        logger.info(f'[PCGraph] strongest paths saved to {dir_output / f"{outname}.png"} / .csv')
+        logger.info(f'[PCGraph] structuring nodes saved to {dir_output / f"{outname}.png"} / .csv')
         return df
 
     def plot_top_explicative_features(self, outname='top_explicative_features', dir_output=None,
@@ -841,7 +950,7 @@ class PCGraphTraining(Model_Torch):
         model = self.model
         F, T = model.in_dim, model.seq_len
         feat_names = list(self.features_name)[:F]
-        out_channels = model.out_channels
+        out_channels = getattr(model, 'n_label', model.out_channels)   # noeuds, pas classes
 
         results = model.core.strongest_paths(
             model.sensory_slice, model.internal_slice, model.label_slice, max_hops=max_hops
@@ -1124,6 +1233,10 @@ class PCGraphCornTraining(PCGraphTraining):
         """Facteur commun aux deux `launch_batch` : energie PC (via `energy_fn`,
         supervisee ou semi-supervisee) + les deux termes distributionnels."""
         inputs_horizon, y_clamp, weights = self._prepare_energy_inputs(data)
+        dept = data[1][:, ids_columns.index('departement'), -1]
+        # Les seuils etant par departement, il doit etre connu avant tout appel
+        # au modele -- `training_energy*` n'expose pas d'argument pour cela.
+        self.model.set_current_departement(dept)
         energy_per_sample, extra = energy_fn(inputs_horizon, y_clamp)
 
         w = weights.view(-1).clamp_min(0)
@@ -1132,7 +1245,7 @@ class PCGraphCornTraining(PCGraphTraining):
         # Lecture des labels a labels LIBRES (regime d'inference) : c'est la
         # distribution que le modele produira reellement, donc celle qu'il faut
         # contraindre -- pas celle obtenue avec les labels clampes.
-        probs, _, _ = self.model(inputs_horizon)
+        probs, _, _ = self.model(inputs_horizon, departement=dept)   # explicite
         l_ord, l_cov, diag = self._distribution_terms(probs, data[1])
 
         lam_ord, lam_cov = self._lambdas()
@@ -1209,45 +1322,206 @@ class PCGraphClmTraining(PCGraphCornTraining):
 
     def make_model(self, graph, custom_model_params):
         params = dict(custom_model_params) if custom_model_params else {}
+        # Parametres proposes par l'essai Optuna courant (cf.
+        # `suggest_loss_params`). Prioritaires sur le JSON : c'est justement ce
+        # qu'on cherche a faire varier.
+        params.update(getattr(self, '_optuna_model_params', None) or {})
         params['label_mode'] = 'clm'
-        params.setdefault('clm_tau', _DEFAULT_CLM_TAU)
+        # pas de clm_tau par defaut : il est DEDUIT de l'espacement des seuils
+        # dans `_clm_thresholds`, sauf si le JSON en impose un explicitement.
+        params.setdefault('n_departements', len(self._departement_ids()))
         model, params = PCGraphTraining.make_model(self, graph, params)
-        model.set_clm_thresholds(self._clm_thresholds(model.out_channels))
+        model.set_clm_dept_ids(self._departement_ids())
+        model.set_clm_scale(self._clm_scale())
+        thr = self._clm_thresholds(model, model.out_channels)
+        model.set_clm_thresholds(thr)
+
+        # `clm_tau` doit etre RELATIF a l'espacement des seuils, jamais absolu :
+        # la sigmoide transitionne sur ~4*tau, donc si tau approche l'ecart entre
+        # deux seuils, leurs bosses se recouvrent et les classes intermediaires
+        # ne gagnent plus jamais l'argmax. Le rapport ecart_min/tau doit valoir
+        # au moins ~1.5 ; on vise 3.
+        #
+        # Un tau fixe ne peut pas convenir : l'echelle de `s` a change plusieurs
+        # fois au fil des variantes (seuils absolus, standardisation, constante),
+        # et avec elle l'espacement des seuils. Mesure sur un modele reel --
+        # tau=0.3 donnait [2025, 3564, 0, 0, 251], tau deduit (0.094) donnait
+        # [1804, 3331, 472, 164, 69] sur EXACTEMENT la meme sortie du graphe.
+        if 'clm_tau' not in (custom_model_params or {}):
+            t = torch.as_tensor(thr)
+            gap = float((t[:, 1:] - t[:, :-1]).min()) if t.shape[1] > 1 else 1.0
+            model.set_clm_tau(max(gap / 3.0, 1e-4))
+            logger.info(f'[PCGraph] clm_tau deduit (ecart minimal {gap:.4f} / 3) : '
+                        f'{float(model.clm_tau):.4f}')
         return model, params
 
-    def _clm_thresholds(self, n_classes):
-        """Seuils du CLM, en unites STANDARDISEES (`s` est centre-reduit avant
-        d'y etre compare, cf. PCGraphModel.class_probs).
+    # ---------------- recherche d'hyperparametres (Optuna) ----------------
 
-        Places aux quantiles de la distribution cible : si l'on veut 53% de la
-        masse en classe 0, le premier seuil est le quantile 0.53 d'une normale
-        standard. La couverture est ainsi presque satisfaite des
-        l'initialisation, ce qui laisse l'optimisation se consacrer a
-        l'ordinalite plutot qu'a rattraper une echelle.
+    #: Espace de recherche. Uniquement des parametres dont on a constate
+    #: empiriquement qu'ils changent le resultat et dont la bonne valeur reste
+    #: incertaine -- pas `clm_tau` (deduit de l'espacement des seuils) ni
+    #: `clm_scale` (constante calculee sur les donnees).
+    OPTUNA_SPACE = {
+        # Ponderation des deux termes distributionnels. Calibrees a la main a
+        # 30 / 3000 a une epoque ou la couverture etait inerte (seuils figes,
+        # donc satisfaite gratuitement) : ces valeurs n'ont plus de raison
+        # d'etre bonnes maintenant que les seuils sont appris.
+        'lambda_ordinality': ('float_log', 1.0, 300.0),
+        'lambda_coverage': ('float_log', 10.0, 30000.0),
+        # Decale la distribution cible vers les classes hautes. C'est le
+        # parametre qui encode "le risque existe sans evenement" -- les donnees
+        # ne peuvent PAS l'apprendre, elles n'observent que les realisations.
+        'coverage_risk_shift': ('float', 0.0, 1.0),
+        # 0 = aucun label jamais clampe (regime cible). Laisse ouvert : c'est
+        # une hypothese de conception, pas un fait etabli.
+        'label_clamp_prob': ('float', 0.0, 1.0),
+        # Le bloc statique ne porte que ~16 lignes d'information distinctes
+        # (features constantes par cluster) : le surdimensionner garantit la
+        # memorisation.
+        'n_internal_spatial': ('int', 4, 48),
+        'weight_decay_theta': ('float_log', 1e-4, 1e-1),
+        'lr_x': ('float', 0.1, 1.0),
+    }
 
-        Remplace les seuils absolus en `sqrt(y)/sigma` : ceux-ci supposaient que
-        le graphe produirait `s` dans [0.8, 3.3], ce que rien ne garantit une
-        fois le clampage retire -- d'ou l'effondrement en classe 0 observe.
-        Seul l'ORDRE de `s` importe pour le scoring monotone ; son echelle est
-        donc un artefact a neutraliser, pas une grandeur a apprendre."""
+    def suggest_loss_params(self, trial, loss_name):
+        """Detourne le point d'entree Optuna du pipeline.
+
+        `train_optuna` a ete ecrit pour chercher des hyperparametres de LOSS.
+        Le PC-graph n'en a aucune (`get_loss` retourne un `_NoOpCriterion`,
+        l'energie EST le signal) : cette methode n'aurait donc rien a proposer.
+
+        On l'utilise a la place pour tirer les parametres du MODELE, ranges
+        dans `_optuna_model_params` que `make_model` fusionne ensuite. C'est le
+        seul point d'accroche disponible sans dupliquer `train_optuna` (~200
+        lignes du pipeline partage) : il est appele une fois par essai, AVANT
+        `make_model`. On retourne `{}` pour que `get_loss` reste inchange."""
+        space = {}
+        for name, spec in self.OPTUNA_SPACE.items():
+            kind, lo, hi = spec
+            if kind == 'int':
+                space[name] = trial.suggest_int(name, int(lo), int(hi))
+            elif kind == 'float_log':
+                space[name] = trial.suggest_float(name, lo, hi, log=True)
+            else:
+                space[name] = trial.suggest_float(name, lo, hi)
+
+        self._optuna_model_params = space
+        # Memorise par numero d'essai : a la fin de `train_optuna`, les poids du
+        # meilleur essai sont charges dans `self.model`, qui est le modele
+        # construit au DERNIER essai. Comme `n_internal` est fixe (128) et que
+        # `n_internal_spatial` ne change que la repartition A L'INTERIEUR du
+        # masque -- un buffer de forme constante -- `load_state_dict` passe
+        # silencieusement et laisse `internal_spatial_slice` desaccorde du
+        # masque charge. `restore_optuna_trial` reconstruit le bon modele.
+        if not hasattr(self, '_optuna_trial_params'):
+            self._optuna_trial_params = {}
+        self._optuna_trial_params[trial.number] = dict(space)
+        # Les seuils initiaux sont estimes par un passage avant sur le modele :
+        # ils dependent donc des poids de CET essai. Sans invalidation, tous les
+        # essais reutiliseraient ceux du premier. `_clm_scale_cache` et
+        # `_dept_ids_cache` ne dependent que des donnees et peuvent rester.
+        self._clm_thr_cache = None
+        logger.info(f'[PCGraph][optuna] parametres modele proposes : '
+                    + ', '.join(f'{k}={v:.4g}' if isinstance(v, float) else f'{k}={v}'
+                                for k, v in space.items()))
+        return {}
+
+    def _departement_ids(self):
+        """Departements presents dans le train, tries -- l'ordre fixe les lignes
+        de la table de seuils."""
+        if getattr(self, '_dept_ids_cache', None) is None:
+            di = ids_columns.index('departement')
+            seen = set()
+            for _, labels, _ in self.train_loader:
+                seen.update(labels[:, di, -1].view(-1).long().cpu().tolist())
+            self._dept_ids_cache = sorted(seen)
+        return self._dept_ids_cache
+
+    def _clm_scale(self):
+        """Constante de mise a l'echelle de `s` : l'ecart-type de la cible
+        reelle transformee (`sqrt(y)`), calcule une fois sur le train.
+
+        CONSTANTE, et non l'ecart-type de `s` lui-meme : diviser `s` par sa
+        propre dispersion effacerait son amplitude et rendrait la loss
+        incapable de voir un effondrement (cf. `PCGraphModel.clm_scale`). Ici
+        le diviseur ne bouge jamais, donc un `s` qui retrecit produit bien des
+        probabilites differentes -- et une couverture degradee."""
+        if getattr(self, '_clm_scale_cache', None) is not None:
+            return self._clm_scale_cache
+
+        y_idx = len(ids_columns) + targets_columns.index(self.scoring_target_column())
+        ys = [labels[:, y_idx, -1].view(-1).float().clamp_min(0).cpu()
+              for _, labels, _ in self.train_loader]
+        scale = float(torch.sqrt(torch.cat(ys)).std())
+        self._clm_scale_cache = max(scale, 1e-6)
+        logger.info(f'[PCGraph] echelle CLM (constante, ecart-type de sqrt(y)) : {scale:.4f}')
+        return self._clm_scale_cache
+
+    def _clm_thresholds(self, model, n_classes):
+        """Seuils initiaux du CLM, places aux quantiles EMPIRIQUES de `s`.
+
+        On mesure d'abord la distribution reelle de `s / clm_scale` produite par
+        le modele a l'initialisation, puis on coupe a ses quantiles reproduisant
+        la distribution cible `q` : si l'on veut 53% de la masse en classe 0, le
+        premier seuil est le quantile 0.53 des `s` observes.
+
+        Les quantiles d'une normale THEORIQUE ne conviennent pas : ils supposent
+        que `s` sorte deja centre-reduit, ce que rien ne garantit une fois la
+        standardisation retiree. Mesure sur ce jeu de donnees -- `s / clm_scale`
+        s'etend sur [-0.95, 0.80] a l'initialisation alors que les quantiles
+        normaux placeraient des seuils jusqu'a 2.56. Les trois seuils hauts ne
+        seraient jamais franchis (distribution [7272, 3179, 0, 0, 0]) et leurs
+        sigmoides seraient saturees (gradient ~0.003), donc pratiquement
+        immobiles malgre leur caractere apprenable.
+
+        Les seuils restent APPRIS : ceci n'est qu'un point de depart, choisi
+        pour que les cinq classes soient peuplees et les gradients sains des le
+        premier pas."""
         if getattr(self, '_clm_thr_cache', None) is not None:
             return self._clm_thr_cache
 
-        counts = torch.zeros(n_classes)
-        for _, labels, _ in self.train_loader:
-            t, _ = self.compute_weights_and_target(labels, -1, ids_columns, False, None, -1)
-            counts += torch.bincount(t.view(-1).long().cpu(), minlength=n_classes).float()
-        q = counts / counts.sum().clamp_min(1.0)
+        di = ids_columns.index('departement')
+        depts = self._departement_ids()
+        counts = torch.zeros(len(depts), n_classes)
+        s_vals, d_vals = [], []
+        was_training = model.training
+        model.eval()
+        with torch.no_grad():
+            for inputs, labels, _ in self.train_loader:
+                t, _ = self.compute_weights_and_target(labels, -1, ids_columns, False, None, -1)
+                d = labels[:, di, -1].view(-1).long().cpu()
+                k = t.view(-1).long().cpu()
+                for row, dept in enumerate(depts):
+                    msk = d == dept
+                    if msk.any():
+                        counts[row] += torch.bincount(k[msk], minlength=n_classes).float()
+                _, lg, _ = model(self.compute_inputs(inputs, -1, 'current'))
+                s_vals.append(lg[:, 0].detach().cpu())
+                d_vals.append(d)
+        model.train(was_training)
 
-        # quantile normal standard : Phi^-1(p) = sqrt(2) * erfinv(2p - 1)
-        cum = torch.cumsum(q, 0)[:-1].clamp(1e-4, 1 - 1e-4)
-        thr = (torch.erfinv(2 * cum - 1) * (2 ** 0.5)).tolist()
-        for i in range(1, len(thr)):
-            thr[i] = max(thr[i], thr[i - 1] + 1e-3)
+        s = torch.cat(s_vals) / float(model.clm_scale)
+        d_all = torch.cat(d_vals)
+        thr = []
+        for row, dept in enumerate(depts):
+            msk = d_all == dept
+            q = counts[row] / counts[row].sum().clamp_min(1.0)
+            cum = torch.cumsum(q, 0)[:-1].clamp(1e-4, 1 - 1e-4)
+            # Quantiles de `s` DANS ce departement : chacun a sa propre echelle
+            # de risque, donc son propre decoupage. `s` reste commun -- on ne
+            # fragmente pas les donnees, seul le seuillage est local.
+            vals = s[msk] if int(msk.sum()) > 10 else s
+            r = torch.quantile(vals, cum).tolist()
+            for i in range(1, len(r)):
+                r[i] = max(r[i], r[i - 1] + 1e-3)
+            thr.append(r)
 
         self._clm_thr_cache = thr
-        logger.info('[PCGraph] seuils CLM (unites standardisees, quantiles de q) : '
-                    + ' '.join(f'{v:.3f}' for v in thr))
+        logger.info(f'[PCGraph] seuils CLM initiaux par departement (quantiles '
+                    f'empiriques de s, ecart-type {float(s.std()):.4f}) :\n'
+                    + '\n'.join(f'    dept {d:>3} : ' + ' '.join(f'{v:7.3f}' for v in r)
+                                 for d, r in zip(depts, thr)))
+
         return thr
 
     def _prepare_energy_inputs(self, data):
@@ -1278,6 +1552,22 @@ class PCGraphClmTraining(PCGraphCornTraining):
         return self._energy_and_terms(
             data, lambda x, y: (self.model.training_energy(x, y), {})
         )
+
+
+    def _predict_tensor(self, X, *args, **kwargs):
+        """Pose le departement du lot avant de deleguer.
+
+        `forward(x, z_prev)` ne peut pas le recevoir sans casser le contrat
+        attendu par le pipeline herite, et il n'est pas recuperable depuis les
+        features (`cluster_encoder` est ambigu). C'est le seul endroit du chemin
+        de prediction ou le modele est appele ET ou les identifiants sont
+        disponibles -- d'ou cette surcharge de trois lignes plutot qu'une
+        duplication de `_predict_tensor`."""
+        try:
+            self.model.set_current_departement(X[1][:, ids_columns.index('departement'), -1])
+            return super()._predict_tensor(X, *args, **kwargs)
+        finally:
+            self.model.set_current_departement(None)
 
 
 class PCGraphGenClmTraining(PCGraphClmTraining):

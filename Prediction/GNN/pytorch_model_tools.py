@@ -56,6 +56,23 @@ np.random.seed(42)
 g = torch.Generator()
 g.manual_seed(42)
 
+def round_loss_params(loss_params, sig=4):
+    """Arrondit les floats d'un dict de parametres de loss, pour la lisibilite
+    des logs et des `optuna_*.pkl`.
+
+    A 4 chiffres SIGNIFICATIFS, jamais a un nombre fixe de decimales. Plusieurs
+    parametres sont tires en log-uniforme sur des plages basses -- `cllt_wkmin`
+    sur [1e-4, 0.1], `tviolation` sur [1e-4, 0.5], `cllt_t` sur [1e-3, 0.5] --
+    et le `round(v, 2)` d'origine envoyait 26 a 57 % des tirages sur exactement
+    0.0, ne laissant qu'une dizaine de valeurs distinctes a explorer. Il
+    annulait au passage le garde-fou `max(t_viol, 1e-6)` de
+    `suggest_loss_params`, qui s'execute AVANT, et desynchronisait les
+    `trial.params` enregistres par Optuna (non arrondis) des valeurs sur
+    lesquelles l'entrainement tournait reellement."""
+    return {k: float(f"{v:.{sig}g}") if isinstance(v, float) else v
+            for k, v in loss_params.items()}
+
+
 def plot_score_per_epochs(score_per_epoch, dir_output, name):
     plt.figure(figsize=(15,5))
     scores = score_per_epoch['score']
@@ -6780,9 +6797,7 @@ class Training():
 
             # Suggest parameters for this loss
             loss_params = self.suggest_loss_params(trial, loss_name)
-            # Round float params to 2 decimal places for readability
-            loss_params = {k: round(v, 2) if isinstance(v, float) else v
-                           for k, v in loss_params.items()}
+            loss_params = round_loss_params(loss_params)
 
             # Instantiate loss
             try:
@@ -7343,6 +7358,20 @@ class Training():
                     else:    
                         self.criterion.calculate_class_coverage(self.df_train, cluster_col=cluster_col, departement_col=department_col, target_col=self.target_name, dir_output=self.dir_log)
             
+            # Rebuild the model on the BEST trial's architecture before loading its
+            # weights. `self.model` is the model built during the LAST trial: if the
+            # search varies architectural params (PC-graph does, via its
+            # `suggest_loss_params` override), loading the best trial's state_dict
+            # into it leaves non-buffer attributes out of sync with the loaded
+            # buffers. No-op for models whose architecture is fixed across trials.
+            if has_method(self, 'restore_optuna_trial'):
+                try:
+                    rebuilt = self.restore_optuna_trial(best_trial.number, graph, custom_model_params)
+                    if rebuilt is not None:
+                        self.model = rebuilt
+                except Exception as e:
+                    logger.warning(f"Could not rebuild model for best trial {best_trial.number}: {e}")
+
             # Load best weights
             if best_trial.number in best_models_states:
                 self.model.load_state_dict(best_models_states[best_trial.number])
