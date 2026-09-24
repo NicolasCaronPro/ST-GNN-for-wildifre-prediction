@@ -501,7 +501,15 @@ class FederatedALA(FederatedLearningModel):
         class_freq = self.global_model.get_class_freq(df_train)
         
         for run in range(self.n_run):
-            
+
+            # Seed distincte par run + ré-initialisation des poids, pour que les n_run soient indépendants
+            seed = 42 + run
+            torch.manual_seed(seed)
+            np.random.seed(seed)
+            random.seed(seed)
+            if run > 0:
+                initiate_model, model_params = self.global_model.make_model(graph, custom_model_params=None)
+
             self.score_per_epochs = {}
             self.model_params = deepcopy(model_params)
             self.global_model.model = deepcopy(initiate_model)
@@ -513,7 +521,6 @@ class FederatedALA(FederatedLearningModel):
             
             best_global_score = float('-inf')
             patience_counter = 0  # Compteur pour l'arrêt anticipé
-            seed = int(random.random())
 
             for epoch in range(global_epochs):
                 print(f"\n--- Global Epoch {epoch + 1}/{global_epochs} ---")
