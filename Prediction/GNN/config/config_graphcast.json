@@ -296,11 +296,7 @@
     "train_script": "train_any_model.py",
     "models": [
         {
-            "type": "graphCastGRU",
-            "use_temporal_as_edges": false,
-            "mesh_file": "icospheres/icospheres_0_1_2_3_4.json.gz",
-            "under_sampling": "search",
-            "over_sampling": "full",
+            "type": "GRU",
             "kdays": 10,
             "horizon": 0,
             "nbfeatures": "all",
@@ -311,7 +307,17 @@
             "n_run": 1,
             "use_log": false,
             "params": {},
-            "loss_param_search": false
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "loss_param_search": false,
+            "use_feature_horizon": false
         }
     ],
     "hyperparameters": {

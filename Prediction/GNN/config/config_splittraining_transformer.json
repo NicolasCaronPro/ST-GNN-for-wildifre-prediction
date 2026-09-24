@@ -266,7 +266,7 @@
     "BayesSearch": false,
     "doTest": true,
     "doTestdepartement": false,
-    "doTrain": true,
+    "doTrain": false,
     "encoder": false,
     "database": false,
     "database2D": false,
@@ -295,25 +295,28 @@
     "train_script": "train_any_model.py",
     "models": [
         {
-            "type": "TransformerNet",
-            "use_temporal_as_edges": false,
-            "mesh_file": null,
-            "under_sampling": "search",
-            "over_sampling": "full",
+            "type": "GRU",
             "kdays": 10,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "nbsinister-kmeans-5-Class-Dept",
             "task": "classification",
             "loss": "mcewk",
             "out_channels": 5,
             "n_run": 1,
-            "federated_cluster": "saison",
-            "cut_layer": "transformer_encoder_channel",
-            "input_server_model": 256,
             "params": {
                 "channel_attention": false
             },
-            "loss_param_search": false
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "loss_param_search": false,
+            "use_feature_horizon": false
         }
     ],
     "hyperparameters": {

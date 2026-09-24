@@ -76,7 +76,7 @@
     "BayesSearch": false,
     "doTest": false,
     "doTestdepartement": false,
-    "doTrain": true,
+    "doTrain": false,
     "encoder": false,
     "database": false,
     "database2D": false,
@@ -84,7 +84,7 @@
     "doKMEANS": false,
     "point": false,
     "graph": true,
-    "quick": false,
+    "quick": true,
     "shift": 5,
     "ncluster": 5,
     "thresh_kmeans": 0.2,
@@ -106,19 +106,25 @@
     "models": [
         {
             "type": "GRU",
-            "use_temporal_as_edges": false,
-            "mesh_file": null,
-            "under_sampling": "search",
-            "over_sampling": "full",
             "kdays": 0,
             "nbfeatures": "all",
-            "target": "nbsinister-quantile-5-Class-Dept",
+            "target": "nbsinister-kmeans-5-Class-Dept",
             "task": "classification",
             "loss": "weightedcrossentropy",
             "out_channels": 5,
             "n_run": 1,
             "params": {},
-            "loss_param_search": true
+            "use_temporal_as_edges": false,
+            "mesh_file": null,
+            "under_sampling": "search",
+            "over_sampling": "full",
+            "aggregation_method": "weighted",
+            "federated_cluster": "cluster",
+            "params_to_update": [
+                "linear2"
+            ],
+            "loss_param_search": false,
+            "use_feature_horizon": false
         }
     ],
     "hyperparameters": {
