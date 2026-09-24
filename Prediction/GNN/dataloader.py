@@ -2605,9 +2605,89 @@ def wrapped_train_deep_learning_1D(params):
                                                params['epochs'], params['PATIENCE_CNT'],  params['CHECKPOINT'],
                                                custom_model_params=custom_model_params, features_importance=False,
                                                use_log=params.get('use_log', True))
-    
+
     wrapped_model.train(params['graph'], params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'],
                         min_epochs=params['min_epochs'], custom_model_params=custom_model_params)
+    save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
+
+    del model
+    del wrapped_model
+    gc.collect()
+
+def wrapped_train_deep_learning_1D_meta(params):
+    torch.cuda.empty_cache()
+    model = params['model']
+    torch_structure = params['torch_structure']
+    infos = params['infos']
+    features = params['features_selected_str']
+    dir_output = params['dir_output']
+    n_run = params['n_run']
+    loss_param_search = params.get('loss_param_search', False)
+
+    under_sampling, over_sampling, kdays, horizon, nbfeatures, weight_type, target_name, task_type, loss = infos.split('_')
+
+    train_dataset = params['train_dataset'].copy(deep=True)
+    val_dataset = params['val_dataset'].copy(deep=True)
+    test_dataset = params['test_dataset'].copy(deep=True)
+
+    logger.info(f'Fitting meta model {model}_{infos}')
+
+    if task_type == 'classification' or task_type == 'ordinal-classification':
+        train_dataset['class'] = train_dataset[target_name]
+
+    logger.info(f'Train set shape : -> {train_dataset.shape}')
+
+    train_dataset['weight'] = 1.0
+    val_dataset['weight'] = 1.0
+    test_dataset['weight'] = 1.0
+
+    custom_model_params = params.get('custom_model_params')
+
+    if torch_structure != 'Model_Torch':
+        raise ValueError(f'{torch_structure} not implemented for meta training')
+
+    wrapped_model = ModelMetaTorch(model_name=model,
+                                batch_size=params['batch_size'],
+                                nbfeatures=nbfeatures,
+                                lr=params['lr'],
+                                delta_lr=params['delta_lr'],
+                                patience_cnt_lr=params['PATIENCE_CNT_LR'],
+                                target_name=target_name,
+                                out_channels=params['out_channels'],
+                                features_name=features,
+                                ks=kdays,
+                                dir_log=dir_output / Path(f'check_{params["scaling"]}/{params["prefix"]}/Meta-{model}_{infos}'),
+                                name=f'Meta-{model}_{infos}',
+                                task_type=task_type,
+                                loss=loss,
+                                device=params['device'],
+                                under_sampling=under_sampling,
+                                over_sampling=over_sampling,
+                                n_run=n_run,
+                                horizon=int(horizon),
+                                loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False),
+                                training_mode='meta',
+                                meta_task_column=params.get('meta_task_column', 'departement'),
+                                meta_known_departments=params.get('meta_known_departments'),
+                                meta_random_tasks=params.get('meta_random_tasks'),
+                                meta_n_tasks_per_iteration=params.get('meta_n_tasks_per_iteration'),
+                                meta_query_ratio=params.get('meta_query_ratio', 0.5),
+                                meta_inner_lr=params.get('meta_inner_lr', 0.01),
+                                meta_inner_steps=params.get('meta_inner_steps', 1),
+                                meta_seed=params.get('meta_seed', 42),
+                                )
+
+    # Training.fit() expects X (ids + features only) and y (ids + all target columns)
+    # separately, then re-joins them internally: build that split from the already-merged
+    # train/val/test frames produced upstream by shift_target().
+    X_train = train_dataset[ids_columns + features]
+    X_val = val_dataset[ids_columns + features]
+    X_test = test_dataset[ids_columns + features]
+
+    wrapped_model.fit(params['graph'], X_train, train_dataset, X_val, val_dataset, X_test, test_dataset,
+                       params['PATIENCE_CNT'], params['CHECKPOINT'], params['epochs'],
+                       custom_model_params=custom_model_params, use_log=params.get('use_log', True))
+
     save_object(wrapped_model, f'{wrapped_model.name}.pkl', wrapped_model.dir_log)
 
     del model
@@ -4470,7 +4550,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
         
         elif model_type in ['LSTM', 'DilatedCNN', 'GRU', 'NetMLP', 'TransformerNet']:
             model_i = Model_Torch(model_name=model_type,
-                                    batch_size=batch_size,
+                                    batch_size=input_params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
                                     delta_lr=input_params['delta_lr'],
@@ -4487,7 +4567,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    loss_param_search=loss_param_search, use_feature_horizon=input_params.get('use_feature_horizon', False)
                                     )
         elif model_type in ['GNN']:
             mesh_file = 'icospheres/icospheres_0.json.gz'
@@ -4498,7 +4578,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
             model_i = ModelGNN(mesh=mesh,
                                mesh_file=mesh_file,
                                 model_name=model_type,
-                                    batch_size=batch_size,
+                                    batch_size=input_params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
                                     delta_lr=input_params['delta_lr'],
@@ -4515,11 +4595,11 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     under_sampling=under_sampling,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    loss_param_search=loss_param_search, use_feature_horizon=input_params.get('use_feature_horizon', False)
                                     )
         elif model_type in ['Zhang']:
             model_i = ModelCNN(model_name=model_type,
-                                    batch_size=batch_size,
+                                    batch_size=input_params['batch_size'],
                                     nbfeatures=nbfeatures,
                                     lr=input_params['lr'],
                                     delta_lr=input_params['delta_lr'],
@@ -4539,7 +4619,7 @@ def wrapped_train_sklearn_api_and_pytorch_voting_model(
                                     image_per_node=True,
                                     over_sampling=over_sampling,
                                     n_run=n_run,
-                                    loss_param_search=loss_param_search, use_feature_horizon=params.get('use_feature_horizon', False)
+                                    loss_param_search=loss_param_search, use_feature_horizon=input_params.get('use_feature_horizon', False)
                                     )
 
         models_list.append(model_i)

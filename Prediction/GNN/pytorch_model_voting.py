@@ -345,7 +345,7 @@ class ModelKnowledgeDistillation(Training):
             sub_teachers = np.asarray([estimator for estimator in self.teacher.best_estimator_])
             weights2use = self.teacher.weights_for_model
             weights2use = np.asarray(weights2use)
-            key = np.argsort(weights2use)
+            key = self.teacher.model_order(weights2use)
             key = np.flip(key)
             sub_teachers = sub_teachers[np.asarray(key)]
             score_0 = 0
@@ -513,6 +513,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         self.cv_results_ = []
         self.is_fitted_ = [True] * len(self.best_estimator_)
         self.weights_for_model = []
+        self.agg_for_model = []
         for i, model in enumerate(self.best_estimator_):
             model.dir_log = self.dir_log / '..' / model.name
             print(f'Fitting model -> {model.name}')
@@ -535,20 +536,27 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             test_output = test_output.detach().cpu().numpy()
 
             test_output = test_output[:, 0]
-            y_test_val = y_test_val[:, :, 0]
-            
-            y_test_val = y_test_val.detach().cpu().numpy()[:, -1]
-                
+            y_val_full = y_test_val[:, :, 0].detach().cpu().numpy()
+
+            y_test_val = y_val_full[:, -1]
+
             model.target_name = target_name_model
 
             score_model = self.score_with_prediction(y_test_val, test_output)
             self.weights_for_model.append(score_model)
 
+            # Score agg (validation, weight > 0) utilisé pour ordonner les modèles
+            mask = y_val_full[:, weight_index] > 0
+            agg_scores = model._compute_run_scores(y_test_val[mask], test_output[mask],
+                                                   y_val_full[mask, date_index], y_val_full[mask, graph_id_index])
+            self.agg_for_model.append(agg_scores['agg'])
+
         self.weights_for_model = np.asarray(self.weights_for_model)
+        self.agg_for_model = np.asarray(self.agg_for_model)
         # Affichage des poids et des modèles
         print("\n--- Final Model Weights ---")
-        for model, weight in zip(self.best_estimator_, self.weights_for_model):
-            print(f"Model: {model.name}, Weight: {weight:.4f}")
+        for model, weight, agg in zip(self.best_estimator_, self.weights_for_model, self.agg_for_model):
+            print(f"Model: {model.name}, Weight (IoU): {weight:.4f}, Agg: {agg:.4f}")
 
         self.plot_weights_by_target()
 
@@ -595,7 +603,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         if hard_or_soft == 'hard':
             if top_model != 'all':
                 top_model = int(top_model)
-                key = np.argsort(weights2use)
+                key = self.model_order(weights2use)
                 models_list = models_list[key]
                 models_list = models_list[-top_model:]
                 #weights2use = weights2use[np.asarray(key)]
@@ -630,7 +638,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             return aggregated_pred, y.detach().cpu().numpy()
         elif hard_or_soft == 'None':
             top_model = int(top_model)
-            key = np.argsort(weights2use)
+            key = self.model_order(weights2use)
             idx = key[-top_model]
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
@@ -654,6 +662,13 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
             
             return predictions, y
         
+    def model_order(self, weights2use):
+        """Indices des modèles triés par score agg croissant (repli sur weights2use si agg indisponible)."""
+        agg = getattr(self, 'agg_for_model', None)
+        if agg is not None and len(agg) == len(weights2use):
+            return np.argsort(np.asarray(agg))
+        return np.argsort(np.asarray(weights2use))
+
     def get_weights(self, top_model, return_self_model_idx=False, name=None):
         weights = np.asarray(self.weights_for_model)
         n_models = len(weights)
@@ -663,7 +678,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
         names = np.asarray([est.name for est in estimators])
 
         # Indices triés par poids (croissant)
-        order = np.argsort(weights)
+        order = self.model_order(weights)
 
         if top_model != 'all':
             k = int(top_model)
@@ -701,7 +716,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         if top_model != 'all':
                 top_model = int(top_model)
-                key = np.argsort(weights2use)
+                key = self.model_order(weights2use)
                 models_list = models_list[np.asarray(key)]
                 models_list = models_list[-top_model:]
                 #weights2use = weights2use[np.asarray(key)]
@@ -714,7 +729,7 @@ class ModelVotingPytorchAndSklearn(RegressorMixin, ClassifierMixin):
 
         if hard_or_soft == 'None':
             top_model = int(top_model)
-            idx = np.argsort(weights2use)[-top_model]
+            idx = self.model_order(weights2use)[-top_model]
             estimator = self.best_estimator_[idx]
             if estimator.target_name == self.target_name:
                 pred, y = estimator.predict_proba(X, return_y=True, prediction_type=prediction_type)

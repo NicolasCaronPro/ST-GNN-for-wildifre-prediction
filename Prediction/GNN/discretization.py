@@ -17,7 +17,7 @@ class KMeansRisk:
 
     def fit(self, X, y):
         """
-        Ajuste le modèle KMeans aux données.
+        Ajuste le modèle KMeans aux données.mask = (ids[:, 0] == month) & (ids[:, 1] == graph_id)
 
         :param X: Données à ajuster.
         """
@@ -865,6 +865,20 @@ class PreprocessorConv:
 
         return convolve1d(X, kernel, mode='nearest', axis=0).reshape(-1)
 
+    def _causal_window(self, X, kernel_size):
+        """
+        Sliding causal window along the time axis (axis 0), zero-padded before the first day.
+
+        :param X: Input array (time first).
+        :param kernel_size: Size of the centred kernel; the causal window keeps its centre and past half.
+        :return: Array of shape X.shape + (kernel_size // 2 + 1,).
+        """
+        half = kernel_size // 2
+        X = np.asarray(X, dtype=float)
+        pad = [(half, 0)] + [(0, 0)] * (X.ndim - 1)
+        padded = np.pad(X, pad, mode='constant', constant_values=0.0)
+        return np.lib.stride_tricks.sliding_window_view(padded, half + 1, axis=0)
+
     def _sum_convolution(self, X, kernel_size):
         """
         Apply sum operation on the input with a sliding window of size `kernel_size`.
@@ -876,10 +890,8 @@ class PreprocessorConv:
         from scipy.ndimage import uniform_filter1d
 
         if self.persistence:
-            mask = np.zeros_like(X, dtype=float)
-            mask[kernel_size // 2:] = 0
-            mask[:kernel_size // 2] = 1  # Persistence applies only to later values
-            X = X * mask
+            # Causal window: current day and the kernel_size // 2 previous days
+            return self._causal_window(X, kernel_size).sum(axis=-1)
 
         return uniform_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0) * kernel_size
 
@@ -894,115 +906,147 @@ class PreprocessorConv:
         from scipy.ndimage import maximum_filter1d
 
         if self.persistence:
-            mask = np.zeros_like(X, dtype=float)
-            mask[kernel_size // 2:] = 0
-            mask[:kernel_size // 2] = 1
-            X = X * mask
+            # Causal window: current day and the kernel_size // 2 previous days
+            return self._causal_window(X, kernel_size).max(axis=-1)
 
         res = maximum_filter1d(X, size=kernel_size, mode='constant', origin=0, axis=0)
         return res
+
+    def _convolve(self, x, kernel_size):
+        """
+        Apply the selected convolution to a 1D daily series.
+
+        :param x: 1D array, one value per consecutive calendar day.
+        :param kernel_size: Size of the convolution kernel.
+        :return: 1D convoluted array of the same length.
+        """
+        if kernel_size == 1:
+            return np.zeros_like(x, dtype=np.float32)
+
+        # Apply Laplace convolution if specified
+        elif self.conv_type == 'laplace':
+            laplace_result = self._laplace_convolution(x, kernel_size)
+            return np.asarray(laplace_result).reshape(-1)
+
+        # Apply mean convolution if specified
+        elif self.conv_type == 'mean':
+            mean_result = self._mean_convolution(x, kernel_size)
+            #return np.asarray((x + mean_result)).reshape(-1)
+            return np.asarray(mean_result).reshape(-1)
+
+        # Apply laplace+mean convolutions if specified
+        elif self.conv_type == 'laplace+mean':
+            laplace_result = self._laplace_convolution(x, kernel_size)
+            mean_result = self._mean_convolution(x, kernel_size)
+            return np.asarray((laplace_result + mean_result)).reshape(-1)
+
+        # Apply sum operation if specified
+        elif self.conv_type == 'sum':
+            sum_result = self._sum_convolution(x, kernel_size)
+            return np.asarray(sum_result).reshape(-1)
+
+        # Apply max operation if specified
+        elif self.conv_type == 'max':
+            max_result = self._max_convolution(x, kernel_size)
+            return np.asarray(max_result).reshape(-1)
+
+        elif self.conv_type == 'median':
+            med_result = self.median_convolution(x, kernel_size)
+            #return np.asarray((x + med_result)).reshape(-1)
+            return np.asarray(med_result).reshape(-1)
+
+        elif self.conv_type == 'laplace+median':
+            laplace_result = self._laplace_convolution(x, kernel_size)
+            med_result = self.median_convolution(x, kernel_size)
+            return np.asarray((laplace_result + med_result)).reshape(-1)
+        
+        elif self.conv_type == 'gradient':
+            gradient_result = self._gradient_convolution(x, kernel_size)
+            return np.asarray(gradient_result).reshape(-1)
+
+        elif self.conv_type == 'gaussian':
+            result = self._gaussian_convolution(x, kernel_size)
+            return np.asarray(result).reshape(-1)
+
+        elif self.conv_type == 'cubic':
+            result = self._cubic_convolution(x, kernel_size)
+            return np.asarray(result).reshape(-1)
+        
+        elif self.conv_type == 'quartic':
+            result = self._quartic_convolution(x, kernel_size)
+            return np.asarray(result).reshape(-1)
+        
+        elif self.conv_type == 'circular':
+            result = self._circular_convolution(x, kernel_size)
+            return np.asarray(result).reshape(-1)
+
+        else:
+            raise ValueError(
+                f"Error: conv_type must be in  ['laplace', 'mean', 'laplace+mean', 'sum', 'max'], got {self.conv_type}"
+            )
 
     def apply(self, X, ids):
         """
         Apply the convolution based on the given type to the input data.
 
-        :param X: Input array of shape (n_samples, n_features).
-        :param ids: Array of shape (n_samples, len(id_col)) if `id_col` is a list, otherwise (n_samples, 1).
+        Each zone is convolved over its whole daily series, ordered by date, so that the window
+        covers the actual days before and after (it neither stops at the end of a month nor joins
+        the same month of different years). Days absent from the data (e.g. years belonging to
+        another partition) are treated as 0, like the zero padding at the borders of the series.
+        For the 'Specialized' kernel, each day is smoothed with the kernel size of its own season.
+
+        :param X: Input array of shape (n_samples,) or (n_samples, 1).
+        :param ids: Array of shape (n_samples, 3) following id_col, which must contain
+                    'month_non_encoder', 'date' (integer day index) and one zone column.
         :return: Processed array with convolutions applied.
         """
-        X_processed = np.zeros_like(X, dtype=np.float32).reshape(-1)
-        unique_ids = np.unique(ids, axis=0)
+        for col in ['month_non_encoder', 'date']:
+            if col not in self.id_col:
+                raise ValueError(f"Error: '{col}' must be in id_col, got {self.id_col}.")
+        zone_cols = [c for c in self.id_col if c not in ['month_non_encoder', 'date']]
+        if len(zone_cols) != 1:
+            raise ValueError(f"Error: id_col must contain exactly one zone column, got {self.id_col}.")
+        month_idx = self.id_col.index('month_non_encoder')
+        date_idx = self.id_col.index('date')
+        zone_idx = self.id_col.index(zone_cols[0])
 
-        for unique_id in unique_ids:
+        ids = np.asarray(ids)
+        X = np.asarray(X, dtype=np.float64).reshape(-1)
+        X_processed = np.zeros_like(X, dtype=np.float32)
 
-            if len(self.id_col) > 1 and not isinstance(self.id_col, str):
-                mask = (ids[:, 0] == unique_id[0]) & (ids[:, 1] == unique_id[1])
-            else:
-                mask = ids[:, 0] == unique_id[0]
+        for zone in np.unique(ids[:, zone_idx]):
+            mask = ids[:, zone_idx] == zone
+            x_z = X[mask]
+            dates_z = ids[mask, date_idx].astype(int)
+            months_z = ids[mask, month_idx].astype(int)
 
-            if not np.any(mask):
-                continue
+            # One value per day: duplicated (zone, date) rows must carry the same value
+            udates, first_idx, inverse = np.unique(dates_z, return_index=True, return_inverse=True)
+            x_u = x_z[first_idx]
+            if not np.allclose(x_z, x_u[inverse], equal_nan=True):
+                raise ValueError(f"Error: rows sharing ({zone_cols[0]}={zone}, date) have different values.")
+            months_u = months_z[first_idx]
 
+            # Dense daily series between the first and last day of this zone
+            offset = udates - udates.min()
+            dense = np.zeros(offset.max() + 1, dtype=np.float64)
+            dense[offset] = x_u
+
+            out_u = np.zeros(len(udates), dtype=np.float32)
             if self.kernel == 'Specialized':
-                # Handle month_non_encoder
-                if 'month_non_encoder' in self.id_col:
-                    month_idx = self.id_col.index('month_non_encoder')
-                    month = unique_id[month_idx]
-                    season_name = self._get_season_name(month)
-                    #print(self.graph.sequences_month)
-                    kernel_size = int(self.seq[season_name][unique_id[1]]['mean_size'])
-                else:
-                    raise ValueError(
-                        "Error: 'month_non_encoder' is not specified in id_col. Please include it in id_col to proceed."
-                    )
+                seasons_u = np.asarray([self._get_season_name(int(m)) for m in months_u])
+                for season_name in np.unique(seasons_u):
+                    kernel_size = int(self.seq[season_name][zone]['mean_size'])
+                    res = self._convolve(dense, kernel_size)
+                    sel = seasons_u == season_name
+                    out_u[sel] = res[offset[sel]]
             else:
                 kernel_size = (int(self.kernel) * 2 + 1) + 2 # Add 2 to make 0 bound
+                res = self._convolve(dense, kernel_size)
+                out_u[:] = res[offset]
 
-            if kernel_size == 1:
-                X_processed[mask] = 0.0
+            X_processed[mask] = out_u[inverse]
 
-            # Apply Laplace convolution if specified
-            elif self.conv_type == 'laplace':
-                laplace_result = self._laplace_convolution(X[mask], kernel_size)
-                X_processed[mask] = laplace_result.reshape(-1)
-
-            # Apply mean convolution if specified
-            elif self.conv_type == 'mean':
-                mean_result = self._mean_convolution(X[mask], kernel_size)
-                #X_processed[mask] = (X[mask].reshape(-1) + mean_result).reshape(-1)
-                X_processed[mask] = mean_result.reshape(-1)
-
-            # Apply laplace+mean convolutions if specified
-            elif self.conv_type == 'laplace+mean':
-                laplace_result = self._laplace_convolution(X[mask], kernel_size)
-                mean_result = self._mean_convolution(X[mask], kernel_size)
-                X_processed[mask] = (laplace_result + mean_result).reshape(-1)
-
-            # Apply sum operation if specified
-            elif self.conv_type == 'sum':
-                sum_result = self._sum_convolution(X[mask], kernel_size)
-                X_processed[mask] = sum_result.reshape(-1)
-
-            # Apply max operation if specified
-            elif self.conv_type == 'max':
-                max_result = self._max_convolution(X[mask], kernel_size)
-                X_processed[mask] = max_result.reshape(-1)
-
-            elif self.conv_type == 'median':
-                med_result = self.median_convolution(X[mask], kernel_size)
-                #X_processed[mask] = (X[mask].reshape(-1) + med_result).reshape(-1)
-                X_processed[mask] = med_result.reshape(-1)
-
-            elif self.conv_type == 'laplace+median':
-                laplace_result = self._laplace_convolution(X[mask], kernel_size)
-                med_result = self.median_convolution(X[mask], kernel_size)
-                X_processed[mask] = (laplace_result + med_result).reshape(-1)
-            
-            elif self.conv_type == 'gradient':
-                gradient_result = self._gradient_convolution(X[mask], kernel_size)
-                X_processed[mask] = gradient_result
-
-            elif self.conv_type == 'gaussian':
-                result = self._gaussian_convolution(X[mask], kernel_size)
-                X_processed[mask] = result.reshape(-1)
-
-            elif self.conv_type == 'cubic':
-                result = self._cubic_convolution(X[mask], kernel_size)
-                X_processed[mask] = result.reshape(-1)
-            
-            elif self.conv_type == 'quartic':
-                result = self._quartic_convolution(X[mask], kernel_size)
-                X_processed[mask] = result.reshape(-1)
-            
-            elif self.conv_type == 'circular':
-                result = self._circular_convolution(X[mask], kernel_size)
-                X_processed[mask] = result.reshape(-1)
-
-            else:
-                raise ValueError(
-                    f"Error: conv_type must be in  ['laplace', 'mean', 'laplace+mean', 'sum', 'max'], got {self.conv_type}"
-                )
-            
         return X_processed
     
 class ScalerClassRisk:
@@ -1407,14 +1451,16 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     ###############################################################################
 
-    departement_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'departement')
-    cluster_sequence_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'cluster-encoder')
+    # Mean fire-sequence length per season and zone ('Specialized' kernel size):
+    # computed on the training partition only.
+    departement_sequence = graph.compute_sequence_month(train_dataset.copy(deep=True), graph.dataset_name, 'departement')
+    cluster_sequence_sequence = graph.compute_sequence_month(train_dataset.copy(deep=True), graph.dataset_name, 'cluster-encoder')
 
     sequences = {'Dept' : departement_sequence, 'Cluster' : cluster_sequence_sequence}
 
     conv_types = ['cubic', 'gaussian', 'circular', 'quartic', 'mean', 'median', 'max', 'sum', 'laplace', 'laplace+mean']
 
-    kernels = ['Specialized', 1, 3, 5]
+    kernels = ['Specialized', 3, 5]
     
     targets = ['nbsinister']
 
@@ -1430,9 +1476,9 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
 
     for conv_type, kernel, cls, col, tar in itertools.product(conv_types, kernels, classifier, group_col, targets):
         
-        if f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}" in train_dataset_.columns:
-            continue
-        
+        # Always (re)compute the smoothed targets, even if the columns already exist,
+        # so that targets cached from a previous version of the code are overwritten.
+
         logger.info(f"Testing with convolution type: {conv_type} {kernel} {cls} {col} {tar}")
 
         class_risk = class_risk_dict[cls]
@@ -1440,7 +1486,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         seq = sequences[col]
 
         # Sélection du préprocesseur
-        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name])
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name, 'date'])
 
         # Définition de l'objet ScalerClassRisk            
         obj = ScalerClassRisk(
@@ -1457,7 +1503,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             train_dataset_[tar].values,
             train_dataset_[tar].values,
             train_dataset_[col_name].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
@@ -1468,20 +1514,20 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             train_dataset_[tar].values,
             train_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             train_dataset_[col_name].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         val_dataset_[val_col] = obj.predict(
             val_dataset_[tar].values,
             val_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             val_dataset_[col_name].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[test_col] = obj.predict(
             test_dataset_[tar].values,
             test_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             test_dataset_[col_name].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         # Stockage des résultats
@@ -1491,7 +1537,7 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
         train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
 
         # Sélection du préprocesseur
-        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name], persistence=True)
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name, 'date'], persistence=True)
 
         # Définition de l'objet ScalerClassRisk
         class_risk = KMeansRisk(n_clusters=n_clusters)
@@ -1509,27 +1555,27 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_dataset_[train_col] = obj.predict(
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         val_dataset_[train_col] = obj.predict(
             val_dataset_['burnedareaDaily'].values,
             val_dataset_['burnedareaDaily'].values,
             val_dataset_['departement'].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[train_col] = obj.predict(
             test_dataset_['burnedareaDaily'].values,
             test_dataset_['burnedareaDaily'].values,
             test_dataset_['departement'].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         res[obj.name] = deepcopy(obj)
@@ -1552,27 +1598,27 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_dataset_[train_col] = obj.predict(
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         
         val_dataset_[train_col] = obj.predict(
             val_dataset_['nbsinisterDaily'].values,
             val_dataset_['nbsinisterDaily'].values,
             val_dataset_['departement'].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[train_col] = obj.predict(
             test_dataset_['nbsinisterDaily'].values,
             test_dataset_['nbsinisterDaily'].values,
             test_dataset_['departement'].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         
         res[obj.name] = deepcopy(obj)
@@ -1618,6 +1664,9 @@ def post_process_model(train_dataset, val_dataset, test_dataset, dir_post_proces
             :param new_cols: Liste des colonnes à ajouter
             :return: DataFrame mis à jour avec les nouvelles colonnes
             """
+            # Supprimer les anciennes versions des colonnes recalculées (sinon le join échoue)
+            original_dataset = original_dataset.drop(columns=[c for c in new_cols if c in original_dataset.columns])
+
             # Joindre les deux DataFrames sur leurs index
             original_dataset.reset_index(drop=True, inplace=True)
             updated_dataset.reset_index(drop=True, inplace=True)
@@ -1721,8 +1770,10 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
 
     ###############################################################################
 
-    departement_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'departement')
-    cluster_sequence_sequence = graph.compute_sequence_month(pd.concat([train_dataset, test_dataset]), graph.dataset_name, 'cluster-encoder')
+    # Mean fire-sequence length per season and zone ('Specialized' kernel size):
+    # computed on the training partition only.
+    departement_sequence = graph.compute_sequence_month(train_dataset.copy(deep=True), graph.dataset_name, 'departement')
+    cluster_sequence_sequence = graph.compute_sequence_month(train_dataset.copy(deep=True), graph.dataset_name, 'cluster-encoder')
 
     sequences = {'Dept' : departement_sequence, 'Cluster' : cluster_sequence_sequence}
 
@@ -1744,9 +1795,9 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
 
     for conv_type, kernel, cls, col, tar in itertools.product(conv_types, kernels, classifier, group_col, targets):
         
-        if f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}" in train_dataset_.columns:
-            continue
-        
+        # Always (re)compute the smoothed targets, even if the columns already exist,
+        # so that targets cached from a previous version of the code are overwritten.
+
         logger.info(f"Testing with convolution type: {conv_type} {kernel} {cls} {col} {tar}")
 
         class_risk = class_risk_dict[cls]
@@ -1754,7 +1805,7 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
         seq = sequences[col]
 
         # Sélection du préprocesseur
-        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name])
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name, 'date'])
 
         # Définition de l'objet ScalerClassRisk            
         obj = ScalerClassRisk(
@@ -1771,7 +1822,7 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
             train_dataset_[tar].values,
             train_dataset_[tar].values,
             train_dataset_[col_name].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_col = f"{tar}-{cls}-{n_clusters}-Class-{col}-{conv_type}-{kernel}"
@@ -1782,20 +1833,20 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
             train_dataset_[tar].values,
             train_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             train_dataset_[col_name].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         val_dataset_[val_col] = obj.predict(
             val_dataset_[tar].values,
             val_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             val_dataset_[col_name].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[test_col] = obj.predict(
             test_dataset_[tar].values,
             test_dataset_[tar].values,  # Ajout de dataset[tar] comme 2ème argument
             test_dataset_[col_name].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         # Stockage des résultats
@@ -1805,7 +1856,7 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
         train_col = f"burnedareaDaily-kmeans-{n_clusters}-Class-Dept-{conv_type}-{kernel}-Past"
 
         # Sélection du préprocesseur
-        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name], persistence=True)
+        preprocessor = PreprocessorConv(seq=seq, conv_type=conv_type, kernel=kernel, id_col=['month_non_encoder', col_name, 'date'], persistence=True)
 
         # Définition de l'objet ScalerClassRisk
         class_risk = KMeansRisk(n_clusters=n_clusters)
@@ -1823,27 +1874,27 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_dataset_[train_col] = obj.predict(
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['burnedareaDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         val_dataset_[train_col] = obj.predict(
             val_dataset_['burnedareaDaily'].values,
             val_dataset_['burnedareaDaily'].values,
             val_dataset_['departement'].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[train_col] = obj.predict(
             test_dataset_['burnedareaDaily'].values,
             test_dataset_['burnedareaDaily'].values,
             test_dataset_['departement'].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         res[obj.name] = deepcopy(obj)
@@ -1866,27 +1917,27 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
 
         train_dataset_[train_col] = obj.predict(
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['nbsinisterDaily'].values,
             train_dataset_['departement'].values,
-            train_dataset_[['month_non_encoder', col_name]].values
+            train_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         
         val_dataset_[train_col] = obj.predict(
             val_dataset_['nbsinisterDaily'].values,
             val_dataset_['nbsinisterDaily'].values,
             val_dataset_['departement'].values,
-            val_dataset_[['month_non_encoder', col_name]].values
+            val_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         test_dataset_[train_col] = obj.predict(
             test_dataset_['nbsinisterDaily'].values,
             test_dataset_['nbsinisterDaily'].values,
             test_dataset_['departement'].values,
-            test_dataset_[['month_non_encoder', col_name]].values
+            test_dataset_[['month_non_encoder', col_name, 'date']].values
         )
         
         res[obj.name] = deepcopy(obj)
@@ -1913,6 +1964,9 @@ def post_process_model_inference(train_dataset, val_dataset, test_dataset, dir_p
             :param new_cols: Liste des colonnes à ajouter
             :return: DataFrame mis à jour avec les nouvelles colonnes
             """
+            # Supprimer les anciennes versions des colonnes recalculées (sinon le join échoue)
+            original_dataset = original_dataset.drop(columns=[c for c in new_cols if c in original_dataset.columns])
+
             # Joindre les deux DataFrames sur leurs index
             original_dataset.reset_index(drop=True, inplace=True)
             updated_dataset.reset_index(drop=True, inplace=True)
@@ -2329,6 +2383,9 @@ def discretization(method, test_window, y_pred, pred_max, pred_min, col, target_
             :param new_cols: Liste des colonnes à ajouter
             :return: DataFrame mis à jour avec les nouvelles colonnes
             """
+            # Supprimer les anciennes versions des colonnes recalculées (sinon le join échoue)
+            original_dataset = original_dataset.drop(columns=[c for c in new_cols if c in original_dataset.columns])
+
             # Joindre les deux DataFrames sur leurs index
             original_dataset.reset_index(drop=True, inplace=True)
             updated_dataset.reset_index(drop=True, inplace=True)

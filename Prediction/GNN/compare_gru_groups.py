@@ -11,13 +11,22 @@ import pickle
 import sys
 import argparse
 
-# Ajout de la gestion d'argument --expert
-SHOW_EXPERT = False
-if any(a.startswith('--expert') for a in sys.argv):
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--expert', action='store_true', help="Afficher le modèle expert dans l'operationnal_plot.")
-    args, _ = parser.parse_known_args()
-    SHOW_EXPERT = args.expert
+# Options de ligne de commande
+_parser = argparse.ArgumentParser(add_help=False)
+_parser.add_argument('--expert', action='store_true',
+                     help="Afficher le modèle expert FWI (operationnal_plot et saisonnalité).")
+_parser.add_argument('--only-seasonal', action='store_true',
+                     help="Ne produire que les tracés de signal : section 1 (signal annuel) et "
+                          "section 8 (saisonnalité). Saute les métriques de classification "
+                          "(sections 2-7), la calibration, le scoring et la heatmap opérationnelle.")
+_parser.add_argument('--only-operational', action='store_true',
+                     help="Ne produire que le score opérationnel : heatmap opérationnelle, "
+                          "heatmap de couverture et table LaTeX. Saute tous les tracés de "
+                          "signal, la calibration et les figures par modèle/cluster.")
+_args, _ = _parser.parse_known_args()
+SHOW_EXPERT      = _args.expert
+ONLY_SEASONAL    = _args.only_seasonal
+ONLY_OPERATIONAL = _args.only_operational
 import numpy as np
 import pandas as pd
 
@@ -98,6 +107,13 @@ else:
 BASE = Path(f'/home/caron/Bureau/ST-GNN-for-wildifre-prediction/Prediction/GNN/{dataset}/firepoint/2x2/test/{expe}/all/{graph_construct}')
 BASE_OUT  = Path('/home/caron/Bureau/bdiff_ordinal_loss_2_operationel_horizon')
 BASE_OUT.mkdir(parents=True, exist_ok=True)
+
+# dossiers de sortie dédiés par famille d'expériences
+STUDENT_OUT   = Path('/home/caron/Bureau/bdiff_student_distillation')
+FEDERATED_OUT = Path('/home/caron/Bureau/bdiff_federated')
+
+# clés de configuration d'un groupe (à ne jamais confondre avec un modèle)
+META_KEYS = {'_target', '_out', '_split'}
 
 N_CLASSES   = 5
 if '2024' in expe:
@@ -227,6 +243,146 @@ for target in targets_list:
 #    'normal-10':  'studenMLP-normal-T3.0-A0.2-filter-GRU-soft-weight-10_full_full_10_0_all_one_nbsinister-kmeans-5-Class-Dept_classification_wkloss',
 #}
 
+# ── studentMLP knowledge-distillation groups ──────────────────────────────────
+# Les élèves MLP sont distillés depuis un ensemble enseignant filter-GRU-soft-weight-{n}.
+# Le chiffre de 'soft-weight-{n}' est le num_test du vote soft-weight
+# (cf. train_any_model.py:444, test_name = f'filter-{type}-{config_weight}-{nt}_...'),
+# c.-à-d. LE NOMBRE DE MODÈLES ENSEIGNANTS agrégés pour produire les cibles molles.
+#
+# Les configurations ne sont pas codées en dur : elles sont découvertes sur disque,
+# donc toute nouvelle run apparaît automatiquement dans l'analyse.
+# Label = '<variante complète>-<mode>mode_<n>-teachers' : température, poids de perte,
+# mode d'entraînement et nombre d'enseignants sont tous lisibles dans les sorties.
+import re
+
+STUDENT_TARGET = 'nbsinister'
+STUDENT_TASK   = 'nbsinister-kmeans-5-Class-Dept_classification_wkloss'
+
+# méthodes de distillation retenues (préfixe de la variante).
+# None = toutes les méthodes présentes sur disque.
+STUDENT_METHODS = ['normal', 'Confidence']
+
+# modes d'entraînement retenus pour la référence sans distillation.
+# None = tous les modes présents sur disque.
+STUDENT_REF_MODES = ['search']
+
+_STUDENT_RE = re.compile(
+    r'^studenMLP-(?P<variant>.+)-filter-GRU-soft-weight-(?P<n>\d+)_(?P<mode>[a-z]+)_'
+)
+
+def _has_pred(folder):
+    return bool(list((BASE / folder / 'H0').glob('*_all_pred.pkl')))
+
+def discover_students(methods=STUDENT_METHODS):
+    """Toutes les runs élève distillées présentes sur disque -> {(variante, mode, n): dossier}."""
+    found = {}
+    for d in sorted(BASE.glob(f'studenMLP-*-filter-GRU-soft-weight-*_{STUDENT_TASK}')):
+        m = _STUDENT_RE.match(d.name)
+        if not m or not _has_pred(d.name):
+            continue
+        variant = m.group('variant')
+        if methods is not None and not any(variant.startswith(x) for x in methods):
+            continue
+        found[(variant, m.group('mode'), int(m.group('n')))] = d.name
+    return found
+
+def discover_student_references(modes=STUDENT_REF_MODES):
+    """Élèves entraînés sans distillation -> même axe que les élèves, 0 enseignant."""
+    refs = {}
+    for d in sorted(BASE.glob(f'studenMLP_*_{STUDENT_TASK}')):
+        mode = d.name.split('_')[1]
+        if modes is not None and mode not in modes:
+            continue
+        if _has_pred(d.name):
+            refs[f'MLP-noKD-{mode}mode_0-teachers'] = d.name
+    return refs
+
+if dataset == 'bdiff':
+    students   = discover_students()
+    references = discover_student_references()
+
+    # un groupe par taille d'ensemble enseignant + un groupe global
+    all_students = {'_target': STUDENT_TARGET, '_out': STUDENT_OUT}
+    for n_teachers in sorted({n for _, _, n in students}):
+        group_name = f'studentMLP_{n_teachers}-teachers'
+        GROUPS[group_name] = {'_target': STUDENT_TARGET, '_out': STUDENT_OUT}
+        for (variant, mode, n), folder in students.items():
+            if n != n_teachers:
+                continue
+            label = f'{variant}-{mode}mode_{n}-teachers'
+            GROUPS[group_name][label] = folder
+            all_students[label] = folder
+        GROUPS[group_name].update(references)
+
+    all_students.update(references)
+    GROUPS['studentMLP_all'] = all_students
+
+# ── federated groups ──────────────────────────────────────────────────────────
+# Nom de dossier : {prefixe}-{archi}-{schema}-{agregation}_{info}
+#   prefixe     : l'algorithme fédéré (cf. train_any_model.py:909-918)
+#                   federated     -> Fed   (agrégation simple)
+#                   moonfederated -> MOON  (perte contrastive model-level)
+#                   alafederated  -> ALA   (adaptive local aggregation)
+#   archi       : GRU, DilatedCNN, ...
+#   schema      : partitionnement des clients (saison, cluster-encoder,
+#                 departement, mediterranean)
+#   agregation  : fltg | weighted -> règle de fusion des poids côté serveur
+# Le segment 'search' de {info} n'est pas un paramètre du modèle mais le mode de
+# recherche d'hyperparamètres : il ne figure pas dans les labels.
+FEDERATED_TASK = 'nbsinister-kmeans-5-Class-Dept_classification_wkloss'
+
+# algorithme -> préfixe de dossier (None en valeur = famille absente du disque)
+FEDERATED_ALGOS = {
+    'Fed':  'federated',
+    'MOON': 'moonfederated',
+    'ALA':  'alafederated',
+}
+
+# architectures retenues (None = toutes celles présentes sur disque)
+FEDERATED_ARCHS = None
+
+_FED_AGG = 'fltg|weighted|median|mean|max'
+
+def discover_federated(algos=FEDERATED_ALGOS, archs=FEDERATED_ARCHS):
+    """Runs fédérées sur disque -> {(algo, archi, schema, agregation): dossier}."""
+    found = {}
+    for algo, prefix in algos.items():
+        rx = re.compile(
+            rf'^{prefix}-(?P<arch>[A-Za-z0-9]+)-(?P<scheme>.+)-(?P<agg>{_FED_AGG})_'
+        )
+        for d in sorted(BASE.glob(f'{prefix}-*_{FEDERATED_TASK}')):
+            m = rx.match(d.name)
+            if not m or not _has_pred(d.name):
+                continue
+            arch = m.group('arch')
+            if archs is not None and arch not in archs:
+                continue
+            found[(algo, arch, m.group('scheme'), m.group('agg'))] = d.name
+    return found
+
+if dataset == 'bdiff':
+    federated = discover_federated()
+
+    # label = '<archi>-<schema>-<agregation>_<algo>' : le découpage aval donne
+    # model = archi+schéma+agrégation, loss = algorithme fédéré. Les lignes de la
+    # heatmap se regroupent donc par Fed / MOON / ALA.
+    # '_split' : une heatmap par règle d'agrégation, sinon 48 lignes dans une figure.
+    FEDERATED_SPLIT = ('fltg', 'weighted')
+
+    all_federated = {'_target': STUDENT_TARGET, '_out': FEDERATED_OUT,
+                     '_split': FEDERATED_SPLIT}
+    for algo in FEDERATED_ALGOS:
+        members = {f'{arch}-{scheme}-{agg}_{algo}': folder
+                   for (a, arch, scheme, agg), folder in federated.items() if a == algo}
+        if not members:
+            continue
+        GROUPS[f'federated_{algo}'] = {'_target': STUDENT_TARGET, '_out': FEDERATED_OUT,
+                                       '_split': FEDERATED_SPLIT, **members}
+        all_federated.update(members)
+
+    if len(all_federated) > 3:
+        GROUPS['federated_all'] = all_federated
+
 # auto-assign colors per group
 _PALETTE = ['#E07B39', '#3A86FF', '#2EC4B6', '#CC2936', '#8338EC', '#FB5607']
 
@@ -287,8 +443,20 @@ def plot_operational_heatmap(
     n_clusters = len(clusters)
     n_metrics = len(k_cols) + 2
 
+    # Colonnes de gauche dimensionnées sur les libellés les plus longs : sinon les
+    # noms débordent sur les cellules de métriques. ~0.11 unité par caractère à
+    # fontsize 10 ; la figure s'élargit d'autant pour garder des cellules de
+    # taille constante, et grandit en hauteur quand il y a beaucoup de lignes.
+    _loss_w  = max(1.0, max((len(str(l)) for l, _ in rows), default=6) * 0.11)
+    _model_w = max(1.0, max((len(str(m)) for _, m in rows), default=10) * 0.11)
+    _left_w  = _loss_w + _model_w
+    _loss_x, _model_x = _loss_w / 2, _loss_w + _model_w / 2
+    _span    = _left_w + n_clusters * n_metrics
+    figsize  = (figsize[0] * _span / (2.0 + n_clusters * n_metrics),
+                max(figsize[1], 0.75 * n_rows + 4))
+
     fig, ax = plt.subplots(figsize=figsize)
-    ax.set_xlim(0, 2 + n_clusters * n_metrics)
+    ax.set_xlim(0, _span)
     ax.set_ylim(0, n_rows + 3)
     ax.axis("off")
 
@@ -312,7 +480,7 @@ def plot_operational_heatmap(
     cmap_iou = plt.cm.Purples
 
     # Paramètres visuels
-    left_w = 2.0
+    left_w = _left_w
     cell_w = 1.0
     cell_h = 0.75
     header_h = 1.25
@@ -330,8 +498,8 @@ def plot_operational_heatmap(
     )
 
     # En-têtes gauche
-    ax.text(0.55, top_y - 0.6, "Schéma", ha="center", va="center", fontsize=10, fontweight="bold")
-    ax.text(1.55, top_y - 0.6, "Modèle", ha="center", va="center", fontsize=10, fontweight="bold")
+    ax.text(_loss_x, top_y - 0.6, "Schéma", ha="center", va="center", fontsize=10, fontweight="bold")
+    ax.text(_model_x, top_y - 0.6, "Modèle", ha="center", va="center", fontsize=10, fontweight="bold")
 
     # En-têtes clusters
     for c_idx, cluster in enumerate(clusters):
@@ -380,10 +548,10 @@ def plot_operational_heatmap(
 
         if loss != previous_loss:
             ax.plot([0, left_w + n_clusters * n_metrics], [y_pos + 0.45, y_pos + 0.45], color="0.55", lw=0.8)
-            ax.text(0.55, y_pos, loss, ha="center", va="center", fontsize=10, fontweight="bold")
+            ax.text(_loss_x, y_pos, loss, ha="center", va="center", fontsize=10, fontweight="bold")
             previous_loss = loss
 
-        ax.text(1.55, y_pos, model, ha="center", va="center", fontsize=10, fontweight="bold")
+        ax.text(_model_x, y_pos, model, ha="center", va="center", fontsize=10, fontweight="bold")
 
         for c_idx, cluster in enumerate(clusters):
             x0 = left_w + c_idx * n_metrics
@@ -674,7 +842,8 @@ def plot_calibration_with_background(probs, y_true, n_bins=10, figsize=(25, 5), 
     return fig, axes, stats
 
 # ── main loop over groups ─────────────────────────────────────────────────────
-RUN_ONLY = None  # set to a list of group names to restrict, e.g. ['student_confidence']
+RUN_ONLY = None  # set to a list of group names to restrict, e.g.
+                 # ['studentMLP_all'] or ['studentMLP_10-teachers', 'studentMLP_14-teachers', 'studentMLP_20-teachers']
 all_scoring_rows = []
 
 for group_name, _group_dict in GROUPS.items():
@@ -685,8 +854,9 @@ for group_name, _group_dict in GROUPS.items():
     print(f'{"="*60}')
 
     base_target = _group_dict.get('_target', 'nbsinister')
-    base_target = _group_dict.get('_target', 'nbsinister')
-    models_dict = {k: v for k, v in _group_dict.items() if k != '_target'}
+    group_out   = Path(_group_dict.get('_out', BASE_OUT))
+    group_split = tuple(_group_dict.get('_split', ()))
+    models_dict = {k: v for k, v in _group_dict.items() if k not in META_KEYS}
     TARGET, NBSIN_COL, _, _ = make_cols(base_target, list(models_dict.values())[0])
     print(f'  Target: {TARGET}')
 
@@ -722,14 +892,14 @@ for group_name, _group_dict in GROUPS.items():
                 expert_fwi_annuel[mask_z] = 0.0
     df_ref_full['EXPERT_FWI_ANNUEL'] = expert_fwi_annuel
 
-    models_dict_orig = {k: v for k, v in _group_dict.items() if k != '_target'}
+    models_dict_orig = {k: v for k, v in _group_dict.items() if k not in META_KEYS}
 
     for run_type in ['annuel', 'estival']:
         # Reset models_dict to avoid accumulating expert keys across iterations
         models_dict = dict(models_dict_orig)
 
         print(f'\n  --- Run: {run_type} ---')
-        OUT = BASE_OUT / dataset / base_target / run_type
+        OUT = group_out / dataset / base_target / run_type
         OUT.mkdir(parents=True, exist_ok=True)
 
         dfs = {}
@@ -807,212 +977,228 @@ for group_name, _group_dict in GROUPS.items():
         for label in dfs:
             dfs[label]['season'] = dfs[label]['datetime'].apply(get_season)
 
-        # ── Section 1: Aggregated temporal signal ─────────────────────────────────
-        all_daily_means = []
-        for label, df in dfs.items():
-            PRED_COL = pred_col_map[label]
-            daily = df.groupby('datetime').agg(
-                pred_class=(PRED_COL, 'mean'),
-                true_class=(TARGET,   'mean'),
-            ).reset_index()
-            all_daily_means.append(daily['pred_class'].values)
-            all_daily_means.append(daily['true_class'].values)
-        combined = np.concatenate(all_daily_means)
-        margin = 0.1 * (combined.max() - combined.min())
-        class_ymin = combined.min() - margin
-        class_ymax = combined.max() + margin
+        # défini par la section 6 ; valeur de repli quand les sections 2-7 sont sautées
+        has_probas = False
 
-        fig, axes = plt.subplots(n, 1, figsize=(16, 4 * n), sharex=True)
-        if n == 1: axes = [axes]
+        # section 1 : tracé du signal, inutile pour le seul score opérationnel
+        if not ONLY_OPERATIONAL:
+            # ── Section 1: Aggregated temporal signal ─────────────────────────────────
+            all_daily_means = []
+            for label, df in dfs.items():
+                if not SHOW_EXPERT and models_dict.get(label) == 'expert':
+                    continue
+                PRED_COL = pred_col_map[label]
+                daily = df.groupby('datetime').agg(
+                    pred_class=(PRED_COL, 'mean'),
+                    true_class=(TARGET,   'mean'),
+                ).reset_index()
+                all_daily_means.append(daily['pred_class'].values)
+                all_daily_means.append(daily['true_class'].values)
+            combined = np.concatenate(all_daily_means)
+            margin = 0.1 * (combined.max() - combined.min())
+            class_ymin = combined.min() - margin
+            class_ymax = combined.max() + margin
 
-        for ax, (label, df) in zip(axes, dfs.items()):
-            PRED_COL = pred_col_map[label]
-            daily = df.groupby('datetime').agg(
-                signal_sum=(NBSIN_COL, 'sum'),
-                pred_class=(PRED_COL,  'mean'),
-                true_class=(TARGET,    'mean'),
-            ).reset_index()
-            ax2 = ax.twinx()
-            ax.fill_between(daily['datetime'], daily['signal_sum'], alpha=0.2, color='gray', label=f'{NBSIN_COL} (sum)')
-            ax.plot(daily['datetime'], daily['signal_sum'], color='gray', lw=0.8)
-            ax2.plot(daily['datetime'], daily['true_class'], color='black',       lw=1.2, linestyle='--', label='true class')
-            ax2.plot(daily['datetime'], daily['pred_class'], color=COLORS[label], lw=1.5, linestyle='-',  label=f'predicted — {label}')
-            ax2.set_ylim(class_ymin, class_ymax)
-            ax.set_ylabel(f'{NBSIN_COL} (sum)', fontsize=8)
-            ax2.set_ylabel('kmeans class', fontsize=8)
-            ax.text(0.01, 0.95, label, transform=ax.transAxes, fontweight='bold', va='top', fontsize=9)
-            lines1, l1 = ax.get_legend_handles_labels()
-            lines2, l2 = ax2.get_legend_handles_labels()
-            ax.legend(lines1 + lines2, l1 + l2, fontsize=7, loc='upper right')
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
+            fig, axes = plt.subplots(n, 1, figsize=(16, 4 * n), sharex=True)
+            if n == 1: axes = [axes]
 
-        plt.setp(axes[-1].xaxis.get_majorticklabels(), rotation=45, ha='right')
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_1_temporal_signal.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_1_temporal_signal.png')
+            for ax, (label, df) in zip(axes, dfs.items()):
+                PRED_COL = pred_col_map[label]
+                daily = df.groupby('datetime').agg(
+                    signal_sum=(NBSIN_COL, 'sum'),
+                    pred_class=(PRED_COL,  'mean'),
+                    true_class=(TARGET,    'mean'),
+                ).reset_index()
+                ax2 = ax.twinx()
+                ax.fill_between(daily['datetime'], daily['signal_sum'], alpha=0.2, color='gray', label=f'{NBSIN_COL} (sum)')
+                ax.plot(daily['datetime'], daily['signal_sum'], color='gray', lw=0.8)
+                ax2.plot(daily['datetime'], daily['true_class'], color='black',       lw=1.2, linestyle='--', label='true class')
+                ax2.plot(daily['datetime'], daily['pred_class'], color=COLORS[label], lw=1.5, linestyle='-',  label=f'predicted — {label}')
+                ax2.set_ylim(class_ymin, class_ymax)
+                ax.set_ylabel(f'{NBSIN_COL} (sum)', fontsize=8)
+                ax2.set_ylabel('kmeans class', fontsize=8)
+                ax.text(0.01, 0.95, label, transform=ax.transAxes, fontweight='bold', va='top', fontsize=9)
+                lines1, l1 = ax.get_legend_handles_labels()
+                lines2, l2 = ax2.get_legend_handles_labels()
+                ax.legend(lines1 + lines2, l1 + l2, fontsize=7, loc='upper right')
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+                ax.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
 
-        # ── Section 2: Class distribution ─────────────────────────────────────────
-        classes = np.arange(N_CLASSES)
-        fig, ax = plt.subplots(figsize=(12, 5))
-        w = 0.8 / (n + 1)
-        offsets = np.linspace(-(n * w) / 2, (n * w) / 2, n)
-        ref_dist = None
-        for (label, df), offset in zip(dfs.items(), offsets):
-            PRED_COL = pred_col_map[label]
-            pred_dist = df[PRED_COL].value_counts(normalize=True).reindex(classes, fill_value=0)
-            if ref_dist is None:
-                ref_dist = df[TARGET].value_counts(normalize=True).reindex(classes, fill_value=0)
-            ax.bar(classes + offset, pred_dist.values, w * 0.9, label=label, color=COLORS[label], alpha=0.8)
-        ax.bar(classes + offsets[-1] + w, ref_dist.values, w * 0.9, label='true', color='#333333', alpha=0.5)
-        ax.set_xticks(classes); ax.set_xlabel('kmeans class'); ax.set_ylabel('Relative frequency')
-        ax.legend(fontsize=7, ncol=2)
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_2_class_distribution.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_2_class_distribution.png')
+            plt.setp(axes[-1].xaxis.get_majorticklabels(), rotation=45, ha='right')
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_1_temporal_signal.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_1_temporal_signal.png')
 
-        # ── Section 3: Confusion matrices ─────────────────────────────────────────
-        ncols = min(n, 3)
-        nrows = (n + ncols - 1) // ncols
-        fig, axes_cm = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
-        axes_flat = np.array(axes_cm).flatten()
-        for ax, (label, df) in zip(axes_flat, dfs.items()):
-            PRED_COL = pred_col_map[label]
-            y_true = df[TARGET].astype(int)
-            y_pred = df[PRED_COL].astype(int)
-            cm   = confusion_matrix(y_true, y_pred, labels=list(range(N_CLASSES)), normalize='true')
-            disp = ConfusionMatrixDisplay(cm, display_labels=list(range(N_CLASSES)))
-            disp.plot(ax=ax, colorbar=False, cmap='Blues', values_format='.2f')
-            ax.set_title(label, fontsize=8)
-        for ax in axes_flat[n:]:
-            ax.set_visible(False)
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_3_confusion_matrices.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_3_confusion_matrices.png')
+        # sections 2 à 7 : métriques de classification, inutiles pour les seuls tracés
+        if not (ONLY_SEASONAL or ONLY_OPERATIONAL):
+            # ── Section 2: Class distribution ─────────────────────────────────────────
+            classes = np.arange(N_CLASSES)
+            fig, ax = plt.subplots(figsize=(12, 5))
+            w = 0.8 / (n + 1)
+            offsets = np.linspace(-(n * w) / 2, (n * w) / 2, n)
+            ref_dist = None
+            for (label, df), offset in zip(dfs.items(), offsets):
+                PRED_COL = pred_col_map[label]
+                pred_dist = df[PRED_COL].value_counts(normalize=True).reindex(classes, fill_value=0)
+                if ref_dist is None:
+                    ref_dist = df[TARGET].value_counts(normalize=True).reindex(classes, fill_value=0)
+                ax.bar(classes + offset, pred_dist.values, w * 0.9, label=label, color=COLORS[label], alpha=0.8)
+            ax.bar(classes + offsets[-1] + w, ref_dist.values, w * 0.9, label='true', color='#333333', alpha=0.5)
+            ax.set_xticks(classes); ax.set_xlabel('kmeans class'); ax.set_ylabel('Relative frequency')
+            ax.legend(fontsize=7, ncol=2)
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_2_class_distribution.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_2_class_distribution.png')
 
-        # ── Section 4: Global metrics ──────────────────────────────────────────────
-        rows = []
-        for label, df in dfs.items():
-            PRED_COL = pred_col_map[label]
-            y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
-            rows.append({
-                'model':       label,
-                'accuracy':    accuracy_score(y_true, y_pred),
-                'f1_macro':    f1_score(y_true, y_pred, average='macro',    zero_division=0),
-                'f1_weighted': f1_score(y_true, y_pred, average='weighted', zero_division=0),
-                'rec_macro':   recall_score(y_true, y_pred, average='macro',    zero_division=0),
-                'prec_macro':  precision_score(y_true, y_pred, average='macro', zero_division=0),
-                'iou':  iou_score(y_true, y_pred),
-            })
-        metrics_df = pd.DataFrame(rows).set_index('model')
-        fig, ax = plt.subplots(figsize=(8, 0.5 * n + 1.5))
-        ax.axis('off')
-        tbl = ax.table(
-            cellText=metrics_df.round(4).values,
-            rowLabels=metrics_df.index,
-            colLabels=metrics_df.columns,
-            loc='center', cellLoc='center',
-        )
-        tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1.2, 1.5)
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_4_global_metrics.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_4_global_metrics.png')
+            # ── Section 3: Confusion matrices ─────────────────────────────────────────
+            ncols = min(n, 3)
+            nrows = (n + ncols - 1) // ncols
+            fig, axes_cm = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
+            axes_flat = np.array(axes_cm).flatten()
+            for ax, (label, df) in zip(axes_flat, dfs.items()):
+                PRED_COL = pred_col_map[label]
+                y_true = df[TARGET].astype(int)
+                y_pred = df[PRED_COL].astype(int)
+                cm   = confusion_matrix(y_true, y_pred, labels=list(range(N_CLASSES)), normalize='true')
+                disp = ConfusionMatrixDisplay(cm, display_labels=list(range(N_CLASSES)))
+                disp.plot(ax=ax, colorbar=False, cmap='Blues', values_format='.2f')
+                ax.set_title(label, fontsize=8)
+            for ax in axes_flat[n:]:
+                ax.set_visible(False)
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_3_confusion_matrices.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_3_confusion_matrices.png')
 
-        # ── Section 5: F1 per class ────────────────────────────────────────────────
-        fig, ax = plt.subplots(figsize=(13, 5))
-        x = np.arange(N_CLASSES); w = 0.8 / n
-        for i, (label, df) in enumerate(dfs.items()):
-            PRED_COL = pred_col_map[label]
-            y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
-            f1_per_class = f1_score(y_true, y_pred, average=None, labels=list(range(N_CLASSES)), zero_division=0)
-            offset = (i - (n - 1) / 2) * w
-            ax.bar(x + offset, f1_per_class, w * 0.9, label=label, color=COLORS[label], alpha=0.85, edgecolor='white', linewidth=0.5)
-        ax.set_xticks(x); ax.set_xticklabels([f'Class {c}' for c in range(N_CLASSES)])
-        ax.set_ylabel('F1-score'); ax.legend(fontsize=7, ncol=2)
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_5_f1_per_class.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_5_f1_per_class.png')
-
-        try:
-            # ── Section 6: Predicted probabilities (softmax) per true class ───────────
-            has_probas = any(proba_cols_map[lbl][0] in df.columns and df[proba_cols_map[lbl][0]].notna().any() for lbl, df in dfs.items())
-            if has_probas:
-                fig, axes_p = plt.subplots(N_CLASSES, n, figsize=(5 * n, 3 * N_CLASSES), sharey=False)
-                if n == 1: axes_p = axes_p.reshape(N_CLASSES, 1)
-                for col, (label, df) in enumerate(dfs.items()):
-                    for true_cls in range(N_CLASSES):
-                        ax = axes_p[true_cls, col]
-                        PROBA_COLS = proba_cols_map[label]
-                        mask = df[TARGET].astype(int) == true_cls
-                        sub  = df.loc[mask, PROBA_COLS]
-                        ax.boxplot(
-                            [sub[c].dropna().values for c in PROBA_COLS],
-                            labels=[f'C{i}' for i in range(N_CLASSES)],
-                            patch_artist=True,
-                            boxprops=dict(facecolor=COLORS[label], alpha=0.6),
-                        )
-                        ax.set_ylabel('P(class)', fontsize=7); ax.set_ylim(0, 1); ax.tick_params(labelsize=6)
-                        ax.text(0.02, 0.96, f'{label} | cls {true_cls}', transform=ax.transAxes, fontsize=6, va='top')
-                plt.tight_layout()
-                fig.savefig(OUT / f'{group_name}_6_softmax_per_class.png', dpi=120, bbox_inches='tight')
-                plt.close(fig)
-                print(f'  Saved: {group_name}_6_softmax_per_class.png')
-        except Exception as e:
-            has_probas = False
-            pass
-
-        # ── Section 7: Per-department accuracy & MSE ──────────────────────────────
-        dept_rows = []
-        for label, df in dfs.items():
-            PRED_COL = pred_col_map[label]
-            y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
-            tmp = df[['departement']].copy()
-            tmp['err'] = (y_true - y_pred) ** 2; tmp['correct'] = (y_true == y_pred).astype(int)
-            agg = tmp.groupby('departement').agg(mse=('err', 'mean'), acc=('correct', 'mean'))
-            agg['model'] = label; dept_rows.append(agg.reset_index())
-        dept_df   = pd.concat(dept_rows)
-        pivot_mse = dept_df.pivot(index='departement', columns='model', values='mse')
-        pivot_acc = dept_df.pivot(index='departement', columns='model', values='acc')
-        fig, axes_d = plt.subplots(2, 1, figsize=(18, 10))
-        pivot_mse.plot(kind='bar', ax=axes_d[0], color=[COLORS[c] for c in pivot_mse.columns], alpha=0.8, width=0.8)
-        axes_d[0].set_xlabel(''); axes_d[0].set_ylabel('MSE'); axes_d[0].tick_params(axis='x', labelsize=6); axes_d[0].legend()
-        pivot_acc.plot(kind='bar', ax=axes_d[1], color=[COLORS[c] for c in pivot_acc.columns], alpha=0.8, width=0.8)
-        axes_d[1].set_xlabel('Department'); axes_d[1].set_ylabel('Accuracy'); axes_d[1].tick_params(axis='x', labelsize=6); axes_d[1].legend()
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_7_per_dept_metrics.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_7_per_dept_metrics.png')
-
-        # ── Section 8: Seasonal signal ────────────────────────────────────────────
-        seasons = ['Winter', 'Spring', 'Summer', 'Autumn']
-        fig, axes_s = plt.subplots(2, 2, figsize=(14, 9))
-        for ax, season in zip(axes_s.flat, seasons):
+            # ── Section 4: Global metrics ──────────────────────────────────────────────
+            rows = []
             for label, df in dfs.items():
                 PRED_COL = pred_col_map[label]
-                sub   = plot_dt(df[df['season'] == season], season)
-                daily = sub.groupby('datetime').agg(pred_class=(PRED_COL, 'mean'), true_class=(TARGET, 'mean')).reset_index()
-                ax.plot(daily['datetime'], daily['pred_class'], color=COLORS[label], lw=1.2, label=label, alpha=0.8)
-            ref       = plot_dt(dfs[ref_label][dfs[ref_label]['season'] == season], season)
-            ref_daily = ref.groupby('datetime')[TARGET].mean().reset_index()
-            ax.plot(ref_daily['datetime'], ref_daily[TARGET], color='black', lw=1.5, linestyle='--', label='true class', alpha=0.7)
-            ax.text(0.01, 0.97, season, transform=ax.transAxes, fontweight='bold', va='top', fontsize=10)
-            ax.set_ylabel('kmeans class (mean)')
-            ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-            ax.xaxis.set_major_locator(mdates.MonthLocator())
-            plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=7)
-            ax.legend(fontsize=8)
-        plt.tight_layout()
-        fig.savefig(OUT / f'{group_name}_8_seasonal.png', dpi=120, bbox_inches='tight')
-        plt.close(fig)
-        print(f'  Saved: {group_name}_8_seasonal.png')
+                y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
+                rows.append({
+                    'model':       label,
+                    'accuracy':    accuracy_score(y_true, y_pred),
+                    'f1_macro':    f1_score(y_true, y_pred, average='macro',    zero_division=0),
+                    'f1_weighted': f1_score(y_true, y_pred, average='weighted', zero_division=0),
+                    'rec_macro':   recall_score(y_true, y_pred, average='macro',    zero_division=0),
+                    'prec_macro':  precision_score(y_true, y_pred, average='macro', zero_division=0),
+                    'iou':  iou_score(y_true, y_pred),
+                })
+            metrics_df = pd.DataFrame(rows).set_index('model')
+            fig, ax = plt.subplots(figsize=(8, 0.5 * n + 1.5))
+            ax.axis('off')
+            tbl = ax.table(
+                cellText=metrics_df.round(4).values,
+                rowLabels=metrics_df.index,
+                colLabels=metrics_df.columns,
+                loc='center', cellLoc='center',
+            )
+            tbl.auto_set_font_size(False); tbl.set_fontsize(9); tbl.scale(1.2, 1.5)
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_4_global_metrics.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_4_global_metrics.png')
+
+            # ── Section 5: F1 per class ────────────────────────────────────────────────
+            fig, ax = plt.subplots(figsize=(13, 5))
+            x = np.arange(N_CLASSES); w = 0.8 / n
+            for i, (label, df) in enumerate(dfs.items()):
+                PRED_COL = pred_col_map[label]
+                y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
+                f1_per_class = f1_score(y_true, y_pred, average=None, labels=list(range(N_CLASSES)), zero_division=0)
+                offset = (i - (n - 1) / 2) * w
+                ax.bar(x + offset, f1_per_class, w * 0.9, label=label, color=COLORS[label], alpha=0.85, edgecolor='white', linewidth=0.5)
+            ax.set_xticks(x); ax.set_xticklabels([f'Class {c}' for c in range(N_CLASSES)])
+            ax.set_ylabel('F1-score'); ax.legend(fontsize=7, ncol=2)
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_5_f1_per_class.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_5_f1_per_class.png')
+
+            try:
+                # ── Section 6: Predicted probabilities (softmax) per true class ───────────
+                has_probas = any(proba_cols_map[lbl][0] in df.columns and df[proba_cols_map[lbl][0]].notna().any() for lbl, df in dfs.items())
+                if has_probas:
+                    fig, axes_p = plt.subplots(N_CLASSES, n, figsize=(5 * n, 3 * N_CLASSES), sharey=False)
+                    if n == 1: axes_p = axes_p.reshape(N_CLASSES, 1)
+                    for col, (label, df) in enumerate(dfs.items()):
+                        for true_cls in range(N_CLASSES):
+                            ax = axes_p[true_cls, col]
+                            PROBA_COLS = proba_cols_map[label]
+                            mask = df[TARGET].astype(int) == true_cls
+                            sub  = df.loc[mask, PROBA_COLS]
+                            ax.boxplot(
+                                [sub[c].dropna().values for c in PROBA_COLS],
+                                labels=[f'C{i}' for i in range(N_CLASSES)],
+                                patch_artist=True,
+                                boxprops=dict(facecolor=COLORS[label], alpha=0.6),
+                            )
+                            ax.set_ylabel('P(class)', fontsize=7); ax.set_ylim(0, 1); ax.tick_params(labelsize=6)
+                            ax.text(0.02, 0.96, f'{label} | cls {true_cls}', transform=ax.transAxes, fontsize=6, va='top')
+                    plt.tight_layout()
+                    fig.savefig(OUT / f'{group_name}_6_softmax_per_class.png', dpi=120, bbox_inches='tight')
+                    plt.close(fig)
+                    print(f'  Saved: {group_name}_6_softmax_per_class.png')
+            except Exception as e:
+                has_probas = False
+                pass
+
+            # ── Section 7: Per-department accuracy & MSE ──────────────────────────────
+            dept_rows = []
+            for label, df in dfs.items():
+                PRED_COL = pred_col_map[label]
+                y_true = df[TARGET].astype(int); y_pred = df[PRED_COL].astype(int)
+                tmp = df[['departement']].copy()
+                tmp['err'] = (y_true - y_pred) ** 2; tmp['correct'] = (y_true == y_pred).astype(int)
+                agg = tmp.groupby('departement').agg(mse=('err', 'mean'), acc=('correct', 'mean'))
+                agg['model'] = label; dept_rows.append(agg.reset_index())
+            dept_df   = pd.concat(dept_rows)
+            pivot_mse = dept_df.pivot(index='departement', columns='model', values='mse')
+            pivot_acc = dept_df.pivot(index='departement', columns='model', values='acc')
+            fig, axes_d = plt.subplots(2, 1, figsize=(18, 10))
+            pivot_mse.plot(kind='bar', ax=axes_d[0], color=[COLORS[c] for c in pivot_mse.columns], alpha=0.8, width=0.8)
+            axes_d[0].set_xlabel(''); axes_d[0].set_ylabel('MSE'); axes_d[0].tick_params(axis='x', labelsize=6); axes_d[0].legend()
+            pivot_acc.plot(kind='bar', ax=axes_d[1], color=[COLORS[c] for c in pivot_acc.columns], alpha=0.8, width=0.8)
+            axes_d[1].set_xlabel('Department'); axes_d[1].set_ylabel('Accuracy'); axes_d[1].tick_params(axis='x', labelsize=6); axes_d[1].legend()
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_7_per_dept_metrics.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_7_per_dept_metrics.png')
+
+        # section 8 : tracé de saisonnalité, inutile pour le seul score opérationnel
+        if not ONLY_OPERATIONAL:
+            # ── Section 8: Seasonal signal ────────────────────────────────────────────
+            seasons = ['Winter', 'Spring', 'Summer', 'Autumn']
+            fig, axes_s = plt.subplots(2, 2, figsize=(14, 9))
+            for ax, season in zip(axes_s.flat, seasons):
+                for label, df in dfs.items():
+                    if not SHOW_EXPERT and models_dict.get(label) == 'expert':
+                        continue
+                    PRED_COL = pred_col_map[label]
+                    sub   = plot_dt(df[df['season'] == season], season)
+                    daily = sub.groupby('datetime').agg(pred_class=(PRED_COL, 'mean'), true_class=(TARGET, 'mean')).reset_index()
+                    ax.plot(daily['datetime'], daily['pred_class'], color=COLORS[label], lw=1.2, label=label, alpha=0.8)
+                ref       = plot_dt(dfs[ref_label][dfs[ref_label]['season'] == season], season)
+                ref_daily = ref.groupby('datetime')[TARGET].mean().reset_index()
+                ax.plot(ref_daily['datetime'], ref_daily[TARGET], color='black', lw=1.5, linestyle='--', label='true class', alpha=0.7)
+                ax.text(0.01, 0.97, season, transform=ax.transAxes, fontweight='bold', va='top', fontsize=10)
+                ax.set_ylabel('kmeans class (mean)')
+                ax.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+                ax.xaxis.set_major_locator(mdates.MonthLocator())
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha='right', fontsize=7)
+                ax.legend(fontsize=8)
+            plt.tight_layout()
+            fig.savefig(OUT / f'{group_name}_8_seasonal.png', dpi=120, bbox_inches='tight')
+            plt.close(fig)
+            print(f'  Saved: {group_name}_8_seasonal.png')
+
+        if ONLY_SEASONAL:
+            continue
 
         # ── Section 9: Calibration ────────────────────────────────────────────────
-        if has_probas:
+        if has_probas and not ONLY_OPERATIONAL:
             ece_rows = []
             for label, df in dfs.items():
                 PROBA_COLS = proba_cols_map[label]
@@ -1145,37 +1331,44 @@ for group_name, _group_dict in GROUPS.items():
                         'recall': rec,
                         'iou': iou_val,
                         'run_type': run_type,
+                        'out_root': str(group_out),
+                        # '*' : ligne sans jeton de split (référence, expert) -> reprise
+                        # dans chaque heatmap au lieu d'en former une à part
+                        'split': next((s for s in group_split if s in label),
+                                      '*' if group_split else ''),
                     }
                     all_scoring_rows.append(row_all)
 
-                    title_suffix = f"{label}_{zone_col}_{z}"
-                    try:
-                        sc._plot_matrice(
-                            ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
-                            title=f"Matrice Transition - {title_suffix}",
-                            dir_output=OUT, normalize_with_reference=False
-                        )
-                    except Exception as e:
-                        pass
+                    # figures par modèle et par cluster : coûteuses, hors score opérationnel
+                    if not ONLY_OPERATIONAL:
+                        title_suffix = f"{label}_{zone_col}_{z}"
+                        try:
+                            sc._plot_matrice(
+                                ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
+                                title=f"Matrice Transition - {title_suffix}",
+                                dir_output=OUT, normalize_with_reference=False
+                            )
+                        except Exception as e:
+                            pass
                     
-                    try:
-                        sc._plot_fixed_effects(
-                            ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
-                            title=f"Fixed Effects - {title_suffix}",
-                            dir_output=OUT
-                        )
-                    except Exception as e:
-                        pass
+                        try:
+                            sc._plot_fixed_effects(
+                                ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
+                                title=f"Fixed Effects - {title_suffix}",
+                                dir_output=OUT
+                            )
+                        except Exception as e:
+                            pass
                     
-                    # New plot request: _plot()
-                    try:
-                        sc._plot(
-                            ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
-                            title=f"Scoring Fit - {title_suffix}",
-                            dir_output=OUT
-                        )
-                    except Exception as e:
-                        pass
+                        # New plot request: _plot()
+                        try:
+                            sc._plot(
+                                ypred=y_pred_float, ytrue=y_true_raw, dates=dates, zones=zones_fe,
+                                title=f"Scoring Fit - {title_suffix}",
+                                dir_output=OUT
+                            )
+                        except Exception as e:
+                            pass
 
                 except Exception as e:
                     print(f"  [ERROR] Computing Scoring metrics for {label} {zone_col}={z}: {e}")
@@ -1186,7 +1379,7 @@ for group_name, _group_dict in GROUPS.items():
             print(f"  Saved: {group_name}_10_scoring_metrics.csv")
             
             metrics_to_plot = ['score_k1', 'score_k2', 'score_k3', 'score_k4', 'recall_bin'] + [f'recall_class_{c}' for c in range(N_CLASSES)]
-            for m in metrics_to_plot:
+            for m in ([] if ONLY_OPERATIONAL else metrics_to_plot):
                 if m in scoring_df.columns and scoring_df[m].notna().any():
                     try:
                         pivot_m = scoring_df.pivot(index='zone', columns='model', values=m)
@@ -1506,7 +1699,7 @@ for group_name, _group_dict in GROUPS.items():
                 except Exception as e:
                     print(f"  [ERROR] Plotting coverage heatmap: {e}")
 
-print('\nDone. All figures saved under', BASE_OUT)
+print('\nDone. All figures saved under', BASE_OUT, 'and', STUDENT_OUT, '(groupes studentMLP)')
 
 
 
@@ -1552,8 +1745,20 @@ def plot_coverage_heatmap(
     n_clusters = len(clusters)
     n_metrics = len(k_cols)
 
+    # Colonnes de gauche dimensionnées sur les libellés les plus longs : sinon les
+    # noms débordent sur les cellules de métriques. ~0.11 unité par caractère à
+    # fontsize 10 ; la figure s'élargit d'autant pour garder des cellules de
+    # taille constante, et grandit en hauteur quand il y a beaucoup de lignes.
+    _loss_w  = max(1.0, max((len(str(l)) for l, _ in rows), default=6) * 0.11)
+    _model_w = max(1.0, max((len(str(m)) for _, m in rows), default=10) * 0.11)
+    _left_w  = _loss_w + _model_w
+    _loss_x, _model_x = _loss_w / 2, _loss_w + _model_w / 2
+    _span    = _left_w + n_clusters * n_metrics
+    figsize  = (figsize[0] * _span / (2.0 + n_clusters * n_metrics),
+                max(figsize[1], 0.75 * n_rows + 4))
+
     fig, ax = plt.subplots(figsize=figsize)
-    ax.set_xlim(0, 2 + n_clusters * n_metrics)
+    ax.set_xlim(0, _span)
     ax.set_ylim(0, n_rows + 3)
     ax.axis("off")
 
@@ -1564,7 +1769,7 @@ def plot_coverage_heatmap(
     k_norm = Normalize(vmin=k_min, vmax=k_max)
     cmap_k = plt.cm.Greens
 
-    left_w = 2.0
+    left_w = _left_w
     cell_w = 1.0
     cell_h = 0.75
     header_h = 1.25
@@ -1580,8 +1785,8 @@ def plot_coverage_heatmap(
         fontweight="bold",
     )
 
-    ax.text(0.55, top_y - 0.6, "Schéma", ha="center", va="center", fontsize=10, fontweight="bold")
-    ax.text(1.55, top_y - 0.6, "Modèle", ha="center", va="center", fontsize=10, fontweight="bold")
+    ax.text(_loss_x, top_y - 0.6, "Schéma", ha="center", va="center", fontsize=10, fontweight="bold")
+    ax.text(_model_x, top_y - 0.6, "Modèle", ha="center", va="center", fontsize=10, fontweight="bold")
 
     for c_idx, cluster in enumerate(clusters):
         x0 = left_w + c_idx * n_metrics
@@ -1624,11 +1829,11 @@ def plot_coverage_heatmap(
     for row_idx, (loss, model) in enumerate(rows):
         y_pos = n_rows - row_idx
         if loss != previous_loss:
-            ax.text(0.55, y_pos, loss, ha="center", va="center", fontsize=10, fontweight="bold")
+            ax.text(_loss_x, y_pos, loss, ha="center", va="center", fontsize=10, fontweight="bold")
             ax.axhline(y_pos + 0.5, xmin=0, xmax=1.5, color="black", linewidth=1.5)
             previous_loss = loss
 
-        ax.text(1.55, y_pos, model, ha="center", va="center", fontsize=10, fontweight="bold")
+        ax.text(_model_x, y_pos, model, ha="center", va="center", fontsize=10, fontweight="bold")
 
         for c_idx, cluster in enumerate(clusters):
             x0 = left_w + c_idx * n_metrics
@@ -1775,19 +1980,30 @@ def save_operational_latex(
 
 if all_scoring_rows:
     df_all = pd.DataFrame(all_scoring_rows)
-    for tgt in df_all['target'].unique():
+    for root in df_all['out_root'].unique():
+      root_splits = sorted(s for s in df_all.loc[df_all['out_root'] == root, 'split'].unique()
+                           if s not in ('', '*'))
+      for split in (root_splits or ['']):
+       for tgt in df_all['target'].unique():
         for rt in df_all['run_type'].unique():
-            sub_df = df_all[(df_all['target'] == tgt) & (df_all['run_type'] == rt)].copy()
+            keep = df_all['split'].isin([split, '*'] if split else [''])
+            sub_df = df_all[(df_all['out_root'] == root) & keep &
+                            (df_all['target'] == tgt) & (df_all['run_type'] == rt)].copy()
+            # un même modèle peut venir de plusieurs groupes (références partagées)
+            sub_df = sub_df.drop_duplicates(subset=['loss', 'model', 'cluster'])
             if not sub_df.empty:
-                out_dir = BASE_OUT / dataset / tgt / rt
+                suffix = f'_{split}' if split else ''
+                out_dir = Path(root) / dataset / tgt / rt
                 out_dir.mkdir(parents=True, exist_ok=True)
+                sub_df.to_csv(out_dir / f'operational_scores_{tgt}_{rt}{suffix}.csv', index=False)
 
                 # ── PNG heatmap ────────────────────────────────────────────
-                out_heat = out_dir / f'operational_heatmap_{tgt}_{rt}.png'
+                out_heat = out_dir / f'operational_heatmap_{tgt}_{rt}{suffix}.png'
                 try:
                     plot_operational_heatmap(
                         sub_df,
-                        title=f"Performance opérationnelle ({tgt}) - {rt.capitalize()}",
+                        title=f"Performance opérationnelle ({tgt}) - {rt.capitalize()}"
+                              + (f" - {split}" if split else ""),
                         loss_col="loss",
                         model_col="model",
                         cluster_col="cluster",
@@ -1799,7 +2015,7 @@ if all_scoring_rows:
                     print(f"  [ERROR] Plotting heatmap for {tgt} ({rt}): {e}")
 
                 # ── Coverage heatmap ─────────────────────────────────────────
-                out_cov = out_dir / f'coverage_heatmap_{tgt}_{rt}.png'
+                out_cov = out_dir / f'coverage_heatmap_{tgt}_{rt}{suffix}.png'
                 try:
                     plot_coverage_heatmap(
                         sub_df,
@@ -1815,7 +2031,7 @@ if all_scoring_rows:
                     print(f"  [ERROR] Plotting coverage heatmap for {tgt} ({rt}): {e}")
 
                 # ── LaTeX table ────────────────────────────────────────────
-                out_tex = out_dir / f'operational_heatmap_{tgt}_{rt}.tex'
+                out_tex = out_dir / f'operational_heatmap_{tgt}_{rt}{suffix}.tex'
                 try:
                     save_operational_latex(
                         sub_df,

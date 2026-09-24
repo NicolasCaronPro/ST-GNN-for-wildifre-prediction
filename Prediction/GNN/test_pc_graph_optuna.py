@@ -87,5 +87,60 @@ class T(unittest.TestCase):
                          int((deg == n_sp).sum()))
 
 
+class TestNTrialsDepuisLeJSON(unittest.TestCase):
+    """`n_optuna_trials` declare dans le bloc "params" du JSON doit atteindre
+    `train_optuna` -- et ne PAS atteindre le constructeur du modele."""
+
+    def _training_stub(self, params):
+        from GNN.pytorch_model_tools import Training
+        t = Training.__new__(Training)
+        t.loss_param_search = True
+        t.name = t.task_type = t.target_name = 'stub'
+        t.train_loader = t.val_loader = []
+        recu = {}
+
+        def fake_train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose,
+                              custom_model_params, new_model, min_epochs, n_trials=300):
+            recu['n_trials'] = n_trials
+            recu['custom_model_params'] = custom_model_params
+
+        t.train_optuna = fake_train_optuna
+        Training.train(t, None, 1, 1, 1, custom_model_params=params)
+        return recu
+
+    def test_valeur_du_json_transmise(self):
+        base = {'n_internal': 128, 'topology': 'bimodal'}
+        recu = self._training_stub(dict(base, n_optuna_trials=30))
+        self.assertEqual(recu['n_trials'], 30)
+        self.assertNotIn('n_optuna_trials', recu['custom_model_params'],
+                         "parametre de RECHERCHE : ne doit pas filer au constructeur")
+        self.assertEqual(recu['custom_model_params'], base)
+
+    def test_defaut_inchange_sans_la_cle(self):
+        recu = self._training_stub({'n_internal': 128})
+        self.assertEqual(recu['n_trials'], 300)
+
+    def test_startup_tpe_indexe_sur_le_budget(self):
+        """Les `n_startup_trials` du TPE sont tires au hasard : a 30 essais, le
+        defaut de 10 mangeait un tiers du budget. Les recherches longues, elles,
+        doivent garder le comportement d'origine."""
+        import inspect
+        from GNN.pytorch_model_tools import Training
+        src = inspect.getsource(Training.train_optuna)
+        self.assertIn('n_startup_trials=n_startup', src,
+                      "le TPE est reparti sur son defaut de 10")
+        regle = lambda n: max(5, min(10, round(n * 0.25)))
+        self.assertEqual(regle(30), 8)
+        self.assertEqual(regle(300), 10, "recherche longue : defaut inchange")
+        self.assertEqual(regle(10), 5, "plancher : le TPE a besoin d'un amorcage")
+
+    def test_les_configs_pcgraph_declarent_leur_budget(self):
+        import json
+        for c in ['config/config_PCGraphGen.json', 'config_firemen/config_PCGraphGen.json']:
+            with self.subTest(c):
+                p = json.load(open(G / c))['models'][0]['params']
+                self.assertEqual(p.get('n_optuna_trials'), 200)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

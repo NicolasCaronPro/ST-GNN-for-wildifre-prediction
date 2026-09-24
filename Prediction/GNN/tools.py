@@ -3349,7 +3349,7 @@ def get_features_name_list(scale, features, methods):
 
         elif var == "air":
             features_name += air_variables
-        elif var in landcover_variables or var in ["id_encoder", "highway_encoder", "landcover_encoder"]:
+        elif var in landcover_variables or var in ["highway_encoder", "landcover_encoder"]:
             if var.endswith(('_ba', '_BA', '_T', '_R')):
                 features_name += [f"{var}_{met}" for met in methods]
             else:

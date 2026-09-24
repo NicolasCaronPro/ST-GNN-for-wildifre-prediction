@@ -2548,19 +2548,19 @@ def define_voting_dl_models(mt, kdays, horizon, out_channels, run, loss='weighte
     m4_undersampling = f'search_full_{kdays}_{horizon}_all'
 
     # Modèles m2
-    for nb_clusters in ['1', '3', '5', 'Specialized']:
+    for nb_clusters in ['3', '5', 'Specialized']:
         model = create_model_config(mt, m2_undersampling, 'one', 'kmeans', 'sum', '5', nb_clusters, loss, 'classification')
         models.append(model)
 
     # Modèles m3
-    for nb_clusters in ['1', '3', '5', 'Specialized']:
+    for nb_clusters in ['3', '5', 'Specialized']:
         model = create_model_config(mt, m3_undersampling, 'one', 'kmeans', 'max', '5', nb_clusters, loss, 'classification')
         models.append(model)
 
     # Modèles m4 avec différentes post-processings
     filters = ['median', 'cubic', 'mean', 'quartic', 'circular', 'gaussian']
     for aggregation in filters:
-        for nb_clusters in ['1', '3', '5', 'Specialized']:
+        for nb_clusters in ['3', '5', 'Specialized']:
             """if aggregation == 'gaussian' and (nb_clusters == '3' or nb_clusters == '5'):
                 continue
             elif aggregation == 'cubic' and nb_clusters == '3':

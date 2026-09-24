@@ -507,6 +507,7 @@ def get_sub_nodes_feature(graph, subNode: np.array,
         X[indexNode[:, 0], indexVar] = np.nansum(array[mask])
 
     def save_values_with_encoding(array, band, indexNode, mask, encoder):
+        indexVar = features_name.index(f'{band}_mean')
         if encoder is None:
             for imet, metstr in enumerate(methods):
                 X[indexNode[:, 0], indexVar+imet] = 0.0
@@ -514,7 +515,6 @@ def get_sub_nodes_feature(graph, subNode: np.array,
 
         values = array[mask].reshape(-1,1)
         encode_values = encoder.transform(values).values
-        indexVar = features_name.index(f'{band}_mean')
         if isinstance(graph.scale, str) or graph.scale > 0:
             for imet, metstr in enumerate(methods):
                 if metstr == 'mean':
@@ -554,7 +554,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
     encoder_corine = read_object(f'encoder_cotine_{name_expe}.pkl', dir_encoder)
     encoder_bdroute = read_object(f'encoder_bdroute_{name_expe}.pkl', dir_encoder)
     encoder_cluster = read_object(f'encoder_cluster_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}.pkl', dir_encoder)
-    
+
+    # id_encoder is expanded by get_features_name_list() into id_encoder(_BA|_T|_R)_<method>
+    # columns (tools.py); the BA/T/R sub-encoders must be loaded here too, mirroring
+    # get_sub_nodes_features_from_xarray/get_sub_nodes_feature_with_geodataframe.
+    encoder_ba_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_BA.pkl', dir_encoder)
+    encoder_T_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_T.pkl', dir_encoder)
+    encoder_R_id = read_object(f'encoder_ids_{graph.scale}_{graph.base}_{graph.graph_method}_{name_expe}_R.pkl', dir_encoder)
+
     if 'Calendar' in features:
         size_calendar = len(calendar_variables)
         encoder_calendar = read_object(f'encoder_calendar_{name_expe}.pkl', dir_encoder)
@@ -831,7 +838,14 @@ def get_sub_nodes_feature(graph, subNode: np.array,
                         save_values_with_encoding(arrayBDROUTELancover, 'bdroute_encoder', index, maskNode, encoder_bdroute)
 
                 if 'id_encoder' in features:
-                    save_value_with_encoding(mask, 'id_encoder', index, maskNode, encoder_id)
+                    # id_encoder is expanded (tools.py:get_features_name_list) into
+                    # id_encoder(_BA|_T|_R)_<method> columns, not a bare 'id_encoder'
+                    # column, so it must go through the multi-method-slot helper (like
+                    # foret_encoder/corine_encoder/... above), not save_value_with_encoding.
+                    save_values_with_encoding(mask, 'id_encoder', index, maskNode, encoder_id)
+                    save_values_with_encoding(mask, 'id_encoder_BA', index, maskNode, encoder_ba_id)
+                    save_values_with_encoding(mask, 'id_encoder_T', index, maskNode, encoder_T_id)
+                    save_values_with_encoding(mask, 'id_encoder_R', index, maskNode, encoder_R_id)
 
         logger.info('Sentinel Dynamic World')
         ### Sentinel

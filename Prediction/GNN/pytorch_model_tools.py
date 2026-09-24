@@ -3253,7 +3253,17 @@ class Training():
             val_loss_dict = train_loss_dict
 
         return val_loss, train_loss, val_loss_dict, train_loss_dict
-    
+
+    def run_epoch(self, optimizer):
+        """
+        Hook called once per epoch by train_run() to produce (val_loss, train_loss,
+        val_loss_dict, train_loss_dict). Overridden by MetaTraining to replace the
+        ordinary epoch-over-self.train_loader step with an episodic meta-training step,
+        while reusing train_run's early stopping / checkpointing / final scoring unchanged.
+        """
+        return self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
+                                optimizer=optimizer, criterion=self.criterion, do_update=True)
+
     def get_class_freq(self, df_train):
         uclass = np.sort(df_train[self.target_name].unique())
         res = np.zeros_like(uclass)
@@ -3484,7 +3494,7 @@ class Training():
             df_eval = df_eval.copy()
             n_classes = 5
             
-        _DEFAULTS = ['fwi', 'fwi_mean', 'isi', 'bui', 'dc', 'ffmc', 'dmc', 'dailySeverityRating']
+        _DEFAULTS = ['fwi', 'fwi_mean', 'fwi_max','isi', 'bui', 'dc', 'ffmc', 'dmc', 'dailySeverityRating']
         if fwi_candidates is None:
             fwi_candidates = [c for c in _DEFAULTS if c in df_train.columns]
         if not fwi_candidates:
@@ -3500,7 +3510,19 @@ class Training():
                     'baseline_scores': self.baseline_scores,
                     'all_results': []
                 }
-            raise ValueError("No FWI candidate column found in df_train.")
+            logger.warning(
+                f"[define_reference_model] No FWI candidate column found in df_train "
+                f"(looked for {_DEFAULTS}). Returning dummy reference scores."
+            )
+            self.reference_scores = {k: 0.001 for k in [1, 2, 3, 4]}
+            self.baseline_scores  = {k: 0.001 for k in [1, 2, 3, 4]}
+            return {
+                'best_config': None,
+                'best_score': 0.0,
+                'ref_scores': self.reference_scores,
+                'baseline_scores': self.baseline_scores,
+                'all_results': []
+            }
 
         for col in [date_col, zone_col]:
             if col not in df_train.columns:
@@ -4011,8 +4033,7 @@ class Training():
             for epoch in tqdm(range(epochs), disable=not verbose):
                 # Expose current epoch to subroutines for logging
                 self._current_epoch = epoch
-                val_loss, train_loss, val_loss_dict, train_loss_dict = self.func_epoch(train_loader=self.train_loader, val_loader=self.val_loader,
-                                                    optimizer=optimizer, criterion=self.criterion, do_update=True)
+                val_loss, train_loss, val_loss_dict, train_loss_dict = self.run_epoch(optimizer)
 
                 val_loss_list.append(round(val_loss, 3))
                 train_loss_list.append(round(train_loss, 3))
@@ -5496,7 +5517,14 @@ class Training():
         )
 
         if self.loss_param_search:
-            self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose, custom_model_params, new_model, min_epochs)
+            # `n_optuna_trials` se declare dans le bloc "params" du JSON du modele.
+            # Retire de custom_model_params : c'est un parametre de RECHERCHE, il
+            # n'a rien a faire dans le constructeur du modele.
+            search_params = dict(custom_model_params) if custom_model_params else {}
+            n_trials = int(search_params.pop('n_optuna_trials', 300))
+            logger.info(f"  optuna trials  : {n_trials}")
+            self.train_optuna(graph, PATIENCE_CNT, CHECKPOINT, epochs, verbose,
+                              search_params, new_model, min_epochs, n_trials=n_trials)
             return
 
         original_dir_log = self.dir_log
@@ -7118,10 +7146,17 @@ class Training():
             n_warmup_steps=warmup,
             interval_steps=1,
         ) if enable_pruning else optuna.pruners.NopPruner()
+        # Le `n_startup_trials` du TPE (10 par defaut) est le nombre d'essais
+        # tires ALEATOIREMENT avant que le modele probabiliste ne prenne la main.
+        # A 300 essais c'est negligeable, mais sur une recherche courte il mange
+        # l'essentiel du budget : a n_trials=30, 10 essais aleatoires ne laissent
+        # que 20 essais guides. On l'indexe donc sur le budget (un quart, borne
+        # a [5, 10]) : 30 -> 8, 300 -> 10, sans changer les recherches longues.
+        n_startup = max(5, min(10, round(n_trials * 0.25)))
         study = optuna.create_study(
             study_name=study_name,
             direction="maximize",
-            sampler=optuna.samplers.TPESampler(seed=42),
+            sampler=optuna.samplers.TPESampler(seed=42, n_startup_trials=n_startup),
             pruner=pruner,
         )
 
@@ -7463,6 +7498,265 @@ class Training():
 
         return study
 
+############################################ Meta training (MAML) ##############################################################
+
+class MetaTraining(Training):
+    """
+    Model-agnostic meta-learning (first-order MAML) training mode.
+
+    Tasks are defined by department (`task_column`, default 'departement'): there are as
+    many tasks as there are departments found in df_train. Each meta-iteration (= one
+    "epoch" of the inherited `train_run()` loop, via the `run_epoch` hook) samples a batch
+    of department tasks, and for every sampled task:
+      1. clones the current meta-parameters,
+      2. adapts the clone for `inner_steps` gradient steps on a per-department support
+         set D (drawn from df_train),
+      3. evaluates the adapted clone on a held-out per-department query set Dquery (also
+         drawn from df_train, disjoint dates from D),
+      4. accumulates the gradient of the query loss w.r.t. the adapted parameters as a
+         first-order approximation of the meta-gradient.
+    The accumulated (averaged) meta-gradient is then applied to the shared meta-parameters
+    with the usual outer optimizer (Adam, built once by `train_run`).
+
+    df_train is therefore the only split ever used for meta-training (as D and Dquery).
+    df_val is only ever used, unmodified, by the inherited `train_run` early-stopping /
+    checkpointing logic. df_test is never touched during fit/training.
+
+    Two ways of choosing which departments are eligible tasks:
+      - random: every department present in df_train is eligible (default when
+        `meta_known_departments` is not set).
+      - fixed/known: only the departments listed in `meta_known_departments` (config
+        field, either raw department ids or "departement-NN-name" strings) are eligible.
+      -full: all departement are eligible (not random and not fixed).
+    In both cases, if `meta_n_tasks_per_iteration` is set, that many departments are
+    randomly drawn from the eligible pool at every meta-iteration; otherwise all eligible
+    departments are used every iteration.
+    """
+
+    def __init__(self, model_name, nbfeatures, batch_size, lr, delta_lr, patience_cnt_lr, target_name, task_type,
+                 features_name, ks, out_channels, dir_log,
+                 loss='ranknet', name='MetaTraining', device='cpu',
+                 under_sampling='full', over_sampling='full', n_run=1,
+                 horizon=0, post_process=None, loss_param_search=False, use_feature_horizon=False,
+                 meta_task_column='departement',
+                 meta_known_departments=None,
+                 meta_random_tasks=None,
+                 meta_n_tasks_per_iteration=None,
+                 meta_query_ratio=0.5,
+                 meta_inner_lr=0.01,
+                 meta_inner_steps=1,
+                 meta_seed=42,
+                 **kwargs):
+
+        super().__init__(model_name=model_name, nbfeatures=nbfeatures, batch_size=batch_size, lr=lr,
+                          delta_lr=delta_lr, patience_cnt_lr=patience_cnt_lr, target_name=target_name,
+                          task_type=task_type, features_name=features_name, ks=ks, out_channels=out_channels,
+                          dir_log=dir_log, loss=loss, name=name, device=device, under_sampling=under_sampling,
+                          over_sampling=over_sampling, n_run=n_run, horizon=horizon, post_process=post_process,
+                          loss_param_search=loss_param_search, use_feature_horizon=use_feature_horizon, **kwargs)
+
+        self.task_column = meta_task_column
+        self.known_train_tasks = list(meta_known_departments) if meta_known_departments and meta_known_departments != 'full' else None
+        self.random_tasks = meta_random_tasks if meta_random_tasks is not None else (self.known_train_tasks is None)
+        self.n_tasks_per_iteration = meta_n_tasks_per_iteration
+        self.query_ratio = float(meta_query_ratio)
+        self.inner_lr = float(meta_inner_lr)
+        self.inner_steps = int(meta_inner_steps)
+        self.meta_seed = int(meta_seed)
+        self.meta_tasks = None
+        self._meta_rng = None
+
+    def fit(self, graph, X, y, X_val, y_val, X_test, y_test, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=None, use_log=True):
+
+        X = X.set_index(ids_columns[:-1]).join(y.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
+        X_val = X_val.set_index(ids_columns[:-1]).join(y_val.set_index(ids_columns[:-1])[targets_columns + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
+        X_test = X_test.set_index(ids_columns[:-1]).join(y_test.set_index(ids_columns[:-1])[targets_columns  + [self.target_name]], on=ids_columns[:-1], how='left').reset_index()
+
+        # The join may create duplicate columns if target_name (or targets_columns)
+        # are already present in X; keep the last occurrence (from y) which carries
+        # the freshly joined values.
+        X      = X.loc[:, ~X.columns.duplicated(keep='last')]
+        X_val  = X_val.loc[:, ~X_val.columns.duplicated(keep='last')]
+        X_test = X_test.loc[:, ~X_test.columns.duplicated(keep='last')]
+
+        # df_test is stored (by create_train_val_test_loader) but never used below: it is
+        # reserved strictly for downstream test-time evaluation, outside of meta-training.
+        self.create_train_val_test_loader(graph, X, X_val, X_test, epochs, PATIENCE_CNT, CHECKPOINT, custom_model_params=custom_model_params, use_log=use_log)
+
+        # df_train (self.df_train) is used below, per meta-iteration, as both D (support)
+        # and Dquery (query); df_val (self.val_loader) only ever feeds the inherited
+        # train_run() early-stopping/checkpoint logic via run_epoch()'s returned val_loss.
+        self.train(graph, PATIENCE_CNT, CHECKPOINT, epochs, custom_model_params=custom_model_params)
+
+    def _resolve_meta_tasks(self):
+        if self.meta_tasks is not None:
+            return
+            
+        assert hasattr(self, 'df_train') and self.df_train is not None, "MetaTraining: 'df_train' not set before resolving tasks"
+        assert self.task_column in self.df_train.columns, f"MetaTraining: '{self.task_column}' column not found in df_train"
+
+        all_tasks = sorted(self.df_train[self.task_column].unique().tolist())
+
+        if self.known_train_tasks:
+            try:
+                from GNN.dico_departements import name2int
+            except ImportError:
+                name2int = {}
+
+            resolved = [name2int.get(t, t) if isinstance(t, str) else t for t in self.known_train_tasks]
+            self.meta_tasks = [t for t in resolved if t in all_tasks]
+            missing = [t for t in resolved if t not in all_tasks]
+            if missing:
+                logger.warning(f'[MetaTraining] known departments not present in df_train, ignored: {missing}')
+            if len(self.meta_tasks) == 0:
+                logger.warning('[MetaTraining] no known department task found in df_train, falling back to all available departments')
+                self.meta_tasks = all_tasks
+        else:
+            self.meta_tasks = all_tasks
+
+        logger.info(f'[MetaTraining] {len(self.meta_tasks)} department task(s) resolved '
+                    f'(random_tasks={self.random_tasks}, n_per_iteration={self.n_tasks_per_iteration}): {self.meta_tasks}')
+
+        self._meta_rng = np.random.RandomState(self.meta_seed)
+
+    def _sample_tasks_for_epoch(self):
+        if self.meta_tasks is None:
+            self._resolve_meta_tasks()
+            
+        tasks = self.meta_tasks
+        n = self.n_tasks_per_iteration
+        if not n or str(n).lower() == 'full' or (isinstance(n, (int, float)) and n >= len(tasks)):
+            return list(tasks)
+        idx = self._meta_rng.choice(len(tasks), size=int(n), replace=False)
+        return [tasks[i] for i in idx]
+
+    def _split_support_query(self, task_id):
+        """
+        Splits the rows of df_train belonging to `task_id` into a support set D and a
+        query set Dquery, by randomly partitioning the department's unique dates (so a
+        given date's rows never straddle both sets). Reshuffled on every call, so every
+        meta-iteration draws a fresh episode for the task.
+        """
+        df_task = self.df_train[self.df_train[self.task_column] == task_id]
+        if df_task.empty:
+            return None, None
+
+        dates = df_task['date'].unique()
+        if len(dates) < 2:
+            return None, None
+
+        n_query_dates = int(round(len(dates) * self.query_ratio))
+        n_query_dates = min(max(n_query_dates, 1), len(dates) - 1)
+
+        shuffled_dates = dates.copy()
+        self._meta_rng.shuffle(shuffled_dates)
+        query_dates = set(shuffled_dates[:n_query_dates])
+
+        df_query = df_task[df_task['date'].isin(query_dates)].reset_index(drop=True)
+        df_support = df_task[~df_task['date'].isin(query_dates)].reset_index(drop=True)
+
+        return df_support, df_query
+
+    def _build_task_loader(self, df):
+        if df is None or df.empty:
+            return None
+        try:
+            dataset = create_train_dataset(self.graph, df, self.features_name, self.target_name, None,
+                                            self.device, self.ks, self.horizon,
+                                            graph_mesh=None, gridh2mesh=None, mesh2graph=None,
+                                            proportion_0_sample_with_positive_weight=1.0)
+        except AssertionError:
+            return None
+
+        if len(dataset) == 0:
+            return None
+
+        batch_size = max(1, min(self.batch_size, len(dataset)))
+        return DataLoader(dataset, batch_size, True, worker_init_fn=seed_worker, generator=g)
+
+    def _zero_criterion_grad(self):
+        """
+        Zeroes the gradient of the loss's own learnable parameters (if any) without
+        touching self.model's gradient. Called after each inner-loop step so that
+        support-set gradients never leak into the criterion's outer/meta gradient, which
+        must only reflect the query losses accumulated in run_epoch().
+        """
+        if has_method(self.criterion, 'get_learnable_parameters'):
+            for p in self.criterion.get_learnable_parameters().values():
+                if isinstance(p, torch.Tensor) and p.grad is not None:
+                    p.grad = None
+
+    def run_epoch(self, optimizer):
+        tasks_this_epoch = self._sample_tasks_for_epoch()
+
+        self.model.zero_grad()
+        self._zero_criterion_grad()
+
+        meta_state = deepcopy(self.model.state_dict())
+        total_query_loss = 0.0
+        n_valid_tasks = 0
+
+        for task_id in tasks_this_epoch:
+            df_support, df_query = self._split_support_query(task_id)
+            if df_support is None or df_query is None:
+                continue
+
+            # Reset to the current meta-parameters before adapting on this task.
+            self.update_weight(meta_state)
+
+            support_loader = self._build_task_loader(df_support)
+            query_loader = self._build_task_loader(df_query)
+            if support_loader is None or query_loader is None:
+                continue
+
+            inner_optimizer = optim.SGD(self.model.parameters(), lr=self.inner_lr)
+            for _ in range(self.inner_steps):
+                self.launch_train_loader(support_loader, self.criterion, inner_optimizer, True)
+                self._zero_criterion_grad()
+
+            self.model.train()
+            query_loss_sum = 0.0
+            n_batches = 0
+            for data in query_loader:
+                loss, _ = self.launch_batch(data, self.criterion, 'train', False)
+                if isinstance(loss, (int, float)):
+                    continue
+                query_loss_sum = query_loss_sum + loss
+                n_batches += 1
+
+            if n_batches == 0 or not torch.is_tensor(query_loss_sum):
+                continue
+
+            task_loss = query_loss_sum / n_batches
+            # First-order MAML: backward through the adapted (task-local) parameters only.
+            # Since self.model.parameters() keep the same identity across update_weight()
+            # calls (load_state_dict updates values in-place), these grads accumulate
+            # across tasks for free.
+            task_loss.backward()
+
+            total_query_loss += task_loss.item()
+            n_valid_tasks += 1
+
+        # Restore the pre-adaptation meta-parameters before applying the outer step.
+        self.update_weight(meta_state)
+
+        if n_valid_tasks == 0:
+            logger.warning(f'[MetaTraining] epoch {self._current_epoch}: no department task produced a usable query loss')
+            val_loss, val_loss_dict = self.launch_val_test_loader(self.val_loader, self.criterion)
+            return val_loss, 0.0, val_loss_dict, {'l': 0.0}
+
+        meta_params = [p for group in optimizer.param_groups for p in group['params']]
+        for p in meta_params:
+            if p.grad is not None:
+                p.grad = p.grad / n_valid_tasks
+        torch.nn.utils.clip_grad_norm_(meta_params, max_norm=5.0)
+        optimizer.step()
+
+        train_loss = total_query_loss / n_valid_tasks
+        val_loss, val_loss_dict = self.launch_val_test_loader(self.val_loader, self.criterion)
+
+        return val_loss, train_loss, val_loss_dict, {'l': train_loss}
+
 ############################################ Split training ##############################################################
 
 class SplitTraining(Training):
@@ -7748,7 +8042,7 @@ class SplitTraining(Training):
         """Generate predictions using the split learning setup."""
 
         try:
-            if self.training_mode == 'normal':
+            if getattr(self, 'training_mode', 'normal') != 'splittraining':
                 return super()._predict_test_loader(X, prediction_type=prediction_type, output_pdf=output_pdf, calibrate=calibrate)
         except:
                 return super()._predict_test_loader(X, prediction_type=prediction_type, output_pdf=output_pdf, calibrate=calibrate)
@@ -7796,7 +8090,7 @@ class SplitTraining(Training):
     def predict(self, df, graph=None, return_y=False, prediction_type="Class"):
         
         try:
-            if self.training_mode == 'normal':
+            if getattr(self, 'training_mode', 'normal') != 'splittraining':
                 return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         except:
                 return super().predict(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
@@ -7818,7 +8112,7 @@ class SplitTraining(Training):
 
     def predict_proba(self, df, graph=None, return_y=False, prediction_type='Proba'):
         try:
-            if self.training_mode == 'normal':
+            if getattr(self, 'training_mode', 'normal') != 'splittraining':
                 return super().predict_proba(df, graph=graph, return_y=return_y, prediction_type=prediction_type)
         except:
                 return super().predict_proba(df, graph=graph, return_y=return_y, prediction_type=prediction_type)

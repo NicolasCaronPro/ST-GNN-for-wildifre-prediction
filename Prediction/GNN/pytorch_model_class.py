@@ -769,7 +769,7 @@ class Model_Torch(SplitTraining):
         
         # ── Reference FWI model (computed before any sampling) ─────────────────
         _nbsin_col = self.target_name.split('-')[0] if '-' in self.target_name else self.target_name
-        
+        print(_nbsin_col)
         print(f'Train -> Unique values of raw targets: {df_train[_nbsin_col].unique()}')
         print(f'Val -> Unique values of raw targets: {df_val[_nbsin_col].unique()}')
         print(f'Test -> Unique values of raw targets: {df_test[_nbsin_col].unique()}')
@@ -973,3 +973,15 @@ class Model_Torch(SplitTraining):
                         proportion_0_sample_witg_positive_weight=1.0)
 
         return loader
+
+
+class ModelMetaTorch(MetaTraining, Model_Torch):
+    """
+    Concrete 1D torch model for training_mode='meta': reuses Model_Torch's
+    create_train_val_test_loader/create_test_loader (loader/df_train/df_val/df_test
+    construction), while fit()/run_epoch() (the meta-learning loop over department
+    tasks) come from MetaTraining. No custom __init__ needed: cooperative super()
+    chaining (MetaTraining -> Model_Torch -> SplitTraining -> Training) initializes
+    every parent through the MRO.
+    """
+    pass

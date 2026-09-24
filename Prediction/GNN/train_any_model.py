@@ -28,6 +28,7 @@ from GNN.dataloader import (
     wrapped_train_deep_learning_1D_alafederated,
     wrapped_train_deep_learning_1D_dualtraining,
     wrapped_train_deep_learning_1D_distrib2classTraining,
+    wrapped_train_deep_learning_1D_meta,
     wrapped_train_deep_learning_2D,
     wrapped_train_deep_learning_distallation,
     wrapped_train_deep_learning_1D_federatedProx,
@@ -234,8 +235,8 @@ def main():
             val_dataset['ressource'] = 0
             if test_dataset is not None: test_dataset['ressource'] = 0
 
-        if 'nbsinister-quantile-5-Class-Dept' not in train_dataset.columns:
-        #if False:
+        #if 'nbsinister-quantile-5-Class-Dept' not in train_dataset.columns:
+        if True:
             dir_post_process = dir_output / 'post_process'
             post_process_model_dico, train_dataset, val_dataset, test_dataset, new_cols = post_process_model(train_dataset, val_dataset, test_dataset, dir_post_process, graphScale)
             save_object(train_dataset, f"df_train_{prefix}.pkl", dir_output)
@@ -699,7 +700,36 @@ def main():
                     }
                     )
                     wrapped_train_deep_learning_1D_dualtraining(params)
-                    
+
+                elif cfg.training_mode == "meta":
+                    params.update(
+                    {
+                        "model": m["type"],
+                        "infos": info,
+                        "min_epochs": m.get('min_epochs', 1),
+                        "out_channels": m["out_channels"],
+                        "n_run": m["n_run"],
+                        "custom_model_params": m.get("params"),
+                        "k_days": m.get("kdays", 0),
+                        "horizon": m.get("horizon", 0),
+                        "dir_output" : dir_output,
+                        "use_log" : m.get("use_log", True),
+                    }
+                    )
+                    # Task = department. Either every department in df_train is an eligible
+                    # task (random draw each meta-iteration), or only the ones listed in
+                    # "meta_known_departments" (raw department ids or "departement-NN-name"
+                    # strings) are (fixed/known tasks); see MetaTraining in pytorch_model_tools.py.
+                    params["meta_task_column"] = m.get("meta_task_column", "departement")
+                    params["meta_known_departments"] = m.get("meta_known_departments")
+                    params["meta_random_tasks"] = m.get("meta_random_tasks")
+                    params["meta_n_tasks_per_iteration"] = m.get("meta_n_tasks_per_iteration")
+                    params["meta_query_ratio"] = m.get("meta_query_ratio", 0.5)
+                    params["meta_inner_lr"] = m.get("meta_inner_lr", 0.01)
+                    params["meta_inner_steps"] = m.get("meta_inner_steps", 1)
+                    params["meta_seed"] = m.get("meta_seed", 42)
+                    wrapped_train_deep_learning_1D_meta(params)
+
                 elif cfg.training_mode == "distrib2classtraining":
                     
                     params.update(
@@ -892,6 +922,9 @@ def main():
                 dl_model_names.append(test_name)
             elif cfg.training_mode == 'dualtraining':
                 test_name = f'DualTraining-{m["type"]}_{info}'
+                dl_model_names.append(test_name)
+            elif cfg.training_mode == 'meta':
+                test_name = f'Meta-{m["type"]}_{info}'
                 dl_model_names.append(test_name)
             elif cfg.training_mode == 'distrib2classtraining':
                 test_name = f'Distribution2Class-{m["type"]}_{info}'
